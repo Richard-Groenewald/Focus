@@ -1022,7 +1022,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r67';  // Increment this with each build
+const APP_REVISION = 'r68';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -3244,7 +3244,7 @@ function lkpToSb(key, item) {
 
 async function loadFromSupabase() {
   const tables1 = ['organisations','people','person_affiliations','user_credentials','opportunities','opportunity_streams','contract_streams','actual_streams','opportunity_people','interactions','risks','contracts','user_permission_overrides','settings'];
-  const tables2 = ['stages','regions'];
+  const tables2 = [];
   const allTables = [...tables1, ...tables2];
   const results = {};
   for(const tbl of allTables) {
@@ -3252,7 +3252,7 @@ async function loadFromSupabase() {
     results[tbl] = await sbFetch(tbl,'GET',null,'select=*');
   }
   const [orgs, people, personAffils, userCreds, opps, streams, conStreams, actStreams, oppPeople, interactions, risks, contracts, permOverrides, settings] = tables1.map(t=>results[t]);
-  const [stages, regions] = tables2.map(t=>results[t]);
+  const stages=null, regions=null;
 
   DB.organisations = (orgs||[]).map(r=>({id:r.id,name:r.name,legalName:r.legal_name,type:r.type||'client',industrySectorId:r.industry_sector_id,categoryIds:r.category_ids||[],notes:r.notes,createdDate:r.created_date}));
   DB.people = (people||[]).map(r=>({id:r.id,first:r.first,last:r.last,email:r.email,phone:r.phone,title:r.title,isXone:r.is_xone||false,initials:r.initials,hidden:r.hidden||false,notes:r.notes}));
@@ -3268,8 +3268,13 @@ async function loadFromSupabase() {
   DB.contracts = (contracts||[]).map(r=>({id:r.id,oppId:r.opp_id,startDate:r.start_date,endDate:r.end_date,notes:r.notes}));
   DB.userPermissionOverrides = (permOverrides||[]).map(r=>({id:r.id,personId:r.person_id,permission:r.permission,type:r.type}));
 
-  DB.stages = (stages||[]).map(r=>({id:r.id,stage:r.stage,probMin:r.prob_min,probMax:r.prob_max,color:r.color}));
-  DB.regions = (regions||[]).map(r=>({id:r.id,value:r.value}));
+  DB.stages = DB.stages.length ? DB.stages : [
+    {id:1,stage:'Lead',probMin:1,probMax:25,color:'#6B7280'},
+    {id:2,stage:'Prospect',probMin:26,probMax:75,color:'#3B82F6'},
+    {id:3,stage:'Secured',probMin:76,probMax:100,color:'#10B981'},
+    {id:4,stage:'Lost',probMin:0,probMax:0,color:'#EF4444'}
+  ];
+  DB.regions = DB.regions.length ? DB.regions : [{id:1,value:'Western Cape'},{id:2,value:'Gauteng'},{id:3,value:'Inland'}];
   DB.projectServiceTypes = DB.projectServiceTypes.length ? DB.projectServiceTypes : [
     {id:1,majorCategory:'Manpower',subCategory:'On-Site Guarding',defaultMargin:0.25,minMargin:0.15,defaultDuration:12,recurring:true},
     {id:2,majorCategory:'Manpower',subCategory:'Off-Site Control Rooms',defaultMargin:0.30,minMargin:0.20,defaultDuration:12,recurring:true},
