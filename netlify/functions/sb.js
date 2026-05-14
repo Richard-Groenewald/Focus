@@ -1,8 +1,8 @@
 const https=require('https');
 const SB='kevrfdjqyuhmgziqxuvs.supabase.co';
-// Key stored encoded - decoded at runtime
-const KEY=process.env.SUPABASE_SECRET_KEY||Buffer.from('c2Jfc2VjcmV0X0NWN1poWENSX3NfbFNFZDdNZTVUZndfbEl2dEc3Wkc=','base64').toString();
 exports.handler=async(event)=>{
+  const KEY=process.env.SUPABASE_SECRET_KEY;
+  if(!KEY)return{statusCode:500,body:'Missing key'};
   if(event.httpMethod==='OPTIONS')return{statusCode:200,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'Content-Type,Authorization,apikey,Prefer','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS'},body:''};
   const path=event.path.replace('/.netlify/functions/sb','/rest/v1');
   const qs=event.rawQuery?'?'+event.rawQuery:'';
