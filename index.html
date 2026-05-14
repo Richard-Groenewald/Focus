@@ -1022,7 +1022,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r74';  // Increment this with each build
+const APP_REVISION = 'r75';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -3244,7 +3244,16 @@ function lkpToSb(key, item) {
 
 async function loadFromSupabase() {
   showLoadingOverlay('Loading data...');
-  const safeFetch = async (tbl) => { try { return await sbFetch(tbl,'GET',null,'select=*'); } catch(e) { return []; } };
+  const safeFetch = async (tbl) => {
+    try {
+      showLoadingOverlay('Loading: '+tbl+'...');
+      const result = await Promise.race([
+        sbFetch(tbl,'GET',null,'select=*'),
+        new Promise(r=>setTimeout(()=>r([]),8000))
+      ]);
+      return result||[];
+    } catch(e) { console.warn('safeFetch failed:',tbl,e.message); return []; }
+  };
   const [orgs, people, personAffils, userCreds, opps, streams, conStreams, actStreams, oppPeople, interactions, risks, contracts, permOverrides] = await Promise.all([
     safeFetch('organisations'), safeFetch('people'), safeFetch('person_affiliations'),
     safeFetch('user_credentials'), safeFetch('opportunities'), safeFetch('opportunity_streams'),
