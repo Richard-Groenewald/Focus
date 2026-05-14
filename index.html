@@ -525,7 +525,7 @@ textarea.form-control{resize:vertical;min-height:70px;}
     <button class="opp-hdr-back" onclick="closeOppForm()">&#8592; Back</button>
     <div class="opp-hdr-field">
       <span class="opp-hdr-label">Client</span>
-      <select class="opp-hdr-select" id="ohf-client" onchange="saveOppField('clientId',this.value)"></select>
+      <select class="opp-hdr-select" id="ohf-client" onchange="saveOppField('orgId',this.value)"></select>
     </div>
     <div class="opp-hdr-field" style="flex:2;margin-left:16px;">
       <span class="opp-hdr-label">Opportunity</span>
@@ -800,7 +800,7 @@ textarea.form-control{resize:vertical;min-height:70px;}
 <div id="client-form-page" class="client-form-page">
   <div class="opp-hdr">
     <button class="opp-hdr-back" onclick="closeClientForm()">&#8592; Back</button>
-    <div class="opp-hdr-field"><span class="opp-hdr-label">Trading Name</span><input type="text" class="opp-hdr-input" id="chf-colloquial" onblur="saveClientField('colloquial',this.value)"></div>
+    <div class="opp-hdr-field"><span class="opp-hdr-label">Trading Name</span><input type="text" class="opp-hdr-input" id="chf-colloquial" onblur="saveClientField('name',this.value)"></div>
     <div id="chf-parent-badge" style="display:none;margin-left:10px;"></div>
     <div id="chf-subsidiary-badge" style="display:none;margin-left:10px;"></div>
     <div class="opp-hdr-field" style="margin-left:16px;"><span class="opp-hdr-label">Status</span>
@@ -904,7 +904,7 @@ textarea.form-control{resize:vertical;min-height:70px;}
           Client *
           <button class="btn btn-ghost btn-sm" onclick="toggleInlineClient()" id="btn-inline-client" style="font-size:11px;padding:3px 10px;">+ New Client</button>
         </label>
-        <select class="form-control" id="new-opp-client"></select>
+        <select class="form-control" id="new-opp-org"></select>
       </div>
       <div class="inline-client-panel" id="inline-client-panel">
         <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:10px;">New Client</div>
@@ -1019,7 +1019,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r54';  // Increment this with each build
+const APP_REVISION = 'r55';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -1084,21 +1084,20 @@ let DB={
   owners:[],clients:[],opportunities:[],
   opportunityStreams:[],contractStreams:[],actualStreams:[],
   // Contacts — global directory of people
-  contacts:[],
-  opportunityStakeholders:[],
+  people:[],
+  personAffiliations:[],
+  userCredentials:[],
+  opportunityPeople:[],
   interactions:[],contracts:[],
   risks:[],
   // Auth & Permissions
-  appUsers:[
-    {id:1, name:'Richard Groenewald', email:'richard@xone.co.za', password:'x', roleIds:[1], ownerId:null, active:true, createdDate:'2026-01-01'}
+  roles:[
+    {id:1,name:'Admin',description:'Full access'},
+    {id:2,name:'Sales Manager',description:'Full deal access'},
+    {id:3,name:'Sales User',description:'Own deals only'},
+    {id:4,name:'Read-only',description:'View only'}
   ],
-  roles:[            // named roles
-    {id:1,name:'Admin',description:'Full access to everything'},
-    {id:2,name:'Sales Manager',description:'Full deal access, no settings or user management'},
-    {id:3,name:'Sales User',description:'Own deals only, no settings'},
-    {id:4,name:'Read-only',description:'View only, no editing'}
-  ],
-  rolePermissions:{  // which global permissions each role has by default
+  rolePermissions:{
     1:['view_all_deals','edit_own_deals','edit_all_deals','create_deals','delete_deals','view_clients','edit_clients','view_dashboard','view_reports','view_all_financials','manage_settings','manage_users','assign_owner','edit_past_revenue','export_data'],
     2:['view_all_deals','edit_own_deals','edit_all_deals','create_deals','delete_deals','view_clients','edit_clients','view_dashboard','view_reports','view_all_financials','assign_owner','export_data'],
     3:['view_all_deals','edit_own_deals','create_deals','view_clients','edit_clients','view_dashboard','view_reports','view_all_financials'],
@@ -1109,7 +1108,7 @@ let DB={
   nextIds:{opp:1,client:1,sh:1,interaction:1,rs:1,contract:1,actual:1,baseline:1,sector:10,stage:5,region:3,type:4,ct:6,pb:4,tr:6,il:4,sl:4,contact:1,appUser:2,role:5,collab:1,globalContact:1,oppSh:1,relType:9,engPurpose:9,risk:1,riskCat:20,clientCat:10}
 };
 const FULLSCREEN_PAGES=['opportunities','pipeline-full','lost','contracts','clients','forecast'];
-let currentOppId=null,currentClientId=null,currentFYYear=null,oppScope='mine';
+let currentOppId=null,currentOrgId=null,currentFYYear=null,oppScope='mine';
 let oppSort={col:null,dir:'asc'};
 let oppFilters={};  // {colKey: Set of allowed values}
 let activeFilterCol=null;
@@ -1150,7 +1149,7 @@ function resolvePermissions(user) {
     (DB.rolePermissions[rid]||[]).forEach(p=>rolePerms.add(p));
   });
   // Apply individual overrides
-  const overrides=DB.userPermissionOverrides.filter(o=>o.userId===user.id);
+  const overrides=DB.userPermissionOverrides.filter(o=>o.personId===user.id);
   overrides.forEach(o=>{ if(o.grant) rolePerms.add(o.permission); else rolePerms.delete(o.permission); });
   return [...rolePerms];
 }
@@ -1164,7 +1163,7 @@ function canOnDeal(oppId, permission) {
   const o=DB.opportunities.find(op=>+op.id===+oppId);
   if(o&&+o.ownerId===+currentUser.ownerId) return true; // own deal
   // Check collaborator permissions
-  const collab=DB.dealCollaborators.find(c=>+c.oppId===+oppId&&+c.userId===+currentUser.id);
+  const collab=DB.opportunityPeople.find(c=>+c.oppId===+oppId&&+c.userId===+currentUser.id);
   return collab&&(collab.permissions||[]).includes(permission);
 }
 
@@ -1176,8 +1175,8 @@ const fmtNum=n=>Math.round(n||0).toString().replace(/\B(?=(\d{3})+(?!\d))/g,',')
 const fmt=n=>'R '+fmtNum(n||0);
 const fmtM=n=>{const v=Math.round(n||0);return v>=1000000?'R '+(v/1000000).toFixed(1).replace(/\.0$/,'')+'M':v>=1000?'R '+Math.round(v/1000)+'K':'R '+fmtNum(v);};
 const getStage=id=>DB.stages.find(s=>+s.id===+id)||{};
-const getClient=id=>DB.clients.find(c=>+c.id===+id)||{};
-const getOwner=id=>DB.owners.find(o=>+o.id===+id)||{};
+const getClient=id=>DB.organisations.find(c=>+c.id===+id)||{};
+const getOwner=id=>DB.people.filter(p=>p.isXone).find(o=>+o.id===+id)||{};
 const getRegion=id=>DB.regions.find(r=>+r.id===+id)||{};
 const getType=id=>DB.projectServiceTypes.find(t=>+t.id===+id)||{};
 const isSecured=o=>getStage(o.stageId).stage==='Secured';
@@ -1207,714 +1206,100 @@ function saveData(){
 // ── Supabase write helpers ────────────────────────────────────────────────
 async function sbSaveOpp(o) {
   await sbUpsert('opportunities', {
-    id:o.id, name:o.name, client_id:o.clientId, stage_id:o.stageId,
-    owner_id:o.ownerId, region_id:o.regionId, type_id:o.typeId,
-    probability:o.probability, base:o.base, margin:o.margin, months:o.months,
-    start_date:o.startDate||null, order_date:o.orderDate||null,
-    description:o.desc, created_date:o.createdDate,
-    esc_month:o.escMonth||null, esc_rate:o.escRate||null
+    id:o.id, org_id:o.orgId, owner_id:o.ownerId,
+    stage_id:o.stageId, region_id:o.regionId, type_id:o.typeId,
+    name:o.name, description:o.desc, margin:o.margin||0.25,
+    base:o.base||0, months:o.months||12, probability:o.probability||5,
+    start_date:o.startDate, order_date:o.orderDate, close_date:o.closeDate,
+    created_date:o.createdDate
   });
 }
-async function sbSaveClient(c) {
-  await sbUpsert('clients', {
-    id:c.id, colloquial:c.colloquial, formal:c.formal, trading_name:c.tradingName,
-    reg_number:c.regNumber, vat_number:c.vatNumber, physical_address:c.physicalAddress,
-    postal_address:c.postalAddress, sector_id:c.sectorId||null, status:c.status,
-    account_manager_id:c.accountManagerId||null, notes:c.notes,
-    parent_id:c.parentId||null, categories:c.categories||[]
+
+async function sbSaveOrg(org) {
+  await sbUpsert('organisations', {
+    id:org.id, name:org.name, legal_name:org.legalName,
+    type:org.type||'client', industry_sector_id:org.industrySectorId,
+    category_ids:org.categoryIds||[], notes:org.notes,
+    created_date:org.createdDate
   });
 }
-async function sbSaveOwner(o) {
-  await sbUpsert('owners', {id:o.id, first:o.first, surname:o.surname, initials:o.initials, hidden:o.hidden||false});
-}
-async function sbSaveUser(u) {
-  await sbUpsert('app_users', {
-    id:u.id, name:u.name, email:u.email, password:u.password,
-    role_ids:u.roleIds||[], owner_id:u.ownerId||null,
-    active:u.active!==false, is_owner:u.isOwner!==false, created_date:u.createdDate
+
+async function sbSavePerson(p) {
+  await sbUpsert('people', {
+    id:p.id, first:p.first, last:p.last, email:p.email, phone:p.phone,
+    title:p.title, is_xone:p.isXone||false, initials:p.initials,
+    hidden:p.hidden||false, notes:p.notes
   });
 }
-async function sbSaveStream(s) { await sbUpsert('opportunity_streams',{id:s.id,opp_id:s.oppId,month:s.month,revenue:s.revenue,margin:s.margin}); }
-async function sbSaveConStream(s) { await sbUpsert('contract_streams',{id:s.id,opp_id:s.oppId,month:s.month,revenue:s.revenue,margin:s.margin,locked_date:s.lockedDate||null}); }
-async function sbSaveActStream(s) { await sbUpsert('actual_streams',{id:s.id,opp_id:s.oppId,contract_id:s.contractId||null,month:s.month,amount:s.amount}); }
-async function sbSaveRisk(r) {
-  await sbUpsert('risks',{id:r.id,opp_id:r.oppId,category:r.category,sub_category:r.subCategory,description:r.description,likelihood:r.likelihood,impact:r.impact,mitigation:r.mitigation,owner_id:r.ownerId||null,status:r.status});
+
+async function sbSaveAffiliation(a) {
+  await sbUpsert('person_affiliations', {
+    id:a.id, person_id:a.personId, org_id:a.orgId,
+    title:a.title, is_primary:a.isPrimary||false
+  });
 }
-async function sbSaveContact(c) { await sbUpsert('contacts',{id:c.id,first:c.first,last:c.last,company:c.company,title:c.title,email:c.email,phone:c.phone}); }
-async function sbSaveOppSH(s) {
-  await sbUpsert('opportunity_stakeholders',{id:s.id,opp_id:s.oppId,contact_id:s.contactId,relationship_type_id:s.relationshipTypeId||null,contact_type_id:s.contactTypeId||null,power_base_id:s.powerBaseId||null,influence_level_id:s.influenceLevelId||null,support_level_id:s.supportLevelId||null});
+
+async function sbSaveCredential(c) {
+  const existing = await sbFetch('user_credentials','GET',null,'person_id=eq.'+c.personId+'&select=id');
+  if(existing&&existing.length) {
+    await sbFetch('user_credentials','PATCH',{
+      password:c.password, role_ids:c.roleIds||[3],
+      active:c.active!==false, created_date:c.createdDate
+    },'person_id=eq.'+c.personId);
+  } else {
+    await sbFetch('user_credentials','POST',{
+      person_id:c.personId, password:c.password,
+      role_ids:c.roleIds||[3], active:c.active!==false,
+      created_date:c.createdDate
+    },'');
+  }
+}
+
+async function sbSaveOppPerson(op) {
+  await sbUpsert('opportunity_people', {
+    id:op.id, opp_id:op.oppId, person_id:op.personId, role:op.role||'stakeholder',
+    contact_type_id:op.contactTypeId, influence_level_id:op.influenceLevelId,
+    support_level_id:op.supportLevelId, power_base_id:op.powerBaseId,
+    relationship_type_id:op.relationshipTypeId, permissions:op.permissions||[]
+  });
+}
+
+async function sbSaveStream(rs) {
+  await sbUpsert('opportunity_streams',{id:rs.id,opp_id:rs.oppId,month:rs.month,revenue:rs.revenue||0,margin:rs.margin||0});
+}
+async function sbSaveConStream(rs) {
+  await sbUpsert('contract_streams',{id:rs.id,opp_id:rs.oppId,month:rs.month,revenue:rs.revenue||0,margin:rs.margin||0});
+}
+async function sbSaveActStream(a) {
+  await sbUpsert('actual_streams',{id:a.id,opp_id:a.oppId,month:a.month,revenue:a.revenue||0,margin:a.margin||0});
 }
 async function sbSaveInteraction(i) {
-  await sbUpsert('interactions',{id:i.id,opp_id:i.oppId,stakeholder_ids:i.stakeholderIds||[],purpose:i.purpose,date:i.date||null,time:i.time||null,notes:i.text});
+  await sbUpsert('interactions',{id:i.id,opp_id:i.oppId,date:i.date,time:i.time,purpose_id:i.purposeId,notes:i.notes,person_ids:i.personIds||[]});
+}
+async function sbSaveRisk(r) {
+  await sbUpsert('risks',{id:r.id,opp_id:r.oppId,category_id:r.categoryId,sub_category:r.subCategory,description:r.description,likelihood:r.likelihood,impact:r.impact,rating:r.rating,mitigation:r.mitigation,owner_id:r.ownerId,status:r.status||'open'});
 }
 async function sbSaveContract(c) {
-  await sbUpsert('contracts',{id:c.id,opp_id:c.oppId,contract_number:c.contractNumber,signed_date:c.signedDate||null,billing_terms:c.billingTerms,end_date:c.endDate||null,is_renewal:c.isRenewal||false,amendment_number:c.amendmentNumber||null,notes:c.notes});
+  await sbUpsert('contracts',{id:c.id,opp_id:c.oppId,start_date:c.startDate,end_date:c.endDate,notes:c.notes});
 }
-async function sbSaveCollab(c) { await sbUpsert('deal_collaborators',{id:c.id,opp_id:c.oppId,user_id:c.userId,permissions:c.permissions||[]}); }
-async function sbSavePermOverride(p) { await sbUpsert('user_permission_overrides',{id:p.id,user_id:p.userId,permission:p.permission,is_granted:p.grant}); }
-async function sbSaveLookup(table, rec) { await sbUpsert(table, rec); }
-async function sbDeleteRecord(table, id) { await sbDelete(table, id); }
-
-// Generic nextId from Supabase max(id)
-async function sbNextId(table) {
-  const r = await sbFetch(table,'GET',null,'select=id&order=id.desc&limit=1');
-  return r&&r.length ? r[0].id+1 : 1;
+async function sbSavePermOverride(po) {
+  await sbUpsert('user_permission_overrides',{id:po.id,person_id:po.personId,permission:po.permission,type:po.type||'grant'});
 }
-function loadData(){} // replaced by loadFromSupabase
-
-// Map Supabase snake_case to SalesFlow camelCase
-function mapOpp(r){return {id:r.id,name:r.name,clientId:r.client_id,stageId:r.stage_id,ownerId:r.owner_id,regionId:r.region_id,typeId:r.type_id,probability:r.probability,base:r.base,margin:r.margin,months:r.months,startDate:r.start_date,orderDate:r.order_date,desc:r.description,createdDate:r.created_date,escMonth:r.esc_month,escRate:r.esc_rate};}
-function mapClient(r){return {id:r.id,colloquial:r.colloquial,formal:r.formal,tradingName:r.trading_name,regNumber:r.reg_number,vatNumber:r.vat_number,physicalAddress:r.physical_address,postalAddress:r.postal_address,sectorId:r.sector_id,status:r.status,accountManagerId:r.account_manager_id,notes:r.notes,parentId:r.parent_id,categories:r.categories||[],contacts:[]};}
-function mapStream(r){return {id:r.id,oppId:r.opp_id,month:r.month,revenue:r.revenue,margin:r.margin};}
-function mapConStream(r){return {id:r.id,oppId:r.opp_id,month:r.month,revenue:r.revenue,margin:r.margin,lockedDate:r.locked_date};}
-function mapActStream(r){return {id:r.id,oppId:r.opp_id,contractId:r.contract_id,month:r.month,amount:r.amount};}
-function mapUser(r){return {id:r.id,name:r.name,email:r.email,password:r.password,roleIds:r.role_ids||[],ownerId:r.owner_id,active:r.active,isOwner:r.is_owner,createdDate:r.created_date};}
-function mapOwner(r){return {id:r.id,first:r.first,surname:r.surname,initials:r.initials,hidden:r.hidden};}
-function mapSH(r){return {id:r.id,oppId:r.opp_id,contactId:r.contact_id,relationshipTypeId:r.relationship_type_id,contactTypeId:r.contact_type_id,powerBaseId:r.power_base_id,influenceLevelId:r.influence_level_id,supportLevelId:r.support_level_id};}
-function mapInteraction(r){return {id:r.id,oppId:r.opp_id,stakeholderIds:r.stakeholder_ids||[],purpose:r.purpose,date:r.date,time:r.time,text:r.notes};}
-function mapRisk(r){return {id:r.id,oppId:r.opp_id,category:r.category,subCategory:r.sub_category,description:r.description,likelihood:r.likelihood,impact:r.impact,mitigation:r.mitigation,ownerId:r.owner_id,status:r.status};}
-function mapContract(r){return {id:r.id,oppId:r.opp_id,contractNumber:r.contract_number,signedDate:r.signed_date,billingTerms:r.billing_terms,endDate:r.end_date,isRenewal:r.is_renewal,amendmentNumber:r.amendment_number,notes:r.notes};}
-function mapCollab(r){return {id:r.id,oppId:r.opp_id,userId:r.user_id,permissions:r.permissions||[]};}
-function mapPermOverride(r){return {id:r.id,userId:r.user_id,permission:r.permission,grant:r.is_granted};}
-function mapStage(r){return {id:r.id,stage:r.stage,probMin:r.prob_min,probMax:r.prob_max,color:r.color};}
-function mapType(r){return {id:r.id,majorCategory:r.major_category,subCategory:r.sub_category,defaultMargin:r.default_margin,defaultDuration:r.default_months,recurring:r.recurring};}
-function mapRiskCat(r){return {id:r.id,category:r.category,subCategory:r.sub_category};}
-
-async function loadFromSupabase() {
-  // Timeout after 5 seconds - fall back to localStorage
-  // No timeout - wait for Supabase to complete
-
-  try {
-    showLoadingOverlay('Loading data...');
-    const [
-      stages, regions, types, contactTypes, powerBases, titleRoles,
-      influenceLevels, supportLevels, relTypes, engPurposes, riskCats,
-      sectors, clientCats, roles, rolePerms,
-      owners, users, permOverrides,
-      clients, contacts, opps, oppSHs, interactions, risks,
-      contracts, oppStreams, conStreams, actStreams, collabs
-    ] = await Promise.all([
-      sbSelect('stages'),sbSelect('regions'),sbSelect('project_service_types'),
-      sbSelect('contact_types'),sbSelect('power_bases'),sbSelect('title_roles'),
-      sbSelect('influence_levels'),sbSelect('support_levels'),sbSelect('relationship_types'),
-      sbSelect('engagement_purposes'),sbSelect('risk_categories'),
-      sbSelect('industry_sectors'),sbSelect('client_categories'),
-      sbSelect('roles'),sbSelect('role_permissions'),
-      sbSelect('owners'),sbSelect('app_users'),sbSelect('user_permission_overrides'),
-      sbSelect('clients'),sbSelect('contacts'),sbSelect('opportunities'),
-      sbSelect('opportunity_stakeholders'),sbSelect('interactions'),sbSelect('risks'),
-      sbSelect('contracts'),sbSelect('opportunity_streams'),sbSelect('contract_streams'),
-      sbSelect('actual_streams'),sbSelect('deal_collaborators')
-    ]);
-
-    DB.stages = (stages||[]).map(mapStage);
-    DB.regions = (regions||[]).map(r=>({id:r.id,value:r.value}));
-    DB.projectServiceTypes = (types||[]).map(mapType);
-    DB.contactTypes = (contactTypes||[]).map(r=>({id:r.id,type:r.type}));
-    DB.powerBases = (powerBases||[]).map(r=>({id:r.id,value:r.value}));
-    DB.titleRoles = (titleRoles||[]).map(r=>({id:r.id,value:r.value}));
-    DB.influenceLevels = (influenceLevels||[]).map(r=>({id:r.id,value:r.value}));
-    DB.supportLevels = (supportLevels||[]).map(r=>({id:r.id,value:r.value}));
-    DB.relationshipTypes = (relTypes||[]).map(r=>({id:r.id,value:r.value}));
-    DB.engagementPurposes = (engPurposes||[]).map(r=>({id:r.id,value:r.value}));
-    DB.riskCategories = (riskCats||[]).map(mapRiskCat);
-    DB.industrySectors = (sectors||[]).map(r=>({id:r.id,value:r.value}));
-    DB.clientCategories = (clientCats||[]).map(r=>({id:r.id,value:r.value}));
-    DB.roles = (roles||[]).map(r=>({id:r.id,name:r.name}));
-    DB.rolePermissions = {};
-    (rolePerms||[]).forEach(r=>{ if(!DB.rolePermissions[r.role_id])DB.rolePermissions[r.role_id]=[]; DB.rolePermissions[r.role_id].push(r.permission); });
-    DB.owners = (owners||[]).map(mapOwner);
-    DB.appUsers = (users||[]).map(mapUser);
-    DB.userPermissionOverrides = (permOverrides||[]).map(mapPermOverride);
-    DB.clients = (clients||[]).map(mapClient);
-    DB.contacts = (contacts||[]).map(r=>({id:r.id,first:r.first,last:r.last,company:r.company,title:r.title,email:r.email,phone:r.phone}));
-    DB.opportunities = (opps||[]).map(mapOpp);
-    DB.opportunityStakeholders = (oppSHs||[]).map(mapSH);
-    DB.interactions = (interactions||[]).map(mapInteraction);
-    DB.risks = (risks||[]).map(mapRisk);
-    DB.contracts = (contracts||[]).map(mapContract);
-    DB.opportunityStreams = (oppStreams||[]).map(mapStream);
-    DB.contractStreams = (conStreams||[]).map(mapConStream);
-    DB.actualStreams = (actStreams||[]).map(mapActStream);
-    DB.dealCollaborators = (collabs||[]).map(mapCollab);
-
-    // Seed lookups if empty
-    if(!DB.stages.length) await seedLookups();
-
-    // Load settings from Supabase
-    const sbSettings = await sbFetch('settings','GET',null,'key=eq.app_settings&select=value');
-    if(sbSettings && sbSettings.length && sbSettings[0].value) {
-      try { Object.assign(DB.settings, JSON.parse(sbSettings[0].value)); } catch(e) {}
-    }
-
-    // Set nextIds above existing data to avoid ID collisions
-    const maxId = (arr) => arr.length ? Math.max(...arr.map(i=>i.id||0)) + 1 : 1;
-    // Transactional tables
-    DB.nextIds.opp = maxId(DB.opportunities);
-    DB.nextIds.client = maxId(DB.clients);
-    DB.nextIds.contract = maxId(DB.contracts);
-    DB.nextIds.rs = maxId(DB.opportunityStreams);
-    DB.nextIds.baseline = maxId(DB.contractStreams);
-    DB.nextIds.actual = maxId(DB.actualStreams);
-    DB.nextIds.globalContact = maxId(DB.contacts);
-    DB.nextIds.appUser = maxId(DB.appUsers);
-    DB.nextIds.contact = maxId(DB.owners);
-    DB.nextIds.oppSh = maxId(DB.opportunityStakeholders);
-    DB.nextIds.interaction = maxId(DB.interactions);
-    DB.nextIds.risk = maxId(DB.risks);
-    DB.nextIds.collab = maxId(DB.dealCollaborators);
-    // Lookup tables - also need correct nextIds
-    DB.nextIds.stage = maxId(DB.stages);
-    DB.nextIds.region = maxId(DB.regions);
-    DB.nextIds.type = maxId(DB.projectServiceTypes);
-    DB.nextIds.ct = maxId(DB.contactTypes);
-    DB.nextIds.pb = maxId(DB.powerBases);
-    DB.nextIds.tr = maxId(DB.titleRoles);
-    DB.nextIds.il = maxId(DB.influenceLevels);
-    DB.nextIds.sl = maxId(DB.supportLevels);
-    DB.nextIds.sector = maxId(DB.industrySectors);
-    DB.nextIds.riskCat = maxId(DB.riskCategories);
-    DB.nextIds.relType = maxId(DB.relationshipTypes);
-    DB.nextIds.engPurpose = maxId(DB.engagementPurposes);
-    DB.nextIds.clientCat = maxId(DB.clientCategories);
-
-    hideLoadingOverlay();
-    initAuth();
-    // If already on settings page, re-render lookups now data is loaded
-    const settingsPage = document.getElementById('page-settings');
-    if(settingsPage && settingsPage.classList.contains('active')) renderSettings();
-  } catch(e) {
-    console.error('loadFromSupabase error:', e);
-    hideLoadingOverlay();
-    document.body.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#e8eef4;font-family:Arial,sans-serif;"><div style="text-align:center;max-width:400px;padding:40px;"><div style="font-size:48px;margin-bottom:16px;">⚡</div><div style="font-size:20px;font-weight:700;color:#001e38;margin-bottom:8px;">Database Error</div><div style="font-size:14px;color:#3a5a78;margin-bottom:24px;">${e.message}</div><button onclick="location.reload()" style="background:#FA0A11;color:#fff;border:none;padding:12px 28px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;">↺ Retry</button></div></div>`;
-  }
-}
-function showPage(id){
-  document.getElementById('opp-form-page').classList.remove('active');
-  document.getElementById('client-form-page').classList.remove('active');
-  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
-  const pg=document.getElementById('page-'+id);if(pg)pg.classList.add('active');
-  document.querySelectorAll('.nav-item').forEach(n=>{if(n.getAttribute('onclick')&&n.getAttribute('onclick').includes("'"+id+"'"))n.classList.add('active');});
-  document.body.classList.toggle('sidebar-hidden',FULLSCREEN_PAGES.includes(id));
-  const renders={dashboard:renderDashboard,forecast:renderForecast,opportunities:renderOppsTable,'pipeline-full':renderFullPipeline,lost:renderLost,contracts:renderContractsTable,clients:renderClientsTable,settings:renderSettings,users:renderUsersTable};
-  if(renders[id])renders[id]();
-}
-function goHome(){document.body.classList.remove('sidebar-hidden');showPage('dashboard');}
-function openModal(id){document.getElementById(id).classList.add('open');}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
-document.addEventListener('click',e=>{
-  if(e.target.classList.contains('modal-overlay'))e.target.classList.remove('open');
-  if(!e.target.closest('.multi-select-wrap'))document.querySelectorAll('.multi-select-dropdown').forEach(d=>d.classList.remove('open'));
-  if(!e.target.closest('.sf-th')&&!e.target.closest('.sf-dropdown'))document.querySelectorAll('.sf-dropdown').forEach(d=>d.classList.remove('open'));
-});
-
-// ═══════════════════════════════════════════════
-// MULTI-SELECT
-// ═══════════════════════════════════════════════
-function toggleMS(id){const dd=document.getElementById(id);document.querySelectorAll('.multi-select-dropdown').forEach(d=>{if(d.id!==id)d.classList.remove('open');});if(dd)dd.classList.toggle('open');}
-function getChecked(prefix){return DB.stages.filter(s=>{const el=document.getElementById(prefix+'-chk-'+s.stage.toLowerCase());return el&&el.checked;}).map(s=>s.stage);}
-function updateMSLabel(labelId,stages){const el=document.getElementById(labelId);if(!el)return;el.textContent=stages.length===0?'None':stages.length===DB.stages.length?'All stages':stages.join(', ');}
-
-// ═══════════════════════════════════════════════
-// DASHBOARD
-// ═══════════════════════════════════════════════
-function renderDashboard(){
-  const opps=DB.opportunities,active=opps.filter(o=>getStage(o.stageId).stage!=='Lost'),secured=opps.filter(o=>isSecured(o));
-  const totPipe=active.reduce((s,o)=>s+getTCV(o),0),weighted=active.reduce((s,o)=>s+getWeighted(o),0);
-  const secRev=secured.reduce((s,o)=>s+getTCV(o),0);
-  const avgP=active.length?Math.round(active.reduce((s,o)=>s+(o.probability||0),0)/active.length):0;
-  document.getElementById('dash-stats').innerHTML=`
-    <div class="stat-card"><div class="stat-label">Total Pipeline</div><div class="stat-value">${fmtM(totPipe)}</div><div class="stat-sub">${active.length} active deals</div></div>
-    <div class="stat-card"><div class="stat-label">Weighted Pipeline</div><div class="stat-value" style="color:rgb(0,106,193)">${fmtM(weighted)}</div><div class="stat-sub">Probability-adjusted</div></div>
-    <div class="stat-card"><div class="stat-label">Secured Revenue</div><div class="stat-value" style="color:rgb(0,172,178)">${fmtM(secRev)}</div><div class="stat-sub">${secured.length} secured deals</div></div>
-    <div class="stat-card"><div class="stat-label">Avg Probability</div><div class="stat-value" style="color:rgb(252,144,19)">${avgP}%</div><div class="stat-sub">Active pipeline</div></div>`;
-  const now=new Date(),chartMos=[];
-  for(let i=0;i<12;i++){const d=new Date(now.getFullYear(),now.getMonth()+i,1);chartMos.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));}
-  const conf={},wt={};chartMos.forEach(m=>{conf[m]=0;wt[m]=0;});
-  DB.opportunityStreams.forEach(rs=>{if(!chartMos.includes(rs.month))return;const o=opps.find(op=>+op.id===+rs.oppId);if(!o)return;if(isSecured(o))conf[rs.month]+=(rs.revenue||0);else wt[rs.month]+=(rs.revenue||0)*(o.probability||0)/100;});
-  const maxV=Math.max(...chartMos.map(m=>conf[m]+wt[m]),1);
-  document.getElementById('dash-chart').innerHTML=chartMos.map(m=>{
-    const c=conf[m],w=wt[m],tot=c+w,ch=Math.round(c/maxV*140),wh=Math.round(w/maxV*140);
-    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;height:100%;justify-content:flex-end;">
-      <div style="font-size:9px;color:var(--text3);white-space:nowrap;">${tot>0?fmtM(tot):''}</div>
-      <div style="width:100%;display:flex;flex-direction:column;justify-content:flex-end;flex:1;">
-        ${wh>0?`<div style="width:100%;height:${wh}px;background:rgba(0,106,193,0.55);border-radius:3px 3px 0 0;"></div>`:''}
-        ${ch>0?`<div style="width:100%;height:${ch}px;background:rgb(0,172,178);"></div>`:''}
-      </div>
-      <div style="font-size:9px;color:var(--text3);">${MONTHS_S[parseInt(m.split('-')[1])-1]}</div>
-    </div>`;}).join('');
-  const sg={};active.forEach(o=>{const s=getStage(o.stageId).stage;if(!sg[s])sg[s]={n:0,v:0};sg[s].n++;sg[s].v+=getTCV(o);});
-  const maxSV=Math.max(...Object.values(sg).map(g=>g.v),1);
-  document.getElementById('dash-stages').innerHTML=Object.entries(sg).map(([s,g])=>
-    `<div style="margin-bottom:12px;"><div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="font-size:12.5px;">${s}</span><span style="font-size:11.5px;color:var(--text2);">${g.n} · ${fmtM(g.v)}</span></div>
-    <div style="height:4px;background:var(--bg3);border-radius:2px;"><div style="height:100%;width:${Math.round(g.v/maxSV*100)}%;background:var(--blue-mid);border-radius:2px;"></div></div></div>`).join('');
-  const rec=[...opps].sort((a,b)=>new Date(b.createdDate||0)-new Date(a.createdDate||0)).slice(0,6);
-  document.getElementById('dash-recent').innerHTML=`<thead><tr><th>Opportunity</th><th>Client</th><th>Stage</th><th style="text-align:right">TCV</th><th>Prob</th></tr></thead><tbody>${rec.map(o=>`<tr style="cursor:pointer" onclick="openOppForm(${o.id})"><td class="primary">${o.name}</td><td>${getClient(o.clientId).colloquial||'—'}</td><td>${stageBadge(o.stageId)}</td><td style="text-align:right;color:rgb(0,172,178);font-weight:500">${fmt(getTCV(o))}</td><td>${o.probability}%</td></tr>`).join('')}</tbody>`;
-}
-
-// ═══════════════════════════════════════════════
-// FORECAST
-// ═══════════════════════════════════════════════
-function renderForecast(){
-  const yrSel=document.getElementById('forecast-year');
-  if(!yrSel.options.length){const thisFY=getCurrentFY();for(let i=-1;i<6;i++){const o=new Option('FY '+getFYLabel(thisFY+i),thisFY+i);yrSel.add(o);}yrSel.value=thisFY;}
-  const yr=+yrSel.value,mode=document.getElementById('forecast-mode').value;
-  const months=getFYMonths(yr),opps=DB.opportunities;
-  const yrStreams=DB.opportunityStreams.filter(rs=>months.includes(rs.month));
-  let totF=0;yrStreams.forEach(rs=>{const o=opps.find(op=>+op.id===+rs.oppId);if(!o)return;if(mode==='secured'&&!isSecured(o))return;totF+=(rs.revenue||0)*(mode==='weighted'?o.probability/100:1);});
-  const actM={};months.forEach(m=>actM[m]=0);
-  DB.actualStreams.forEach(a=>{if(!months.includes(a.month))return;actM[a.month]+=(a.amount||0);});
-  const totA=Object.values(actM).reduce((s,v)=>s+v,0);
-  document.getElementById('forecast-stats').innerHTML=`
-    <div class="stat-card"><div class="stat-label">FY ${getFYLabel(yr)} Forecast</div><div class="stat-value" style="color:rgb(0,106,193)">${fmtM(totF)}</div></div>
-    <div class="stat-card"><div class="stat-label">Actuals YTD</div><div class="stat-value" style="color:rgb(0,172,178)">${fmtM(totA)}</div></div>
-    <div class="stat-card"><div class="stat-label">Variance</div><div class="stat-value" style="color:${totA>=totF?'rgb(0,172,178)':'rgb(252,144,19)'}">${fmtM(totA-totF)}</div></div>
-    <div class="stat-card"><div class="stat-label">Avg Monthly</div><div class="stat-value" style="color:rgb(252,144,19)">${fmtM(totF/12)}</div></div>`;
-  const mVals=months.map(m=>{let v=0;yrStreams.filter(r=>r.month===m).forEach(rs=>{const o=opps.find(op=>+op.id===+rs.oppId);if(!o)return;if(mode==='secured'&&!isSecured(o))return;v+=(rs.revenue||0)*(mode==='weighted'?o.probability/100:1);});return v;});
-  const maxV=Math.max(...mVals,1);
-  document.getElementById('forecast-chart').innerHTML=months.map((m,i)=>{const v=mVals[i],bh=Math.round(v/maxV*170);return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;justify-content:flex-end;height:100%"><div style="font-size:9px;color:var(--text3)">${v>0?fmtM(v):''}</div><div style="width:100%;height:${bh||2}px;border-radius:3px 3px 0 0;background:${v>0?'rgb(0,106,193)':'var(--bg3)'};"></div><div style="font-size:9px;color:var(--text3)">${MONTHS_S[i]}</div></div>`;}).join('');
-  const tblOpps=opps.filter(o=>yrStreams.some(rs=>+rs.oppId===+o.id));
-  const hCols=months.map(m=>`<th style="font-size:9px;min-width:42px;">${MONTHS_S[parseInt(m.split('-')[1])-1]}</th>`).join('');
-  const rows=tblOpps.map(o=>{if(mode==='secured'&&!isSecured(o))return'';const cells=months.map(m=>{const rs=yrStreams.find(r=>+r.oppId===+o.id&&r.month===m);if(!rs)return'<td style="color:var(--text3)">—</td>';const v=(rs.revenue||0)*(mode==='weighted'?o.probability/100:1);return `<td style="text-align:right;color:rgb(0,106,193);font-weight:500">${fmtM(v)}</td>`;}).join('');const tot=months.reduce((s,m)=>{const rs=yrStreams.find(r=>+r.oppId===+o.id&&r.month===m);return s+(rs?(rs.revenue||0)*(mode==='weighted'?o.probability/100:1):0);},0);return `<tr onclick="openOppForm(${o.id})" style="cursor:pointer"><td class="primary">${o.name}</td><td>${getClient(o.clientId).colloquial||'—'}</td><td>${stageBadge(o.stageId)}</td>${cells}<td style="text-align:right;color:rgb(0,172,178);font-weight:600">${fmtM(tot)}</td></tr>`;}).join('');
-  document.getElementById('forecast-table').innerHTML=`<thead><tr><th>Opportunity</th><th>Client</th><th>Stage</th>${hCols}<th style="text-align:right">Total</th></tr></thead><tbody>${rows||'<tr><td colspan="16" style="text-align:center;color:var(--text3);padding:20px">No revenue streams for this period</td></tr>'}<tr style="background:rgba(0,172,178,0.06)"><td class="primary" colspan="3" style="color:rgb(0,172,178)">Actuals (invoiced)</td>${months.map(m=>`<td style="text-align:right;color:rgb(0,172,178);font-weight:500">${actM[m]>0?fmtM(actM[m]):'—'}</td>`).join('')}<td style="text-align:right;color:rgb(0,172,178);font-weight:700">${fmtM(totA)}</td></tr></tbody>`;
-}
-
-// ═══════════════════════════════════════════════
-// PIPELINE TABLES
-// ═══════════════════════════════════════════════
-// Column definitions for sortable table
-const OPP_COLS = [
-  {key:'client',    label:'Client',      align:'left',  width:'auto',  filterType:'text',      getValue:o=>getClient(o.clientId).colloquial||''},
-  {key:'name',      label:'Deal',        align:'left',  width:'auto',  filterType:'text',      getValue:o=>o.name||''},
-  {key:'tcv',       label:'Deal Value',  align:'right', width:'110px', filterType:'range',     getValue:o=>getTCV(o)},
-  {key:'stage',     label:'Stage',       align:'right', width:'90px',  filterType:'multisel',  getValue:o=>getStage(o.stageId).stage||''},
-  {key:'prob',      label:'Probability', align:'right', width:'90px',  filterType:'range',     getValue:o=>o.probability||0},
-  {key:'service',   label:'Service',     align:'right', width:'140px', filterType:'multisel',  getValue:o=>getType(o.typeId).subCategory||''},
-  {key:'startDate', label:'Start Date',  align:'right', width:'96px',  filterType:'daterange', getValue:o=>o.startDate||''},
-  {key:'owner',     label:'Owner',       align:'right', width:'72px',  filterType:'multisel',  getValue:o=>getOwner(o.ownerId).initials||''},
-];
-
-function oppTblCols(opps) {
-  const allOpps = DB.opportunities;
-  const ths = OPP_COLS.map(col => {
-    const f = oppFilters[col.key]||{};
-    const sd = oppSort.col===col.key ? oppSort.dir : null;
-    const hasF = !!(f.search||f.min!==undefined||f.max!==undefined||f.dateFrom||f.dateTo||(f.values&&f.values.size>0));
-    const aw = col.align==='right'?'text-align:right;':col.align==='center'?'text-align:center;':'';
-    const ww = col.width&&col.width!=='auto'?'width:'+col.width+';min-width:'+col.width+';max-width:'+col.width+';':'';
-    const k = col.key;
-    const sb = '<div class="sf-dd-sort">'
-      +'<button onclick="event.stopPropagation();setOppSort(\''+k+'\',\'asc\')">&#9650; A&#8594;Z</button>'
-      +'<button onclick="event.stopPropagation();setOppSort(\''+k+'\',\'desc\')">&#9660; Z&#8594;A</button>'
-      +'</div>';
-    const cb = '<div style="padding:6px 10px;border-top:1px solid var(--border);">'
-      +'<button onclick="event.stopPropagation();clearColFilter(\''+k+'\')" '
-      +'style="width:100%;padding:5px;font-size:11px;font-family:Arial,sans-serif;border:1px solid var(--border2);border-radius:5px;background:#fff;color:var(--red);cursor:pointer;">Clear Filter</button></div>';
-    let body = '';
-    if(col.filterType==='text'){
-      body = sb+'<div style="padding:8px 10px;">'
-        +'<input type="text" class="form-control" placeholder="Search '+col.label+'..." value="'+(f.search||'')+'" '
-        +'oninput="setTextFilter(\''+k+'\',this.value)" style="font-size:12px;"></div>'+cb;
-    } else if(col.filterType==='range'){
-      body = sb+'<div style="padding:8px 10px;">'
-        +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">From</div>'
-        +'<input type="number" class="form-control" placeholder="Min" value="'+(f.min!==undefined?f.min:'')+'" '
-        +'oninput="setRangeFilter(\''+k+'\',\'min\',this.value)" style="font-size:12px;margin-bottom:8px;">'
-        +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">To</div>'
-        +'<input type="number" class="form-control" placeholder="Max" value="'+(f.max!==undefined?f.max:'')+'" '
-        +'oninput="setRangeFilter(\''+k+'\',\'max\',this.value)" style="font-size:12px;"></div>'+cb;
-    } else if(col.filterType==='daterange'){
-      body = sb+'<div style="padding:8px 10px;">'
-        +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">From</div>'
-        +'<input type="date" class="form-control" value="'+(f.dateFrom||'')+'" '
-        +'onchange="setDateFilter(\''+k+'\',\'from\',this.value)" style="font-size:12px;margin-bottom:8px;">'
-        +'<div style="font-size:11px;color:var(--text2);margin-bottom:4px;">To</div>'
-        +'<input type="date" class="form-control" value="'+(f.dateTo||'')+'" '
-        +'onchange="setDateFilter(\''+k+'\',\'to\',this.value)" style="font-size:12px;"></div>'+cb;
-    } else if(col.filterType==='multisel'){
-      const vals=[...new Set(allOpps.map(o=>String(col.getValue(o))).filter(Boolean))].sort();
-      const sel=f.values;
-      const items=vals.map(v=>{
-        const chk=(!sel||sel.has(v))?' checked':'';
-        const sv=v.replace(/'/g,'&#39;');
-        return '<div class="sf-dd-item"><input type="checkbox"'+chk+' onchange="toggleMSFilter(\''+k+'\',\''+sv+'\',this.checked)"><span>'+v+'</span></div>';
-      }).join('');
-      body = sb
-        +'<div style="padding:5px 10px;border-bottom:1px solid var(--border);display:flex;gap:6px;">'
-        +'<button onclick="event.stopPropagation();selectAllMS(\''+k+'\',true)" style="flex:1;padding:4px;font-size:11px;font-family:Arial,sans-serif;border:1px solid var(--border2);border-radius:4px;background:#fff;cursor:pointer;">All</button>'
-        +'<button onclick="event.stopPropagation();selectAllMS(\''+k+'\',false)" style="flex:1;padding:4px;font-size:11px;font-family:Arial,sans-serif;border:1px solid var(--border2);border-radius:4px;background:#fff;cursor:pointer;">None</button>'
-        +'</div><div style="max-height:200px;overflow-y:auto;">'+items+'</div>'+cb;
-    }
-    const labelAlign = col.align==='right'?'text-align:right;':col.align==='center'?'text-align:center;':'';
-    const icons = '<div class="sf-th-icons">'
-      +'<span class="sf-sort-icon '+(sd==='asc'?'active':'')+'">&#9650;</span>'
-      +'<span class="sf-sort-icon '+(sd==='desc'?'active':'')+'">&#9660;</span>'
-      +'<span class="sf-filter-icon '+(hasF?'active':'')+'">&#9661;</span>'
-      +'</div>';
-    const label = '<span class="sf-th-label" style="'+labelAlign+'">'+col.label+'</span>';
-    const inner = col.align==='right' ? icons+label : label+icons;
-    return '<th class="sf-th" style="'+aw+ww+'" onclick="handleThClick(event,\''+k+'\')">'
-      +'<div class="sf-th-inner">'+inner+'</div>'
-      +'<div class="sf-dropdown" id="sf-dd-'+k+'" onclick="event.stopPropagation()">'+body+'</div>'
-      +'</th>';
-  }).join('');
-  return '<thead><tr>'+ths+'</tr></thead>';
-}
-
-function oppTblRow(o){
-  const t=getType(o.typeId),sc=stageColor(getStage(o.stageId).stage);
-  return `<tr style="cursor:pointer" onclick="openOppForm(${o.id})">
-    <td class="primary" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;">${getClient(o.clientId).colloquial||'—'}</td>
-    <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;">${o.name}</td>
-    <td style="text-align:right;color:rgb(0,172,178);font-weight:600;white-space:nowrap;">${fmt(getTCV(o))}</td>
-    <td style="text-align:right;"><span class="badge" style="background:${sc}18;color:${sc};white-space:nowrap;">${getStage(o.stageId).stage||'—'}</span></td>
-    <td style="text-align:right;font-weight:600;font-size:12px;">${o.probability}%</td>
-    <td style="text-align:right;font-size:11.5px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.majorCategory?t.subCategory:'—'}</td>
-    <td style="text-align:right;font-size:11.5px;color:var(--text2);white-space:nowrap;">${o.startDate||'—'}</td>
-    <td style="text-align:right;font-size:12px;font-weight:600;color:var(--text2);">${getOwner(o.ownerId).initials||'—'}</td>
-  </tr>`;
-}
-function filterOpps(checked,search){
-  let opps=DB.opportunities.filter(o=>checked.includes(getStage(o.stageId).stage));
-  if(search)opps=opps.filter(o=>
-    (o.name||'').toLowerCase().includes(search)||
-    (getClient(o.clientId).colloquial||'').toLowerCase().includes(search)||
-    (getType(o.typeId).subCategory||'').toLowerCase().includes(search)||
-    (getOwner(o.ownerId).initials||'').toLowerCase().includes(search)||
-    (getStage(o.stageId).stage||'').toLowerCase().includes(search)||
-    (o.startDate||'').includes(search)
-  );
-  return opps;
-}
-function noRowMsg(cols){return `<tr><td colspan="${cols}" style="text-align:center;color:var(--text3);padding:24px">No deals found</td></tr>`;}
-function handleThClick(e, colKey) {
-  if(e.target.closest('.sf-dropdown')) return;
-  document.querySelectorAll('.sf-dropdown').forEach(d=>{
-    if(d.id !== 'sf-dd-'+colKey) d.classList.remove('open');
-  });
-  const dd = document.getElementById('sf-dd-'+colKey);
-  if(!dd) return;
-  const isOpen = dd.classList.contains('open');
-  if(isOpen){ dd.classList.remove('open'); return; }
-  // Position dropdown using viewport coordinates
-  const th = e.target.closest('th');
-  if(th){
-    const r = th.getBoundingClientRect();
-    dd.style.position = 'fixed';
-    dd.style.top = (r.bottom + 2) + 'px';
-    dd.style.width = '200px';
-    // If th right edge is past halfway - open leftward from right edge
-    if(r.right > window.innerWidth / 2){
-      dd.style.right = (window.innerWidth - r.right) + 'px';
-      dd.style.left = 'auto';
-    } else {
-      dd.style.left = r.left + 'px';
-      dd.style.right = 'auto';
-    }
-  }
-  dd.classList.add('open');
-  setTimeout(()=>{ const inp=dd.querySelector('input[type="text"]'); if(inp)inp.focus(); },50);
-  e.stopPropagation();
-}
-function setOppSort(col, dir) {
-  oppSort={col,dir};
-  document.querySelectorAll('.sf-dropdown').forEach(d=>d.classList.remove('open'));
-  renderOppsTable();
-}
-function setTextFilter(key,val){
-  if(!val)delete oppFilters[key];else oppFilters[key]={search:val};
-  renderOppsTable();
-}
-function setRangeFilter(key,bound,val){
-  if(!oppFilters[key])oppFilters[key]={};
-  if(val==='')delete oppFilters[key][bound];else oppFilters[key][bound]=parseFloat(val);
-  if(!Object.keys(oppFilters[key]).length)delete oppFilters[key];
-  renderOppsTable();
-}
-function setDateFilter(key,bound,val){
-  if(!oppFilters[key])oppFilters[key]={};
-  const p=bound==='from'?'dateFrom':'dateTo';
-  if(!val)delete oppFilters[key][p];else oppFilters[key][p]=val;
-  if(!Object.keys(oppFilters[key]).length)delete oppFilters[key];
-  renderOppsTable();
-}
-function toggleMSFilter(key,val,checked){
-  if(!oppFilters[key])oppFilters[key]={};
-  if(!oppFilters[key].values){
-    const col=OPP_COLS.find(c=>c.key===key);
-    oppFilters[key].values=new Set([...new Set(DB.opportunities.map(o=>String(col.getValue(o))).filter(Boolean))]);
-  }
-  if(checked)oppFilters[key].values.add(val);else oppFilters[key].values.delete(val);
-  if(!oppFilters[key].values.size)delete oppFilters[key];
-  renderOppsTable();
-}
-function selectAllMS(key,all){
-  if(all)delete oppFilters[key];else oppFilters[key]={values:new Set()};
-  renderOppsTable();
-}
-function clearColFilter(key){
-  delete oppFilters[key];
-  document.querySelectorAll('.sf-dropdown').forEach(d=>d.classList.remove('open'));
-  renderOppsTable();
-}
-
-function viewAllDeals(){ setOppScope('all'); }
-
-function setOppScope(scope) {
-  oppScope = scope;
-  const mine = document.getElementById('opp-scope-mine');
-  const all  = document.getElementById('opp-scope-all');
-  if(mine) mine.style.cssText = scope==='mine'
-    ? 'background:var(--red);color:#fff;border-radius:5px;padding:5px 12px;border:none;font-family:Arial,sans-serif;font-size:12px;font-weight:600;cursor:pointer;'
-    : 'background:none;color:var(--text2);border:none;border-radius:5px;padding:5px 12px;font-family:Arial,sans-serif;font-size:12px;cursor:pointer;';
-  if(all) all.style.cssText = scope==='all'
-    ? 'background:var(--blue-mid);color:#fff;border-radius:5px;padding:5px 12px;border:none;font-family:Arial,sans-serif;font-size:12px;font-weight:600;cursor:pointer;'
-    : 'background:none;color:var(--text2);border:none;border-radius:5px;padding:5px 12px;font-family:Arial,sans-serif;font-size:12px;cursor:pointer;';
-  renderOppsTable();
-}
-
-function renderOppsTable() {
-  const checked=getChecked('opp');
-  const search=(document.getElementById('opp-search')?.value||'').toLowerCase();
-  updateMSLabel('ms-opp-label',checked);
-  let opps=filterOpps(checked,search);
-  if(oppScope==='mine'){
-    const myId=currentUser?.ownerId;
-    const cIds=DB.dealCollaborators.filter(c=>+c.userId===+currentUser?.id).map(c=>+c.oppId);
-    opps=opps.filter(o=>+o.ownerId===+myId||cIds.includes(+o.id));
-  }
-  OPP_COLS.forEach(col=>{
-    const f=oppFilters[col.key];if(!f)return;
-    if(col.filterType==='text'&&f.search)
-      opps=opps.filter(o=>String(col.getValue(o)).toLowerCase().includes(f.search.toLowerCase()));
-    else if(col.filterType==='range'){
-      if(f.min!==undefined)opps=opps.filter(o=>col.getValue(o)>=f.min);
-      if(f.max!==undefined)opps=opps.filter(o=>col.getValue(o)<=f.max);
-    } else if(col.filterType==='daterange'){
-      if(f.dateFrom)opps=opps.filter(o=>(col.getValue(o)||'')>=f.dateFrom);
-      if(f.dateTo)opps=opps.filter(o=>(col.getValue(o)||'')<=f.dateTo);
-    } else if(col.filterType==='multisel'&&f.values)
-      opps=opps.filter(o=>f.values.has(String(col.getValue(o))));
-  });
-  if(oppSort.col){
-    const col=OPP_COLS.find(c=>c.key===oppSort.col);
-    if(col)opps=[...opps].sort((a,b)=>{
-      const va=col.getValue(a),vb=col.getValue(b);
-      const cmp=typeof va==='number'?va-vb:String(va).localeCompare(String(vb));
-      return oppSort.dir==='asc'?cmp:-cmp;
-    });
-  }
-  document.getElementById('opp-sub').textContent=opps.length+' shown'+(oppScope==='mine'?' · My Deals':' · All Deals');
-  document.getElementById('opp-table').innerHTML=oppTblCols(opps)+'<tbody>'+(opps.length
-    ?opps.map(oppTblRow).join('')
-    :oppScope==='mine'
-      ?'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:28px;">No deals assigned to you. <span onclick="viewAllDeals()" style="color:var(--blue-mid);text-decoration:underline;cursor:pointer;">View all deals</span></td></tr>'
-      :noRowMsg(8))+'</tbody>';
-}
-
-function renderFullPipeline(){
-  const checked=getChecked('fp'),search=(document.getElementById('fp-search')?.value||'').toLowerCase();
-  updateMSLabel('ms-fp-label',checked);
-  const opps=filterOpps(checked,search);
-  document.getElementById('fp-sub').textContent=opps.length+' of '+DB.opportunities.length+' deals';
-  document.getElementById('fp-table').innerHTML=oppTblCols(opps)+'<tbody>'+(opps.length?opps.map(oppTblRow).join(''):noRowMsg(9))+'</tbody>';
-}
-function renderLost(){
-  const checked=getChecked('lost'),search=(document.getElementById('lost-search')?.value||'').toLowerCase();
-  updateMSLabel('ms-lost-label',checked);
-  const opps=filterOpps(checked,search);
-  const lostCount=DB.opportunities.filter(o=>getStage(o.stageId).stage==='Lost').length;
-  document.getElementById('lost-sub').textContent=lostCount+' lost · '+opps.length+' shown';
-  document.getElementById('lost-table').innerHTML=oppTblCols(opps)+'<tbody>'+(opps.length?opps.map(oppTblRow).join(''):noRowMsg(9))+'</tbody>';
-}
-
-// ═══════════════════════════════════════════════
-// CONTRACTS
-// ═══════════════════════════════════════════════
-function renderContractsTable(){
-  const search=(document.getElementById('contracts-search')?.value||'').toLowerCase();
-  const secOpps=DB.opportunities.filter(o=>isSecured(o));
-  let cons=DB.contracts.filter(c=>secOpps.some(o=>+o.id===+c.oppId));
-  if(search)cons=cons.filter(c=>{const o=DB.opportunities.find(op=>+op.id===+c.oppId);return(c.contractNumber||'').toLowerCase().includes(search)||(o?.name||'').toLowerCase().includes(search)||(getClient(o?.clientId).colloquial||'').toLowerCase().includes(search);});
-  document.getElementById('contracts-table').innerHTML=`<thead><tr><th>Contract #</th><th>Opportunity</th><th>Client</th><th>Signed</th><th>Billing</th><th>End Date</th><th style="text-align:right">Actuals</th><th></th></tr></thead><tbody>${cons.length?cons.map(c=>{const o=DB.opportunities.find(op=>+op.id===+c.oppId)||{};const acts=getActStreams(o.id).reduce((s,a)=>s+(a.amount||0),0);return `<tr><td class="primary">${c.contractNumber||'—'}</td><td>${o.name||'—'}</td><td>${getClient(o.clientId).colloquial||'—'}</td><td>${c.signedDate||'—'}</td><td>${c.billingTerms||'—'}</td><td>${c.endDate||'—'}</td><td style="text-align:right;color:rgb(0,172,178);font-weight:500">${fmt(acts)}</td><td><button class="btn btn-ghost btn-sm" onclick="openOppForm(${o.id})">Open</button></td></tr>`;}).join(''):'<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:24px">No contracts yet — secure an opportunity to create one</td></tr>'}</tbody>`;
-}
-
-// ═══════════════════════════════════════════════
-// CLIENTS TABLE
-// ═══════════════════════════════════════════════
-function renderClientsTable(){
-  document.getElementById('clients-table').innerHTML=`<thead><tr><th>Trading Name</th><th>Formal Name</th><th>Sector</th><th>Status</th><th>Account Manager</th><th style="text-align:center">Opps</th><th style="text-align:right">Pipeline</th></tr></thead><tbody>${DB.clients.length?DB.clients.map(c=>{const opps=DB.opportunities.filter(o=>+o.clientId===+c.id),val=opps.reduce((s,o)=>s+getTCV(o),0),sec=DB.industrySectors.find(s=>+s.id===+c.sectorId),am=getOwner(c.accountManagerId);const sc={Active_Client:'badge-green',Prospect:'badge-amber',Inactive:'badge-gray'}[(c.status||'').replace(' ','_')]||'badge-gray';return `<tr style="cursor:pointer" onclick="openClientForm(${c.id})"><td class="primary">${c.colloquial||'—'}</td><td style="font-size:12px;color:var(--text2)">${c.formal||'—'}</td><td style="font-size:12px;color:var(--text2)">${sec?.value||'—'}</td><td><span class="badge ${sc}">${c.status||'—'}</span></td><td style="font-size:12px;color:var(--text2)">${am.first?am.first+' '+am.surname:'—'}</td><td style="text-align:center">${opps.length}</td><td style="text-align:right;color:rgb(0,172,178);font-weight:500">${fmt(val)}</td></tr>`;}).join(''):'<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">No clients yet</td></tr>'}</tbody>`;
-}
-
-// ═══════════════════════════════════════════════
-// SETTINGS
-// ═══════════════════════════════════════════════
-function renderSettings(){
-  document.getElementById('s-fy-start').value=DB.settings.fyStart;
-  document.getElementById('s-esc-month').value=DB.settings.escMonth;
-  document.getElementById('s-esc-rate').value=DB.settings.escRate;
-  document.getElementById('s-esc-desc').value=DB.settings.escDesc||'';
-  // Only render lookups if data is loaded
-  if(DB.stages&&DB.stages.length>0){
-    document.querySelectorAll('.lkp-section').forEach(sec=>renderLkpSection(sec,false));
-  } else {
-    // Try again after a short delay - data may still be loading
-    setTimeout(()=>document.querySelectorAll('.lkp-section').forEach(sec=>renderLkpSection(sec,false)), 1500);
-  }
-}
-async function saveSettings(){
-  DB.settings.fyStart=+document.getElementById('s-fy-start').value;
-  DB.settings.escMonth=+document.getElementById('s-esc-month').value;
-  DB.settings.escRate=+document.getElementById('s-esc-rate').value;
-  DB.settings.escDesc=document.getElementById('s-esc-desc').value;
-  // Persist to Supabase settings table
-  // PATCH existing settings record, or POST if not exists
-  const settingsVal = JSON.stringify(DB.settings);
-  const existing = await sbFetch('settings','GET',null,'key=eq.app_settings&select=id');
-  if(existing && existing.length) {
-    await sbFetch('settings','PATCH',{value:settingsVal},'key=eq.app_settings');
-  } else {
-    await sbFetch('settings','POST',{key:'app_settings',value:settingsVal},'');
-  }
-  alert('Settings saved.');
-}
-function renderLkpSection(sec,forceOpen){
-  const key=sec.dataset.key,lblKey=sec.dataset.lblKey,label=sec.dataset.label;
-  const hasProb=sec.dataset.prob==='true',hasSub=sec.dataset.sub==='true';
-  const hasRec=sec.dataset.recurring==='true',isOwner=sec.dataset.owner==='true';
-  const items=DB[key]||[],bodyId='lkpb-'+key;
-  const wasOpen=forceOpen===true?true:(document.getElementById(bodyId)?.classList.contains('open')||false);
-  sec.innerHTML='';
-  const hdr=document.createElement('div');hdr.className='lkp-header';
-  hdr.innerHTML=`<span class="lkp-header-title">${label}</span><span class="lkp-header-count">${items.length}</span>`;
-  hdr.onclick=()=>{const b=document.getElementById(bodyId);if(b)b.classList.toggle('open');};
-  sec.appendChild(hdr);
-  const body=document.createElement('div');body.className='lkp-body'+(wasOpen?' open':'');body.id=bodyId;
-  // Add column headers for service types
-  if(hasSub && items.length > 0) {
-    const colHdr=document.createElement('div');
-    colHdr.style.cssText='display:flex;align-items:center;gap:6px;padding:4px 8px 2px 8px;border-bottom:1px solid var(--border);';
-    const cols=[
-      {label:'Product / Service Category', flex:'1 1 120px'},
-      {label:'Type', flex:'1 1 100px'},
-      {label:'Target Margin', flex:'0 0 72px', align:'center'},
-      {label:'Min Margin', flex:'0 0 72px', align:'center'},
-      {label:'Months', flex:'0 0 48px', align:'center'},
-      {label:'Recurring Revenue', flex:'0 0 100px', align:'center'},
-    ];
-    cols.forEach(c=>{
-      const s=document.createElement('span');
-      s.textContent=c.label;
-      s.style.cssText='font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;flex:'+c.flex+';'+(c.align?'text-align:'+c.align+';':'');
-      colHdr.appendChild(s);
-    });
-    const delSp=document.createElement('span');delSp.style.cssText='flex:0 0 20px;';colHdr.appendChild(delSp);
-    body.appendChild(colHdr);
-  }
-  items.forEach(item=>{
-    const row=document.createElement('div');row.className='lkp-row';
-    const ml=document.createElement('div');ml.style.cssText='display:flex;align-items:center;gap:4px;width:100%;';
-    if(isOwner){
-      ['first','surname','initials'].forEach(f=>{const inp=document.createElement('input');inp.className=f==='initials'?'lkp-input-sm':'lkp-input';if(f==='initials')inp.style.width='50px';inp.value=item[f]||'';inp.placeholder=f.charAt(0).toUpperCase()+f.slice(1);inp.onblur=(function(ff){return function(){updateLkp(key,item.id,ff,this.value);};})(f);ml.appendChild(inp);});
-    }else{
-      const inp=document.createElement('input');inp.className='lkp-input';inp.value=item[lblKey]||'';inp.onblur=(function(lk){return function(){updateLkp(key,item.id,lk,this.value);};})(lblKey);ml.appendChild(inp);
-    }
-    if(hasSub){
-      const si=document.createElement('input');si.className='lkp-input';si.value=item.subCategory||'';si.placeholder='Sub Category';si.style.maxWidth='120px';si.onblur=function(){updateLkp(key,item.id,'subCategory',this.value);};ml.appendChild(si);
-      const mkSm=(lbl,field)=>{
-        const isMargin=field==='defaultMargin'||field==='minMargin';
-        const inp=document.createElement('input');inp.className='lkp-input-sm';
-        const rawVal = item[field]!==undefined?item[field]:0;
-        inp.value = isMargin ? Math.round(rawVal*100*10)/10 : (Number.isInteger(rawVal)?rawVal:Math.round(rawVal));
-        if(isMargin)inp.style.color='rgb(0,106,193)';
-        inp.title=isMargin?'Enter as percentage e.g. 25 for 25%':(field==='defaultDuration'?'Months':'');
-        inp.onblur=(function(f,isM){return function(){
-          const v=parseFloat(this.value)||0;
-          updateLkp(key,item.id,f, isM ? v/100 : v);
-        };})(field,isMargin);
-        ml.appendChild(inp);
-        if(isMargin){const pct=document.createElement('span');pct.textContent='%';pct.style.cssText='font-size:10px;color:var(--text3);margin-right:4px;';ml.appendChild(pct);}
-      };
-      mkSm('M%','defaultMargin');mkSm('Min%','minMargin');mkSm('Mths','defaultDuration');
-    }
-    if(hasRec){
-      const lbl=document.createElement('label');lbl.style.cssText='display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);white-space:nowrap;cursor:pointer;';
-      const chk=document.createElement('input');chk.type='checkbox';chk.checked=!!item.recurring;chk.style.cssText='accent-color:var(--red);width:14px;height:14px;';chk.onchange=(function(id){return function(){updateLkp(key,id,'recurring',this.checked);};})(item.id);
-      lbl.appendChild(chk);ml.appendChild(lbl);
-    }
-    const del=document.createElement('button');del.className='lkp-del';del.textContent='×';del.title='Remove';del.onclick=(function(id){return function(){deleteLkp(key,id);};})(item.id);ml.appendChild(del);
-    row.appendChild(ml);
-    if(hasProb){
-      const pl=document.createElement('div');pl.style.cssText='display:flex;align-items:center;gap:4px;width:100%;margin-top:4px;';
-      ['Min%','probMin','Max%','probMax'].forEach((v,i)=>{if(i%2===0){const sp=document.createElement('span');sp.textContent=v;sp.style.cssText='font-size:9.5px;color:var(--text3);width:36px;flex-shrink:0;';pl.appendChild(sp);}else{const inp=document.createElement('input');inp.className='lkp-input-sm';inp.value=item[v]!==undefined?item[v]:0;inp.onblur=(function(f){return function(){updateLkp(key,item.id,f,this.value);};})(v);pl.appendChild(inp);}});
-      row.appendChild(pl);
-      const dl=document.createElement('div');dl.style.cssText='width:100%;margin-top:4px;';const di=document.createElement('input');di.className='lkp-input';di.value=item.desc||'';di.placeholder='Stage description...';di.onblur=function(){updateLkp(key,item.id,'desc',this.value);};dl.appendChild(di);row.appendChild(dl);
-    }
-    body.appendChild(row);
-  });
-  const addBtn=document.createElement('button');addBtn.className='lkp-add';addBtn.textContent='+ Add '+label;
-  addBtn.onclick=function(){addLkp(key,lblKey,label);};body.appendChild(addBtn);
-  sec.appendChild(body);
-}
-// Map DB key to Supabase table name
-const LKP_TABLE = {
-  stages:'stages', regions:'regions', projectServiceTypes:'project_service_types',
-  contactTypes:'contact_types', powerBases:'power_bases', titleRoles:'title_roles',
-  influenceLevels:'influence_levels', supportLevels:'support_levels',
-  relationshipTypes:'relationship_types', engagementPurposes:'engagement_purposes',
-  riskCategories:'risk_categories', industrySectors:'industry_sectors',
-  clientCategories:'client_categories', owners:'owners',
-  roles:'roles', appUsers:'app_users'
-};
-
-// Map camelCase record to snake_case for Supabase
-function lkpToSb(key, item) {
-  if(key==='stages') return {id:item.id, stage:item.stage, prob_min:item.probMin, prob_max:item.probMax, color:item.color};
-  if(key==='projectServiceTypes') return {id:item.id, major_category:item.majorCategory, sub_category:item.subCategory, default_margin:item.defaultMargin||item.margin||0, default_months:item.defaultDuration||item.months||0, recurring:!!item.recurring};
-  if(key==='riskCategories') return {id:item.id, category:item.category, sub_category:item.subCategory};
-  if(key==='owners') return {id:item.id, first:item.first, surname:item.surname, initials:item.initials, hidden:item.hidden||false};
-  if(key==='contactTypes') return {id:item.id, type:item.type};
-  // Default: just pass through with id and value
-  return {id:item.id, value:item.value};
-}
-
 async function sbSaveLkpItem(key, item) {
-  const table = LKP_TABLE[key];
-  if(!table) return;
-  await sbFetch(table, 'POST', lkpToSb(key, item), 'on_conflict=id');
+  const map = lkpToSb(key,item);
+  const tableMap = {stages:'stages',regions:'regions',projectServiceTypes:'project_service_types',contactTypes:'contact_types',powerBases:'power_bases',titleRoles:'title_roles',influenceLevels:'influence_levels',supportLevels:'support_levels',relationshipTypes:'relationship_types',engagementPurposes:'engagement_purposes',riskCategories:'risk_categories',industrySectors:'industry_sectors',clientCategories:'client_categories'};
+  const tbl = tableMap[key];
+  if(tbl) await sbUpsert(tbl, map);
+}
+async function sbDeleteRecord(table, id) {
+  await sbFetch(table,'DELETE',null,'id=eq.'+id);
 }
 async function sbDeleteLkpItem(key, id) {
-  const table = LKP_TABLE[key];
-  if(!table) return;
-  await sbFetch(table, 'DELETE', null, 'id=eq.'+id);
+  const tableMap = {stages:'stages',regions:'regions',projectServiceTypes:'project_service_types',contactTypes:'contact_types',powerBases:'power_bases',titleRoles:'title_roles',influenceLevels:'influence_levels',supportLevels:'support_levels',relationshipTypes:'relationship_types',engagementPurposes:'engagement_purposes',riskCategories:'risk_categories',industrySectors:'industry_sectors',clientCategories:'client_categories'};
+  const tbl = tableMap[key];
+  if(tbl) await sbFetch(tbl,'DELETE',null,'id=eq.'+id);
 }
 
-function updateLkp(key,id,field,value){
-  const item=DB[key].find(i=>+i.id===+id);if(!item)return;
-  if(['probMin','probMax','prob','defaultMargin','defaultDuration'].includes(field))item[field]=+value;
-  else if(field==='recurring')item[field]=value===true||value==='true';
-  else item[field]=value;
-  if(field==='probMin')item.prob=+value;
-  sbSaveLkpItem(key, item);
-}
-function deleteLkp(key,id){
-  if(!confirm('Remove this entry?'))return;
-  sbDeleteLkpItem(key, id);DB[key]=DB[key].filter(i=>+i.id!==+id);
-  const sec=document.querySelector('.lkp-section[data-key="'+key+'"]');if(sec)renderLkpSection(sec,true);
-}
-function addLkp(key,lblKey,label){
-  const nkMap={stages:'stage',regions:'region',projectServiceTypes:'type',contactTypes:'ct',powerBases:'pb',titleRoles:'tr',influenceLevels:'il',supportLevels:'sl',owners:'contact',industrySectors:'sector'};
-  const nk=nkMap[key]||'opp';
-  if(!DB.nextIds[nk])DB.nextIds[nk]=(DB[key]||[]).length?Math.max(...DB[key].map(i=>i.id||0))+1:1;
-  const ni={id:DB.nextIds[nk]++};
-  if(key==='owners'){ni.first='';ni.surname='';ni.initials='';}
-  else if(key==='stages'){ni[lblKey]='New Stage';ni.probMin=0;ni.probMax=100;ni.prob=0;ni.desc='';}
-  else if(key==='projectServiceTypes'){ni.majorCategory='New';ni.subCategory='';ni.recurring=false;ni.defaultMargin=0;ni.defaultDuration=12;}
-  else ni[lblKey]='New '+label;
-  DB[key].push(ni);sbSaveLkpItem(key, ni);
-  const sec=document.querySelector('.lkp-section[data-key="'+key+'"]');if(sec){renderLkpSection(sec,true);setTimeout(()=>{const b=document.getElementById('lkpb-'+key);if(b){const rows=b.querySelectorAll('.lkp-row');const last=rows[rows.length-1];if(last){last.scrollIntoView({behavior:'smooth',block:'nearest'});const inp=last.querySelector('input:not([type="checkbox"])');if(inp)inp.focus();}}},30);}
-}
 
 // ═══════════════════════════════════════════════
 // NEW OPPORTUNITY
@@ -1924,25 +1309,31 @@ function similarity(a,b){a=(a||'').toLowerCase().trim();b=(b||'').toLowerCase().
 function checkSimilar(val){
   const warn=document.getElementById('sim-warning'),list=document.getElementById('sim-list');
   if(!val||val.length<2){warn.style.display='none';return;}
-  const matches=DB.clients.filter(c=>similarity(val,c.colloquial)>=0.6||similarity(val,c.formal)>=0.6);
+  const matches=DB.organisations.filter(o=>similarity(val,c.name)>=0.6||similarity(val,c.formal)>=0.6);
   if(!matches.length){warn.style.display='none';return;}
   warn.style.display='block';
-  list.innerHTML=matches.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(252,144,19,0.15);"><span><strong>${c.colloquial}</strong><span style="color:var(--text3);"> — ${c.formal}</span></span><button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px;" onclick="useExistingClient(${c.id})">Select this client</button></div>`).join('');
+  list.innerHTML=matches.map(c=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(252,144,19,0.15);"><span><strong>${c.name}</strong><span style="color:var(--text3);"> — ${c.formal}</span></span><button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px;" onclick="useExistingClient(${c.id})">Select this client</button></div>`).join('');
 }
-function useExistingClient(id){document.getElementById('new-opp-client').value=id;toggleInlineClient();document.getElementById('sim-warning').style.display='none';}
+function useExistingClient(id){document.getElementById('new-opp-org').value=id;toggleInlineClient();document.getElementById('sim-warning').style.display='none';}
 function forceCreateInlineClient(){
-  // Create client without similarity check
-  const col  = document.getElementById('ic-colloquial').value.trim();
-  const form = document.getElementById('ic-formal').value.trim();
-  if(!col||!form) return;
-  if(!DB.nextIds.client) DB.nextIds.client=1;
-  const nc={id:DB.nextIds.client++,colloquial:col,formal:form,tradingName:col,regNumber:'',vatNumber:'',physicalAddress:'',postalAddress:'',sectorId:null,status:'Prospect',accountManagerId:currentUser?.ownerId||null,notes:'',contacts:[]};
-  DB.clients.push(nc);sbSaveClient(nc);
-  const sel=document.getElementById('new-opp-client');
-  sel.add(new Option(col+' — '+form,nc.id));
-  sel.value=nc.id;
+  const name = document.getElementById('ic-colloquial').value.trim();
+  const legalName = document.getElementById('ic-formal').value.trim();
+  if(!name||!legalName) return;
+  const nc={id:DB.nextIds.org++, name, legalName, type:'client',
+    industrySectorId:null, categoryIds:[], notes:'',
+    createdDate:new Date().toISOString().slice(0,10)};
+  DB.organisations.push(nc);
+  sbSaveOrg(nc);
+  const sel=document.getElementById('new-opp-org');
+  if(sel){
+    const opt=document.createElement('option');
+    opt.value=nc.id; opt.textContent=nc.name; opt.selected=true;
+    sel.appendChild(opt);
+  }
   toggleInlineClient();
+  document.getElementById('sim-warning').style.display='none';
 }
+
 
 function toggleInlineClient(){
   const panel=document.getElementById('inline-client-panel'),btn=document.getElementById('btn-inline-client');
@@ -1957,7 +1348,7 @@ function createInlineClient(){
   if(!form) return alert('Formal name required.');
   // If similarity warning is showing, let user decide via the warning UI buttons
   const warn = document.getElementById('sim-warning');
-  if(warn && warn.style.display!=='none' && DB.clients.some(c=>similarity(col,c.colloquial)>=0.6)){
+  if(warn && warn.style.display!=='none' && DB.organisations.some(c=>similarity(col,c.name)>=0.6)){
     warn.style.borderColor='rgba(250,10,17,0.4)';
     setTimeout(()=>{ if(warn)warn.style.borderColor=''; },1000);
     return; // nudge user to use the warning buttons
@@ -1965,8 +1356,8 @@ function createInlineClient(){
   forceCreateInlineClient();
 }
 function showNewOppModal(){
-  const cs=document.getElementById('new-opp-client');
-  cs.innerHTML='<option value="">— Select client —</option>'+DB.clients.map(c=>`<option value="${c.id}">${c.colloquial}${c.formal?' — '+c.formal:''}</option>`).join('');
+  const cs=document.getElementById('new-opp-org');
+  cs.innerHTML='<option value="">— Select organisation —</option>'+DB.organisations.map(c=>`<option value="${c.id}">${c.name}${c.formal?' — '+c.formal:''}</option>`).join('');
   document.getElementById('new-opp-stage').innerHTML=DB.stages.map(s=>`<option value="${s.id}">${s.stage}</option>`).join('');
   document.getElementById('new-opp-name').value='';
   document.getElementById('inline-client-panel').style.display='none';
@@ -1975,13 +1366,13 @@ function showNewOppModal(){
 }
 function createNewOpp(){
   const name=document.getElementById('new-opp-name').value.trim();if(!name)return alert('Opportunity name required.');
-  const clientId=document.getElementById('new-opp-client').value;if(!clientId)return alert('Please select or create a client.');
+  const clientId=document.getElementById('new-opp-org').value;if(!clientId)return alert('Please select or create a client.');
   const stageId=+document.getElementById('new-opp-stage').value;
   const stage=DB.stages.find(s=>+s.id===stageId);
   if(!DB.nextIds.opp)DB.nextIds.opp=1;
   // Auto-assign to logged-in user's owner record if they have owner rights, else leave unassigned
-  const defaultOwner = (currentUser?.isOwner !== false && currentUser?.ownerId) ? currentUser.ownerId : (DB.owners[0]?.id||null);
-  const newOpp={id:DB.nextIds.opp++,name,clientId:+clientId,stageId,ownerId:defaultOwner,regionId:DB.regions[0]?.id||null,typeId:DB.projectServiceTypes[0]?.id||null,probability:stage?.probMin||5,base:0,margin:0,months:0,startDate:'',orderDate:'',desc:'',createdDate:new Date().toISOString().slice(0,10),escMonth:null,escRate:null};
+  const defaultOwner = (currentUser?.isOwner !== false && currentUser?.ownerId) ? currentUser.ownerId : (DB.people.filter(p=>p.isXone)[0]?.id||null);
+  const newOpp={id:DB.nextIds.opp++,name,orgId:+clientId,stageId,ownerId:defaultOwner,regionId:DB.regions[0]?.id||null,typeId:DB.projectServiceTypes[0]?.id||null,probability:stage?.probMin||5,base:0,margin:0,months:0,startDate:'',orderDate:'',desc:'',createdDate:new Date().toISOString().slice(0,10),escMonth:null,escRate:null};
   DB.opportunities.push(newOpp);sbSaveOpp(newOpp);closeModal('modal-new-opp');openOppForm(newOpp.id);
 }
 
@@ -2000,7 +1391,7 @@ function openOppForm(oppId){
   if(saveBtn) saveBtn.style.display = canEdit ? '' : 'none';
   document.body.classList.add('sidebar-hidden');
   // Header
-  document.getElementById('ohf-client').innerHTML=DB.clients.map(c=>`<option value="${c.id}" ${+c.id===+o.clientId?'selected':''}>${c.colloquial}</option>`).join('');
+  document.getElementById('ohf-client').innerHTML=DB.organisations.map(c=>`<option value="${c.id}" ${+c.id===+o.orgId?'selected':''}>${c.name}</option>`).join('');
   document.getElementById('ohf-name').value=o.name||'';
   document.getElementById('ohf-date').textContent=new Date().toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'});
   // Product tab
@@ -2009,7 +1400,7 @@ function openOppForm(oppId){
   document.getElementById('otf-desc').value=o.desc||'';
   // Commercial tab
   const ownerSel = document.getElementById('otf-owner');
-  ownerSel.innerHTML='<option value="">— Unassigned —</option>'+DB.owners.filter(ow=>!ow.hidden).map(ow=>`<option value="${ow.id}" ${+ow.id===+o.ownerId?'selected':''}>${ow.first} ${ow.surname}</option>`).join('');
+  ownerSel.innerHTML='<option value="">— Unassigned —</option>'+DB.people.filter(p=>p.isXone).filter(ow=>!ow.hidden).map(ow=>`<option value="${ow.id}" ${+ow.id===+o.ownerId?'selected':''}>${ow.first} ${ow.surname}</option>`).join('');
   // Lock owner field unless user has assign_owner permission
   ownerSel.disabled = !can('assign_owner');
   if(!can('assign_owner')) {
@@ -2078,7 +1469,7 @@ function openOppForm(oppId){
 function closeOppForm(){saveCurrentOpp();document.getElementById('opp-form-page').classList.remove('active');document.body.classList.remove('sidebar-hidden');showPage('opportunities');}
 function saveOppField(field,value){
   const o=DB.opportunities.find(op=>+op.id===+currentOppId);if(!o)return;
-  if(['clientId','ownerId','stageId','regionId','typeId'].includes(field))o[field]=value?+value:null;
+  if(['orgId','ownerId','stageId','regionId','typeId'].includes(field))o[field]=value?+value:null;
   else if(['probability','base','margin','months'].includes(field))o[field]=+value||0;
   else if(field==='escRate')o[field]=(value!==''&&value!=null)?+value:null;
   else if(field==='escMonth')o[field]=value?+value:null;
@@ -2098,7 +1489,7 @@ function saveOppField(field,value){
 }
 function saveCurrentOpp(){
   if(!currentOppId)return;
-  saveOppField('clientId',document.getElementById('ohf-client').value);
+  saveOppField('orgId',document.getElementById('ohf-client').value);
   saveOppField('name',document.getElementById('ohf-name').value);
   saveOppField('regionId',document.getElementById('otf-region').value);
   saveOppField('desc',document.getElementById('otf-desc').value);
@@ -2252,7 +1643,10 @@ function applyTypeDefaults(typeId){
 function mkOpts(arr,vk,lk,sel){return arr.map(i=>`<option value="${i.id}" ${+i.id===+sel?'selected':''}>${i[lk]}</option>`).join('');}
 
 // ── CONTACTS (global directory) ─────────────────────────────────────────
-function getContact(id){return DB.contacts.find(c=>+c.id===+id)||{};}
+function getOrg(id){return DB.organisations.find(o=>+o.id===+id)||{};}
+function personName(p){if(!p)return "";return ((p.first||"")+" "+(p.last||"")).trim();}
+function personInitials(p){if(!p)return "";return p.initials||(((p.first||"")[0]||"")+((p.last||"")[0]||"")).toUpperCase();}
+function getPerson(id){return DB.people.find(c=>+c.id===+id)||{};}
 
 function searchContacts(query){
   const res=document.getElementById('sh-search-results');
@@ -2261,14 +1655,14 @@ function searchContacts(query){
 
   // Include client contacts from the current opportunity's client
   const opp=DB.opportunities.find(op=>+op.id===+currentOppId);
-  const client=opp?DB.clients.find(cl=>+cl.id===+opp.clientId):null;
+  const client=opp?DB.organisations.find(cl=>+cl.id===+opp.clientId):null;
   const clientContacts=(client&&client.contacts||[]).map((ct,i)=>({
     id:'cc-'+i, first:ct.first, last:ct.last,
     company:client.colloquial, title:ct.title,
     email:ct.email, phone:ct.phone, isClientContact:true, clientContactIdx:i
   }));
 
-  const allContacts=[...DB.contacts, ...clientContacts];
+  const allContacts=[...DB.people, ...clientContacts];
   const matches=allContacts.filter(c=>
     (c.first||'').toLowerCase().includes(q)||
     (c.last||'').toLowerCase().includes(q)||
@@ -2281,11 +1675,11 @@ function searchContacts(query){
   }
   res.style.display='block';
   // Show existing links for this opp
-  const linked=DB.opportunityStakeholders.filter(s=>+s.oppId===+currentOppId).map(s=>+s.contactId);
+  const linked=DB.opportunityPeople.filter(s=>+s.oppId===+currentOppId).map(s=>+s.contactId);
   res.innerHTML=matches.map(c=>{
     const isLinked=linked.includes(+c.id);
     // Count other opportunities this contact is on
-    const otherOpps=DB.opportunityStakeholders.filter(s=>+s.contactId===+c.id&&+s.oppId!==+currentOppId).length;
+    const otherOpps=DB.opportunityPeople.filter(s=>+s.contactId===+c.id&&+s.oppId!==+currentOppId).length;
     return `<div style="display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);font-size:13px;">
       <div>
         <span style="font-weight:600;color:var(--text);">${c.first} ${c.last}</span>
@@ -2302,7 +1696,7 @@ function searchContacts(query){
 
 function addExistingContact(contactId){
   // Open a mini modal to set relationship context then add
-  const c=getContact(contactId);
+  const c=getPerson(contactId);
   // Reuse new contact modal but in "add existing" mode
   document.getElementById('new-contact-title').textContent='Add '+c.first+' '+c.last+' to Deal';
   document.getElementById('nc-edit-id').value='existing:'+contactId;
@@ -2333,7 +1727,7 @@ function openNewContactModal(){
   const compSel=document.getElementById('nc-company-sel');
   if(compSel && currentOppId) {
     const opp=DB.opportunities.find(op=>+op.id===+currentOppId);
-    const client=opp?getClient(opp.clientId):null;
+    const client=opp?getOrg(opp.clientId):null;
     if(client&&client.colloquial) {
       // Try to match client in dropdown
       const opt=[...compSel.options].find(o=>o.value===client.colloquial);
@@ -2365,7 +1759,7 @@ function populateContactDropdowns(){
   const compSel = document.getElementById('nc-company-sel');
   if(compSel) {
     compSel.innerHTML = '<option value="">— Select client or type below —</option>'
-      + DB.clients.map(c=>`<option value="${c.colloquial}">${c.colloquial}${c.formal&&c.formal!==c.colloquial?' ('+c.formal+')':''}</option>`).join('');
+      + DB.organisations.map(c=>`<option value="${c.name}">${c.name}${c.formal&&c.formal!==c.name?' ('+c.formal+')':''}</option>`).join('');
   }
 }
 function onCompanySelChange(val) {
@@ -2402,7 +1796,7 @@ function saveContact(){
     contactId=+editId.split(':')[1];
   } else {
     // Duplicate check — same first + last name (case insensitive)
-    const dup=DB.contacts.find(c=>
+    const dup=DB.people.find(c=>
       c.first.toLowerCase()===first.toLowerCase()&&
       c.last.toLowerCase()===last.toLowerCase()
     );
@@ -2421,7 +1815,7 @@ function saveContact(){
           email:document.getElementById('nc-email').value.trim(),
           phone:document.getElementById('nc-phone').value.trim()
         };
-        DB.contacts.push(nc);
+        DB.people.push(nc);
         contactId=nc.id;
       }
     } else {
@@ -2432,12 +1826,12 @@ function saveContact(){
         email:document.getElementById('nc-email').value.trim(),
         phone:document.getElementById('nc-phone').value.trim()
       };
-      DB.contacts.push(nc);
+      DB.people.push(nc);
       contactId=nc.id;
     }
   }
   // Check not already linked
-  if(DB.opportunityStakeholders.some(s=>+s.oppId===+currentOppId&&+s.contactId===+contactId)){
+  if(DB.opportunityPeople.some(s=>+s.oppId===+currentOppId&&+s.contactId===+contactId)){
     alert('This contact is already on this deal.');
     closeModal('modal-new-contact');
     return;
@@ -2445,7 +1839,7 @@ function saveContact(){
   // Create link
   if(!DB.nextIds.oppSh)DB.nextIds.oppSh=1;
   const newSH={id:DB.nextIds.oppSh++,oppId:+currentOppId,contactId,relationshipTypeId:relTypeId,contactTypeId:ctId,powerBaseId:pbId,influenceLevelId:ilId,supportLevelId:slId};
-  DB.opportunityStakeholders.push(newSH);
+  DB.opportunityPeople.push(newSH);
   closeModal('modal-new-contact');
   // Clear search
   const searchEl=document.getElementById('sh-search'); if(searchEl)searchEl.value='';
@@ -2455,9 +1849,9 @@ function saveContact(){
 }
 
 function renderShGrid(oppId){
-  const links=DB.opportunityStakeholders.filter(s=>+s.oppId===+oppId);
+  const links=DB.opportunityPeople.filter(s=>+s.oppId===+oppId);
   document.getElementById('sh-body').innerHTML=links.length?links.map((s,idx)=>{
-    const c=getContact(s.contactId);
+    const c=getPerson(s.contactId);
     return `<tr data-shid="${s.id}">
       <td style="color:var(--text3);font-size:10px;text-align:center;">${idx+1}</td>
       <td>
@@ -2475,14 +1869,14 @@ function renderShGrid(oppId){
   }).join(''):'<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:18px;font-size:12.5px;">No stakeholders yet — search for a contact above or create a new one.</td></tr>';
 }
 function updateOppSH(id,field,value){
-  const s=DB.opportunityStakeholders.find(s=>+s.id===+id);if(!s)return;
-  s[field]=value?+value:null;sbSaveOppSH(s);renderEngagement(currentOppId);
+  const s=DB.opportunityPeople.find(s=>+s.id===+id);if(!s)return;
+  s[field]=value?+value:null;sbSaveOppPerson(s);renderEngagement(currentOppId);
 }
 function removeOppSH(id){
   if(!confirm('Remove this stakeholder from the deal?'))return;
   const shId=id;
-  DB.opportunityStakeholders=DB.opportunityStakeholders.filter(s=>+s.id!==+shId);
-  sbDeleteRecord('opportunity_stakeholders',shId);renderShGrid(currentOppId);renderEngagement(currentOppId);
+  DB.opportunityPeople=DB.opportunityPeople.filter(s=>+s.id!==+shId);
+  sbDeleteRecord('opportunity_people',shId);renderShGrid(currentOppId);renderEngagement(currentOppId);
 }
 
 // ═══════════════════════════════════════════════
@@ -2495,11 +1889,11 @@ function onEngPurposeChange(val) {
   else custom.style.display='none';
 }
 function renderEngagement(oppId){
-  const links=DB.opportunityStakeholders.filter(s=>+s.oppId===+oppId);
+  const links=DB.opportunityPeople.filter(s=>+s.oppId===+oppId);
   const ints=DB.interactions.filter(i=>+i.oppId===+oppId);
   // Stakeholder sidebar list
   document.getElementById('eng-sh-list').innerHTML=links.length?links.map(s=>{
-    const c=getContact(s.contactId);
+    const c=getPerson(s.contactId);
     return `<div class="eng-sh-item"><div><div style="font-weight:600;font-size:12.5px;">${c.first||''} ${c.last||''}</div>${c.company?`<div style="font-size:10.5px;color:var(--text3);">${c.company}</div>`:''}</div></div>`;
   }).join(''):'<div style="padding:12px;font-size:12px;color:var(--text3)">No stakeholders yet.</div>';
   // Purpose dropdown
@@ -2513,7 +1907,7 @@ function renderEngagement(oppId){
   const chkDiv=document.getElementById('eng-sh-checkboxes');
   if(chkDiv){
     chkDiv.innerHTML=links.length
-      ?links.map(s=>{const c=getContact(s.contactId);return `<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer;background:#fff;border:1px solid var(--border);border-radius:5px;padding:4px 9px;"><input type="checkbox" data-sh-id="${s.id}" style="accent-color:var(--red);width:13px;height:13px;">${c.first||''} ${c.last||''}</label>`;}).join('')
+      ?links.map(s=>{const c=getPerson(s.contactId);return `<label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text);cursor:pointer;background:#fff;border:1px solid var(--border);border-radius:5px;padding:4px 9px;"><input type="checkbox" data-sh-id="${s.id}" style="accent-color:var(--red);width:13px;height:13px;">${c.first||''} ${c.last||''}</label>`;}).join('')
       :'<span style="font-size:11.5px;color:var(--text3);padding:2px 4px;">No stakeholders on this deal yet</span>';
   }
   // Default date to today
@@ -2521,9 +1915,9 @@ function renderEngagement(oppId){
   if(dateEl&&!dateEl.value) dateEl.value=new Date().toISOString().slice(0,10);
   // Interaction log
   document.getElementById('eng-log-list').innerHTML=ints.length?[...ints].reverse().map(i=>{
-    const shNames=(i.stakeholderIds||[]).map(sid=>{
+    const shNames=(i.personIds||[]).map(sid=>{
       const link=links.find(s=>+s.id===+sid);
-      const c=link?getContact(link.contactId):null;
+      const c=link?getPerson(link.contactId):null;
       return c?c.first+' '+c.last:null;
     }).filter(Boolean);
     const dateStr=i.date?(i.time?i.date+' at '+i.time:i.date):'';
@@ -2921,16 +2315,16 @@ function clearAllRevenue(){
 // CLIENT FORM
 // ═══════════════════════════════════════════════
 function openClientForm(clientId){
-  currentClientId=+clientId;
-  const c=DB.clients.find(cl=>+cl.id===+clientId);if(!c)return;
+  currentOrgId=+clientId;
+  const c=DB.organisations.find(cl=>+cl.id===+clientId);if(!c)return;
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
   document.getElementById('opp-form-page').classList.remove('active');
   document.getElementById('client-form-page').classList.add('active');
   document.body.classList.add('sidebar-hidden');
-  document.getElementById('chf-colloquial').value=c.colloquial||'';
+  document.getElementById('chf-colloquial').value=c.name||'';
   document.getElementById('chf-status').value=c.status||'Prospect';
   document.getElementById('chf-date').textContent=new Date().toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'});
-  document.getElementById('chf-am').innerHTML='<option value="">— Unassigned —</option>'+DB.owners.filter(o=>!o.hidden).map(o=>`<option value="${o.id}" ${+o.id===+c.accountManagerId?'selected':''}>${o.first} ${o.surname}</option>`).join('');
+  document.getElementById('chf-am').innerHTML='<option value="">— Unassigned —</option>'+DB.people.filter(p=>p.isXone).filter(o=>!o.hidden).map(o=>`<option value="${o.id}" ${+o.id===+c.accountManagerId?'selected':''}>${o.first} ${o.surname}</option>`).join('');
   document.getElementById('ctf-formal').value=c.formal||'';
   document.getElementById('ctf-reg').value=c.regNumber||'';
   document.getElementById('ctf-vat').value=c.vatNumber||'';
@@ -2943,7 +2337,7 @@ function openClientForm(clientId){
   switchClientTab(document.querySelector('#client-form-page .opp-tab'),'ct-company');
   renderClientCategoryCheckboxes(c);
   populateParentDropdown(c);
-  renderClientBadges(DB.clients.find(cl=>+cl.id===+currentClientId)||c);
+  renderClientBadges(DB.organisations.find(cl=>+cl.id===+currentOrgId)||c);
 }
 
 function renderClientCategoryCheckboxes(client) {
@@ -2958,21 +2352,21 @@ function renderClientCategoryCheckboxes(client) {
     </label>`).join('');
 }
 function toggleClientCategory(catId, checked) {
-  const c = DB.clients.find(cl=>+cl.id===+currentClientId);
+  const c = DB.organisations.find(cl=>+cl.id===+currentOrgId);
   if(!c) return;
   if(!c.categories) c.categories = [];
   if(checked) { if(!c.categories.includes(+catId)) c.categories.push(+catId); }
   else c.categories = c.categories.filter(id=>+id!==+catId);
-  sbSaveClient(c);
+  sbSaveOrg(c);
 }
 function populateParentDropdown(client) {
   const sel = document.getElementById('ctf-parent-sel');
   if(!sel) return;
   sel.innerHTML = '<option value="">— None —</option>'
-    + DB.clients
+    + DB.organisations
         .filter(c=>+c.id!==+client.id)
         .sort((a,b)=>a.colloquial.localeCompare(b.colloquial))
-        .map(c=>`<option value="${c.id}" ${+c.id===+client.parentId?'selected':''}>${c.colloquial}</option>`)
+        .map(c=>`<option value="${c.id}" ${+c.id===+client.parentId?'selected':''}>${c.name}</option>`)
         .join('')
     + '<option value="__new__">+ Create new parent client...</option>';
   document.getElementById('ctf-parent-new-wrap').style.display='none';
@@ -2989,10 +2383,10 @@ function onParentSelChange(val) {
 }
 function renderClientBadges(c) {
   if(!c){console.warn('renderClientBadges: no client'); return;}
-  console.log('renderClientBadges:', c.colloquial, 'parentId:', c.parentId, 'id:', c.id);
+  console.log('renderClientBadges:', c.name, 'parentId:', c.parentId, 'id:', c.id);
   // Parent badge — show if this client IS a parent to others
-  const subsidiaries = DB.clients.filter(cl=>+cl.parentId===+c.id);
-  console.log('subsidiaries:', subsidiaries.length, 'all parentIds:', DB.clients.map(cl=>cl.parentId));
+  const subsidiaries = DB.organisations.filter(cl=>+cl.parentId===+c.id);
+  console.log('subsidiaries:', subsidiaries.length, 'all parentIds:', DB.organisations.map(cl=>cl.parentId));
   const parentBadge = document.getElementById('chf-parent-badge');
   console.log('parentBadge el:', parentBadge);
   if(parentBadge) {
@@ -3012,7 +2406,7 @@ function renderClientBadges(c) {
   const subBadge = document.getElementById('chf-subsidiary-badge');
   if(subBadge) {
     if(c.parentId) {
-      const parent = DB.clients.find(cl=>+cl.id===+c.parentId);
+      const parent = DB.organisations.find(cl=>+cl.id===+c.parentId);
       subBadge.style.display = '';
       subBadge.innerHTML = `<span style="display:inline-flex;align-items:center;gap:6px;background:rgba(0,172,178,0.08);border:1px solid rgba(0,172,178,0.25);border-radius:20px;padding:4px 12px;font-size:11.5px;color:var(--teal);font-weight:600;cursor:pointer;" onclick="openClientForm(${c.parentId})" title="Open parent record">
         &#8593; Part of ${parent?parent.colloquial:'Unknown'}
@@ -3026,33 +2420,33 @@ function renderClientBadges(c) {
 
 function cancelNewParent() {
   document.getElementById('ctf-parent-new-wrap').style.display='none';
-  const c=DB.clients.find(cl=>+cl.id===+currentClientId);
+  const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);
   document.getElementById('ctf-parent-sel').value=c&&c.parentId?c.parentId:'';
 }
 function createParentClient() {
   const name=document.getElementById('ctf-parent-new').value.trim();
   if(!name) return alert('Please enter a name for the parent company.');
   // Similarity check
-  const similar=DB.clients.filter(c=>similarity(name,c.colloquial)>=0.6||similarity(name,c.formal)>=0.6);
+  const similar=DB.organisations.filter(o=>similarity(name,c.name)>=0.6||similarity(name,c.formal)>=0.6);
   if(similar.length){
-    const names=similar.map(c=>c.colloquial).join(', ');
+    const names=similar.map(c=>c.name).join(', ');
     if(!confirm('Similar client'+(similar.length>1?'s':'')+' already exist: '+names+'. Create "'+name+'" anyway?')) return;
   }
   if(!DB.nextIds.client)DB.nextIds.client=1;
   const nc={id:DB.nextIds.client++,colloquial:name,formal:name,tradingName:name,
     regNumber:'',vatNumber:'',physicalAddress:'',postalAddress:'',
     sectorId:null,status:'Prospect',accountManagerId:null,notes:'',contacts:[],categories:[],parentId:null};
-  DB.clients.push(nc);
-  sbSaveClient(nc);
+  DB.organisations.push(nc);
+  sbSaveOrg(nc);
   // Add to dropdown and select
   const sel=document.getElementById('ctf-parent-sel');
   // Rebuild dropdown with new client included
-  const currentClient=DB.clients.find(cl=>+cl.id===+currentClientId);
+  const currentClient=DB.organisations.find(cl=>+cl.id===+currentOrgId);
   populateParentDropdown(currentClient);
   sel.value=nc.id;
   document.getElementById('ctf-parent-new-wrap').style.display='none';
   saveClientField('parentId',nc.id);
-  renderClientBadges(DB.clients.find(cl=>+cl.id===+currentClientId));
+  renderClientBadges(DB.organisations.find(cl=>+cl.id===+currentOrgId));
   alert('"'+name+'" has been created as a client. Please open their record to complete the details.');
 }
 // ── DEV NOTES ─────────────────────────────────────────────────────────────
@@ -3197,19 +2591,19 @@ document.addEventListener('keydown', e => {
 
 function closeClientForm(){saveCurrentClient();document.getElementById('client-form-page').classList.remove('active');document.body.classList.remove('sidebar-hidden');showPage('clients');}
 function saveClientField(field,value){
-  const c=DB.clients.find(cl=>+cl.id===+currentClientId);if(!c)return;
+  const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);if(!c)return;
   if(['sectorId','accountManagerId','parentId'].includes(field))c[field]=value?+value:null;else c[field]=value;
-  if(field==='colloquial')c.tradingName=value;
-  sbSaveClient(c);
+  if(field==='name')c.tradingName=value;
+  sbSaveOrg(c);
 }
 function saveCurrentClient(){
-  if(!currentClientId)return;
-  const fieldMap={'colloquial':'chf-colloquial','status':'chf-status','formal':'ctf-formal','regNumber':'ctf-reg','vatNumber':'ctf-vat','physicalAddress':'ctf-physical','postalAddress':'ctf-postal','notes':'ctf-notes'};
+  if(!currentOrgId)return;
+  const fieldMap={'name':'chf-colloquial','status':'chf-status','formal':'ctf-formal','regNumber':'ctf-reg','vatNumber':'ctf-vat','physicalAddress':'ctf-physical','postalAddress':'ctf-postal','notes':'ctf-notes'};
   Object.entries(fieldMap).forEach(function(kv){const el=document.getElementById(kv[1]);if(el)saveClientField(kv[0],el.value);});
   saveClientField('accountManagerId',document.getElementById('chf-am').value);
   saveClientField('sectorId',document.getElementById('ctf-sector').value);
-  const c=DB.clients.find(cl=>+cl.id===+currentClientId);
-  if(c) sbSaveClient(c);
+  const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);
+  if(c) sbSaveOrg(c);
 }
 function switchClientTab(el,paneId){
   document.querySelectorAll('#client-form-page .opp-tab').forEach(t=>t.classList.remove('active'));
@@ -3217,7 +2611,7 @@ function switchClientTab(el,paneId){
   if(el)el.classList.add('active');const pane=document.getElementById(paneId);if(pane)pane.classList.add('active');
 }
 function renderClientContacts(){
-  const c=DB.clients.find(cl=>+cl.id===+currentClientId);
+  const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);
   if(!c)return;
   const contacts=c.contacts||[];
   const countEl=document.getElementById('ct-contacts-count');
@@ -3261,35 +2655,35 @@ function toggleContactExpand(i){
 
 
 function addClientContact(){
-  const c=DB.clients.find(cl=>+cl.id===+currentClientId);if(!c)return;if(!c.contacts)c.contacts=[];
+  const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);if(!c)return;if(!c.contacts)c.contacts=[];
   if(!DB.nextIds.contact)DB.nextIds.contact=1;
   c.contacts.push({id:DB.nextIds.contact++,first:'',last:'',title:'',email:'',phone:''});
-  sbSaveClient(c);renderClientContacts();
+  sbSaveOrg(c);renderClientContacts();
 }
-function updateContact(idx,field,value){const c=DB.clients.find(cl=>+cl.id===+currentClientId);if(!c||!c.contacts[idx])return;c.contacts[idx][field]=value;sbSaveClient(c);
+function updateContact(idx,field,value){const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);if(!c||!c.contacts[idx])return;c.contacts[idx][field]=value;sbSaveOrg(c);
   // refresh display name in list
   renderClientContacts();
 }
-function removeContact(idx){const c=DB.clients.find(cl=>+cl.id===+currentClientId);if(!c||!confirm('Remove contact?'))return;c.contacts.splice(idx,1);sbSaveClient(c);renderClientContacts(currentClientId);}
+function removeContact(idx){const c=DB.organisations.find(cl=>+cl.id===+currentOrgId);if(!c||!confirm('Remove contact?'))return;c.contacts.splice(idx,1);sbSaveOrg(c);renderClientContacts(currentOrgId);}
 function renderClientOpps(clientId){
-  const opps=DB.opportunities.filter(o=>+o.clientId===+clientId);
+  const opps=DB.opportunities.filter(o=>+o.orgId===+clientId);
   document.getElementById('client-opp-count').textContent=opps.length+' opportunit'+(opps.length===1?'y':'ies');
-  document.getElementById('client-opp-tbl').innerHTML=`<thead><tr><th>Opportunity</th><th>Stage</th><th>Service</th><th>Owner</th><th style="text-align:right">TCV</th></tr></thead><tbody>${opps.map(o=>`<tr style="cursor:pointer" onclick="closeClientForm();setTimeout(()=>openOppForm(${o.id}),100)"><td>${o.name}</td><td>${getStage(o.stageId).stage||'—'}</td><td>${getType(o.typeId).subCategory||'—'}</td><td>${getOwner(o.ownerId).initials||'—'}</td><td style="text-align:right;color:#3ecf8e;font-weight:500">${fmt(getTCV(o))}</td></tr>`).join('')}</tbody>`;
+  document.getElementById('client-opp-tbl').innerHTML=`<thead><tr><th>Opportunity</th><th>Stage</th><th>Service</th><th>Owner</th><th style="text-align:right">TCV</th></tr></thead><tbody>${opps.map(o=>`<tr style="cursor:pointer" onclick="closeClientForm();setTimeout(()=>openOppForm(${o.id}),100)"><td>${o.name}</td><td>${getStage(o.stageId).stage||'—'}</td><td>${getType(o.typeId).subCategory||'—'}</td><td>${getXonePerson(o.ownerId).initials||'—'}</td><td style="text-align:right;color:#3ecf8e;font-weight:500">${fmt(getTCV(o))}</td></tr>`).join('')}</tbody>`;
 }
 function openNewClientModal(){document.getElementById('nc-colloquial').value='';document.getElementById('nc-formal').value='';openModal('modal-new-client');}
 function saveNewClient(){
   const col=document.getElementById('nc-colloquial').value.trim(),form=document.getElementById('nc-formal').value.trim();
   if(!col||!form)return alert('Both names required.');
   // Similarity check against existing clients
-  const similar=DB.clients.filter(c=>similarity(col,c.colloquial)>=0.6||similarity(col,c.formal)>=0.6||similarity(form,c.formal)>=0.6);
+  const similar=DB.organisations.filter(o=>similarity(col,c.name)>=0.6||similarity(col,c.formal)>=0.6||similarity(form,c.formal)>=0.6);
   if(similar.length){
-    const names=similar.map(c=>c.colloquial+(c.formal&&c.formal!==c.colloquial?' / '+c.formal:'')).join('; ');
+    const names=similar.map(c=>c.name+(c.formal&&c.formal!==c.name?' / '+c.formal:'')).join('; ');
     const proceed=confirm('Similar client'+(similar.length>1?'s':'')+' already exist: '+names+'.\n\nCreate "'+col+'" as a new client anyway?');
     if(!proceed)return;
   }
   if(!DB.nextIds.client)DB.nextIds.client=1;
   const nc={id:DB.nextIds.client++,colloquial:col,formal:form,tradingName:col,regNumber:'',vatNumber:'',physicalAddress:'',postalAddress:'',sectorId:null,status:'Prospect',accountManagerId:null,notes:'',contacts:[],categories:[],parentId:null};
-  DB.clients.push(nc);sbSaveClient(nc);closeModal('modal-new-client');openClientForm(nc.id);
+  DB.organisations.push(nc);sbSaveOrg(nc);closeModal('modal-new-client');openClientForm(nc.id);
 }
 
 // ═══════════════════════════════════════════════
@@ -3321,7 +2715,7 @@ function hideLoadingOverlay() {
 }
 function initAuth() {
   // First run — no users exist yet, create initial admin
-  if (DB.appUsers.length === 0) {
+  if (DB.people.length === 0) {
     showFirstRun();
     return;
   }
@@ -3330,7 +2724,7 @@ function initAuth() {
     try {
       currentUser = JSON.parse(savedUser);
       // Refresh permissions in case they changed
-      const freshUser = DB.appUsers.find(u=>u.id===currentUser.id);
+      const freshUser = DB.people.find(u=>u.id===currentUser.id);
       if (!freshUser || freshUser.active===false) { doLogout(); return; }
       currentUser = {...freshUser};
       currentUser.resolvedPermissions = resolvePermissions(currentUser);
@@ -3366,26 +2760,43 @@ function createFirstAdmin() {
   const name = document.getElementById('fr-name').value.trim();
   const email = document.getElementById('fr-email').value.trim().toLowerCase();
   const password = document.getElementById('fr-password').value;
-  const errEl = document.getElementById('fr-error');
-  errEl.style.display = 'none';
-  if(!name||!email||!password){errEl.textContent='All fields are required.';errEl.style.display='block';return;}
-  if(password.length<1){errEl.textContent='Password is required.';errEl.style.display='block';return;}
-  if(!DB.nextIds.appUser) DB.nextIds.appUser = 1;
-  // Auto-create owner record
-  if(!DB.nextIds.contact) DB.nextIds.contact=1;
-  const parts = name.split(' ');
-  const newOwner = {id:DB.nextIds.contact++,first:parts[0]||'',surname:parts.slice(1).join(' ')||'',initials:((parts[0]?.[0]||'')+(parts[1]?.[0]||'')).toUpperCase()};
-  DB.owners.push(newOwner);
-  const admin = {id:DB.nextIds.appUser++,name,email,password,roleIds:[1],ownerId:newOwner.id,active:true,createdDate:new Date().toISOString().slice(0,10)};
-  DB.appUsers.push(admin);
-  sbSaveOwner(newOwner);sbSaveUser(admin);
-  currentUser = {...admin};
-  currentUser.resolvedPermissions = resolvePermissions(currentUser);
+  if (!name || !email || !password) { alert('Please fill in all fields.'); return; }
+
+  const parts = name.trim().split(' ');
+  const first = parts[0];
+  const last = parts.slice(1).join(' ');
+  const initials = (first[0]||'')+(last?last[0]:'');
+
+  const newPerson = {
+    id: DB.nextIds.person++,
+    first, last, email, phone: '',
+    title: 'Administrator',
+    isXone: true, initials: initials.toUpperCase(),
+    hidden: false, notes: ''
+  };
+  DB.people.push(newPerson);
+  sbSavePerson(newPerson);
+
+  const newCred = {
+    id: DB.nextIds.credential++,
+    personId: newPerson.id,
+    password, roleIds: [1], active: true,
+    createdDate: new Date().toISOString().slice(0,10)
+  };
+  DB.userCredentials.push(newCred);
+  sbSaveCredential(newCred);
+
+  currentUser = {
+    id: newPerson.id, personId: newPerson.id,
+    name: personName(newPerson), email,
+    roleIds: [1], isXone: true, initials: initials.toUpperCase()
+  };
+  refreshCurrentUserPerms();
   sessionStorage.setItem('sf_user', JSON.stringify(currentUser));
-  // Hide first-run screen and show app
-  document.getElementById('first-run-screen').style.display = 'none';
   showApp();
 }
+
+
 function showLogin() {
   document.getElementById('login-screen').style.display = 'flex';
   document.querySelector('.sidebar').style.display = 'none';
@@ -3423,8 +2834,8 @@ function doLogin() {
   errEl.style.display = 'none';
   if (!email || !password) { errEl.textContent = 'Please enter your email and password.'; errEl.style.display = 'block'; return; }
   // Find user - show count to help debug
-  if (DB.appUsers.length === 0) { errEl.textContent = 'No users in database. Use "First time setup" link below.'; errEl.style.display = 'block'; return; }
-  const user = DB.appUsers.find(u => (u.name.toLowerCase() === email || u.email.toLowerCase() === email) && u.active !== false);
+  if (DB.people.length === 0) { errEl.textContent = 'No users in database. Use "First time setup" link below.'; errEl.style.display = 'block'; return; }
+  const user = DB.people.find(u => (u.name.toLowerCase() === email || u.email.toLowerCase() === email) && u.active !== false);
   if (!user) { errEl.textContent = 'No account found for "' + email + '".'; errEl.style.display = 'block'; return; }
   if (user.password !== password) { errEl.textContent = 'Incorrect password.'; errEl.style.display = 'block'; return; }
   currentUser = {...user};
@@ -3456,31 +2867,28 @@ function applyNavPermissions() {
 // ═══════════════════════════════════════════════
 function renderUsersTable() {
   if (!can('manage_users')) { showPage('dashboard'); return; }
-  document.getElementById('users-sub').textContent = DB.appUsers.length + ' users';
-  const rows = DB.appUsers.map(u => {
-    const roleNames = (u.roleIds||[]).map(rid=>DB.roles.find(r=>r.id===rid)?.name).filter(Boolean).join(', ') || '—';
-    const overrides = DB.userPermissionOverrides.filter(o=>o.userId===u.id);
-    const active = u.active !== false;
+  const appPeople = DB.people.filter(p => DB.userCredentials.some(c => +c.personId === +p.id));
+  document.getElementById('users-sub').textContent = appPeople.length + ' users';
+  const rows = appPeople.map(p => {
+    const cred = DB.userCredentials.find(c => +c.personId === +p.id)||{};
+    const roleNames = (cred.roleIds||[]).map(rid=>DB.roles.find(r=>+r.id===+rid)?.name).filter(Boolean).join(', ');
+    const active = cred.active !== false;
     return `<tr>
-      <td class="primary">${u.name}</td>
-      <td style="font-size:12px;color:var(--text2)">${u.email}</td>
+      <td style="font-weight:600">${personName(p)}</td>
+      <td>${p.email||''}</td>
+      <td><span class="badge">${roleNames||'No role'}</span></td>
+      <td>${p.isXone?'<span class="badge badge-blue">Xone</span>':'<span class="badge">External</span>'}</td>
+      <td><span class="badge ${active?'badge-green':'badge-gray'}">${active?'Active':'Inactive'}</span></td>
       <td>
-        <span class="badge ${active?'badge-green':'badge-gray'}">${active?'Active':'Inactive'}</span>
-        ${u.isOwner===false?'<span class="badge badge-amber" style="margin-left:4px;font-size:10px;">Not owner</span>':''}
-      </td>
-      <td style="font-size:12px;color:var(--text2)">${roleNames}</td>
-      <td style="font-size:12px;color:var(--text2)">${overrides.length?overrides.length+' override'+(overrides.length!==1?'s':''):'—'}</td>
-      <td style="font-size:12px;color:var(--text2)">${getOwner(u.ownerId).initials||'—'} · ${getOwner(u.ownerId).first?getOwner(u.ownerId).first+' '+getOwner(u.ownerId).surname:'No owner record'}</td>
-      <td>
-        <button class="btn btn-ghost btn-sm" onclick="editUser(${u.id})">Edit</button>
-        ${u.id!==currentUser?.id?`<button class="btn btn-danger btn-sm" style="margin-left:4px;" onclick="toggleUserActive(${u.id})">${active?'Deactivate':'Activate'}</button>`:''}
+        <button class="btn btn-sm" onclick="openEditUser(${p.id})">Edit</button>
+        <button class="btn btn-sm" onclick="toggleUserActive(${p.id})">${active?'Deactivate':'Activate'}</button>
       </td>
     </tr>`;
   }).join('');
-  document.getElementById('users-table').innerHTML = `
-    <thead><tr><th>Name</th><th>Email</th><th>Status</th><th>Roles</th><th>Overrides</th><th>Owner Record</th><th></th></tr></thead>
-    <tbody>${rows||'<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px">No users yet. Create the first user to get started.</td></tr>'}</tbody>`;
+  document.getElementById('users-table-body').innerHTML = rows || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:28px;">No users yet</td></tr>';
 }
+
+
 function openNewUserModal() {
   document.getElementById('new-user-title').textContent = 'New User';
   document.getElementById('edit-user-id').value = '';
@@ -3503,7 +2911,7 @@ function openNewUserModal() {
   setTimeout(()=>document.getElementById('nu-name').focus(),100);
 }
 function editUser(userId) {
-  const u = DB.appUsers.find(u=>u.id===userId);if(!u)return;
+  const u = DB.people.find(u=>u.id===userId);if(!u)return;
   document.getElementById('new-user-title').textContent = 'Edit User';
   document.getElementById('edit-user-id').value = u.id;
   document.getElementById('nu-name').value = u.name||'';
@@ -3513,14 +2921,14 @@ function editUser(userId) {
   document.getElementById('nu-active').checked = u.active!==false;
   document.getElementById('nu-is-owner').checked = u.isOwner!==false;
   // Derive initials from existing owner record
-  const linkedOwner = DB.owners.find(o=>+o.id===+u.ownerId);
+  const linkedOwner = DB.people.filter(p=>p.isXone).find(o=>+o.id===+u.ownerId);
   document.getElementById('nu-initials').value = linkedOwner?.initials || '';
   document.getElementById('nu-roles').innerHTML = DB.roles.map(r=>`
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text);cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 11px;">
       <input type="checkbox" data-role-id="${r.id}" ${(u.roleIds||[]).includes(r.id)?'checked':''} style="accent-color:var(--red);width:14px;height:14px;">
       <div><div style="font-weight:600;">${r.name}</div><div style="font-size:10.5px;color:var(--text3);">${r.description}</div></div>
     </label>`).join('');
-  const overrides = DB.userPermissionOverrides.filter(o=>o.userId===userId);
+  const overrides = DB.userPermissionOverrides.filter(o=>o.personId===userId);
   renderPermissionOverrides(overrides);
   openModal('modal-new-user');
 }
@@ -3549,60 +2957,49 @@ function saveUser() {
   const name = document.getElementById('nu-name').value.trim();
   const email = document.getElementById('nu-email').value.trim().toLowerCase();
   const password = document.getElementById('nu-password').value;
-  const active = document.getElementById('nu-active').checked;
-  const isOwner = document.getElementById('nu-is-owner').checked;
-  const initials = (document.getElementById('nu-initials').value||'').toUpperCase().trim();
-  if(!name) return alert('Name is required.');
-  if(!email) return alert('Email is required.');
-  const existingEmail = DB.appUsers.find(u=>u.email.toLowerCase()===email&&u.id!==+editId);
-  if(existingEmail) return alert('An account with that email already exists.');
-  const roleIds = [...document.querySelectorAll('#nu-roles input[type="checkbox"]:checked')].map(c=>+c.dataset.roleId);
-  if(!editId && !password) return alert('Password is required for new users.');
-  let user;
+  const isXone = document.getElementById('nu-is-xone')?.checked || false;
+  const roleId = +document.getElementById('nu-role').value || 3;
   const parts = name.split(' ');
-  const autoInitials = initials || ((parts[0]?.[0]||'')+(parts[1]?.[0]||'')).toUpperCase();
-  if(editId) {
-    user = DB.appUsers.find(u=>u.id===+editId);
-    if(!user) return;
-    user.name=name; user.email=email; user.roleIds=roleIds; user.active=active; user.isOwner=isOwner;
-    if(password) user.password=password;
-    // Update linked owner record
-    const linkedOwner = DB.owners.find(o=>+o.id===+user.ownerId);
-    if(linkedOwner) {
-      linkedOwner.first=parts[0]||''; linkedOwner.surname=parts.slice(1).join(' ')||'';
-      linkedOwner.initials=autoInitials; linkedOwner.hidden=!isOwner;
+  const first = parts[0], last = parts.slice(1).join(' ');
+  const initials = ((first[0]||'')+(last?last[0]:'')).toUpperCase();
+
+  if (!name || !email) { alert('Name and email are required.'); return; }
+
+  if (editId) {
+    // Edit existing
+    const person = DB.people.find(p=>+p.id===+editId);
+    if (person) {
+      person.first = first; person.last = last; person.email = email;
+      person.isXone = isXone; person.initials = initials;
+      sbSavePerson(person);
+    }
+    const cred = DB.userCredentials.find(c=>+c.personId===+editId);
+    if (cred) {
+      cred.roleIds = [roleId];
+      if (password) cred.password = password;
+      sbSaveCredential(cred);
     }
   } else {
-    if(!DB.nextIds.appUser) DB.nextIds.appUser=1;
-    if(!DB.nextIds.contact) DB.nextIds.contact=1;
-    // Auto-create owner record
-    const newOwner = {id:DB.nextIds.contact++, first:parts[0]||'', surname:parts.slice(1).join(' ')||'', initials:autoInitials, hidden:!isOwner};
-    DB.owners.push(newOwner);
-    user = {id:DB.nextIds.appUser++, name, email, password, roleIds, ownerId:newOwner.id, active, isOwner, createdDate:new Date().toISOString().slice(0,10)};
-    DB.appUsers.push(user);
-    sbSaveUser(user);
-  }
-  // Save permission overrides
-  DB.userPermissionOverrides = DB.userPermissionOverrides.filter(o=>o.userId!==user.id);
-  document.querySelectorAll('#nu-permissions select[data-perm]').forEach(sel => {
-    if(sel.value!=='default') {
-      DB.userPermissionOverrides.push({userId:user.id,permission:sel.dataset.perm,grant:sel.value==='grant'});
-    }
-  });
-  // Refresh current user's permissions if editing self
-  if(currentUser&&currentUser.id===user.id) {
-    currentUser = {...user};
-    currentUser.resolvedPermissions = resolvePermissions(currentUser);
-    sessionStorage.setItem('sf_user',JSON.stringify(currentUser));
-    applyNavPermissions();
+    // Create new person
+    const person = {id:DB.nextIds.person++, first, last, email, phone:'',
+      title:'', isXone, initials, hidden:false, notes:''};
+    DB.people.push(person);
+    sbSavePerson(person);
+    const cred = {id:DB.nextIds.credential++, personId:person.id,
+      password:password||'changeme', roleIds:[roleId], active:true,
+      createdDate:new Date().toISOString().slice(0,10)};
+    DB.userCredentials.push(cred);
+    sbSaveCredential(cred);
   }
   closeModal('modal-new-user');
   renderUsersTable();
 }
+
+
 function toggleUserActive(userId) {
-  const u=DB.appUsers.find(u=>u.id===userId);if(!u)return;
+  const u=DB.people.find(u=>u.id===userId);if(!u)return;
   if(!confirm((u.active===false?'Activate':'Deactivate')+' '+u.name+'?'))return;
-  u.active=!u.active;sbSaveUser(u);renderUsersTable();
+  u.active=!u.active;sbSavePerson(u);renderUsersTable();
 }
 
 // ═══════════════════════════════════════════════
@@ -3708,7 +3105,7 @@ function renderRisks(oppId) {
       <td style="padding:6px 8px;">
         <select class="sh-select" style="width:100%;" onchange="updateRisk(${r.id},'ownerId',this.value)">
           <option value="">—</option>
-          ${DB.owners.filter(o=>!o.hidden).map(o=>`<option value="${o.id}" ${+o.id===+r.ownerId?'selected':''}>${o.initials}</option>`).join('')}
+          ${DB.people.filter(p=>p.isXone).filter(o=>!o.hidden).map(o=>`<option value="${o.id}" ${+o.id===+r.ownerId?'selected':''}>${o.initials}</option>`).join('')}
         </select>
       </td>
       <td style="padding:6px 8px;text-align:center;">
@@ -3732,7 +3129,7 @@ function renderRisks(oppId) {
 }
 
 function renderCollaborators(oppId) {
-  const collabs = DB.dealCollaborators.filter(c=>+c.oppId===+oppId);
+  const collabs = DB.opportunityPeople.filter(c=>+c.oppId===+oppId);
   const o = DB.opportunities.find(op=>+op.id===+oppId)||{};
   const canManage = can('edit_all_deals')||(+o.ownerId===+currentUser?.ownerId);
   // Show/hide add button
@@ -3742,7 +3139,7 @@ function renderCollaborators(oppId) {
   if(!list) return;
   if(!collabs.length) { list.innerHTML='<div style="text-align:center;padding:24px;color:var(--text3);font-size:13px;">No collaborators yet. Add users to contribute to this deal.</div>'; return; }
   list.innerHTML = collabs.map(c => {
-    const u = DB.appUsers.find(u=>u.id===c.userId)||{};
+    const u = DB.people.find(u=>u.id===c.userId)||{};
     const permLabels = (c.permissions||[]).map(p=>DEAL_PERMISSIONS.find(dp=>dp.key===p)?.label).filter(Boolean);
     return `<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
       <div>
@@ -3758,11 +3155,11 @@ function renderCollaborators(oppId) {
   }).join('');
 }
 function openAddCollabModal(editCollabId) {
-  const existingCollab = editCollabId ? DB.dealCollaborators.find(c=>c.id===editCollabId) : null;
+  const existingCollab = editCollabId ? DB.opportunityPeople.find(c=>c.id===editCollabId) : null;
   // Populate user dropdown — exclude current owner and existing collabs (unless editing)
   const o = DB.opportunities.find(op=>+op.id===+currentOppId)||{};
-  const existingUserIds = DB.dealCollaborators.filter(c=>+c.oppId===+currentOppId&&c.id!==editCollabId).map(c=>c.userId);
-  const eligible = DB.appUsers.filter(u=>u.active!==false&&+u.ownerId!==+o.ownerId&&!existingUserIds.includes(u.id));
+  const existingUserIds = DB.opportunityPeople.filter(c=>+c.oppId===+currentOppId&&c.id!==editCollabId).map(c=>c.userId);
+  const eligible = DB.people.filter(u=>u.active!==false&&+u.ownerId!==+o.ownerId&&!existingUserIds.includes(u.id));
   document.getElementById('collab-user-sel').innerHTML = '<option value="">— Select user —</option>' + eligible.map(u=>`<option value="${u.id}" ${existingCollab&&existingCollab.userId===u.id?'selected':''}>${u.name} (${u.email})</option>`).join('');
   document.getElementById('collab-user-sel').dataset.editId = editCollabId||'';
   // Permissions checkboxes
@@ -3782,18 +3179,18 @@ function saveCollaborator() {
   if(!permissions.length) return alert('Please grant at least one permission.');
   const editId = document.getElementById('collab-user-sel').dataset.editId;
   if(editId) {
-    const c = DB.dealCollaborators.find(c=>c.id===+editId);
+    const c = DB.opportunityPeople.find(c=>c.id===+editId);
     if(c){c.userId=userId;c.permissions=permissions;}
   } else {
     if(!DB.nextIds.collab) DB.nextIds.collab=1;
-    DB.dealCollaborators.push({id:DB.nextIds.collab++,oppId:+currentOppId,userId,permissions});
+    DB.opportunityPeople.push({id:DB.nextIds.collab++,oppId:+currentOppId,userId,permissions});
   }
   closeModal('modal-add-collab');renderCollaborators(currentOppId);
 }
 function removeCollaborator(collabId) {
   if(!confirm('Remove this collaborator?'))return;
-  DB.dealCollaborators=DB.dealCollaborators.filter(c=>c.id!==collabId);
-  sbDeleteRecord('deal_collaborators',collabId);renderCollaborators(currentOppId);
+  DB.opportunityPeople=DB.opportunityPeople.filter(c=>c.id!==collabId);
+  sbDeleteRecord('opportunity_people',collabId);renderCollaborators(currentOppId);
 }
 
 // ═══════════════════════════════════════════════
