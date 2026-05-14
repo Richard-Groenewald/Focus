@@ -1018,7 +1018,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r25';  // Increment this with each build
+const APP_REVISION = 'r26';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -2877,6 +2877,82 @@ function createParentClient() {
   renderClientBadges(DB.clients.find(cl=>+cl.id===+currentClientId));
   alert('"'+name+'" has been created as a client. Please open their record to complete the details.');
 }
+// ── DEV NOTES ─────────────────────────────────────────────────────────────
+let devNotesOpen = false;
+
+function openDevNotes() {
+  const modal = document.getElementById('modal-dev-notes');
+  if(!modal) return;
+  modal.style.display = 'flex';
+  devNotesOpen = true;
+  // Load from Supabase
+  loadDevNotes();
+  setTimeout(() => document.getElementById('dev-notes-editor')?.focus(), 100);
+}
+
+function closeDevNotes() {
+  const modal = document.getElementById('modal-dev-notes');
+  if(modal) modal.style.display = 'none';
+  devNotesOpen = false;
+}
+
+async function loadDevNotes() {
+  const res = await sbFetch('settings','GET',null,'key=eq.dev_notes&select=value');
+  if(res && res.length && res[0].value) {
+    const el = document.getElementById('dev-notes-editor');
+    if(el) { el.value = res[0].value; updateDevNotesCount(); }
+  }
+}
+
+async function saveDevNotes() {
+  const el = document.getElementById('dev-notes-editor');
+  if(!el) return;
+  const text = el.value;
+  const existing = await sbFetch('settings','GET',null,'key=eq.dev_notes&select=id');
+  if(existing && existing.length) {
+    await sbFetch('settings','PATCH',{value:text},'key=eq.dev_notes');
+  } else {
+    await sbFetch('settings','POST',{key:'dev_notes',value:text},'');
+  }
+  const saved = document.getElementById('dev-notes-saved');
+  if(saved) { saved.textContent = 'Saved ✓'; setTimeout(()=>saved.textContent='',2000); }
+}
+
+function insertDevNote(prefix) {
+  const el = document.getElementById('dev-notes-editor');
+  if(!el) return;
+  const now = new Date().toLocaleDateString('en-ZA',{day:'2-digit',month:'short',year:'numeric'});
+  const insert = '\n\n' + prefix + ' [' + now + ']\n';
+  const pos = el.selectionStart;
+  el.value = el.value.slice(0, pos) + insert + el.value.slice(pos);
+  el.selectionStart = el.selectionEnd = pos + insert.length;
+  el.focus();
+  updateDevNotesCount();
+}
+
+function updateDevNotesCount() {
+  const el = document.getElementById('dev-notes-editor');
+  const countEl = document.getElementById('dev-notes-count');
+  if(el && countEl) countEl.textContent = el.value.length.toLocaleString() + ' characters';
+}
+
+function copyDevNotes() {
+  const el = document.getElementById('dev-notes-editor');
+  if(!el) return;
+  navigator.clipboard.writeText(el.value).then(() => {
+    const btn = document.querySelector('#modal-dev-notes button[onclick="copyDevNotes()"]');
+    if(btn) { const orig=btn.textContent; btn.textContent='✓ Copied!'; setTimeout(()=>btn.textContent=orig,2000); }
+  });
+}
+
+// Auto-save every 30 seconds while open
+setInterval(() => { if(devNotesOpen) saveDevNotes(); }, 30000);
+
+// Update character count on typing
+document.addEventListener('input', e => {
+  if(e.target.id === 'dev-notes-editor') updateDevNotesCount();
+});
+
 function closeClientForm(){saveCurrentClient();document.getElementById('client-form-page').classList.remove('active');document.body.classList.remove('sidebar-hidden');showPage('clients');}
 function saveClientField(field,value){
   const c=DB.clients.find(cl=>+cl.id===+currentClientId);if(!c)return;
@@ -3576,5 +3652,48 @@ startApp();
     <div id="loading-msg" style="color:#fff;font-size:14px;font-family:Arial,sans-serif;font-weight:600;">Loading...</div>
   </div>
   <style>@keyframes spin{to{transform:rotate(360deg)}}</style>
+<!-- DEV NOTES MODAL -->
+<div id="modal-dev-notes" style="display:none;position:fixed;inset:0;z-index:99999;background:rgba(0,20,40,0.75);align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:14px;width:680px;max-width:95vw;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+    <!-- Header -->
+    <div style="background:#001e38;border-radius:14px 14px 0 0;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div style="color:#fff;font-size:14px;font-weight:700;font-family:Arial,sans-serif;">&#9998; Developer Notes</div>
+        <div style="color:rgba(255,255,255,0.5);font-size:10.5px;font-family:Arial,sans-serif;margin-top:2px;">Thoughts, observations, bugs and feature requests — becomes instructions to Claude</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <span id="dev-notes-saved" style="font-size:10px;color:rgba(255,255,255,0.4);font-family:Arial,sans-serif;"></span>
+        <button onclick="saveDevNotes()" style="background:#FA0A11;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;">Save</button>
+        <button onclick="closeDevNotes()" style="background:rgba(255,255,255,0.1);color:#fff;border:none;border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer;font-family:Arial,sans-serif;">&#215; Close</button>
+      </div>
+    </div>
+    <!-- Toolbar -->
+    <div style="background:#f4f7fa;border-bottom:1px solid #dde5ee;padding:8px 16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button onclick="insertDevNote('## Bug: ')" style="font-size:11px;background:#fff;border:1px solid #dde5ee;border-radius:5px;padding:4px 10px;cursor:pointer;color:#FA0A11;font-weight:600;">🐛 Bug</button>
+      <button onclick="insertDevNote('## Feature Request: ')" style="font-size:11px;background:#fff;border:1px solid #dde5ee;border-radius:5px;padding:4px 10px;cursor:pointer;color:rgb(0,106,193);font-weight:600;">✨ Feature</button>
+      <button onclick="insertDevNote('## Improvement: ')" style="font-size:11px;background:#fff;border:1px solid #dde5ee;border-radius:5px;padding:4px 10px;cursor:pointer;color:rgb(0,172,178);font-weight:600;">⚡ Improve</button>
+      <button onclick="insertDevNote('## Observation: ')" style="font-size:11px;background:#fff;border:1px solid #dde5ee;border-radius:5px;padding:4px 10px;cursor:pointer;color:#666;font-weight:600;">💡 Note</button>
+      <div style="margin-left:auto;font-size:10px;color:#999;font-family:Arial,sans-serif;">Saved to Supabase · Paste into Claude to action</div>
+    </div>
+    <!-- Editor -->
+    <textarea id="dev-notes-editor" 
+      style="flex:1;border:none;padding:18px 20px;font-size:13px;font-family:'Courier New',monospace;line-height:1.7;resize:none;outline:none;color:#001e38;background:#fafcff;min-height:400px;"
+      placeholder="Write your thoughts here...
+
+Examples:
+## Bug: Opportunity name not saving when I tab away
+## Feature Request: Add a notes field to the client form  
+## Improvement: The revenue grid is too narrow on laptop screens
+## Observation: Service type margin defaulting to 0 on new opportunities
+
+These notes will be saved and you can paste them into Claude as instructions."></textarea>
+    <!-- Footer -->
+    <div style="background:#f4f7fa;border-radius:0 0 14px 14px;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
+      <div style="font-size:10.5px;color:#999;font-family:Arial,sans-serif;" id="dev-notes-count">0 characters</div>
+      <button onclick="copyDevNotes()" style="background:#003057;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;">&#128203; Copy to Clipboard</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
