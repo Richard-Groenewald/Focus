@@ -991,14 +991,18 @@ async function sbFetch(table, method='GET', body=null, params='') {
   const prefer = method==='POST' ? 'resolution=merge-duplicates,return=representation'
                 : method==='PATCH' ? 'return=representation'
                 : '';
-  const opts = {method, mode:'cors', headers:{...SB_HEADERS, 'Prefer': prefer}};
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  const opts = {method, mode:'cors', signal:controller.signal, headers:{...SB_HEADERS, 'Prefer': prefer}};
   if(body) opts.body = JSON.stringify(body);
   try {
     const r = await fetch(url, opts);
+    clearTimeout(timer);
     if(!r.ok) { const e=await r.text(); console.error('SB Error',table,method,r.status,e); return null; }
     if(r.status===204) return [];
     return r.json();
   } catch(e) {
+    clearTimeout(timer);
     console.error('sbFetch failed:', table, method, e.message);
     return null;
   }
@@ -1018,7 +1022,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r65';  // Increment this with each build
+const APP_REVISION = 'r66';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
