@@ -1018,7 +1018,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r28';  // Increment this with each build
+const APP_REVISION = 'r31';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -1545,8 +1545,9 @@ function oppTblCols(opps) {
         +'<button onclick="event.stopPropagation();selectAllMS(\''+k+'\',false)" style="flex:1;padding:4px;font-size:11px;font-family:Arial,sans-serif;border:1px solid var(--border2);border-radius:4px;background:#fff;cursor:pointer;">None</button>'
         +'</div><div style="max-height:200px;overflow-y:auto;">'+items+'</div>'+cb;
     }
+    const labelAlign = col.align==='right'?'text-align:right;':col.align==='center'?'text-align:center;':'';
     return '<th class="sf-th" style="'+aw+ww+'" onclick="handleThClick(event,\''+k+'\')">'
-      +'<div class="sf-th-inner"><span class="sf-th-label">'+col.label+'</span>'
+      +'<div class="sf-th-inner"><span class="sf-th-label" style="'+labelAlign+'">'+col.label+'</span>'
       +'<div class="sf-th-icons">'
       +'<span class="sf-sort-icon '+(sd==='asc'?'active':'')+'">&#9650;</span>'
       +'<span class="sf-sort-icon '+(sd==='desc'?'active':'')+'">&#9660;</span>'
@@ -2030,6 +2031,17 @@ function saveOppField(field,value){
   else if(field==='escRate')o[field]=(value!==''&&value!=null)?+value:null;
   else if(field==='escMonth')o[field]=value?+value:null;
   else o[field]=value;
+  // Enforce order date <= start date
+  if(field==='startDate' && o.orderDate && value && value < o.orderDate) {
+    o.startDate=o.orderDate; // Can't be before order date
+    const startEl=document.getElementById('otf-start');
+    if(startEl) startEl.value=o.orderDate;
+  }
+  if(field==='orderDate' && o.startDate && value && value > o.startDate) {
+    o.startDate=value; // Start date moves with order date
+    const startEl=document.getElementById('otf-start');
+    if(startEl) startEl.value=value;
+  }
   sbSaveOpp(o);
 }
 function saveCurrentOpp(){
@@ -2563,10 +2575,56 @@ function renderRevGrid(oppId,fyYear){
 }
 function updateOppCell(month,field,rawVal,input){
   const val=parseCur(rawVal);
+  const o=DB.opportunities.find(op=>+op.id===+currentOppId);
+  const t=o?getType(o.typeId):null;
+  const isRecurring=t&&t.recurring===true;
+
+  // Non-recurring: enforce start date rule
+  if(!isRecurring && val>0 && o) {
+    const today=new Date().toISOString().slice(0,10);
+    const todayMonth=today.slice(0,7);
+
+    // Rule 1: month can't be before start date month
+    if(o.startDate && month < o.startDate.slice(0,7)) {
+      if(input){input.value='';input.classList.remove('has-val');}
+      showToast('Revenue cannot be entered before the start date month');
+      return;
+    }
+
+    // Rule 2: if no start date or order date, auto-set them
+    if(!o.startDate || !o.orderDate) {
+      const autoDate = month===todayMonth ? today : month+'-01';
+      if(!o.startDate) {
+        o.startDate=autoDate;
+        const startEl=document.getElementById('otf-start');
+        if(startEl) startEl.value=autoDate;
+        sbSaveOpp(o);
+      }
+      if(!o.orderDate) {
+        // Order date = same as start date or today if current month
+        o.orderDate=autoDate;
+        const orderEl=document.getElementById('otf-order');
+        if(orderEl) orderEl.value=autoDate;
+        sbSaveOpp(o);
+      }
+      // Update start date min on order date field
+      const startEl2=document.getElementById('otf-start');
+      if(startEl2&&!can('edit_past_revenue')) startEl2.min=o.orderDate;
+    }
+  }
+
   let rs=DB.opportunityStreams.find(r=>+r.oppId===+currentOppId&&r.month===month);
   if(!rs){rs={id:DB.nextIds.rs++,oppId:+currentOppId,month,revenue:0,margin:0};DB.opportunityStreams.push(rs);}
   rs[field]=val;if(input){input.value=val>0?fmtNum(val):'';input.classList.toggle('has-val',val>0);}
+  sbSaveStream(rs);
   updateCommCalcs();
+}
+
+function showToast(msg) {
+  let t=document.getElementById('sf-toast');
+  if(!t){t=document.createElement('div');t.id='sf-toast';t.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#001e38;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;font-family:Arial,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.3);transition:opacity 0.3s;';document.body.appendChild(t);}
+  t.textContent=msg;t.style.opacity='1';
+  clearTimeout(t._timer);t._timer=setTimeout(()=>t.style.opacity='0',3000);
 }
 function updateConCell(month,field,rawVal,input){
   const val=parseCur(rawVal);
@@ -2899,20 +2957,26 @@ function closeDevNotes() {
 async function loadDevNotes() {
   const res = await sbFetch('settings','GET',null,'key=eq.dev_notes&select=value');
   if(res && res.length && res[0].value) {
-    const el = document.getElementById('dev-notes-editor');
-    if(el) { el.value = res[0].value; updateDevNotesCount(); }
+    try {
+      const parsed = JSON.parse(res[0].value);
+      if(Array.isArray(parsed)) devNotesData = parsed;
+      else devNotesData = [{id:Date.now(),text:res[0].value,date:new Date().toISOString(),implemented:false}];
+    } catch(e) {
+      // Legacy plain text - migrate to structured
+      devNotesData = res[0].value.trim() ? [{id:Date.now(),text:res[0].value,date:new Date().toISOString(),implemented:false}] : [];
+    }
   }
+  renderDevNotes();
+  updateDevNotesCount();
 }
 
 async function saveDevNotes() {
-  const el = document.getElementById('dev-notes-editor');
-  if(!el) return;
-  const text = el.value;
+  const val = JSON.stringify(devNotesData);
   const existing = await sbFetch('settings','GET',null,'key=eq.dev_notes&select=id');
   if(existing && existing.length) {
-    await sbFetch('settings','PATCH',{value:text},'key=eq.dev_notes');
+    await sbFetch('settings','PATCH',{value:val},'key=eq.dev_notes');
   } else {
-    await sbFetch('settings','POST',{key:'dev_notes',value:text},'');
+    await sbFetch('settings','POST',{key:'dev_notes',value:val},'');
   }
   const saved = document.getElementById('dev-notes-saved');
   if(saved) { saved.textContent = 'Saved ✓'; setTimeout(()=>saved.textContent='',2000); }
@@ -3678,22 +3742,21 @@ startApp();
       <button onclick="insertDevNote('## Observation: ')" style="font-size:11px;background:#fff;border:1px solid #dde5ee;border-radius:5px;padding:4px 10px;cursor:pointer;color:#666;font-weight:600;">💡 Note</button>
       <div style="margin-left:auto;font-size:10px;color:#999;font-family:Arial,sans-serif;">Saved to Supabase · Paste into Claude to action</div>
     </div>
-    <!-- Editor -->
-    <textarea id="dev-notes-editor" 
-      style="flex:1;border:none;padding:18px 20px;font-size:13px;font-family:'Courier New',monospace;line-height:1.7;resize:none;outline:none;color:#001e38;background:#fafcff;min-height:400px;"
-      placeholder="Write your thoughts here...
-
-Examples:
-## Bug: Opportunity name not saving when I tab away
-## Feature Request: Add a notes field to the client form  
-## Improvement: The revenue grid is too narrow on laptop screens
-## Observation: Service type margin defaulting to 0 on new opportunities
-
-These notes will be saved and you can paste them into Claude as instructions."></textarea>
+    <!-- Entry list -->
+    <div id="dev-notes-list" style="flex:1;overflow-y:auto;padding:12px 16px;background:#fafcff;min-height:300px;"></div>
+    <!-- New entry input -->
+    <div style="border-top:1px solid #dde5ee;padding:12px 16px;background:#f4f7fa;">
+      <textarea id="dev-notes-input" rows="3"
+        style="width:100%;border:1px solid #dde5ee;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'Courier New',monospace;line-height:1.6;resize:none;outline:none;color:#001e38;background:#fff;box-sizing:border-box;"
+        placeholder="Write a new note, bug, feature request or observation..."></textarea>
+      <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+        <button onclick="addDevNoteEntry()" style="background:#FA0A11;color:#fff;border:none;border-radius:7px;padding:7px 18px;font-size:12px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;">Add Note</button>
+      </div>
+    </div>
     <!-- Footer -->
-    <div style="background:#f4f7fa;border-radius:0 0 14px 14px;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;">
-      <div style="font-size:10.5px;color:#999;font-family:Arial,sans-serif;" id="dev-notes-count">0 characters</div>
-      <button onclick="copyDevNotes()" style="background:#003057;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;">&#128203; Copy to Clipboard</button>
+    <div style="background:#f4f7fa;border-radius:0 0 14px 14px;padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #dde5ee;">
+      <div style="font-size:10.5px;color:#999;font-family:Arial,sans-serif;" id="dev-notes-count">0 entries</div>
+      <button onclick="copyDevNotes()" style="background:#003057;color:#fff;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;font-family:Arial,sans-serif;">&#128203; Copy Open to Clipboard</button>
     </div>
   </div>
 </div>
