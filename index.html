@@ -1019,7 +1019,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r43';  // Increment this with each build
+const APP_REVISION = 'r44';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -1791,6 +1791,27 @@ function renderLkpSection(sec,forceOpen){
   hdr.onclick=()=>{const b=document.getElementById(bodyId);if(b)b.classList.toggle('open');};
   sec.appendChild(hdr);
   const body=document.createElement('div');body.className='lkp-body'+(wasOpen?' open':'');body.id=bodyId;
+  // Add column headers for service types
+  if(hasSub && items.length > 0) {
+    const colHdr=document.createElement('div');
+    colHdr.style.cssText='display:flex;align-items:center;gap:6px;padding:4px 8px 2px 8px;border-bottom:1px solid var(--border);';
+    const cols=[
+      {label:'Product / Service Category', flex:'1 1 120px'},
+      {label:'Type', flex:'1 1 100px'},
+      {label:'Target Margin', flex:'0 0 72px', align:'center'},
+      {label:'Min Margin', flex:'0 0 72px', align:'center'},
+      {label:'Months', flex:'0 0 48px', align:'center'},
+      {label:'Rec', flex:'0 0 36px', align:'center'},
+    ];
+    cols.forEach(c=>{
+      const s=document.createElement('span');
+      s.textContent=c.label;
+      s.style.cssText='font-size:9px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:0.05em;flex:'+c.flex+';'+(c.align?'text-align:'+c.align+';':'');
+      colHdr.appendChild(s);
+    });
+    const delSp=document.createElement('span');delSp.style.cssText='flex:0 0 20px;';colHdr.appendChild(delSp);
+    body.appendChild(colHdr);
+  }
   items.forEach(item=>{
     const row=document.createElement('div');row.className='lkp-row';
     const ml=document.createElement('div');ml.style.cssText='display:flex;align-items:center;gap:4px;width:100%;';
@@ -1805,10 +1826,15 @@ function renderLkpSection(sec,forceOpen){
         const isMargin=field==='defaultMargin'||field==='minMargin';
         const sp=document.createElement('span');sp.textContent=lbl;sp.style.cssText='font-size:10px;color:var(--text3);white-space:nowrap;';
         const inp=document.createElement('input');inp.className='lkp-input-sm';
-        inp.value=item[field]!==undefined?item[field]:0;
+        // Margin fields: stored as decimal (0.25) but shown as % (25)
+        const rawVal = item[field]!==undefined?item[field]:0;
+        inp.value = isMargin ? Math.round(rawVal*100*10)/10 : rawVal;
         if(isMargin)inp.style.color='rgb(0,106,193)';
-        inp.title=isMargin?'Percentage e.g. 25 for 25%':'';
-        inp.onblur=(function(f){return function(){updateLkp(key,item.id,f,this.value);};})(field);
+        inp.title=isMargin?'Enter as percentage e.g. 25 for 25%':'';
+        inp.onblur=(function(f,isM){return function(){
+          const v=parseFloat(this.value)||0;
+          updateLkp(key,item.id,f, isM ? v/100 : v);
+        };})(field,isMargin);
         ml.appendChild(sp);ml.appendChild(inp);
         if(isMargin){const pct=document.createElement('span');pct.textContent='%';pct.style.cssText='font-size:10px;color:var(--text3);';ml.appendChild(pct);}
       };
