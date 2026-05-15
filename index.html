@@ -1026,7 +1026,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r117';  // Increment this with each build
+const APP_REVISION = 'r118';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -1313,19 +1313,14 @@ async function sbSaveAffiliation(a) {
 }
 
 async function sbSaveCredential(c) {
-  const existing = await sbFetch('user_credentials','GET',null,'person_id=eq.'+c.personId+'&select=id');
-  if(existing&&existing.length) {
-    await sbFetch('user_credentials','PATCH',{
-      password:c.password, role_ids:c.roleIds||[3],
-      active:c.active!==false, created_date:c.createdDate
-    },'person_id=eq.'+c.personId);
-  } else {
-    await sbFetch('user_credentials','POST',{
-      person_id:c.personId, password:c.password,
-      role_ids:c.roleIds||[3], active:c.active!==false,
-      created_date:c.createdDate
-    },'');
-  }
+  await sbUpsert('user_credentials', {
+    id: c.id,
+    person_id: c.personId,
+    password: c.password,
+    role_ids: c.roleIds||[3],
+    active: c.active!==false,
+    created_date: c.createdDate
+  });
 }
 
 async function sbSaveOppPerson(op) {
@@ -2805,6 +2800,7 @@ function forceFirstRun() {
 }
 
 function showFirstRun() {
+  const lo=document.getElementById('loading-overlay');if(lo)lo.style.display='none';
   document.getElementById('login-screen').style.display = 'none';
   document.querySelector('.sidebar').style.display = 'none';
   document.querySelector('.main').style.display = 'none';
@@ -2861,6 +2857,7 @@ function createFirstAdmin() {
 
 
 function showLogin() {
+  const lo=document.getElementById('loading-overlay');if(lo)lo.style.display='none';
   document.getElementById('login-screen').style.display = 'flex';
   document.querySelector('.sidebar').style.display = 'none';
   document.querySelector('.main').style.display = 'none';
@@ -3062,10 +3059,14 @@ function saveUser() {
   renderUsersTable();
 }
 
-function toggleUserActive(userId) {
-  const u=DB.people.find(u=>u.id===userId);if(!u)return;
-  if(!confirm((u.active===false?'Activate':'Deactivate')+' '+u.name+'?'))return;
-  u.active=!u.active;sbSavePerson(u);renderUsersTable();
+function toggleUserActive(personId) {
+  const p = DB.people.find(x=>+x.id===+personId); if(!p) return;
+  const cred = DB.userCredentials.find(c=>+c.personId===+personId); if(!cred) return;
+  const name = personName(p);
+  if(!confirm((cred.active===false?'Activate':'Deactivate')+' '+name+'?')) return;
+  cred.active = cred.active === false ? true : false;
+  sbSaveCredential(cred);
+  renderUsersTable();
 }
 
 // ═══════════════════════════════════════════════
@@ -3306,7 +3307,6 @@ function lkpToSb(key, item) {
 }
 
 async function loadFromSupabase() {
-  showLoadingOverlay('Loading data...');
   const safeFetch = async (tbl) => {
     try {
       const result = await Promise.race([
@@ -3410,8 +3410,7 @@ async function startApp() {
   try {
         const test = await sbFetch('organisations','GET',null,'select=id&limit=1');
         if(test !== null) {
-      showLoadingOverlay('Loading data...');
-      await Promise.race([
+          await Promise.race([
         loadFromSupabase(),
         new Promise((_,reject)=>setTimeout(()=>reject(new Error('Load timeout after 30s')),30000))
       ]);
