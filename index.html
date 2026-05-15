@@ -131,7 +131,30 @@ tr:hover td{background:#F8FAFC;}
 </head>
 <body>
 
-<div class="app">
+<!-- Login Screen -->
+<div id="login-screen" style="display:flex;position:fixed;inset:0;z-index:99999;background:var(--navy);align-items:center;justify-content:center;">
+  <div style="background:var(--bg2);border-radius:var(--radius-lg);width:380px;padding:36px;box-shadow:var(--shadow-lg);text-align:center;">
+    <svg width="80" height="56" viewBox="0 0 145 40" style="margin-bottom:20px;">
+      <rect width="32" height="32" rx="4" fill="#D0021B"/>
+      <path d="M8 8h16l-8 8-8-8zM8 24h16l-8-8-8 8z" fill="white" opacity="0.9"/>
+      <text x="38" y="18" font-family="Segoe UI,sans-serif" font-size="13" font-weight="800" fill="#0D1B2A">XONE</text>
+      <text x="38" y="30" font-family="Segoe UI,sans-serif" font-size="8" fill="#4A5568" letter-spacing="2">SECURITY</text>
+    </svg>
+    <div style="font-size:22px;font-weight:800;color:var(--text);margin-bottom:4px;">Focus</div>
+    <div style="font-size:13px;color:var(--text3);margin-bottom:28px;">Sign in to continue</div>
+    <div style="text-align:left;margin-bottom:16px;">
+      <label class="form-label">Select User</label>
+      <select id="login-user" class="form-control" style="font-size:14px;">
+        <option value="">— loading users —</option>
+      </select>
+    </div>
+    <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
+    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
+    <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
+  </div>
+</div>
+
+<div class="app" id="main-app" style="display:none;">
   <!-- Sidebar -->
   <aside class="sidebar">
     <div class="sidebar-logo">
@@ -177,8 +200,13 @@ tr:hover td{background:#F8FAFC;}
     </button>
 
     <div class="sidebar-footer">
+      <div style="font-size:12px;font-weight:700;color:rgba(255,255,255,0.8);" id="sidebar-user-name"></div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
-      <div style="margin-top:8px;background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v1.3</div>
+      <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v1.4</div>
+        <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
+      </div>
     </div>
   </aside>
 
@@ -226,6 +254,7 @@ const FN_URL = '/.netlify/functions/sb';
 let currentPage = 'people';
 let currentData = [];
 let allData = {}; // cache for lookups
+let currentUser = null; // logged in user
 
 // ── API ──────────────────────────────────────────────────
 async function api(table, method='GET', body=null, params='') {
@@ -670,6 +699,109 @@ async function deleteRecord(id) {
   }
 }
 
+// ── Auth ─────────────────────────────────────────────────
+async function loadLoginUsers() {
+  try {
+    const users = await apiGet('system_users', 'active=eq.true&select=id,person_id');
+    const people = await apiGet('people', 'select=id,first_name,last_name');
+    const sel = document.getElementById('login-user');
+    sel.innerHTML = '<option value="">— select user —</option>';
+    users.forEach(u => {
+      const p = people.find(x => +x.id === +u.person_id);
+      const name = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id;
+      const opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    document.getElementById('login-user').innerHTML = '<option value="">Error loading users</option>';
+  }
+}
+
+async function doLogin() {
+  const sel = document.getElementById('login-user');
+  const userId = sel.value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  if (!userId) {
+    errEl.textContent = 'Please select a user';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    // Load user and their roles
+    const users = await apiGet('system_users', 'id=eq.' + userId + '&select=*');
+    const user = users[0];
+    if (!user) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
+
+    // Load person details
+    const people = await apiGet('people', 'id=eq.' + user.person_id + '&select=*');
+    const person = people[0] || {};
+
+    // Load roles
+    const userRoles = await apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id');
+    const roleIds = userRoles.map(r => r.role_id);
+    let roles = [];
+    if (roleIds.length) {
+      roles = await apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*');
+    }
+
+    // Load permissions for those roles
+    let permissions = [];
+    if (roleIds.length) {
+      const rp = await apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id');
+      const permIds = rp.map(r => r.permission_id);
+      if (permIds.length) {
+        const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
+        permissions = perms.map(p => p.name);
+      }
+    }
+
+    // Set current user
+    currentUser = {
+      id: user.id,
+      personId: user.person_id,
+      name: [person.first_name, person.last_name].filter(Boolean).join(' '),
+      roles,
+      permissions,
+      isAdmin: roles.some(r => r.name === 'Admin')
+    };
+
+    // If admin and no permissions set yet, grant all
+    if (currentUser.isAdmin && !permissions.length) {
+      currentUser.permissions = ['all'];
+    }
+
+    // Show app
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'flex';
+    document.getElementById('sidebar-user-name').textContent = currentUser.name;
+    document.getElementById('sidebar-user-role').textContent = roles.map(r => r.name).join(', ') || 'No role';
+
+    await checkConnection();
+    loadTable('people');
+  } catch(e) {
+    errEl.textContent = 'Login failed: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function can(permission) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
+  return currentUser.permissions.includes(permission);
+}
+
+function doLogout() {
+  currentUser = null;
+  document.getElementById('main-app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+}
+
 // ── Eligible People ─────────────────────────────────────
 async function loadEligiblePeople() {
   try {
@@ -692,13 +824,8 @@ async function loadEligiblePeople() {
 
 // ── Init ─────────────────────────────────────────────────
 async function init() {
-  const online = await checkConnection();
-  if (online) {
-    loadTable('people');
-  } else {
-    document.getElementById('table-body').innerHTML =
-      '<tr class="empty-row"><td colspan="7">Database offline — check connection</td></tr>';
-  }
+  // Load users for login dropdown
+  await loadLoginUsers();
 }
 
 init();
