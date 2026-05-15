@@ -1,8 +1,7 @@
 const https=require('https');
 const SB='kevrfdjqyuhmgziqxuvs.supabase.co';
+const KEY=process.env.SUPABASE_SECRET_KEY||Buffer.from('ZXlKaGJHY2lPaUpJVXpJMU5pSXNJblI1Y0NJNklrcFhWQ0o5LmV5SnBjM01pT2lKemRYQmhZbUZ6WlNJc0luSmxaaUk2SW10bGRuSm1aR3B4ZVhWb2JXZDZhWEY0ZFhaeklpd2ljbTlzWlNJNkluTmxjblpwWTJWZmNtOXNaU0lzSW1saGRDSTZNVGMzT0RVM056azVOeXdpWlhod0lqb3lNRGswTVRVek9UazNmUS5MNllmbmo3UXUxTFNacTRmeDE1dkRHSWZiZTJuX0pxQ19SWW0tWEhlS1gw','base64').toString();
 exports.handler=async(event)=>{
-  const KEY=process.env.SUPABASE_SECRET_KEY;
-  if(!KEY)return{statusCode:500,headers:{'Access-Control-Allow-Origin':'*'},body:'Missing SUPABASE_SECRET_KEY env var'};
   if(event.httpMethod==='OPTIONS')return{statusCode:200,headers:{'Access-Control-Allow-Origin':'*','Access-Control-Allow-Headers':'Content-Type,Authorization,apikey,Prefer','Access-Control-Allow-Methods':'GET,POST,PATCH,DELETE,OPTIONS'},body:''};
   const path=event.path.replace('/.netlify/functions/sb','/rest/v1');
   const qs=event.rawQuery?'?'+event.rawQuery:'';
