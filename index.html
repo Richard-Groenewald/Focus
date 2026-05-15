@@ -1026,7 +1026,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r109';  // Increment this with each build
+const APP_REVISION = 'r112';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -2849,9 +2849,6 @@ function showLogin() {
 function showApp() {
   // Always refresh permissions on app show
   refreshCurrentUserPerms();
-  console.log('showApp: currentUser=', JSON.stringify(currentUser));
-  console.log('showApp: resolvedPerms=', currentUser?.resolvedPermissions);
-  console.log('showApp: DB.rolePermissions[1]=', DB.rolePermissions[1]);
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('first-run-screen').style.display = 'none';
   document.body.classList.remove('sidebar-hidden');
@@ -2867,7 +2864,7 @@ function showApp() {
     const roleNames = roleIds.map(rid => DB.roles.find(r=>+r.id===+rid)?.name).filter(Boolean);
     roleEl.textContent = roleNames.join(', ') || 'Admin';
   }
-  try { applyNavPermissions(); } catch(e) { console.error('applyNavPermissions error:', e); }
+  setTimeout(() => { try { applyNavPermissions(); } catch(e) { console.error('applyNavPermissions error:', e); } }, 50);
   const revEl = document.getElementById('sidebar-revision');
   if(revEl) revEl.textContent = APP_REVISION;
   renderDashboard();
@@ -2908,7 +2905,6 @@ function applyNavPermissions() {
     const isAdmin = !!(currentUser?.roleIds||[]).find(r=>r===1||r==='1');
     const hasManageUsers = isAdmin || (currentUser?.resolvedPermissions||[]).includes('manage_users');
     const hasManageSettings = isAdmin || (currentUser?.resolvedPermissions||[]).includes('manage_settings');
-    console.log('applyNav: isAdmin=',isAdmin,'hasManageUsers=',hasManageUsers,'currentUser.roleIds=',currentUser?.roleIds);
     const navUsers = document.getElementById('nav-users');
     if (navUsers) navUsers.style.display = hasManageUsers ? '' : 'none';
     document.querySelectorAll('.nav-item').forEach(n => {
@@ -2922,9 +2918,9 @@ function applyNavPermissions() {
 // USER MANAGEMENT
 // ═══════════════════════════════════════════════
 function renderUsersTable() {
-  // Allow admin (roleId 1) even if permissions not yet resolved
   const isAdmin = (currentUser?.roleIds||[]).includes(1) || (currentUser?.resolvedPermissions||[]).includes('manage_users');
   if (!isAdmin) { showPage('dashboard'); return; }
+  console.log('renderUsersTable: DB.people=',DB.people.length,'DB.userCredentials=',DB.userCredentials.length);
   const appPeople = DB.people.filter(p => DB.userCredentials.some(c => +c.personId === +p.id));
   const subEl = document.getElementById('users-sub');
   if(subEl) subEl.textContent = appPeople.length + ' users';
@@ -2933,7 +2929,7 @@ function renderUsersTable() {
     const roleNames = (cred.roleIds||[]).map(rid=>DB.roles.find(r=>+r.id===+rid)?.name).filter(Boolean).join(', ');
     const active = cred.active !== false;
     return `<tr>
-      <td style="font-weight:600">${personName(p)}</td>
+      <td style="font-weight:600">${personName(p)||p.email||'(no name)'}</td>
       <td>${p.email||''}</td>
       <td><span class="badge">${roleNames||'No role'}</span></td>
       <td>${p.isXone?'<span class="badge badge-blue">Xone</span>':'<span class="badge">External</span>'}</td>
@@ -3431,7 +3427,6 @@ function getTCV(opp){
 }
 
 function showPage(page) {
-  // Ensure page exists before rendering
   if(!document.getElementById('page-'+page)) { console.warn('Page not found:', page); return; }
   const pages = document.querySelectorAll('.page');
   pages.forEach(p=>p.classList.remove('active'));
