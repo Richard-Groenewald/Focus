@@ -309,17 +309,18 @@ const PAGES = {
     title: 'Organisations',
     table: 'organisations',
     columns: [
-      { key: 'name',       label: 'Name' },
-      { key: 'legal_name', label: 'Legal Name' },
-      { key: 'website',    label: 'Website' },
-      { key: 'address',    label: 'Address' },
+      { key: 'name',                label: 'Name' },
+      { key: 'legal_name',          label: 'Legal Name' },
+      { key: 'website',             label: 'Website' },
+      { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
     ],
     fields: [
-      { key: 'name',       label: 'Name', required: true },
-      { key: 'legal_name', label: 'Legal Name' },
-      { key: 'website',    label: 'Website', type: 'url' },
-      { key: 'address',    label: 'Address', type: 'textarea' },
-      { key: 'notes',      label: 'Notes', type: 'textarea' },
+      { key: 'name',                label: 'Name', required: true },
+      { key: 'legal_name',          label: 'Legal Name' },
+      { key: 'website',             label: 'Website', type: 'url' },
+      { key: 'address',             label: 'Address', type: 'textarea' },
+      { key: 'notes',               label: 'Notes', type: 'textarea' },
+      { key: 'allows_system_users', label: 'Eligible for System Users (Admin only)', type: 'checkbox', adminOnly: true },
     ],
   },
 
@@ -536,7 +537,8 @@ function renderModal(data) {
 }
 
 function renderField(f, val) {
-  const label = `<label class="form-label">${f.label}${f.required ? ' <span style="color:var(--red)">*</span>' : ''}</label>`;
+  const adminNote = f.adminOnly ? ' <span style="color:var(--text3);font-weight:400;">(admin only)</span>' : '';
+  const label = `<label class="form-label">${f.label}${f.required ? ' <span style="color:var(--red)">*</span>' : ''}${adminNote}</label>`;
 
   if (f.type === 'checkbox') {
     return `<div class="form-group" style="display:flex;align-items:center;gap:8px;">
@@ -582,6 +584,30 @@ async function saveRecord(e) {
     if (f.required && !body[f.key] && body[f.key] !== false) {
       showStatus(`${f.label} is required`, 'error');
       el.focus();
+      return;
+    }
+  }
+
+  // Extra validation for system_users
+  if (currentPage === 'system_users' && !editingId) {
+    const personId = body.person_id;
+    if (!personId) { showStatus('Please select a person', 'error'); return; }
+    try {
+      // Check person has an org affiliation
+      const affiliations = await apiGet('person_organisation_roles', 'person_id=eq.' + personId + '&select=org_id');
+      if (!affiliations || !affiliations.length) {
+        showStatus('Person must be affiliated with an organisation first', 'error');
+        return;
+      }
+      // Check at least one org allows system users
+      const orgIds = affiliations.map(a => a.org_id).join(',');
+      const eligibleOrgs = await apiGet('organisations', 'id=in.(' + orgIds + ')&allows_system_users=eq.true&select=id');
+      if (!eligibleOrgs || !eligibleOrgs.length) {
+        showStatus('None of this person\'s organisations are eligible for system users', 'error');
+        return;
+      }
+    } catch(validErr) {
+      showStatus('Could not validate organisation eligibility: ' + validErr.message, 'error');
       return;
     }
   }
