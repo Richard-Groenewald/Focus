@@ -1026,7 +1026,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r102';  // Increment this with each build
+const APP_REVISION = 'r104';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -3009,44 +3009,32 @@ function saveUser() {
   const name = document.getElementById('nu-name').value.trim();
   const email = document.getElementById('nu-email').value.trim().toLowerCase();
   const password = document.getElementById('nu-password').value;
-  const isXone = document.getElementById('nu-is-xone')?.checked || false;
-  const roleId = +document.getElementById('nu-role').value || 3;
+  const initialsEl = document.getElementById('nu-initials');
+  const isOwner = document.getElementById('nu-is-owner')?.checked || false;
+  const active = document.getElementById('nu-active')?.checked !== false;
+  const roleIds = [...document.querySelectorAll('#nu-roles input[type=checkbox]:checked')].map(cb=>+(cb.dataset.roleId||cb.value));
   const parts = name.split(' ');
-  const first = parts[0], last = parts.slice(1).join(' ');
-  const initials = ((first[0]||'')+(last?last[0]:'')).toUpperCase();
+  const first = parts[0]||'', last = parts.slice(1).join(' ');
+  const initials = (initialsEl?.value.trim().toUpperCase()) || ((first[0]||'')+(last?last[0]:'')).toUpperCase();
 
   if (!name || !email) { alert('Name and email are required.'); return; }
 
   if (editId) {
-    // Edit existing
     const person = DB.people.find(p=>+p.id===+editId);
-    if (person) {
-      person.first = first; person.last = last; person.email = email;
-      person.isXone = isXone; person.initials = initials;
-      sbSavePerson(person);
-    }
+    if (person) { person.first=first; person.last=last; person.email=email; person.isXone=isOwner; person.initials=initials; sbSavePerson(person); }
     const cred = DB.userCredentials.find(c=>+c.personId===+editId);
-    if (cred) {
-      cred.roleIds = [roleId];
-      if (password) cred.password = password;
-      sbSaveCredential(cred);
-    }
+    if (cred) { if(roleIds.length) cred.roleIds=roleIds; cred.active=active; if(password) cred.password=password; sbSaveCredential(cred); }
   } else {
-    // Create new person
-    const person = {id:DB.nextIds.person++, first, last, email, phone:'',
-      title:'', isXone, initials, hidden:false, notes:''};
+    const person = {id:DB.nextIds.person++, first, last, email, phone:'', title:'', isXone:isOwner, initials, hidden:false, notes:''};
     DB.people.push(person);
     sbSavePerson(person);
-    const cred = {id:DB.nextIds.credential++, personId:person.id,
-      password:password||'changeme', roleIds:[roleId], active:true,
-      createdDate:new Date().toISOString().slice(0,10)};
+    const cred = {id:DB.nextIds.credential++, personId:person.id, password:password||'changeme', roleIds:roleIds.length?roleIds:[3], active, createdDate:new Date().toISOString().slice(0,10)};
     DB.userCredentials.push(cred);
     sbSaveCredential(cred);
   }
   closeModal('modal-new-user');
   renderUsersTable();
 }
-
 
 function toggleUserActive(userId) {
   const u=DB.people.find(u=>u.id===userId);if(!u)return;
