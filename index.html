@@ -1026,7 +1026,7 @@ async function sbUpdate(table, id, data) {
 }
 
 const DB_VERSION='5.0-xone';
-const APP_REVISION = 'r118';  // Increment this with each build
+const APP_REVISION = 'r119';  // Increment this with each build
 let DB={
   version:DB_VERSION,
   settings:{fyStart:7,escMonth:7,escRate:5,escDesc:'Revenue escalates every July by 5%'},
@@ -2954,7 +2954,7 @@ function renderUsersTable() {
       <td>${p.isXone?'<span class="badge badge-blue">Xone</span>':'<span class="badge">External</span>'}</td>
       <td><span class="badge ${active?'badge-green':'badge-gray'}">${active?'Active':'Inactive'}</span></td>
       <td>
-        <button class="btn btn-sm" onclick="openEditUser(${p.id})">Edit</button>
+        <button class="btn btn-sm" onclick="editUserById(${p.id})">Edit</button>
         <button class="btn btn-sm" onclick="toggleUserActive(${p.id})">${active?'Deactivate':'Activate'}</button>
       </td>
     </tr>`;
@@ -3057,6 +3057,40 @@ function saveUser() {
   }
   closeModal('modal-new-user');
   renderUsersTable();
+}
+
+function editUserById(personId) {
+  const p = DB.people.find(x => +x.id === +personId);
+  if (!p) { alert('User not found'); return; }
+  const cred = DB.userCredentials.find(c => +c.personId === +personId) || {};
+  
+  // Set modal title and fields
+  document.getElementById('new-user-title').textContent = 'Edit User';
+  document.getElementById('edit-user-id').value = personId;
+  document.getElementById('nu-name').value = personName(p);
+  document.getElementById('nu-email').value = p.email || '';
+  document.getElementById('nu-password').value = '';
+  document.getElementById('nu-password').placeholder = 'Leave blank to keep current';
+  const ini = document.getElementById('nu-initials');
+  if(ini) ini.value = p.initials || '';
+  const isOwner = document.getElementById('nu-is-owner');
+  if(isOwner) isOwner.checked = !!p.isXone;
+  const activeEl = document.getElementById('nu-active');
+  if(activeEl) activeEl.checked = cred.active !== false;
+  
+  // Populate role checkboxes
+  const rolesEl = document.getElementById('nu-roles');
+  if(rolesEl) rolesEl.innerHTML = DB.roles.map(r =>
+    `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 11px;">
+      <input type="checkbox" data-role-id="${r.id}" ${(cred.roleIds||[]).map(Number).includes(r.id)?'checked':''} style="accent-color:var(--red);width:14px;height:14px;">
+      <div style="font-weight:600;">${r.name}</div></label>`).join('');
+
+  // Force show modal
+  const modal = document.getElementById('modal-new-user');
+  if(modal) {
+    modal.style.cssText = 'display:flex !important; position:fixed !important; inset:0 !important; z-index:99999 !important; background:rgba(0,0,0,0.55) !important; align-items:center !important; justify-content:center !important;';
+  }
+  setTimeout(() => { const n = document.getElementById('nu-name'); if(n) n.focus(); }, 100);
 }
 
 function toggleUserActive(personId) {
