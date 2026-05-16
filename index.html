@@ -1215,14 +1215,28 @@ async function openNewOpportunity() {
 }
 
 async function openOpportunity(id) {
-  // Load existing opportunity - placeholder for now
-  oppData = { id };
-  oppMonths = {};
-  await initOppForm();
-  document.getElementById('opp-page-title').textContent = 'Edit Opportunity';
-  document.getElementById('opp-page').classList.add('active');
-  switchOppTab('general', document.querySelector('.opp-tab'));
-  buildRevGrid();
+  try {
+    const deals = await apiGet('deals', 'id=eq.' + id + '&select=*');
+    oppData = deals[0] || { id };
+    oppMonths = {};
+
+    // Load revenue stream months
+    const streams = await apiGet('revenue_streams', 'deal_id=eq.' + id + '&stream_type=eq.opportunity&select=id');
+    if (streams.length) {
+      const months = await apiGet('revenue_stream_months', 'stream_id=eq.' + streams[0].id + '&select=*');
+      months.forEach(m => {
+        oppMonths[m.month] = { revenue: m.opportunity_revenue, margin: m.opportunity_margin };
+      });
+    }
+
+    await initOppForm();
+    document.getElementById('opp-page-title').textContent = 'Edit Opportunity';
+    document.getElementById('opp-page').classList.add('active');
+    switchOppTab('general', document.querySelector('.opp-tab'));
+    buildRevGrid();
+  } catch(e) {
+    showStatus('Failed to load deal: ' + e.message, 'error');
+  }
 }
 
 function closeOppPage() {
@@ -1604,15 +1618,85 @@ async function saveOpportunity() {
   const name = document.getElementById('opp-name').value.trim();
   const orgId = document.getElementById('opp-org-id').value;
   const stageId = document.getElementById('opp-stage-id').value;
+  const ownerId = document.getElementById('opp-owner-id').value;
 
   if (!name) { showStatus('Deal name is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
   if (!orgId) { showStatus('Organisation is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
   if (!stageId) { showStatus('Stage is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
+  if (!ownerId) { showStatus('Owner is required', 'error'); switchOppTab('collaborators', document.querySelectorAll('.opp-tab')[2]); return; }
 
-  showStatus('Saving...', 'success');
-  // TODO: save to Supabase deals table once created
-  showStatus('Opportunity saved (local only — deals table coming soon)');
-  closeOppPage();
+  const payload = {
+    name,
+    org_id: +orgId || null,
+    region_id: +document.getElementById('opp-region-id').value || null,
+    stage_id: +stageId || null,
+    service_major_id: +document.getElementById('opp-service-major-id').value || null,
+    service_sub_id: +document.getElementById('opp-service-sub-id').value || null,
+    margin_pct: +document.getElementById('opp-margin-pct').value || 25,
+    probability: +document.getElementById('opp-probability').value || 50,
+    order_date: document.getElementById('opp-order-date').value || null,
+    start_date: document.getElementById('opp-start-date').value || null,
+    notes: document.getElementById('opp-notes').value || null,
+    owner_id: +ownerId || null,
+    created_by: currentUser?.personId || null,
+    lost_date: document.getElementById('opp-lost-date').value || null,
+    lost_to: document.getElementById('opp-lost-to').value || null,
+    lost_reason: document.getElementById('opp-lost-reason').value || null,
+    lost_notes: document.getElementById('opp-lost-notes').value || null,
+  };
+
+  try {
+    let deal;
+    if (oppData.id) {
+      const result = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
+      deal = result[0];
+      showStatus('Opportunity updated');
+    } else {
+      const result = await api('deals', 'POST', payload, 'select=*');
+      deal = result[0];
+      showStatus('Opportunity created');
+    }
+    oppData.id = deal.id;
+
+    // Save revenue stream months
+    await saveRevenueStream(deal.id);
+
+    closeOppPage();
+    await renderOpportunitiesPage();
+  } catch(e) {
+    showStatus('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function saveRevenueStream(dealId) {
+  // Get or create opportunity stream
+  let streams = await apiGet('revenue_streams', 'deal_id=eq.' + dealId + '&stream_type=eq.opportunity&select=*');
+  let streamId;
+  if (streams.length) {
+    streamId = streams[0].id;
+  } else {
+    const result = await api('revenue_streams', 'POST', { deal_id: dealId, stream_type: 'opportunity', locked: false }, 'select=*');
+    streamId = result[0].id;
+  }
+
+  // Save each month that has a value
+  const monthEntries = Object.entries(oppMonths).filter(([m, v]) => v.revenue);
+  for (const [month, vals] of monthEntries) {
+    const existing = await apiGet('revenue_stream_months', `stream_id=eq.${streamId}&month=eq.${month}&select=id`);
+    const marginPct = +document.getElementById('opp-margin-pct').value || 25;
+    const marginRand = Math.round((vals.revenue * marginPct / 100) * 100) / 100;
+    const monthPayload = {
+      stream_id: streamId,
+      month,
+      opportunity_revenue: +vals.revenue,
+      opportunity_margin: marginRand,
+    };
+    if (existing.length) {
+      await api('revenue_stream_months', 'PATCH', monthPayload, 'id=eq.' + existing[0].id);
+    } else {
+      await api('revenue_stream_months', 'POST', monthPayload, '');
+    }
+  }
 }
 
 // ── Auth ─────────────────────────────────────────────────
@@ -1722,12 +1806,59 @@ function doLogout() {
 async function renderOpportunitiesPage() {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
-  document.getElementById('add-btn').style.display = '';
-  document.getElementById('add-btn').onclick = () => openNewOpportunity();
 
-  head.innerHTML = '<tr><th>Deal Name</th><th>Organisation</th><th>Stage</th><th>Owner</th><th>TCV</th><th>Actions</th></tr>';
-  body.innerHTML = '<tr class="empty-row"><td colspan="6">No opportunities yet — click "+ Add" to create one</td></tr>';
-  // TODO: load from Supabase deals table once created
+  head.innerHTML = '<tr><th>Deal Name</th><th>Organisation</th><th>Stage</th><th>Owner</th><th style="text-align:right">TCV</th><th>Actions</th></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
+
+  try {
+    const [deals, orgs, stages, people] = await Promise.all([
+      apiGet('deals', 'select=*&order=created_at.desc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      allData['stages'] || apiGet('stages', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+    ]);
+    allData['organisations'] = orgs;
+    allData['stages'] = stages;
+    allData['people'] = people;
+
+    document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
+
+    if (!deals.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="6">No opportunities yet — click "+ New Opportunity" to create one</td></tr>';
+      return;
+    }
+
+    body.innerHTML = deals.map(d => {
+      const org = orgs.find(o => +o.id === +d.org_id);
+      const stage = stages.find(s => +s.id === +d.stage_id);
+      const owner = people.find(p => +p.id === +d.owner_id);
+      const ownerName = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
+      return `<tr onclick="openOpportunity(${d.id})" style="cursor:pointer;">
+        <td style="font-weight:600;">${d.name}</td>
+        <td>${org?.name || '—'}</td>
+        <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
+        <td>${ownerName}</td>
+        <td style="text-align:right;">—</td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="openOpportunity(${d.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteDeal(${d.id})">Delete</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function confirmDeleteDeal(id) {
+  if (!confirm('Delete this deal? This cannot be undone.')) return;
+  try {
+    await apiDelete('deals', id);
+    showStatus('Deal deleted');
+    await renderOpportunitiesPage();
+  } catch(e) {
+    showStatus('Delete failed: ' + e.message, 'error');
+  }
 }
 
 // ── Role Permissions Manager ──────────────────────────────
