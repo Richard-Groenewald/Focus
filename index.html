@@ -175,7 +175,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v2.0</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v2.1</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -348,15 +348,25 @@ const PAGES = {
   parties: {
     title: 'Parties',
     table: 'parties',
+    custom_form: true,
     columns: [
       { key: 'party_type',  label: 'Type' },
-      { key: 'ref_id',      label: 'Reference ID' },
+      { key: 'ref_id',      label: 'Name', render: (v, row) => {
+          if (row.party_type === 'person') {
+            const p = (allData['people']||[]).find(x => +x.id === +v);
+            return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : v;
+          } else {
+            const o = (allData['organisations']||[]).find(x => +x.id === +v);
+            return o ? o.name : v;
+          }
+        }
+      },
       { key: 'category_id', label: 'Category', lookup: 'party_categories', lookupLabel: r => r.name },
       { key: 'status',      label: 'Status', render: v => `<span class="badge ${v==='active'?'badge-green':'badge-gray'}">${v||'active'}</span>` },
     ],
     fields: [
       { key: 'party_type',  label: 'Party Type', type: 'select', options: ['person','organisation'], required: true },
-      { key: 'ref_id',      label: 'Reference ID (person or org id)', type: 'number', required: true },
+      { key: 'ref_id',      label: 'Name', type: 'dynamic_lookup', required: true },
       { key: 'category_id', label: 'Category', type: 'lookup', lookupTable: 'party_categories', lookupLabel: r => r.name },
       { key: 'status',      label: 'Status', type: 'select', options: ['active','inactive'] },
     ],
@@ -657,6 +667,20 @@ function renderModal(data) {
     </div>`;
 
   document.getElementById('modal-root').innerHTML = html;
+
+  // For parties, populate ref_id based on party_type
+  if (currentPage === 'parties') {
+    const partyTypeEl = document.getElementById('f_party_type');
+    if (partyTypeEl && partyTypeEl.value) {
+      await onPartyTypeChange(partyTypeEl.value);
+      // If editing, set the selected value
+      if (data && data.ref_id) {
+        const refEl = document.getElementById('f_ref_id');
+        if (refEl) refEl.value = data.ref_id;
+      }
+    }
+  }
+
   // Focus first input
   setTimeout(() => {
     const first = document.querySelector('#modal-form input, #modal-form select, #modal-form textarea');
@@ -680,14 +704,20 @@ function renderField(f, val) {
   }
 
   if (f.type === 'select') {
+    const onchange = (currentPage === 'parties' && f.key === 'party_type') ? ' onchange="onPartyTypeChange(this.value)"' : '';
     const opts = f.options.map(o => `<option value="${o}" ${val==o?'selected':''}>${o||'— select —'}</option>`).join('');
-    return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}>${opts}</select></div>`;
+    return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}${onchange}>${opts}</select></div>`;
   }
 
   if (f.type === 'lookup') {
     const lookupData = allData[f.lookupTable] || [];
     const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${f.lookupLabel(r)}</option>`).join('');
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select —</option>${opts}</select></div>`;
+  }
+
+  if (f.type === 'dynamic_lookup') {
+    // Will be populated by onPartyTypeChange
+    return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select party type first —</option></select></div>`;
   }
 
   return `<div class="form-group">${label}<input type="${f.type||'text'}" id="f_${f.key}" name="${f.key}" class="form-control" value="${val}" ${f.required?'required':''} ${f.placeholder?`placeholder="${f.placeholder}"`:''} autocomplete="off"></div>`;
@@ -1048,6 +1078,35 @@ async function toggleRolePermission(roleId, permId, grant) {
     showStatus('Failed: ' + e.message, 'error');
     // Revert checkbox
     await renderRolePermissions();
+  }
+}
+
+// ── Party Type Dynamic Lookup ───────────────────────────
+async function onPartyTypeChange(type) {
+  const refEl = document.getElementById('f_ref_id');
+  if (!refEl) return;
+  refEl.innerHTML = '<option value="">Loading...</option>';
+
+  try {
+    let records = [];
+    if (type === 'person') {
+      records = allData['people'] || await apiGet('people', 'select=*&order=first_name.asc');
+      allData['people'] = records;
+      refEl.innerHTML = '<option value="">— select person —</option>' +
+        records.map(p => {
+          const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+          return `<option value="${p.id}">${name}</option>`;
+        }).join('');
+    } else if (type === 'organisation') {
+      records = allData['organisations'] || await apiGet('organisations', 'select=*&order=name.asc');
+      allData['organisations'] = records;
+      refEl.innerHTML = '<option value="">— select organisation —</option>' +
+        records.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    } else {
+      refEl.innerHTML = '<option value="">— select party type first —</option>';
+    }
+  } catch(e) {
+    refEl.innerHTML = '<option value="">Error loading options</option>';
   }
 }
 
