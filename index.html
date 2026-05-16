@@ -175,7 +175,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v2.2</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v2.5</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -351,14 +351,12 @@ const PAGES = {
     custom_form: true,
     columns: [
       { key: 'party_type',  label: 'Type' },
-      { key: 'ref_id',      label: 'Name', render: (v, row) => {
-          if (row.party_type === 'person') {
-            const p = (allData['people']||[]).find(x => +x.id === +v);
-            return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : v;
-          } else {
-            const o = (allData['organisations']||[]).find(x => +x.id === +v);
-            return o ? o.name : v;
-          }
+      { key: 'ref_id', label: 'Name', render: v => {
+          const p = (allData['people']||[]).find(x => +x.id === +v);
+          if (p) return [p.first_name, p.last_name].filter(Boolean).join(' ');
+          const o = (allData['organisations']||[]).find(x => +x.id === +v);
+          if (o) return o.name;
+          return v || '—';
         }
       },
       { key: 'category_id', label: 'Category', lookup: 'party_categories', lookupLabel: r => r.name },
@@ -576,6 +574,11 @@ async function loadTable(page) {
       if (col.lookup && !allData[col.lookup]) {
         allData[col.lookup] = await apiGet(col.lookup, 'select=*');
       }
+    }
+    // Parties page needs both people and organisations for ref_id rendering
+    if (page === 'parties') {
+      if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+      if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
     }
     for (const field of (cfg.fields || [])) {
       if (field.lookupTable === 'eligible_people') {
