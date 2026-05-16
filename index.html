@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v3.6</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v3.8</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v3.6</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v3.8</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -271,8 +271,8 @@ tr:hover td{background:#F8FAFC;}
 
     <!-- General Tab -->
     <div class="opp-tab-content active" id="opp-tab-general">
-      <div class="opp-section">
-        <div class="opp-grid-2">
+      <div class="opp-section" style="display:grid;grid-template-columns:1fr 320px;gap:24px;">
+        <div>
           <div class="form-group">
             <label class="form-label">Organisation <span style="color:var(--red)">*</span></label>
             <select id="opp-org-id" class="form-control" onchange="onOppOrgChange()">
@@ -283,36 +283,31 @@ tr:hover td{background:#F8FAFC;}
             <label class="form-label">Deal Name <span style="color:var(--red)">*</span></label>
             <input type="text" id="opp-name" class="form-control" placeholder="e.g. ABC Mining — Guarding Contract">
           </div>
-        </div>
-        <div class="opp-grid-3">
-          <div class="form-group">
-            <label class="form-label">Region</label>
-            <select id="opp-region-id" class="form-control">
-              <option value="">— select region —</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Stage <span style="color:var(--red)">*</span></label>
-            <select id="opp-stage-id" class="form-control" onchange="onOppStageChange()">
-              <option value="">— select stage —</option>
-            </select>
-          </div>
           <div class="form-group">
             <label class="form-label">Service Type</label>
-            <select id="opp-service-sub-id" class="form-control" onchange="onOppServiceChange()">
+            <select id="opp-service-sub-id" class="form-control" onchange="onOppServiceChange()" style="max-width:320px;">
               <option value="">— select service type —</option>
             </select>
             <input type="hidden" id="opp-service-major-id">
           </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;">
+            <div class="form-group" style="flex:0 0 200px;margin-bottom:0;">
+              <label class="form-label">Region</label>
+              <select id="opp-region-id" class="form-control">
+                <option value="">— select —</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:0 0 200px;margin-bottom:0;">
+              <label class="form-label">Stage <span style="color:var(--red)">*</span></label>
+              <select id="opp-stage-id" class="form-control" onchange="onOppStageChange()">
+                <option value="">— select —</option>
+              </select>
+            </div>
+          </div>
         </div>
-        <div class="opp-grid-2">
-          <div class="form-group" style="display:none;">
-            <!-- Hidden - major set by service sub selection -->
-          </div>
-          <div class="form-group">
-            <label class="form-label">Notes</label>
-            <textarea id="opp-notes" class="form-control" rows="2"></textarea>
-          </div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Notes</label>
+          <textarea id="opp-notes" class="form-control" style="height:calc(100% - 28px);min-height:180px;resize:none;"></textarea>
         </div>
       </div>
     </div>
@@ -1211,9 +1206,8 @@ function getFYMonths(fy) {
   for (let i = 0; i < 12; i++) {
     const totalM = startM + i;
     const year = fy + Math.floor(totalM / 12);
-    const month = totalM % 12;
-    const d = new Date(year, month, 1);
-    months.push(d.toISOString().slice(0, 7));
+    const month = (totalM % 12) + 1; // 1-based for formatting
+    months.push(year + '-' + String(month).padStart(2, '0'));
   }
   return months;
 }
@@ -1541,11 +1535,21 @@ function autoPopulateGrid() {
   if (!base) { showStatus('Enter a base amount first', 'error'); return; }
   if (!startDate) { showStatus('Enter a start date first', 'error'); return; }
 
-  const start = new Date(startDate);
+  const startParts = startDate.split('-');
+  const startYear = +startParts[0];
+  const startMonth = +startParts[1]; // 1-based
   for (let i = 0; i < months; i++) {
-    const d = new Date(start.getFullYear(), start.getMonth() + i, 1);
-    const key = d.toISOString().slice(0,7);
-    const yearNum = Math.floor(i / 12);
+    const totalM = (startMonth - 1) + i;
+    const year = startYear + Math.floor(totalM / 12);
+    const month = (totalM % 12) + 1;
+    const key = year + '-' + String(month).padStart(2, '0');
+
+    // Apply escalation in the correct month
+    const escMonthName = appSettings['escalation_month'] || 'April';
+    const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const escM = MONTHS.indexOf(escMonthName) + 1; // 1-based
+    // Count how many escalation months have passed
+    const yearNum = month === escM && i > 0 ? Math.ceil(i/12) : Math.floor(i / 12);
     const escalatedAmount = base * Math.pow(1 + esc/100, yearNum);
     if (!oppMonths[key]) oppMonths[key] = {};
     oppMonths[key].revenue = Math.round(escalatedAmount);
