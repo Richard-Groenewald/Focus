@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v5.7</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v5.9</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v5.7</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v5.9</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -1874,7 +1874,7 @@ async function saveOpportunity() {
     start_date: document.getElementById('opp-start-date').value || null,
     notes: document.getElementById('opp-notes').value || null,
     ext_notes: document.getElementById('opp-ext-notes').value || null,
-    owner_id: oppCollaborators.find(c => c.isOwner)?.personId || null,
+    owner_id: oppData.owner_id || currentUser?.personId || null,
     created_by: currentUser?.personId || null,
     lost_date: document.getElementById('opp-lost-date').value || null,
     lost_to: document.getElementById('opp-lost-to').value || null,
@@ -2266,15 +2266,20 @@ async function loadCollaborators(dealId) {
           isOwner: c.is_owner,
         });
       });
+
     } catch(e) { console.warn('Could not load collaborators:', e.message); }
   }
   renderCollaborators();
-  // Update owner display in topbar
-  const owner = oppCollaborators.find(c => c.isOwner);
+
+  // Owner display always comes from deals.owner_id - source of truth
   const ownerNameEl = document.getElementById('opp-owner-name');
   const ownerDisplayEl = document.getElementById('opp-owner-display');
-  if (ownerNameEl && owner) {
-    ownerNameEl.textContent = owner.name;
+  if (ownerNameEl) {
+    const people = allData['people'] || [];
+    const ownerId = oppData.owner_id || (dealId ? null : currentUser?.personId);
+    const owner = people.find(p => +p.id === +ownerId);
+    const ownerName = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : currentUser?.name || '—';
+    ownerNameEl.textContent = ownerName;
     if (ownerDisplayEl) ownerDisplayEl.style.display = 'flex';
   }
 }
