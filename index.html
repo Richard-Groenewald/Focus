@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v4.8</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v4.9</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v4.8</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v4.9</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -379,24 +379,14 @@ tr:hover td{background:#F8FAFC;}
 
     <!-- Collaborators Tab -->
     <div class="opp-tab-content" id="opp-tab-collaborators">
-      <div class="opp-section">
-        <div class="opp-section-title">Owner</div>
-        <div class="opp-grid-2">
-          <div class="form-group">
-            <label class="form-label">Owner <span style="color:var(--red)">*</span></label>
-            <select id="opp-owner-id" class="form-control">
-              <option value="">— select owner —</option>
-            </select>
-          </div>
-        </div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;gap:8px;">
+        <button class="btn btn-secondary btn-sm" onclick="openAddCollaboratorModal()">+ Add Collaborator</button>
+        <button class="btn btn-ghost btn-sm" onclick="openCreateCollaboratorModal()">+ Create New Person</button>
       </div>
-      <div class="opp-section">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <div class="opp-section-title" style="margin-bottom:0;">Collaborators</div>
-          <button class="btn btn-secondary btn-sm" onclick="addCollaboratorRow()">+ Add</button>
-        </div>
-        <div id="collaborators-list"></div>
+      <div id="collaborators-list">
+        <div style="text-align:center;padding:40px;color:var(--text3);">No collaborators yet</div>
       </div>
+      <input type="hidden" id="opp-owner-id">
     </div>
 
     <!-- Engagement Tab -->
@@ -1283,6 +1273,7 @@ async function openNewOpportunity() {
   document.getElementById('opp-page').classList.add('active');
   switchOppTab('general', document.querySelector('.opp-tab'));
   buildRevGrid();
+  await loadCollaborators(null);
 }
 
 async function openOpportunity(id) {
@@ -1704,11 +1695,26 @@ function addCollaboratorRow() {
   list.appendChild(div);
 }
 
-function openEngagementModal() {
-  const people = allData['people'] || [];
+async function openEngagementModal() {
+  // Build people pool: collaborators + client affiliates, deduplicated
+  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
+  let clientPeople = [];
+  if (orgId) {
+    const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+    const ids = affiliations.map(a => a.person_id);
+    if (ids.length) clientPeople = await apiGet('people', `id=in.(${ids.join(',')})&select=*`);
+  }
+  const collabPeople = oppCollaborators.map(c => ({ id: c.personId, _name: c.name }));
+  const seen = new Set();
+  const pool = [...collabPeople, ...clientPeople].filter(p => {
+    if (seen.has(+p.id)) return false;
+    seen.add(+p.id);
+    return true;
+  });
+
   const html = `
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
-      <div class="modal" style="width:520px;">
+      <div class="modal" style="width:560px;">
         <div class="modal-header">
           <div class="modal-title">Log Engagement</div>
           <button class="modal-close" onclick="closeModal()">×</button>
@@ -1728,11 +1734,16 @@ function openEngagementModal() {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Person</label>
-            <select id="eng-person-id" class="form-control">
-              <option value="">— select —</option>
-              ${people.map(p => `<option value="${p.id}">${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
-            </select>
+            <label class="form-label">People Involved</label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;" id="eng-people-selected"></div>
+            <div style="display:flex;gap:8px;">
+              <select id="eng-person-pool" class="form-control" style="flex:1;">
+                <option value="">— add person —</option>
+                ${pool.map(p => `<option value="${p.id}">${p._name || [p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+              </select>
+              <button class="btn btn-secondary btn-sm" onclick="addEngPerson()">Add</button>
+              <button class="btn btn-ghost btn-sm" onclick="openCreateCollaboratorModal(true)">New</button>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label">Notes</label>
@@ -1756,13 +1767,40 @@ function openEngagementModal() {
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
+  window._engPeople = [];
+}
+
+function addEngPerson() {
+  const sel = document.getElementById('eng-person-pool');
+  const id = sel.value;
+  const name = sel.options[sel.selectedIndex]?.text;
+  if (!id || window._engPeople.find(p => p.id === id)) return;
+  window._engPeople.push({ id, name });
+  sel.value = '';
+  renderEngPeople();
+}
+
+function removeEngPerson(id) {
+  window._engPeople = window._engPeople.filter(p => p.id !== id);
+  renderEngPeople();
+}
+
+function renderEngPeople() {
+  const el = document.getElementById('eng-people-selected');
+  if (!el) return;
+  el.innerHTML = (window._engPeople || []).map(p =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
+      ${p.name}
+      <button onclick="removeEngPerson('${p.id}')" style="background:none;border:none;color:white;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>
+    </span>`
+  ).join('');
 }
 
 function saveEngagement() {
   const entry = {
     date: document.getElementById('eng-date').value,
     type: document.getElementById('eng-type').value,
-    personId: document.getElementById('eng-person-id').value,
+    people: window._engPeople || [],
     notes: document.getElementById('eng-notes').value,
     nextAction: document.getElementById('eng-next-action').value,
     nextDate: document.getElementById('eng-next-date').value,
@@ -1844,6 +1882,8 @@ async function saveOpportunity() {
 
     // Save revenue stream months
     await saveRevenueStream(deal.id);
+    // Save collaborators
+    await saveCollaborators(deal.id);
 
     closeOppPage();
     await renderOpportunitiesPage();
@@ -2174,6 +2214,319 @@ async function saveNewClient() {
   }
 }
 
+
+// ── Deal Collaborators ────────────────────────────────────
+let oppCollaborators = []; // {personId, name, role, isOwner}
+
+async function loadCollaborators(dealId) {
+  oppCollaborators = [];
+  if (!dealId) {
+    // New deal — add owner as first collaborator
+    const ownerId = document.getElementById('opp-owner-id')?.value;
+    if (ownerId) {
+      const people = allData['people'] || [];
+      const owner = people.find(p => +p.id === +ownerId);
+      if (owner) {
+        oppCollaborators.push({
+          personId: +ownerId,
+          name: [owner.first_name, owner.last_name].filter(Boolean).join(' '),
+          role: 'Owner',
+          isOwner: true,
+          isNew: true,
+        });
+      }
+    }
+  } else {
+    try {
+      const collabs = await apiGet('deal_collaborators', `deal_id=eq.${dealId}&select=*`);
+      const people = allData['people'] || await apiGet('people', 'select=*');
+      allData['people'] = people;
+      collabs.forEach(c => {
+        const p = people.find(x => +x.id === +c.person_id);
+        oppCollaborators.push({
+          id: c.id,
+          personId: c.person_id,
+          name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown',
+          role: c.role || 'Collaborator',
+          isOwner: c.is_owner,
+        });
+      });
+    } catch(e) { console.warn('Could not load collaborators:', e.message); }
+  }
+  renderCollaborators();
+}
+
+function renderCollaborators() {
+  const list = document.getElementById('collaborators-list');
+  if (!list) return;
+  if (!oppCollaborators.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No collaborators yet</div>';
+    return;
+  }
+  list.innerHTML = oppCollaborators.map((c, i) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;">
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;">${c.name}</div>
+        <div style="font-size:11px;color:var(--text3);">${c.role}</div>
+      </div>
+      ${c.isOwner ? '<span class="badge badge-blue">Owner</span>' : ''}
+      ${!c.isOwner ? `<button class="btn btn-danger btn-sm" onclick="removeCollaborator(${i})">Remove</button>` : ''}
+    </div>
+  `).join('');
+}
+
+function removeCollaborator(idx) {
+  oppCollaborators.splice(idx, 1);
+  renderCollaborators();
+}
+
+async function getCollaboratorPool() {
+  // People affiliated with client
+  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
+  let clientPeople = [];
+  if (orgId) {
+    const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+    const personIds = affiliations.map(a => a.person_id);
+    if (personIds.length) {
+      const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=*`);
+      clientPeople = people;
+    }
+  }
+
+  // Home org people with eligible roles
+  const eligibleRoleNames = (appSettings['eligible_collaborator_roles'] || 'Sales Manager,Sales User').split(',').map(s => s.trim());
+  const roles = allData['roles'] || await apiGet('roles', 'select=*');
+  const eligibleRoleIds = roles.filter(r => eligibleRoleNames.includes(r.name)).map(r => r.id);
+  let homeOrgPeople = [];
+  if (eligibleRoleIds.length) {
+    const members = await apiGet('home_organisation_members', `role_id=in.(${eligibleRoleIds.join(',')})&select=person_id`);
+    const personIds = members.map(m => m.person_id);
+    if (personIds.length) {
+      const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=*`);
+      homeOrgPeople = people;
+    }
+  }
+
+  // Merge, deduplicate, exclude existing collaborators
+  const existingIds = new Set(oppCollaborators.map(c => c.personId));
+  const allPeople = [...clientPeople, ...homeOrgPeople];
+  const seen = new Set();
+  return allPeople.filter(p => {
+    if (existingIds.has(+p.id)) return false;
+    if (seen.has(+p.id)) return false;
+    seen.add(+p.id);
+    return true;
+  });
+}
+
+async function openAddCollaboratorModal() {
+  const pool = await getCollaboratorPool();
+  const html = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:480px;">
+        <div class="modal-header">
+          <div class="modal-title">Add Collaborator</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Person <span style="color:var(--red)">*</span></label>
+            <select id="collab-person-id" class="form-control">
+              <option value="">— select person —</option>
+              ${pool.map(p => `<option value="${p.id}">${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+            </select>
+            ${!pool.length ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No eligible people found — use "Create New Person" instead</div>' : ''}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role</label>
+            <input type="text" id="collab-role" class="form-control" value="Collaborator" placeholder="e.g. Technical Lead">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmAddCollaborator()">Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function confirmAddCollaborator() {
+  const personId = document.getElementById('collab-person-id')?.value;
+  const role = document.getElementById('collab-role')?.value || 'Collaborator';
+  if (!personId) { showStatus('Please select a person', 'error'); return; }
+  const people = allData['people'] || [];
+  const person = people.find(p => +p.id === +personId);
+  oppCollaborators.push({
+    personId: +personId,
+    name: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : 'Unknown',
+    role,
+    isOwner: false,
+    isNew: true,
+  });
+  renderCollaborators();
+  closeModal();
+  showStatus('Collaborator added');
+}
+
+async function openCreateCollaboratorModal(forEngagement) {
+  const html = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:540px;">
+        <div class="modal-header">
+          <div class="modal-title">Create New ${forEngagement ? 'Engagement Contact' : 'Collaborator'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 80px;">
+              <label class="form-label">Title</label>
+              <select id="new-collab-title" class="form-control">
+                <option>—</option><option>Mr</option><option>Mrs</option><option>Ms</option><option>Dr</option><option>Prof</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="new-collab-first" class="form-control" oninput="checkNewCollabSimilarity()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="new-collab-last" class="form-control" oninput="checkNewCollabSimilarity()">
+            </div>
+          </div>
+          <div id="new-collab-match" style="display:none;padding:10px 12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);font-size:12px;margin-bottom:12px;"></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" id="new-collab-email" class="form-control">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" id="new-collab-phone" class="form-control">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role on Opportunity</label>
+            <input type="text" id="new-collab-role" class="form-control" value="${forEngagement ? 'Contact' : 'Collaborator'}">
+          </div>
+          <div class="divider"></div>
+          <div class="form-group">
+            <label class="form-label">Relationship to Client</label>
+            <div style="display:flex;gap:16px;">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                <input type="radio" name="collab-affil" value="client" checked style="accent-color:var(--red);"> Works for client
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                <input type="radio" name="collab-affil" value="party"> External party
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewCollaborator(${forEngagement ? 'true' : 'false'})">Create & Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+let _collabCheckTimer;
+async function checkNewCollabSimilarity() {
+  clearTimeout(_collabCheckTimer);
+  _collabCheckTimer = setTimeout(async () => {
+    const first = document.getElementById('new-collab-first')?.value || '';
+    const last = document.getElementById('new-collab-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const matchEl = document.getElementById('new-collab-match');
+    if (!matchEl || fullName.length < 3) { if(matchEl) matchEl.style.display='none'; return; }
+    const people = allData['people'] || await apiGet('people', 'select=*');
+    allData['people'] = people;
+    const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      matchEl.style.display = 'block';
+      matchEl.innerHTML = '🔍 Similar people found: ' +
+        matches.map(m => {
+          const name = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+          return `<strong>${name}</strong> (${m.score}% match) — <a href="#" onclick="useExistingPerson(${m.item.id},'${name}');return false;" style="color:var(--red);">Use this person</a>`;
+        }).join(', ');
+    } else {
+      matchEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+function useExistingPerson(personId, name) {
+  const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
+  oppCollaborators.push({ personId, name, role, isOwner: false, isNew: true });
+  renderCollaborators();
+  closeModal();
+  showStatus(name + ' added as collaborator');
+}
+
+async function saveNewCollaborator(forEngagement) {
+  const first = document.getElementById('new-collab-first')?.value.trim();
+  const last = document.getElementById('new-collab-last')?.value.trim();
+  if (!first || !last) { showStatus('First and last name required', 'error'); return; }
+
+  const affiliType = document.querySelector('input[name="collab-affil"]:checked')?.value || 'client';
+  const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
+  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
+
+  try {
+    // Create person
+    const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+    const personResult = await api('people', 'POST', {
+      first_name: first, last_name: last,
+      title: document.getElementById('new-collab-title')?.value || null,
+      email: document.getElementById('new-collab-email')?.value || null,
+      phone: document.getElementById('new-collab-phone')?.value || null,
+      initials,
+    }, 'select=*');
+    const person = personResult[0];
+    allData['people'] = null; // clear cache
+
+    if (affiliType === 'client' && orgId) {
+      // Add affiliation to client
+      await api('person_organisation_roles', 'POST', {
+        person_id: person.id, org_id: +orgId,
+        role_type: 'Contact', is_primary: false,
+      }, '');
+    } else {
+      // Add to parties table
+      await api('parties', 'POST', {
+        party_type: 'person', ref_id: person.id, status: 'active',
+      }, '');
+    }
+
+    const name = [first, last].join(' ');
+    oppCollaborators.push({ personId: person.id, name, role, isOwner: false, isNew: true });
+    renderCollaborators();
+    closeModal();
+    showStatus(name + ' created and added');
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+async function saveCollaborators(dealId) {
+  // Save new collaborators to deal_collaborators table
+  for (const c of oppCollaborators) {
+    if (!c.isNew) continue;
+    try {
+      await api('deal_collaborators', 'POST', {
+        deal_id: dealId,
+        person_id: c.personId,
+        role: c.role,
+        is_owner: !!c.isOwner,
+      }, '');
+      delete c.isNew;
+    } catch(e) {
+      console.warn('Could not save collaborator:', e.message);
+    }
+  }
+}
+
 // ── Auth ─────────────────────────────────────────────────
 async function loadLoginUsers() {
   try {
@@ -2403,6 +2756,19 @@ async function renderSettingsPage() {
           </div>
         </div>
       </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Eligible Collaborator Roles</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Home organisation members with these roles will appear in the collaborator dropdown on opportunities.</div>
+        <div id="setting-collab-roles-list" style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${(allData['roles']||[]).map(r => {
+            const selected = (appSettings['eligible_collaborator_roles']||'Sales Manager,Sales User').split(',').includes(r.name);
+            return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;">
+              <input type="checkbox" class="setting-collab-role" value="${r.name}" ${selected?'checked':''} style="accent-color:var(--red);">
+              ${r.name}${r.is_system?'':' <span style="font-size:10px;color:var(--text3);">(org)</span>'}
+            </label>`;
+          }).join('')}
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
@@ -2416,15 +2782,18 @@ async function saveSettings() {
     const escMonth = document.getElementById('setting-esc-month').value;
 
     const similarity = document.getElementById('setting-similarity').value;
+    const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
     await Promise.all([
       api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
       api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
       api('settings', 'PATCH', { value: similarity, updated_at: new Date().toISOString() }, 'key=eq.similarity_threshold'),
+      api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
     ]);
 
     appSettings['fy_start_month'] = fyStart;
     appSettings['escalation_month'] = escMonth;
     appSettings['similarity_threshold'] = similarity;
+    appSettings['eligible_collaborator_roles'] = collabRoles;
     showStatus('Settings saved');
   } catch(e) {
     showStatus('Failed to save: ' + e.message, 'error');
