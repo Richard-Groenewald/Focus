@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.3</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.3</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -1400,6 +1400,7 @@ async function openOpportunity(id) {
     await displayOwner();
     await loadCollaborators(id);
     await loadOppContacts(id);
+    await loadEngagements(id);
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
   }
@@ -1809,9 +1810,11 @@ async function openEngagementModal() {
     if (ids.length) clientPeople = await apiGet('people', `id=in.(${ids.join(',')})&select=*`);
   }
   const collabPeople = oppCollaborators.map(c => ({ id: c.personId, _name: c.name }));
+  const selectedIds = new Set((window._engPeople || []).map(p => String(p.id)));
   const seen = new Set();
   const pool = [...collabPeople, ...clientPeople].filter(p => {
     if (seen.has(+p.id)) return false;
+    if (selectedIds.has(String(p.id))) return false;
     seen.add(+p.id);
     return true;
   });
@@ -1866,7 +1869,7 @@ async function openEngagementModal() {
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveEngagement()">Save</button>
+          <button class="btn btn-primary" onclick="saveEngagement(null)">Save</button>
         </div>
       </div>
     </div>`;
@@ -1880,12 +1883,25 @@ function addEngPerson() {
   const name = sel.options[sel.selectedIndex]?.text;
   if (!id || window._engPeople.find(p => p.id === id)) return;
   window._engPeople.push({ id, name });
+  // Remove from dropdown
+  sel.options[sel.selectedIndex].remove();
   sel.value = '';
   renderEngPeople();
 }
 
 function removeEngPerson(id) {
+  const person = window._engPeople.find(p => p.id === id);
   window._engPeople = window._engPeople.filter(p => p.id !== id);
+  // Add back to dropdown
+  if (person) {
+    const sel = document.getElementById('eng-person-pool');
+    if (sel) {
+      const opt = document.createElement('option');
+      opt.value = person.id;
+      opt.textContent = person.name;
+      sel.appendChild(opt);
+    }
+  }
   renderEngPeople();
 }
 
@@ -1900,20 +1916,52 @@ function renderEngPeople() {
   ).join('');
 }
 
-function saveEngagement() {
-  const entry = {
-    date: document.getElementById('eng-date').value,
-    type: document.getElementById('eng-type').value,
-    people: window._engPeople || [],
-    notes: document.getElementById('eng-notes').value,
-    nextAction: document.getElementById('eng-next-action').value,
-    nextDate: document.getElementById('eng-next-date').value,
-  };
-  if (!oppData.engagements) oppData.engagements = [];
-  oppData.engagements.push(entry);
-  renderEngagements();
-  closeModal();
-  showStatus('Engagement logged');
+async function saveEngagement(editId) {
+  const date = document.getElementById('eng-date').value;
+  const type = document.getElementById('eng-type').value;
+  const notes = document.getElementById('eng-notes').value;
+  const nextAction = document.getElementById('eng-next-action').value;
+  const nextDate = document.getElementById('eng-next-date').value;
+  const people = window._engPeople || [];
+
+  if (!date) { showStatus('Date is required', 'error'); return; }
+
+  try {
+    let engId = editId;
+    if (editId) {
+      // Update existing
+      await api('engagements', 'PATCH', {
+        engagement_date: date, engagement_type: type,
+        notes, next_action: nextAction, next_action_date: nextDate || null,
+      }, 'id=eq.' + editId);
+      // Remove old people and re-add
+      await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + editId);
+    } else {
+      // Create new
+      const result = await api('engagements', 'POST', {
+        deal_id: oppData.id,
+        engagement_date: date, engagement_type: type,
+        notes, next_action: nextAction, next_action_date: nextDate || null,
+        created_by: currentUser?.personId || null,
+      }, 'select=*');
+      engId = result[0].id;
+    }
+
+    // Save people
+    for (const p of people) {
+      try {
+        await api('engagement_people', 'POST', {
+          engagement_id: engId, person_id: +p.id,
+        }, '');
+      } catch(e) { /* ignore duplicate */ }
+    }
+
+    closeModal();
+    showStatus(editId ? 'Engagement updated' : 'Engagement logged');
+    await loadEngagements(oppData.id);
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
 }
 
 function renderEngagements() {
@@ -3013,10 +3061,20 @@ async function saveNewCollaborator(forEngagement) {
     }
 
     const name = [first, last].join(' ');
-    oppCollaborators.push({ personId: person.id, name, role, isOwner: false, isNew: true });
-    renderCollaborators();
-    closeModal();
-    showStatus(name + ' created and added');
+    if (forEngagement === 'true' || forEngagement === true) {
+      // Add to engagement people and reopen engagement modal
+      if (!window._engPeople) window._engPeople = [];
+      window._engPeople.push({ id: String(person.id), name });
+      showStatus(name + ' created and added to engagement');
+      await openEngagementModal();
+      // Restore engagement people
+      renderEngPeople();
+    } else {
+      oppCollaborators.push({ personId: person.id, name, role, isOwner: false, isNew: true });
+      renderCollaborators();
+      closeModal();
+      showStatus(name + ' created and added');
+    }
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
   }
@@ -3282,6 +3340,21 @@ async function renderSettingsPage() {
             <label class="form-label">Similarity Warning Threshold (%)</label>
             <input type="number" id="setting-similarity" class="form-control" min="50" max="100" value="${appSettings['similarity_threshold']||'80'}">
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">How similar two names must be before a duplicate warning is shown (50–100%). Lower = more warnings.</div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Engagement Edit Grace Period</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Minutes allowed to edit after logging</label>
+            <select id="setting-eng-edit" class="form-control">
+              ${[15,30,60,120,240,480,1440].map(m => {
+                const label = m < 60 ? m+'m' : (m/60)+'h';
+                return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${label}</option>`;
+              }).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited.</div>
           </div>
         </div>
       </div>
