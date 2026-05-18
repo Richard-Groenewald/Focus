@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.2</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.3</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.2</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.3</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -2368,6 +2368,13 @@ async function loadOppContacts(dealId) {
       });
     });
   } catch(e) { console.warn('Could not load opp contacts:', e.message); }
+  // Deduplicate by personId
+  const seen = new Set();
+  oppContacts = oppContacts.filter(c => {
+    if (seen.has(c.personId)) return false;
+    seen.add(c.personId);
+    return true;
+  });
   renderOppContacts();
 }
 
@@ -2706,12 +2713,17 @@ async function saveOppContacts(dealId) {
   for (const c of oppContacts) {
     if (!c.isNew) continue;
     try {
-      await api('opportunity_contacts', 'POST', {
+      const result = await api('opportunity_contacts', 'POST', {
         deal_id: dealId, person_id: c.personId,
         dmu_role_id: c.dmuRoleId || null, note: c.note || '',
-      }, '');
+      }, 'select=*');
+      c.id = result[0].id;
       delete c.isNew;
-    } catch(e) { console.warn('Could not save opp contact:', e.message); }
+    } catch(e) {
+      // Ignore duplicate - already saved
+      if (e.message.includes('23505')) { delete c.isNew; }
+      else console.warn('Could not save opp contact:', e.message);
+    }
   }
 }
 
