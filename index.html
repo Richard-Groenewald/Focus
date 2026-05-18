@@ -195,7 +195,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.1</div>
   </div>
 </div>
 
@@ -214,7 +214,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.1</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -2041,4 +2041,1774 @@ async function openEditEngagementModal(engId) {
   if (saveBtn) saveBtn.onclick = () => saveEngagement(engId);
 }
 
+async function saveOpportunity() {
+  const name = document.getElementById('opp-name').value.trim();
+  const orgId = document.getElementById('opp-org-id').value;
+  const stageId = document.getElementById('opp-stage-id').value;
+  const ownerId = document.getElementById('opp-owner-id').value;
 
+  if (!name) { showStatus('Deal name is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
+  if (!orgId) { showStatus('Organisation is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
+  if (!stageId) { showStatus('Stage is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
+  // Owner managed via collaborators tab
+
+  const payload = {
+    name,
+    org_id: +orgId || null,
+    region_id: +document.getElementById('opp-region-id').value || null,
+    stage_id: +stageId || null,
+    service_major_id: +document.getElementById('opp-service-major-id').value || null,
+    service_sub_id: +document.getElementById('opp-service-sub-id').value || null,
+    margin_pct: +document.getElementById('opp-margin-pct').value || 25,
+    probability: document.getElementById('opp-probability').value !== '' ? +document.getElementById('opp-probability').value : null,
+    order_date: document.getElementById('opp-order-date').value || null,
+    start_date: document.getElementById('opp-start-date').value || null,
+    notes: document.getElementById('opp-notes').value || null,
+    ext_notes: document.getElementById('opp-ext-notes').value || null,
+    owner_id: oppData.owner_id || currentUser?.personId || null,
+    created_by: currentUser?.personId || null,
+    lost_date: document.getElementById('opp-lost-date').value || null,
+    lost_to: document.getElementById('opp-lost-to').value || null,
+    lost_reason: document.getElementById('opp-lost-reason').value || null,
+    lost_notes: document.getElementById('opp-lost-notes').value || null,
+  };
+
+  try {
+    let deal;
+    if (oppData.id) {
+      const result = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
+      deal = result[0];
+      showStatus('Opportunity updated');
+    } else {
+      const result = await api('deals', 'POST', payload, 'select=*');
+      deal = result[0];
+      showStatus('Opportunity created');
+    }
+    oppData.id = deal.id;
+
+    // Save revenue stream months
+    await saveRevenueStream(deal.id);
+    // Save collaborators
+    await saveCollaborators(deal.id);
+    await saveOppContacts(deal.id);
+
+    closeOppPage();
+    await renderOpportunitiesPage();
+  } catch(e) {
+    showStatus('Save failed: ' + e.message, 'error');
+  }
+}
+
+async function saveRevenueStream(dealId) {
+  // Get or create opportunity stream
+  let streams = await apiGet('revenue_streams', 'deal_id=eq.' + dealId + '&stream_type=eq.opportunity&select=*');
+  let streamId;
+  if (streams.length) {
+    streamId = streams[0].id;
+  } else {
+    const result = await api('revenue_streams', 'POST', { deal_id: dealId, stream_type: 'opportunity', locked: false }, 'select=*');
+    streamId = result[0].id;
+  }
+
+  // Save each month that has a value
+  const monthEntries = Object.entries(oppMonths).filter(([m, v]) => v.revenue);
+  for (const [month, vals] of monthEntries) {
+    const existing = await apiGet('revenue_stream_months', `stream_id=eq.${streamId}&month=eq.${month}&select=id`);
+    const marginPct = +document.getElementById('opp-margin-pct').value || 25;
+    const marginRand = Math.round((vals.revenue * marginPct / 100) * 100) / 100;
+    const monthPayload = {
+      stream_id: streamId,
+      month,
+      opportunity_revenue: +vals.revenue,
+      opportunity_margin: marginRand,
+    };
+    if (existing.length) {
+      await api('revenue_stream_months', 'PATCH', monthPayload, 'id=eq.' + existing[0].id);
+    } else {
+      await api('revenue_stream_months', 'POST', monthPayload, '');
+    }
+  }
+}
+
+
+// ── Fuzzy String Matching ─────────────────────────────────
+function normaliseStr(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function tokenSetRatio(a, b) {
+  const tokA = new Set(normaliseStr(a).split(' ').filter(Boolean));
+  const tokB = new Set(normaliseStr(b).split(' ').filter(Boolean));
+  const intersection = [...tokA].filter(t => tokB.has(t));
+  const union = new Set([...tokA, ...tokB]);
+  if (!union.size) return 0;
+  return Math.round((intersection.length / union.size) * 100);
+}
+
+function findSimilar(name, list, labelFn, threshold) {
+  threshold = threshold || +(appSettings['similarity_threshold'] || 80);
+  return list
+    .map(item => ({ item, score: tokenSetRatio(name, labelFn(item)) }))
+    .filter(x => x.score >= threshold)
+    .sort((a, b) => b.score - a.score);
+}
+
+// ── Add Client Modal ──────────────────────────────────────
+let newClientContacts = [];
+
+async function openAddClientModal() {
+  newClientContacts = [];
+
+  // Ensure organisations and people are loaded
+  if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
+  if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:620px;">
+        <div class="modal-header">
+          <div class="modal-title">Add Client</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+
+          <!-- Organisation section -->
+          <div style="margin-bottom:20px;">
+            <div class="opp-section-title" style="margin-bottom:12px;">Organisation</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Name <span style="color:var(--red)">*</span></label>
+                <input type="text" id="nc-org-name" class="form-control" placeholder="e.g. Acme Mining (Pty) Ltd" oninput="checkOrgSimilarity()">
+                <div id="nc-org-warning" style="display:none;margin-top:6px;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;"></div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Legal Name</label>
+                <input type="text" id="nc-org-legal" class="form-control" placeholder="Full registered name">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Industry Sector</label>
+                <select id="nc-org-sector" class="form-control">
+                  <option value="">— select —</option>
+                  ${(allData['industry_sectors']||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Region</label>
+                <select id="nc-org-region" class="form-control">
+                  <option value="">— select —</option>
+                  ${(allData['regions']||[]).map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- Contacts section -->
+          <div>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+              <div class="opp-section-title" style="margin-bottom:0;">Contacts <span style="color:var(--red)">*</span> <span style="font-weight:400;color:var(--text3);">(at least one required)</span></div>
+              <button class="btn btn-secondary btn-sm" onclick="addNewClientContact()">+ Add Contact</button>
+            </div>
+            <div id="nc-contacts-list"></div>
+          </div>
+
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewClient()">Create Client</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-root').innerHTML = html;
+
+  // Load industry sectors and regions if needed
+  if (!allData['industry_sectors']) {
+    apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc').then(d => {
+      allData['industry_sectors'] = d;
+      const sel = document.getElementById('nc-org-sector');
+      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+    });
+  }
+  if (!allData['regions']) {
+    apiGet('regions', 'active=eq.true&select=*&order=name.asc').then(d => {
+      allData['regions'] = d;
+      const sel = document.getElementById('nc-org-region');
+      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(r=>`<option value="${r.id}">${r.name}</option>`).join('');
+    });
+  }
+
+  // Add first contact row automatically
+  addNewClientContact();
+}
+
+let _orgCheckTimer;
+function checkOrgSimilarity() {
+  clearTimeout(_orgCheckTimer);
+  _orgCheckTimer = setTimeout(() => {
+    const name = document.getElementById('nc-org-name')?.value || '';
+    const warningEl = document.getElementById('nc-org-warning');
+    if (!warningEl) return;
+    if (name.length < 3) { warningEl.style.display = 'none'; return; }
+    const orgs = allData['organisations'] || [];
+    const matches = findSimilar(name, orgs, o => o.name);
+    if (matches.length) {
+      warningEl.style.display = 'block';
+      warningEl.innerHTML = '⚠️ Similar clients found: ' +
+        matches.map(m => `<strong>${m.item.name}</strong> (${m.score}% match)`).join(', ') +
+        '. Please confirm this is a new client.';
+    } else {
+      warningEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+function addNewClientContact() {
+  const list = document.getElementById('nc-contacts-list');
+  if (!list) return;
+  const idx = newClientContacts.length;
+  newClientContacts.push({});
+  const isPrimary = idx === 0;
+
+  const div = document.createElement('div');
+  div.id = 'nc-contact-' + idx;
+  div.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:10px;';
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div style="font-size:12px;font-weight:700;color:var(--text2);">
+        ${isPrimary ? '<span class="badge badge-blue">Primary Contact</span>' : 'Additional Contact'}
+      </div>
+      ${!isPrimary ? `<button class="btn btn-danger btn-sm" onclick="removeContact(${idx})">Remove</button>` : ''}
+    </div>
+    <div class="form-row">
+      <div class="form-group" style="flex:0 0 80px;">
+        <label class="form-label">Title</label>
+        <select class="form-control nc-title" data-idx="${idx}">
+          <option value="">—</option>
+          <option>Mr</option><option>Mrs</option><option>Ms</option><option>Dr</option><option>Prof</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+        <input type="text" class="form-control nc-first" data-idx="${idx}" oninput="checkPersonSimilarity(${idx})">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+        <input type="text" class="form-control nc-last" data-idx="${idx}" oninput="checkPersonSimilarity(${idx})">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Position</label>
+        <input type="text" class="form-control nc-position" data-idx="${idx}" placeholder="e.g. Financial Director">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email</label>
+        <input type="email" class="form-control nc-email" data-idx="${idx}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Phone</label>
+        <input type="text" class="form-control nc-phone" data-idx="${idx}">
+      </div>
+    </div>
+    <div id="nc-person-warning-${idx}" style="display:none;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;margin-top:4px;"></div>
+  `;
+  list.appendChild(div);
+}
+
+function removeContact(idx) {
+  const el = document.getElementById('nc-contact-' + idx);
+  if (el) el.remove();
+}
+
+let _personCheckTimers = {};
+function checkPersonSimilarity(idx) {
+  clearTimeout(_personCheckTimers[idx]);
+  _personCheckTimers[idx] = setTimeout(() => {
+    const first = document.querySelector(`.nc-first[data-idx="${idx}"]`)?.value || '';
+    const last = document.querySelector(`.nc-last[data-idx="${idx}"]`)?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const warningEl = document.getElementById('nc-person-warning-' + idx);
+    if (!warningEl) return;
+    if (fullName.length < 3) { warningEl.style.display = 'none'; return; }
+    const people = allData['people'] || [];
+    const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      warningEl.style.display = 'block';
+      warningEl.innerHTML = '⚠️ Similar contacts found: ' +
+        matches.map(m => `<strong>${[m.item.first_name,m.item.last_name].filter(Boolean).join(' ')}</strong> (${m.score}% match)`).join(', ') +
+        '. Please confirm this is a new person.';
+    } else {
+      warningEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+async function saveNewClient() {
+  const orgName = document.getElementById('nc-org-name')?.value.trim();
+  if (!orgName) { showStatus('Organisation name is required', 'error'); return; }
+
+  // Collect contacts
+  const contactEls = document.querySelectorAll('[id^="nc-contact-"]');
+  if (!contactEls.length) { showStatus('At least one contact is required', 'error'); return; }
+
+  const contacts = [];
+  for (const el of contactEls) {
+    const idx = el.id.replace('nc-contact-', '');
+    const first = el.querySelector('.nc-first')?.value.trim();
+    const last = el.querySelector('.nc-last')?.value.trim();
+    if (!first || !last) { showStatus('All contacts require first and last name', 'error'); return; }
+    contacts.push({
+      title: el.querySelector('.nc-title')?.value || '',
+      first, last,
+      position: el.querySelector('.nc-position')?.value.trim() || '',
+      email: el.querySelector('.nc-email')?.value.trim() || '',
+      phone: el.querySelector('.nc-phone')?.value.trim() || '',
+      isPrimary: idx === '0',
+    });
+  }
+
+  try {
+    // Create organisation
+    const orgPayload = {
+      name: orgName,
+      legal_name: document.getElementById('nc-org-legal')?.value.trim() || null,
+      active: true,
+      allows_system_users: false,
+    };
+    const sectorId = document.getElementById('nc-org-sector')?.value;
+    const regionId = document.getElementById('nc-org-region')?.value;
+
+    const orgResult = await api('organisations', 'POST', orgPayload, 'select=*');
+    const org = orgResult[0];
+    allData['organisations'] = null; // clear cache
+
+    // Create people and affiliations
+    for (const c of contacts) {
+      const initials = ((c.first[0]||'') + (c.last[0]||'')).toUpperCase();
+      const personResult = await api('people', 'POST', {
+        first_name: c.first, last_name: c.last,
+        title: c.title || null, email: c.email || null,
+        phone: c.phone || null, initials,
+      }, 'select=*');
+      const person = personResult[0];
+      allData['people'] = null; // clear cache
+
+      // Create affiliation
+      await api('person_organisation_roles', 'POST', {
+        person_id: person.id, org_id: org.id,
+        role_type: c.position || 'Contact',
+        is_primary: c.isPrimary,
+      }, '');
+    }
+
+    showStatus('Client created successfully');
+    closeModal();
+
+    // Reload organisations and select the new one
+    allData['organisations'] = await apiGet('organisations', 'select=*&order=name.asc');
+    const orgSel = document.getElementById('opp-org-id');
+    if (orgSel) {
+      orgSel.innerHTML = '<option value="">— select client —</option>' +
+        allData['organisations'].map(o => `<option value="${o.id}" ${o.id===org.id?'selected':''}>${o.name}</option>`).join('');
+    }
+
+  } catch(e) {
+    showStatus('Failed to create client: ' + e.message, 'error');
+  }
+}
+
+
+
+// ── Owner Display ─────────────────────────────────────────
+async function displayOwner() {
+  const ownerNameEl = document.getElementById('opp-owner-name');
+  const ownerDisplayEl = document.getElementById('opp-owner-display');
+  if (!ownerNameEl) return;
+
+  const ownerId = oppData.owner_id || currentUser?.personId;
+  if (!ownerId) { ownerNameEl.textContent = '—'; return; }
+
+  if (!allData['people'] || !allData['people'].length) {
+    allData['people'] = await apiGet('people', 'select=*');
+  }
+  const person = allData['people'].find(p => String(p.id) === String(ownerId));
+  ownerNameEl.textContent = person
+    ? [person.first_name, person.last_name].filter(Boolean).join(' ')
+    : '—';
+  if (ownerDisplayEl) ownerDisplayEl.style.display = 'flex';
+}
+
+
+// ── Opportunity Contacts ──────────────────────────────────
+let oppContacts = [];
+
+async function loadOppContacts(dealId) {
+  oppContacts = [];
+  if (!dealId) { renderOppContacts(); return; }
+  try {
+    const contacts = await apiGet('opportunity_contacts', `deal_id=eq.${dealId}&select=*`);
+    const people = allData['people'] || await apiGet('people', 'select=*');
+    const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'select=*');
+    allData['people'] = people;
+    allData['dmu_roles'] = dmuRoles;
+    contacts.forEach(c => {
+      const p = people.find(x => +x.id === +c.person_id);
+      const dmu = dmuRoles.find(x => +x.id === +c.dmu_role_id);
+      oppContacts.push({
+        id: c.id,
+        personId: c.person_id,
+        name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown',
+        title: p?.title || '',
+        phone: p?.phone || '',
+        dmuRole: dmu?.name || '',
+        dmuRoleId: c.dmu_role_id,
+        note: c.note || '',
+      });
+    });
+  } catch(e) { console.warn('Could not load opp contacts:', e.message); }
+  // Deduplicate by personId
+  const seen = new Set();
+  oppContacts = oppContacts.filter(c => {
+    if (seen.has(c.personId)) return false;
+    seen.add(c.personId);
+    return true;
+  });
+  renderOppContacts();
+}
+
+function renderOppContacts() {
+  const list = document.getElementById('opp-contacts-list');
+  if (!list) return;
+  if (!oppContacts.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No contacts added yet</div>';
+    return;
+  }
+  list.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="background:var(--bg);text-align:left;">
+        <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Name</th>
+        <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Title</th>
+        <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Phone</th>
+        <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">DMU Role</th>
+        <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Note</th>
+        <th style="padding:8px 12px;"></th>
+      </tr></thead>
+      <tbody>
+        ${oppContacts.map((c, i) => `
+          <tr style="border-top:1px solid var(--border);">
+            <td style="padding:10px 12px;font-weight:600;">${c.name}</td>
+            <td style="padding:10px 12px;color:var(--text2);">${c.title || '—'}</td>
+            <td style="padding:10px 12px;color:var(--text2);">${c.phone || '—'}</td>
+            <td style="padding:10px 12px;"><span class="badge badge-blue">${c.dmuRole || '—'}</span></td>
+            <td style="padding:10px 12px;color:var(--text2);font-size:12px;">${c.note || ''}</td>
+            <td style="padding:10px 12px;text-align:right;">
+              <button class="btn btn-ghost btn-sm" onclick="editOppContact(${i})">Edit</button>
+              <button class="btn btn-danger btn-sm" onclick="removeOppContact(${i})">Remove</button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+async function openAddOppContactModal(editIdx) {
+  const orgId = oppData?.org_id;
+  if (!orgId) { showStatus('Please select a client first', 'error'); return; }
+
+  // Load client-affiliated people excluding already-added contacts
+  const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+  const affiliatedIds = affiliations.map(a => a.person_id);
+  const people = allData['people'] || await apiGet('people', 'select=*');
+  allData['people'] = people;
+  const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'active=eq.true&select=*&order=name.asc');
+  allData['dmu_roles'] = dmuRoles;
+
+  const existingIds = new Set(oppContacts.map(c => c.personId));
+  const pool = people.filter(p => affiliatedIds.includes(+p.id) && (editIdx !== undefined || !existingIds.has(+p.id)));
+
+  const editing = editIdx !== undefined ? oppContacts[editIdx] : null;
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">${editing ? 'Edit' : 'Add'} Opportunity Contact</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Person <span style="color:var(--red)">*</span></label>
+            <select id="oc-person-id" class="form-control" ${editing ? 'disabled' : ''}>
+              <option value="">— select from client contacts —</option>
+              ${pool.map(p => `<option value="${p.id}" ${editing?.personId==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}${p.title?' ('+p.title+')':''}</option>`).join('')}
+            </select>
+            ${!pool.length && !editing ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No client contacts available — use "Create New Person" to add one</div>' : ''}
+          </div>
+          <div class="form-group">
+            <label class="form-label">DMU Role</label>
+            <select id="oc-dmu-role-id" class="form-control">
+              <option value="">— select role —</option>
+              ${dmuRoles.map(r => `<option value="${r.id}" ${editing?.dmuRoleId==r.id?'selected':''}>${r.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Note</label>
+            <textarea id="oc-note" class="form-control" rows="3">${editing?.note||''}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveOppContact(${editIdx ?? 'null'})">${editing ? 'Update' : 'Add'}</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function saveOppContact(editIdx) {
+  const personId = document.getElementById('oc-person-id')?.value;
+  const dmuRoleId = document.getElementById('oc-dmu-role-id')?.value || null;
+  const note = document.getElementById('oc-note')?.value || '';
+
+  if (!personId && editIdx === null) { showStatus('Please select a person', 'error'); return; }
+
+  const people = allData['people'] || [];
+  const dmuRoles = allData['dmu_roles'] || [];
+  const person = people.find(p => +p.id === +personId);
+  const dmu = dmuRoles.find(r => +r.id === +dmuRoleId);
+
+  if (editIdx !== null && editIdx !== undefined) {
+    // Update existing
+    const c = oppContacts[editIdx];
+    try {
+      await api('opportunity_contacts', 'PATCH', { dmu_role_id: dmuRoleId || null, note }, `id=eq.${c.id}`);
+      c.dmuRoleId = dmuRoleId;
+      c.dmuRole = dmu?.name || '';
+      c.note = note;
+      showStatus('Contact updated');
+    } catch(e) { showStatus('Failed: ' + e.message, 'error'); return; }
+  } else {
+    // Add new — save to DB if deal exists, otherwise queue
+    const entry = {
+      personId: +personId,
+      name: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : 'Unknown',
+      title: person?.title || '',
+      phone: person?.phone || '',
+      dmuRoleId: dmuRoleId || null,
+      dmuRole: dmu?.name || '',
+      note,
+      isNew: true,
+    };
+    if (oppData.id) {
+      try {
+        const result = await api('opportunity_contacts', 'POST', {
+          deal_id: oppData.id, person_id: +personId,
+          dmu_role_id: dmuRoleId || null, note,
+        }, 'select=*');
+        entry.id = result[0].id;
+        delete entry.isNew;
+      } catch(e) { showStatus('Failed: ' + e.message, 'error'); return; }
+    }
+    oppContacts.push(entry);
+    showStatus('Contact added');
+  }
+  renderOppContacts();
+  closeModal();
+}
+
+async function removeOppContact(idx) {
+  const c = oppContacts[idx];
+  if (!confirm('Remove this contact from the opportunity?')) return;
+  if (c.id) {
+    try {
+      await api('opportunity_contacts', 'DELETE', null, `id=eq.${c.id}`);
+    } catch(e) { showStatus('Failed: ' + e.message, 'error'); return; }
+  }
+  oppContacts.splice(idx, 1);
+  renderOppContacts();
+  showStatus('Contact removed');
+}
+
+function editOppContact(idx) {
+  openAddOppContactModal(idx);
+}
+
+async function openCreateOppContactModal() {
+  const orgId = oppData?.org_id;
+  const people = allData['people'] || await apiGet('people', 'select=*');
+  allData['people'] = people;
+  const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'active=eq.true&select=*&order=name.asc');
+  allData['dmu_roles'] = dmuRoles;
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:540px;">
+        <div class="modal-header">
+          <div class="modal-title">Create New Contact</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 80px;">
+              <label class="form-label">Title</label>
+              <select id="noc-title" class="form-control">
+                <option>—</option><option>Mr</option><option>Mrs</option><option>Ms</option><option>Dr</option><option>Prof</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="noc-first" class="form-control" oninput="checkNewOppContactSimilarity()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="noc-last" class="form-control" oninput="checkNewOppContactSimilarity()">
+            </div>
+          </div>
+          <div id="noc-match" style="display:none;padding:10px 12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);font-size:12px;margin-bottom:12px;"></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" id="noc-phone" class="form-control">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" id="noc-email" class="form-control">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">DMU Role</label>
+              <select id="noc-dmu-role-id" class="form-control">
+                <option value="">— select role —</option>
+                ${dmuRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Note</label>
+              <input type="text" id="noc-note" class="form-control">
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--text3);padding:8px 0;">
+            This person will be automatically affiliated with the client organisation.
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewOppContact()">Create & Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+let _nocCheckTimer;
+function checkNewOppContactSimilarity() {
+  clearTimeout(_nocCheckTimer);
+  _nocCheckTimer = setTimeout(() => {
+    const first = document.getElementById('noc-first')?.value || '';
+    const last = document.getElementById('noc-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const matchEl = document.getElementById('noc-match');
+    if (!matchEl || fullName.length < 3) { if(matchEl) matchEl.style.display='none'; return; }
+    const people = allData['people'] || [];
+    const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      matchEl.style.display = 'block';
+      matchEl.innerHTML = '🔍 Similar people found: ' +
+        matches.map(m => {
+          const name = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+          return `<strong>${name}</strong> (${m.score}% match) — <a href="#" onclick="useExistingOppContact(${m.item.id},'${name}');return false;" style="color:var(--red);">Use this person</a>`;
+        }).join(', ');
+    } else {
+      matchEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+async function useExistingOppContact(personId, name) {
+  const orgId = oppData?.org_id;
+  // Check if affiliated with client
+  if (orgId) {
+    const affiliations = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${orgId}&select=id`);
+    if (!affiliations.length) {
+      // Auto-create affiliation
+      await api('person_organisation_roles', 'POST', {
+        person_id: personId, org_id: +orgId, role_type: 'Contact', is_primary: false
+      }, '');
+    }
+  }
+  const people = allData['people'] || [];
+  const person = people.find(p => +p.id === +personId);
+  oppContacts.push({
+    personId, name,
+    title: person?.title || '',
+    phone: person?.phone || '',
+    dmuRoleId: null, dmuRole: '', note: '', isNew: true,
+  });
+  renderOppContacts();
+  closeModal();
+  showStatus(name + ' added as opportunity contact');
+}
+
+async function saveNewOppContact() {
+  const first = document.getElementById('noc-first')?.value.trim();
+  const last = document.getElementById('noc-last')?.value.trim();
+  if (!first || !last) { showStatus('First and last name required', 'error'); return; }
+
+  const orgId = oppData?.org_id;
+  const dmuRoleId = document.getElementById('noc-dmu-role-id')?.value || null;
+  const note = document.getElementById('noc-note')?.value || '';
+  const dmuRoles = allData['dmu_roles'] || [];
+  const dmu = dmuRoles.find(r => +r.id === +dmuRoleId);
+
+  try {
+    const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+    const personResult = await api('people', 'POST', {
+      first_name: first, last_name: last,
+      title: document.getElementById('noc-title')?.value || null,
+      email: document.getElementById('noc-email')?.value || null,
+      phone: document.getElementById('noc-phone')?.value || null,
+      initials,
+    }, 'select=*');
+    const person = personResult[0];
+    allData['people'] = null;
+
+    // Auto-affiliate with client
+    if (orgId) {
+      await api('person_organisation_roles', 'POST', {
+        person_id: person.id, org_id: +orgId, role_type: 'Contact', is_primary: false,
+      }, '');
+    }
+
+    const entry = {
+      personId: person.id,
+      name: [first, last].join(' '),
+      title: person.title || '',
+      phone: person.phone || '',
+      dmuRoleId: dmuRoleId || null,
+      dmuRole: dmu?.name || '',
+      note, isNew: true,
+    };
+
+    if (oppData.id) {
+      const result = await api('opportunity_contacts', 'POST', {
+        deal_id: oppData.id, person_id: person.id,
+        dmu_role_id: dmuRoleId || null, note,
+      }, 'select=*');
+      entry.id = result[0].id;
+      delete entry.isNew;
+    }
+
+    oppContacts.push(entry);
+    renderOppContacts();
+    closeModal();
+    showStatus([first, last].join(' ') + ' created and added');
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+async function saveOppContacts(dealId) {
+  for (const c of oppContacts) {
+    if (!c.isNew) continue;
+    try {
+      const result = await api('opportunity_contacts', 'POST', {
+        deal_id: dealId, person_id: c.personId,
+        dmu_role_id: c.dmuRoleId || null, note: c.note || '',
+      }, 'select=*');
+      c.id = result[0].id;
+      delete c.isNew;
+    } catch(e) {
+      // Ignore duplicate - already saved
+      if (e.message.includes('23505')) { delete c.isNew; }
+      else console.warn('Could not save opp contact:', e.message);
+    }
+  }
+}
+
+// ── Deal Collaborators ────────────────────────────────────
+let oppCollaborators = []; // {personId, name, role, isOwner}
+
+async function loadCollaborators(dealId) {
+  oppCollaborators = [];
+  if (!dealId) {
+    // New deal — add owner as first collaborator
+    const ownerId = document.getElementById('opp-owner-id')?.value;
+    if (ownerId) {
+      const people = allData['people'] || [];
+      const owner = people.find(p => +p.id === +ownerId);
+      if (owner) {
+        oppCollaborators.push({
+          personId: +ownerId,
+          name: [owner.first_name, owner.last_name].filter(Boolean).join(' '),
+          role: 'Owner',
+          isOwner: true,
+          isNew: true,
+        });
+      }
+    }
+  } else {
+    try {
+      const collabs = await apiGet('deal_collaborators', `deal_id=eq.${dealId}&select=*`);
+      const people = allData['people'] || await apiGet('people', 'select=*');
+      allData['people'] = people;
+      collabs.forEach(c => {
+        const p = people.find(x => +x.id === +c.person_id);
+        oppCollaborators.push({
+          id: c.id,
+          personId: c.person_id,
+          name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown',
+          role: c.role || 'Collaborator',
+          isOwner: c.is_owner,
+        });
+      });
+
+    } catch(e) { console.warn('Could not load collaborators:', e.message); }
+  }
+  renderCollaborators();
+}
+
+function renderCollaborators() {
+  const list = document.getElementById('collaborators-list');
+  if (!list) return;
+  if (!oppCollaborators.length) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No collaborators yet</div>';
+    return;
+  }
+  list.innerHTML = oppCollaborators.map((c, i) => `
+    <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;">
+      <div style="flex:1;">
+        <div style="font-weight:600;font-size:13px;">${c.name}</div>
+        <div style="font-size:11px;color:var(--text3);">${c.role}</div>
+      </div>
+      ${c.isOwner ? '<span class="badge badge-blue">Owner</span>' : ''}
+      ${!c.isOwner ? `<button class="btn btn-danger btn-sm" onclick="removeCollaborator(${i})">Remove</button>` : ''}
+    </div>
+  `).join('');
+}
+
+function removeCollaborator(idx) {
+  oppCollaborators.splice(idx, 1);
+  renderCollaborators();
+}
+
+async function getCollaboratorPool() {
+  // People affiliated with client
+  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
+  let clientPeople = [];
+  if (orgId) {
+    const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+    const personIds = affiliations.map(a => a.person_id);
+    if (personIds.length) {
+      const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=*`);
+      clientPeople = people;
+    }
+  }
+
+  // Home org people with eligible roles
+  const eligibleRoleNames = (appSettings['eligible_collaborator_roles'] || 'Sales Manager,Sales User').split(',').map(s => s.trim());
+  const roles = allData['roles'] || await apiGet('roles', 'select=*');
+  const eligibleRoleIds = roles.filter(r => eligibleRoleNames.includes(r.name)).map(r => r.id);
+  let homeOrgPeople = [];
+  if (eligibleRoleIds.length) {
+    const members = await apiGet('home_organisation_members', `role_id=in.(${eligibleRoleIds.join(',')})&select=person_id`);
+    const personIds = members.map(m => m.person_id);
+    if (personIds.length) {
+      const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=*`);
+      homeOrgPeople = people;
+    }
+  }
+
+  // Merge, deduplicate, exclude existing collaborators
+  const existingIds = new Set(oppCollaborators.map(c => c.personId));
+  const allPeople = [...clientPeople, ...homeOrgPeople];
+  const seen = new Set();
+  return allPeople.filter(p => {
+    if (existingIds.has(+p.id)) return false;
+    if (seen.has(+p.id)) return false;
+    seen.add(+p.id);
+    return true;
+  });
+}
+
+async function openAddCollaboratorModal() {
+  const pool = await getCollaboratorPool();
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:480px;">
+        <div class="modal-header">
+          <div class="modal-title">Add Collaborator</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Person <span style="color:var(--red)">*</span></label>
+            <select id="collab-person-id" class="form-control">
+              <option value="">— select person —</option>
+              ${pool.map(p => `<option value="${p.id}">${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+            </select>
+            ${!pool.length ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No eligible people found — use "Create New Person" instead</div>' : ''}
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role</label>
+            <input type="text" id="collab-role" class="form-control" value="Collaborator" placeholder="e.g. Technical Lead">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmAddCollaborator()">Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function confirmAddCollaborator() {
+  const personId = document.getElementById('collab-person-id')?.value;
+  const role = document.getElementById('collab-role')?.value || 'Collaborator';
+  if (!personId) { showStatus('Please select a person', 'error'); return; }
+  const people = allData['people'] || [];
+  const person = people.find(p => +p.id === +personId);
+  oppCollaborators.push({
+    personId: +personId,
+    name: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : 'Unknown',
+    role,
+    isOwner: false,
+    isNew: true,
+  });
+  renderCollaborators();
+  closeModal();
+  showStatus('Collaborator added');
+}
+
+async function openCreateCollaboratorModal(forEngagement) {
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:540px;">
+        <div class="modal-header">
+          <div class="modal-title">Create New ${forEngagement ? 'Engagement Contact' : 'Collaborator'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 80px;">
+              <label class="form-label">Title</label>
+              <select id="new-collab-title" class="form-control">
+                <option>—</option><option>Mr</option><option>Mrs</option><option>Ms</option><option>Dr</option><option>Prof</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="new-collab-first" class="form-control" oninput="checkNewCollabSimilarity()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="new-collab-last" class="form-control" oninput="checkNewCollabSimilarity()">
+            </div>
+          </div>
+          <div id="new-collab-match" style="display:none;padding:10px 12px;background:#EFF6FF;border:1px solid #BFDBFE;border-radius:var(--radius);font-size:12px;margin-bottom:12px;"></div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" id="new-collab-email" class="form-control">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone</label>
+              <input type="text" id="new-collab-phone" class="form-control">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role on Opportunity</label>
+            <input type="text" id="new-collab-role" class="form-control" value="${forEngagement ? 'Contact' : 'Collaborator'}">
+          </div>
+          <div class="divider"></div>
+          <div class="form-group">
+            <label class="form-label">Relationship to Client</label>
+            <div style="display:flex;gap:16px;">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                <input type="radio" name="collab-affil" value="client" checked style="accent-color:var(--red);"> Works for client
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;">
+                <input type="radio" name="collab-affil" value="party"> External party
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewCollaborator(${forEngagement ? 'true' : 'false'})">Create & Add</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+let _collabCheckTimer;
+async function checkNewCollabSimilarity() {
+  clearTimeout(_collabCheckTimer);
+  _collabCheckTimer = setTimeout(async () => {
+    const first = document.getElementById('new-collab-first')?.value || '';
+    const last = document.getElementById('new-collab-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const matchEl = document.getElementById('new-collab-match');
+    if (!matchEl || fullName.length < 3) { if(matchEl) matchEl.style.display='none'; return; }
+    const people = allData['people'] || await apiGet('people', 'select=*');
+    allData['people'] = people;
+    const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      matchEl.style.display = 'block';
+      matchEl.innerHTML = '🔍 Similar people found: ' +
+        matches.map(m => {
+          const name = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+          return `<strong>${name}</strong> (${m.score}% match) — <a href="#" onclick="useExistingPerson(${m.item.id},'${name}');return false;" style="color:var(--red);">Use this person</a>`;
+        }).join(', ');
+    } else {
+      matchEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+function useExistingPerson(personId, name) {
+  const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
+  oppCollaborators.push({ personId, name, role, isOwner: false, isNew: true });
+  renderCollaborators();
+  closeModal();
+  showStatus(name + ' added as collaborator');
+}
+
+async function saveNewCollaborator(forEngagement) {
+  const first = document.getElementById('new-collab-first')?.value.trim();
+  const last = document.getElementById('new-collab-last')?.value.trim();
+  if (!first || !last) { showStatus('First and last name required', 'error'); return; }
+
+  const affiliType = document.querySelector('input[name="collab-affil"]:checked')?.value || 'client';
+  const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
+  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
+
+  try {
+    // Create person
+    const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+    const personResult = await api('people', 'POST', {
+      first_name: first, last_name: last,
+      title: document.getElementById('new-collab-title')?.value || null,
+      email: document.getElementById('new-collab-email')?.value || null,
+      phone: document.getElementById('new-collab-phone')?.value || null,
+      initials,
+    }, 'select=*');
+    const person = personResult[0];
+    allData['people'] = null; // clear cache
+
+    if (affiliType === 'client' && orgId) {
+      // Add affiliation to client
+      await api('person_organisation_roles', 'POST', {
+        person_id: person.id, org_id: +orgId,
+        role_type: 'Contact', is_primary: false,
+      }, '');
+    } else {
+      // Add to parties table
+      await api('parties', 'POST', {
+        party_type: 'person', ref_id: person.id, status: 'active',
+      }, '');
+    }
+
+    const name = [first, last].join(' ');
+    if (forEngagement === 'true' || forEngagement === true) {
+      // Add to engagement people and reopen engagement modal
+      if (!window._engPeople) window._engPeople = [];
+      window._engPeople.push({ id: String(person.id), name });
+      showStatus(name + ' created and added to engagement');
+      await openEngagementModal();
+      // Restore engagement people
+      renderEngPeople();
+    } else {
+      oppCollaborators.push({ personId: person.id, name, role, isOwner: false, isNew: true });
+      renderCollaborators();
+      closeModal();
+      showStatus(name + ' created and added');
+    }
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+async function saveCollaborators(dealId) {
+  // Ensure logged-in user is always a collaborator as owner on new deals
+  if (!oppData.id && currentUser?.personId) {
+    const alreadyOwner = oppCollaborators.find(c => c.isOwner);
+    if (!alreadyOwner) {
+      const people = allData['people'] || [];
+      const person = people.find(p => +p.id === +currentUser.personId);
+      oppCollaborators.unshift({
+        personId: +currentUser.personId,
+        name: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : currentUser.name,
+        role: 'Owner',
+        isOwner: true,
+        isNew: true,
+      });
+    }
+  }
+
+  // Save new collaborators to deal_collaborators table
+  for (const c of oppCollaborators) {
+    if (!c.isNew) continue;
+    try {
+      await api('deal_collaborators', 'POST', {
+        deal_id: dealId,
+        person_id: c.personId,
+        role: c.role,
+        is_owner: !!c.isOwner,
+      }, '');
+      delete c.isNew;
+    } catch(e) {
+      console.warn('Could not save collaborator:', e.message);
+    }
+  }
+}
+
+// ── Auth ─────────────────────────────────────────────────
+async function loadLoginUsers() {
+  try {
+    const users = await apiGet('system_users', 'active=eq.true&select=id,person_id');
+    const people = await apiGet('people', 'select=id,first_name,last_name');
+    const sel = document.getElementById('login-user');
+    sel.innerHTML = '<option value="">— select user —</option>';
+    users.forEach(u => {
+      const p = people.find(x => +x.id === +u.person_id);
+      const name = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id;
+      const opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    document.getElementById('login-user').innerHTML = '<option value="">Error loading users</option>';
+  }
+}
+
+async function doLogin() {
+  const sel = document.getElementById('login-user');
+  const userId = sel.value;
+  const errEl = document.getElementById('login-error');
+  errEl.style.display = 'none';
+
+  if (!userId) {
+    errEl.textContent = 'Please select a user';
+    errEl.style.display = 'block';
+    return;
+  }
+
+  try {
+    // Load user and their roles
+    const users = await apiGet('system_users', 'id=eq.' + userId + '&select=*');
+    const user = users[0];
+    if (!user) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
+
+    // Load person details
+    const people = await apiGet('people', 'id=eq.' + user.person_id + '&select=*');
+    const person = people[0] || {};
+
+    // Load roles
+    const userRoles = await apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id');
+    const roleIds = userRoles.map(r => r.role_id);
+    let roles = [];
+    if (roleIds.length) {
+      roles = await apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*');
+    }
+
+    // Load permissions for those roles
+    let permissions = [];
+    if (roleIds.length) {
+      const rp = await apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id');
+      const permIds = rp.map(r => r.permission_id);
+      if (permIds.length) {
+        const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
+        permissions = perms.map(p => p.name);
+      }
+    }
+
+    // Set current user
+    currentUser = {
+      id: user.id,
+      personId: user.person_id,
+      name: [person.first_name, person.last_name].filter(Boolean).join(' '),
+      roles,
+      permissions,
+      isAdmin: roles.some(r => r.name === 'Admin')
+    };
+
+    // If admin and no permissions set yet, grant all
+    if (currentUser.isAdmin && !permissions.length) {
+      currentUser.permissions = ['all'];
+    }
+
+    // Show app
+    document.getElementById('login-screen').style.display = 'none';
+    document.getElementById('main-app').style.display = 'flex';
+    document.getElementById('sidebar-user-name').textContent = currentUser.name;
+    document.getElementById('sidebar-user-role').textContent = roles.map(r => r.name).join(', ') || 'No role';
+
+    await checkConnection();
+    await loadAppSettings();
+    buildNav();
+  } catch(e) {
+    errEl.textContent = 'Login failed: ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
+
+function can(permission) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
+  return currentUser.permissions.includes(permission);
+}
+
+function doLogout() {
+  currentUser = null;
+  document.getElementById('main-app').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('login-user').value = '';
+}
+
+
+async function renderOpportunitiesPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+
+  head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th><th>Actions</th></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
+
+  try {
+    const [deals, orgs, stages, people] = await Promise.all([
+      apiGet('deals', 'select=*&order=created_at.desc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      allData['stages'] || apiGet('stages', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+    ]);
+    allData['organisations'] = orgs;
+    allData['stages'] = stages;
+    allData['people'] = people;
+
+    document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
+
+    if (!deals.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="6">No opportunities yet — click "+ New Opportunity" to create one</td></tr>';
+      return;
+    }
+
+    body.innerHTML = deals.map(d => {
+      const org = orgs.find(o => +o.id === +d.org_id);
+      const stage = stages.find(s => +s.id === +d.stage_id);
+      const owner = people.find(p => +p.id === +d.owner_id);
+      const ownerName = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
+      return `<tr onclick="openOpportunity(${d.id})" style="cursor:pointer;">
+        <td style="font-weight:600;">${org?.name || '—'}</td>
+        <td>${d.name}</td>
+        <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
+        <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
+        <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
+        <td onclick="event.stopPropagation()">
+          <button class="btn btn-ghost btn-sm" onclick="openOpportunity(${d.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteDeal(${d.id})">Delete</button>
+        </td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function confirmDeleteDeal(id) {
+  if (!confirm('Delete this deal? This cannot be undone.')) return;
+  try {
+    await apiDelete('deals', id);
+    showStatus('Deal deleted');
+    await renderOpportunitiesPage();
+  } catch(e) {
+    showStatus('Delete failed: ' + e.message, 'error');
+  }
+}
+
+
+// ── Settings Page ─────────────────────────────────────────
+let appSettings = {};
+
+async function loadAppSettings() {
+  try {
+    const rows = await apiGet('settings', 'select=*');
+    rows.forEach(r => appSettings[r.key] = r.value);
+  } catch(e) { console.warn('Could not load settings:', e.message); }
+}
+
+async function renderSettingsPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '';
+  body.innerHTML = '<tr><td style="padding:0;border:none;"></td></tr>';
+
+  await loadAppSettings();
+
+  const fy = appSettings['fy_start_month'] || 'April';
+  const esc = appSettings['escalation_month'] || 'April';
+  const monthOptions = (selected) => `              <option value='January'>January</option>
+              <option value='February'>February</option>
+              <option value='March'>March</option>
+              <option value='April'>April</option>
+              <option value='May'>May</option>
+              <option value='June'>June</option>
+              <option value='July'>July</option>
+              <option value='August'>August</option>
+              <option value='September'>September</option>
+              <option value='October'>October</option>
+              <option value='November'>November</option>
+              <option value='December'>December</option>`.replace(`value='${selected}'`, `value='${selected}' selected`);
+
+  body.innerHTML = `<tr><td colspan="2" style="padding:0;border:none;">
+    <div style="max-width:600px;padding:8px 0;">
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Financial Year</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Financial Year Start Month</label>
+            <select id="setting-fy-start" class="form-control">
+              ${monthOptions(fy)}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The month the financial year begins — determines the revenue grid layout</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Escalation Month</label>
+            <select id="setting-esc-month" class="form-control">
+              ${monthOptions(esc)}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The month in which annual escalation is applied to recurring revenue</div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Duplicate Detection</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Similarity Warning Threshold (%)</label>
+            <input type="number" id="setting-similarity" class="form-control" min="50" max="100" value="${appSettings['similarity_threshold']||'80'}">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">How similar two names must be before a duplicate warning is shown (50–100%). Lower = more warnings.</div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Engagement Edit Grace Period</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Minutes allowed to edit after logging</label>
+            <select id="setting-eng-edit" class="form-control">
+              ${[15,30,60,120,240,480,1440].map(m => {
+                const label = m < 60 ? m+'m' : (m/60)+'h';
+                return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${label}</option>`;
+              }).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited.</div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Eligible Collaborator Roles</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Home organisation members with these roles will appear in the collaborator dropdown on opportunities.</div>
+        <div id="setting-collab-roles-list" style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${(allData['roles']||[]).map(r => {
+            const selected = (appSettings['eligible_collaborator_roles']||'Sales Manager,Sales User').split(',').includes(r.name);
+            return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;">
+              <input type="checkbox" class="setting-collab-role" value="${r.name}" ${selected?'checked':''} style="accent-color:var(--red);">
+              ${r.name}${r.is_system?'':' <span style="font-size:10px;color:var(--text3);">(org)</span>'}
+            </label>`;
+          }).join('')}
+        </div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;">
+        <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </td></tr>`;
+}
+
+async function saveSettings() {
+  try {
+    const fyStart = document.getElementById('setting-fy-start').value;
+    const escMonth = document.getElementById('setting-esc-month').value;
+
+    const similarity = document.getElementById('setting-similarity').value;
+    const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
+    await Promise.all([
+      api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
+      api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
+      api('settings', 'PATCH', { value: similarity, updated_at: new Date().toISOString() }, 'key=eq.similarity_threshold'),
+      api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
+    ]);
+
+    appSettings['fy_start_month'] = fyStart;
+    appSettings['escalation_month'] = escMonth;
+    appSettings['similarity_threshold'] = similarity;
+    appSettings['eligible_collaborator_roles'] = collabRoles;
+    showStatus('Settings saved');
+  } catch(e) {
+    showStatus('Failed to save: ' + e.message, 'error');
+  }
+}
+
+// ── Role Permissions Manager ──────────────────────────────
+async function renderRolePermissions() {
+  const body = document.getElementById('table-body');
+  const head = document.getElementById('table-head');
+
+  // Use cache if available, fetch in background
+  const cachedRoles = allData['roles'];
+  const cachedPerms = allData['permissions'];
+
+  if (cachedRoles && cachedPerms) {
+    // Render with cached roles/perms immediately, only fetch assignments
+    head.innerHTML = '<tr><th style="width:200px;">Permission</th>' +
+      cachedRoles.map(r => `<th style="text-align:center;white-space:nowrap;">${r.name}</th>`).join('') + '</tr>';
+    body.innerHTML = '<tr class="empty-row"><td colspan="' + (cachedRoles.length+1) + '">Loading assignments...</td></tr>';
+  } else {
+    head.innerHTML = '';
+    body.innerHTML = '<tr class="empty-row"><td colspan="2">Loading...</td></tr>';
+  }
+
+  try {
+    const [roles, permissions, assignments] = await Promise.all([
+      cachedRoles ? Promise.resolve(cachedRoles) : apiGet('roles', 'select=*&order=name.asc'),
+      cachedPerms ? Promise.resolve(cachedPerms) : apiGet('permissions', 'select=*&order=name.asc'),
+      apiGet('role_permissions', 'select=role_id,permission_id')
+    ]);
+
+    // Update cache
+    allData['roles'] = roles;
+    allData['permissions'] = permissions;
+
+    document.getElementById('page-sub').textContent = roles.length + ' roles, ' + permissions.length + ' permissions';
+
+    // Build assignment set for quick lookup
+    const assigned = new Set(assignments.map(a => a.role_id + '_' + a.permission_id));
+
+    // Build table - roles as columns, permissions as rows
+    head.innerHTML = '<tr><th style="width:200px;">Permission</th>' +
+      roles.map(r => `<th style="text-align:center;white-space:nowrap;">${r.name}</th>`).join('') + '</tr>';
+
+    body.innerHTML = permissions.map(p => {
+      const cells = roles.map(r => {
+        const checked = assigned.has(r.id + '_' + p.id);
+        return `<td style="text-align:center;">
+          <input type="checkbox" ${checked ? 'checked' : ''}
+            style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;"
+            onchange="toggleRolePermission(${r.id}, ${p.id}, this.checked)"
+            title="${checked ? 'Remove' : 'Grant'} ${p.name} from ${r.name}">
+        </td>`;
+      }).join('');
+      return `<tr>
+        <td><div style="font-weight:600;font-size:13px;">${p.name}</div>
+            <div style="font-size:11px;color:var(--text3);">${p.description||''}</div></td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="10">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function toggleRolePermission(roleId, permId, grant) {
+  try {
+    if (grant) {
+      await apiPost('role_permissions', { role_id: roleId, permission_id: permId });
+    } else {
+      await api('role_permissions', 'DELETE', null, 'role_id=eq.' + roleId + '&permission_id=eq.' + permId);
+    }
+    showStatus(grant ? 'Permission granted' : 'Permission removed');
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+    // Revert checkbox
+    await renderRolePermissions();
+  }
+}
+
+// ── Party Type Dynamic Lookup ───────────────────────────
+async function onPartyTypeChange(type) {
+  const refEl = document.getElementById('f_ref_id');
+  if (!refEl) return;
+  refEl.innerHTML = '<option value="">Loading...</option>';
+
+  try {
+    let records = [];
+    if (type === 'person') {
+      records = allData['people'] || await apiGet('people', 'select=*&order=first_name.asc');
+      allData['people'] = records;
+      refEl.innerHTML = '<option value="">— select person —</option>' +
+        records.map(p => {
+          const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+          return `<option value="${p.id}">${name}</option>`;
+        }).join('');
+    } else if (type === 'organisation') {
+      records = allData['organisations'] || await apiGet('organisations', 'select=*&order=name.asc');
+      allData['organisations'] = records;
+      refEl.innerHTML = '<option value="">— select organisation —</option>' +
+        records.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    } else {
+      refEl.innerHTML = '<option value="">— select party type first —</option>';
+    }
+  } catch(e) {
+    refEl.innerHTML = '<option value="">Error loading options</option>';
+  }
+}
+
+
+
+async function renderAllOppContacts() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '<tr><th>Person</th><th>Organisation</th><th>Opportunity</th><th>DMU Role</th><th>Note</th></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
+  try {
+    const [contacts, people, orgs, deals, dmuRoles] = await Promise.all([
+      apiGet('opportunity_contacts', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      apiGet('deals', 'select=id,name,org_id'),
+      allData['dmu_roles'] || apiGet('dmu_roles', 'select=*'),
+    ]);
+    allData['people'] = people;
+    allData['organisations'] = orgs;
+    allData['dmu_roles'] = dmuRoles;
+    document.getElementById('page-sub').textContent = contacts.length + ' contact' + (contacts.length !== 1 ? 's' : '');
+    if (!contacts.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">No opportunity contacts yet</td></tr>';
+      return;
+    }
+    body.innerHTML = contacts.map(c => {
+      const p = people.find(x => +x.id === +c.person_id);
+      const d = deals.find(x => +x.id === +c.deal_id);
+      const o = orgs.find(x => d && +x.id === +d.org_id);
+      const dmu = dmuRoles.find(x => +x.id === +c.dmu_role_id);
+      return `<tr>
+        <td style="font-weight:600;">${p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : '—'}</td>
+        <td>${o?.name || '—'}</td>
+        <td>${d?.name || '—'}</td>
+        <td>${dmu ? '<span class="badge badge-blue">'+dmu.name+'</span>' : '—'}</td>
+        <td style="font-size:12px;color:var(--text2);">${c.note || ''}</td>
+      </tr>`;
+    }).join('');
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="5">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// ── Home Organisation Members ─────────────────────────────
+async function renderHomeOrgMembers() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = '';
+  document.getElementById('add-btn').onclick = () => openAddHomeMemberModal();
+  document.getElementById('add-btn').textContent = '+ Add Member';
+
+  head.innerHTML = '<tr><th>Name</th><th>Organisation</th><th>Role</th><th>System User</th><th>Actions</th></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
+
+  try {
+    const [members, people, orgs, roles, sysUsers] = await Promise.all([
+      apiGet('home_organisation_members', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      allData['roles'] || apiGet('roles', 'select=*'),
+      apiGet('system_users', 'select=person_id,active'),
+    ]);
+
+    allData['people'] = people;
+    allData['organisations'] = orgs;
+    allData['roles'] = roles;
+
+    document.getElementById('page-sub').textContent = members.length + ' member' + (members.length !== 1 ? 's' : '');
+
+    if (!members.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">No members yet — click "+ Add Member" to add one</td></tr>';
+      return;
+    }
+
+    body.innerHTML = members.map(m => {
+      const person = people.find(p => +p.id === +m.person_id);
+      const org = orgs.find(o => +o.id === +m.org_id);
+      const role = roles.find(r => +r.id === +m.role_id);
+      const sysUser = sysUsers.find(s => +s.person_id === +m.person_id);
+      const name = person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : '—';
+      const isSystemUser = !!sysUser;
+      return `<tr>
+        <td style="font-weight:600;">${name}</td>
+        <td>${org?.name || '—'}</td>
+        <td>
+          <span class="badge ${role?.is_system ? 'badge-blue' : 'badge-gray'}">${role?.name || '—'}</span>
+          ${role?.is_system ? '<span style="font-size:10px;color:var(--text3);margin-left:4px;">system</span>' : ''}
+        </td>
+        <td>${isSystemUser
+          ? `<span class="badge badge-green">${sysUser.active ? 'Active' : 'Inactive'}</span>`
+          : '<span class="badge badge-gray">No access</span>'}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="openEditHomeMemberModal(${m.id})">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmDeleteHomeMember(${m.id})">Remove</button>
+        </td>
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="5">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function openAddHomeMemberModal(editMember) {
+  // Load home organisations
+  const orgs = allData['organisations'] || await apiGet('organisations', 'select=*');
+  const homeOrgs = orgs.filter(o => o.home_organisation);
+  const people = allData['people'] || await apiGet('people', 'select=*');
+  const roles = allData['roles'] || await apiGet('roles', 'select=*&order=name.asc');
+  allData['organisations'] = orgs;
+  allData['people'] = people;
+  allData['roles'] = roles;
+
+  const isEdit = !!editMember;
+  const title = isEdit ? 'Edit Member' : 'Add Home Org Member';
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">${title}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Person <span style="color:var(--red)">*</span></label>
+            <select id="hom-person-id" class="form-control" onchange="checkHomeOrgAffiliation()">
+              <option value="">— select person —</option>
+              ${people.map(p => `<option value="${p.id}" ${editMember?.person_id==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Home Organisation <span style="color:var(--red)">*</span></label>
+            <select id="hom-org-id" class="form-control" onchange="checkHomeOrgAffiliation()">
+              <option value="">— select —</option>
+              ${homeOrgs.map(o => `<option value="${o.id}" ${editMember?.org_id==o.id?'selected':''}>${o.name}</option>`).join('')}
+            </select>
+          </div>
+          <div id="hom-affiliation-warning" style="display:none;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;margin-bottom:12px;">
+            ⚠️ This person is not affiliated with the selected organisation. An affiliation will be created automatically on save.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Role <span style="color:var(--red)">*</span></label>
+            <select id="hom-role-id" class="form-control">
+              <option value="">— select role —</option>
+              <optgroup label="System Roles">
+                ${roles.filter(r=>r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+              </optgroup>
+              <optgroup label="Organisational Roles">
+                ${roles.filter(r=>!r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+              </optgroup>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveHomeMember(${editMember?.id||'null'})">${isEdit?'Update':'Add'}</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('modal-root').innerHTML = html;
+  if (isEdit) checkHomeOrgAffiliation();
+}
+
+async function checkHomeOrgAffiliation() {
+  const personId = document.getElementById('hom-person-id')?.value;
+  const orgId = document.getElementById('hom-org-id')?.value;
+  const warningEl = document.getElementById('hom-affiliation-warning');
+  if (!warningEl || !personId || !orgId) { if(warningEl) warningEl.style.display='none'; return; }
+  const affiliations = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${orgId}&select=id`);
+  warningEl.style.display = affiliations.length ? 'none' : 'block';
+}
+
+async function saveHomeMember(editId) {
+  const personId = document.getElementById('hom-person-id')?.value;
+  const orgId = document.getElementById('hom-org-id')?.value;
+  const roleId = document.getElementById('hom-role-id')?.value;
+
+  if (!personId || !orgId || !roleId) { showStatus('All fields are required', 'error'); return; }
+
+  try {
+    // Ensure affiliation exists
+    const affiliations = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${orgId}&select=id`);
+    if (!affiliations.length) {
+      await api('person_organisation_roles', 'POST', {
+        person_id: +personId, org_id: +orgId, role_type: 'Staff', is_primary: false
+      }, '');
+    }
+
+    if (editId) {
+      await api('home_organisation_members', 'PATCH', { role_id: +roleId }, 'id=eq.' + editId);
+    } else {
+      await api('home_organisation_members', 'POST', {
+        person_id: +personId, org_id: +orgId, role_id: +roleId
+      }, '');
+    }
+
+    showStatus(editId ? 'Member updated' : 'Member added');
+    closeModal();
+    await renderHomeOrgMembers();
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+async function openEditHomeMemberModal(id) {
+  const members = await apiGet('home_organisation_members', `id=eq.${id}&select=*`);
+  if (members.length) await openAddHomeMemberModal(members[0]);
+}
+
+async function confirmDeleteHomeMember(id) {
+  if (!confirm('Remove this member?')) return;
+  try {
+    await api('home_organisation_members', 'DELETE', null, 'id=eq.' + id);
+    showStatus('Member removed');
+    await renderHomeOrgMembers();
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+// ── Eligible People ─────────────────────────────────────
+async function loadEligiblePeople() {
+  try {
+    // Get orgs that allow system users
+    const eligibleOrgs = await apiGet('organisations', 'allows_system_users=eq.true&select=id');
+    if (!eligibleOrgs.length) return [];
+    const orgIds = eligibleOrgs.map(o => o.id).join(',');
+    // Get affiliations for those orgs
+    const affiliations = await apiGet('person_organisation_roles', 'org_id=in.(' + orgIds + ')&select=person_id');
+    if (!affiliations.length) return [];
+    const personIds = [...new Set(affiliations.map(a => a.person_id))].join(',');
+    // Get those people
+    const people = await apiGet('people', 'id=in.(' + personIds + ')&select=*');
+    return people;
+  } catch(e) {
+    console.warn('loadEligiblePeople failed:', e.message);
+    return [];
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────
+async function init() {
+  // Load users for login dropdown
+  await loadLoginUsers();
+}
+
+init();
+</script>
+</body>
+</html>
