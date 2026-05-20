@@ -203,7 +203,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.12</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.13</div>
   </div>
 </div>
 
@@ -222,7 +222,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.12</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.13</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -491,13 +491,16 @@ tr:hover td{background:#F8FAFC;}
     <button class="btn btn-ghost btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">← Back</button>
     <div class="opp-topbar-title" id="lead-page-title">New Lead</div>
     <div style="flex:1;"></div>
-    <div style="display:flex;gap:8px;align-items:center;">
+    <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
       <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveLead()">Save</button>
+      <button class="btn btn-primary" id="lead-save-btn" onclick="saveLead()">Save</button>
     </div>
   </div>
 
   <div class="opp-body">
+    <!-- Read-only banner (shown when lead is Promoted or Dead) -->
+    <div id="lead-readonly-banner" style="display:none;margin-bottom:16px;padding:12px 16px;background:#FFF5E5;border:1px solid #E8A33D;border-radius:var(--radius);color:#7A4F0E;font-size:13px;font-weight:600;"></div>
+
     <!-- Top Tabs -->
     <div class="opp-tabs">
       <button class="opp-tab active" onclick="switchLeadTab('overview', this)">Overview</button>
@@ -625,16 +628,9 @@ tr:hover td{background:#F8FAFC;}
               <select id="lead-status" class="form-control" onchange="onLeadStatusChange()">
                 <option value="New">New</option>
                 <option value="Working">Working</option>
-                <option value="Qualified">Qualified</option>
-                <option value="Disqualified">Disqualified</option>
                 <option value="Dormant">Dormant</option>
               </select>
             </div>
-          </div>
-
-          <div class="form-group" id="lead-disqualified-reason-wrap" style="display:none;">
-            <label class="form-label">Disqualified reason</label>
-            <input type="text" id="lead-disqualified-reason" class="form-control" placeholder="Why was this disqualified?">
           </div>
 
           <div class="form-row">
@@ -674,7 +670,7 @@ tr:hover td{background:#F8FAFC;}
     <!-- Interactions Tab -->
     <div class="opp-tab-content" id="lead-tab-interactions">
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-        <button class="btn btn-primary btn-sm" onclick="openLeadInteractionModal()">+ Log Interaction</button>
+        <button class="btn btn-primary btn-sm" id="lead-log-interaction-btn" onclick="openLeadInteractionModal()">+ Log Interaction</button>
       </div>
       <div id="lead-interactions-list">
         <div style="text-align:center;padding:40px;color:var(--text3);">No interactions logged yet</div>
@@ -3618,7 +3614,7 @@ async function confirmDeleteDeal(id) {
 
 // ── Leads Page ────────────────────────────────────────────
 // View tab state — persists across re-renders within the session
-let leadsViewTab = 'my_active';
+let leadsViewTab = 'Working';
 
 async function renderLeadsPage() {
   const head = document.getElementById('table-head');
@@ -3654,15 +3650,13 @@ async function renderLeadsPage() {
     allData['organisations']      = orgs;
     allData['research_campaigns'] = campaigns;
 
-    // Helper: figure out which leads belong in each tab
-    const myPersonId = currentUser?.personId ? +currentUser.personId : null;
-    const isActive = (l) => ['New','Working','Qualified'].includes(l.status);
+    // Tabs filter by status. Ownership is intentionally not used as a tab filter for now.
     const tabs = [
-      { key: 'my_active',   label: 'My Active',   filter: l => isActive(l) && myPersonId && +l.owner_id === myPersonId },
-      { key: 'shared_pool', label: 'Shared Pool', filter: l => isActive(l) && !l.owner_id },
-      { key: 'all_active',  label: 'All Active',  filter: l => isActive(l) },
-      { key: 'dormant',     label: 'Dormant',     filter: l => l.status === 'Dormant' },
-      { key: 'all',         label: 'All',         filter: l => true },
+      { key: 'New',      label: 'New',      filter: l => l.status === 'New' },
+      { key: 'Working',  label: 'Working',  filter: l => l.status === 'Working' },
+      { key: 'Promoted', label: 'Promoted', filter: l => l.status === 'Promoted' },
+      { key: 'Dormant',  label: 'Dormant',  filter: l => l.status === 'Dormant' },
+      { key: 'Dead',     label: 'Dead',     filter: l => l.status === 'Dead' },
     ];
 
     // Render tabs
@@ -3739,12 +3733,11 @@ function renderLeadRow(l, sources, regions, people, orgs) {
 
   // Status badge
   const statusColour = {
-    'New':          'background:#dbeafe;color:#1e40af;',
-    'Working':      'background:#fef3c7;color:#92400e;',
-    'Qualified':    'background:#dcfce7;color:#166534;',
-    'Promoted':     'background:#e0e7ff;color:#3730a3;',
-    'Disqualified': 'background:#fee2e2;color:#991b1b;',
-    'Dormant':      'background:#f3f4f6;color:#4b5563;',
+    'New':      'background:#dbeafe;color:#1e40af;',
+    'Working':  'background:#fef3c7;color:#92400e;',
+    'Promoted': 'background:#dcfce7;color:#166534;',
+    'Dormant':  'background:#f3f4f6;color:#4b5563;',
+    'Dead':     'background:#fee2e2;color:#991b1b;',
   }[l.status] || 'background:#f3f4f6;color:#4b5563;';
 
   // Next action — red if overdue
@@ -3849,6 +3842,9 @@ function openResearchCampaign(id) {
 // State for the currently open lead
 let leadData = {};
 let leadInteractions = [];
+// Read-only mode: true when the open lead has status Promoted or Dead.
+// Disables all inputs, hides Save and Log Interaction buttons, hides qual dots from clicking, shows a banner.
+let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
@@ -3860,6 +3856,7 @@ async function openNewLead() {
   const ownerSel = document.getElementById('lead-owner-id');
   if (ownerSel && currentUser?.personId) ownerSel.value = currentUser.personId;
   document.getElementById('lead-page-title').textContent = 'New Lead';
+  applyLeadReadOnly(false);  // New leads are always editable
   document.getElementById('lead-page').classList.add('active');
   switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
   renderLeadQualification();
@@ -3875,13 +3872,59 @@ async function openLeadForm(id) {
     // Populate fields from leadData
     populateLeadForm();
     await loadLeadInteractions(id);
-    document.getElementById('lead-page-title').textContent = 'Edit Lead';
+    // Decide editability based on status. Promoted and Dead are terminal — view-only.
+    const isTerminal = ['Promoted','Dead'].includes(leadData.status);
+    document.getElementById('lead-page-title').textContent = isTerminal ? 'View Lead' : 'Edit Lead';
+    applyLeadReadOnly(isTerminal);
     document.getElementById('lead-page').classList.add('active');
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
     renderLeadInteractions();
   } catch(e) {
     showStatus('Failed to load lead: ' + e.message, 'error');
+  }
+}
+
+// Apply or clear read-only mode on the lead form.
+// When true: disables every form input within #lead-page, hides Save and Log Interaction,
+// and shows a status banner. When false: re-enables everything.
+function applyLeadReadOnly(on) {
+  leadReadOnly = !!on;
+  const page = document.getElementById('lead-page');
+  if (!page) return;
+
+  // Toggle every input/select/textarea inside the page
+  page.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = leadReadOnly; });
+
+  // Hide / show Save button
+  const saveBtn = document.getElementById('lead-save-btn');
+  if (saveBtn) saveBtn.style.display = leadReadOnly ? 'none' : '';
+
+  // Hide / show + Log Interaction button
+  const logBtn = document.getElementById('lead-log-interaction-btn');
+  if (logBtn) logBtn.style.display = leadReadOnly ? 'none' : '';
+
+  // Banner: status-specific message
+  const banner = document.getElementById('lead-readonly-banner');
+  if (banner) {
+    if (leadReadOnly) {
+      if (leadData.status === 'Promoted') {
+        banner.textContent = '✓ This lead has been Promoted to an Opportunity. View-only.';
+        banner.style.background = '#E8F5E9';
+        banner.style.borderColor = '#16a34a';
+        banner.style.color = '#0F5132';
+      } else if (leadData.status === 'Dead') {
+        banner.textContent = '✗ This lead is marked Dead. View-only.';
+        banner.style.background = '#FEF2F2';
+        banner.style.borderColor = '#D0021B';
+        banner.style.color = '#8B0F18';
+      } else {
+        banner.textContent = 'This lead is view-only.';
+      }
+      banner.style.display = '';
+    } else {
+      banner.style.display = 'none';
+    }
   }
 }
 
@@ -3902,7 +3945,7 @@ function resetLeadForm() {
     'lead-source-id','lead-source-person-id','lead-source-org-id','lead-research-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
     'lead-target-person-name','lead-description','lead-region-id','lead-service-major-id',
-    'lead-est-value','lead-owner-id','lead-status','lead-disqualified-reason',
+    'lead-est-value','lead-owner-id','lead-status',
     'lead-next-action','lead-next-action-date'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
@@ -3911,7 +3954,7 @@ function resetLeadForm() {
   if (statusEl) statusEl.value = 'New';
   // Hide conditional sections
   ['lead-source-person-wrap','lead-source-org-wrap','lead-source-campaign-wrap',
-   'lead-source-detail-wrap','lead-disqualified-reason-wrap'].forEach(id => {
+   'lead-source-detail-wrap'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
 }
@@ -4008,7 +4051,6 @@ function populateLeadForm() {
   // Workflow
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
   if (leadData.status) document.getElementById('lead-status').value = leadData.status;
-  if (leadData.disqualified_reason) document.getElementById('lead-disqualified-reason').value = leadData.disqualified_reason;
   if (leadData.next_action) document.getElementById('lead-next-action').value = leadData.next_action;
   if (leadData.next_action_date) document.getElementById('lead-next-action-date').value = leadData.next_action_date;
   // Trigger conditional reveals
@@ -4060,9 +4102,8 @@ function onLeadTargetPersonChange() {
 }
 
 function onLeadStatusChange() {
-  const status = document.getElementById('lead-status').value;
-  const wrap = document.getElementById('lead-disqualified-reason-wrap');
-  wrap.style.display = (status === 'Disqualified') ? '' : 'none';
+  // Reserved for Phase 2: when status flips to 'Dormant', reveal the wake_date field
+  // and require it before save. For now the handler exists so the onchange wiring stays valid.
 }
 
 // ── Qualification dots ────────────────────────────────────
@@ -4088,7 +4129,7 @@ function renderLeadQualification() {
           const isActive = +val === level;
           const colour = level === 2 ? '#16a34a' : level === 1 ? '#f59e0b' : '#cbd5e1';
           const ring = isActive ? `box-shadow:0 0 0 3px ${colour}33;` : '';
-          return `<button onclick="setLeadQual('${d.key}', ${level})" title="${level===2?'Strong':level===1?'Weak':'Unknown'}" style="width:24px;height:24px;border-radius:50%;background:${colour};border:none;cursor:pointer;${ring}opacity:${isActive?'1':'0.4'};transition:all 0.15s;"></button>`;
+          return `<button onclick="setLeadQual('${d.key}', ${level})" title="${level===2?'Strong':level===1?'Weak':'Unknown'}" style="width:24px;height:24px;border-radius:50%;background:${colour};border:none;cursor:${leadReadOnly?'default':'pointer'};${ring}opacity:${isActive?'1':'0.4'};transition:all 0.15s;"></button>`;
         }).join('')}
       </div>
       <div style="width:80px;text-align:right;font-size:12px;font-weight:600;color:${val===2?'#16a34a':val===1?'#f59e0b':'var(--text3)'};">
@@ -4100,6 +4141,7 @@ function renderLeadQualification() {
 }
 
 function setLeadQual(key, level) {
+  if (leadReadOnly) return;
   leadData[key] = level;
   renderLeadQualification();
 }
@@ -4111,7 +4153,7 @@ function updateLeadReadiness() {
   const allStrong = scores.every(s => s === 2);
   const anyUnknown = scores.some(s => s === 0);
   if (allStrong) {
-    el.innerHTML = '<span style="color:#16a34a;">✓ Ready to qualify</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider moving status to Qualified</span>';
+    el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider promoting this lead to an Opportunity</span>';
   } else if (anyUnknown) {
     const missing = QUAL_DIMENSIONS.filter((d,i) => scores[i] === 0).map(d => d.label).join(', ');
     el.innerHTML = `<span style="color:var(--text3);">Still assessing</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— unknown: ${missing}</span>`;
@@ -4144,6 +4186,12 @@ function flagLeadField(fieldId, message) {
 }
 
 async function saveLead() {
+  // Defensive: the Save button is hidden in read-only mode, but if anything ever calls
+  // saveLead() programmatically while a Promoted/Dead lead is open, refuse cleanly.
+  if (leadReadOnly) {
+    showStatus('This lead is view-only and cannot be saved.', 'error');
+    return;
+  }
   clearLeadFieldErrors();
 
   const sourceId = document.getElementById('lead-source-id').value;
@@ -4183,7 +4231,6 @@ async function saveLead() {
     capacity:      +leadData.capacity || 0,
 
     status,
-    disqualified_reason: status === 'Disqualified' ? (document.getElementById('lead-disqualified-reason').value.trim() || null) : null,
 
     owner_id: +document.getElementById('lead-owner-id').value || null,
 
