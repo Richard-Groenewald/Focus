@@ -203,7 +203,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.14</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.15</div>
   </div>
 </div>
 
@@ -222,7 +222,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.14</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.15</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -2071,7 +2071,7 @@ function addCollaboratorRow() {
   list.appendChild(div);
 }
 
-async function openEngagementModal() {
+async function openEngagementModal(mode = 'new') {
   // Build people pool: collaborators + client affiliates, deduplicated
   const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
   let clientPeople = [];
@@ -2090,11 +2090,13 @@ async function openEngagementModal() {
     return true;
   });
 
+  const title = mode === 'edit' ? 'Edit Engagement' : mode === 'view' ? 'View Engagement' : 'Log Engagement';
+
   const html = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:560px;">
         <div class="modal-header">
-          <div class="modal-title">Log Engagement</div>
+          <div class="modal-title">${title}</div>
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
@@ -2338,7 +2340,7 @@ async function openEditEngagementModal(engId) {
     return { id: String(ep.person_id), name: p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : 'Unknown' };
   });
 
-  await openEngagementModal();
+  await openEngagementModal('edit');
 
   const d = document.getElementById('eng-date'); if (d) d.value = eng.engagement_date;
   const t = document.getElementById('eng-type'); if (t) t.value = eng.engagement_type || 'Meeting';
@@ -2369,7 +2371,7 @@ async function openViewEngagementModal(engId) {
     return { id: String(ep.person_id), name: p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : 'Unknown' };
   });
 
-  await openEngagementModal();
+  await openEngagementModal('view');
 
   // Populate the form
   const d = document.getElementById('eng-date'); if (d) d.value = eng.engagement_date;
@@ -2401,10 +2403,6 @@ async function openViewEngagementModal(engId) {
     banner.textContent = 'View only — edit window has closed.';
     body.insertBefore(banner, body.firstChild);
   }
-
-  // Override modal title
-  const title = modalRoot.querySelector('.modal-title');
-  if (title) title.textContent = 'View Engagement';
 }
 
 async function saveOpportunity() {
@@ -4374,60 +4372,105 @@ function renderLeadInteractions() {
     list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No interactions logged yet</div>';
     return;
   }
-  // Whole row is clickable → opens view-only (lead interactions have no edit UI today).
-  // Same visual language as engagement rows but without the next-action block (leads track next actions at the lead level).
+  // Whole row clickable. Routes to edit (within grace) or view (locked).
+  // Matches engagement row design.
+  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const now = Date.now();
   list.innerHTML = leadInteractions.map(i => {
+    const createdAt = new Date(i.created_at).getTime();
+    const ageMs = now - createdAt;
+    const isEditable = ageMs < graceMins * 60 * 1000;
     const notesFull = (i.notes || '').trim();
     const notesPreview = notesFull.length > 120 ? notesFull.slice(0, 120).trimEnd() + '…' : notesFull;
-    return `<div class="eng-entry" style="border-left:3px solid var(--border);cursor:pointer;" onclick="openLeadInteractionView(${i.id})">
+    const borderStyle = isEditable
+      ? 'border-left:3px solid var(--red);'
+      : 'border-left:3px solid var(--border);';
+    return `<div class="eng-entry" style="${borderStyle}cursor:pointer;" onclick="openLeadInteractionRow(${i.id})">
       <div class="eng-entry-header">
         <span class="eng-entry-date">${i.engagement_date}</span>
         <span class="eng-badge">${i.engagement_type || ''}</span>
         <div style="flex:1;"></div>
-        <span style="font-size:11px;color:var(--text3);">View only</span>
+        ${isEditable ? '' : '<span style="font-size:11px;color:var(--text3);">View only</span>'}
       </div>
       ${notesPreview ? `<div style="font-size:13px;white-space:pre-wrap;overflow:hidden;text-overflow:ellipsis;">${notesPreview}</div>` : ''}
     </div>`;
   }).join('');
 }
 
-// View-only modal for an existing lead interaction.
-// Lead interactions have no edit grace period in the current build — they're always view-only after save.
-function openLeadInteractionView(interactionId) {
+// Router: clicking an interaction row routes to edit (within grace) or view (locked).
+function openLeadInteractionRow(interactionId) {
   const i = leadInteractions.find(x => +x.id === +interactionId);
   if (!i) return;
-  const html = `
+  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const ageMs = Date.now() - new Date(i.created_at).getTime();
+  const isEditable = ageMs < graceMins * 60 * 1000;
+  if (isEditable) openEditLeadInteractionModal(interactionId);
+  else            openLeadInteractionView(interactionId);
+}
+
+// Shared HTML renderer for the lead interaction modal in any mode.
+// mode: 'new' | 'edit' | 'view'
+// interaction: existing row for 'edit' and 'view', null for 'new'
+function renderLeadInteractionModalHtml(mode, interaction) {
+  const title = mode === 'edit' ? 'Edit Lead Interaction' : mode === 'view' ? 'View Lead Interaction' : 'Log Lead Interaction';
+  const isView = mode === 'view';
+  const i = interaction || {};
+  const dateValue = i.engagement_date || new Date().toISOString().slice(0,10);
+  const typeValue = i.engagement_type || 'Call';
+  const notesValue = (i.notes || '').replace(/</g,'&lt;');
+  const types = ['Call','Email','Meeting','Site Visit','Note'];
+  const banner = isView
+    ? `<div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">View only — edit window has closed.</div>`
+    : '';
+  const dis = isView ? 'disabled' : '';
+  const footer = isView
+    ? `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
+    : `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" onclick="saveLeadInteraction(${mode === 'edit' ? i.id : 'null'})">Save</button>`;
+
+  return `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:520px;">
         <div class="modal-header">
-          <div class="modal-title">View Lead Interaction</div>
+          <div class="modal-title">${title}</div>
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
-          <div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">
-            View only.
-          </div>
+          ${banner}
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Date</label>
-              <input type="date" class="form-control" value="${i.engagement_date || ''}" disabled>
+              <input type="date" id="li-date" class="form-control" value="${dateValue}" ${dis}>
             </div>
             <div class="form-group">
               <label class="form-label">Type</label>
-              <input type="text" class="form-control" value="${i.engagement_type || ''}" disabled>
+              <select id="li-type" class="form-control" ${dis}>
+                ${types.map(t => `<option ${t===typeValue?'selected':''}>${t}</option>`).join('')}
+              </select>
             </div>
           </div>
           <div class="form-group">
             <label class="form-label">Notes</label>
-            <textarea class="form-control" rows="6" disabled>${(i.notes || '').replace(/</g,'&lt;')}</textarea>
+            <textarea id="li-notes" class="form-control" rows="4" placeholder="What happened?" ${dis}>${notesValue}</textarea>
           </div>
         </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-        </div>
+        <div class="modal-footer">${footer}</div>
       </div>
     </div>`;
-  document.getElementById('modal-root').innerHTML = html;
+}
+
+// View-only modal for a locked lead interaction.
+function openLeadInteractionView(interactionId) {
+  const i = leadInteractions.find(x => +x.id === +interactionId);
+  if (!i) return;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('view', i);
+}
+
+// Edit modal for an interaction still within the grace period.
+function openEditLeadInteractionModal(interactionId) {
+  const i = leadInteractions.find(x => +x.id === +interactionId);
+  if (!i) return;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('edit', i);
 }
 
 function openLeadInteractionModal() {
@@ -4435,60 +4478,39 @@ function openLeadInteractionModal() {
     showStatus('Save the lead first before logging interactions', 'error');
     return;
   }
-  const html = `
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:520px;">
-        <div class="modal-header">
-          <div class="modal-title">Log Lead Interaction</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Date</label>
-              <input type="date" id="li-date" class="form-control" value="${new Date().toISOString().slice(0,10)}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Type</label>
-              <select id="li-type" class="form-control">
-                <option>Call</option><option>Email</option><option>Meeting</option>
-                <option>Site Visit</option><option>Note</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Notes</label>
-            <textarea id="li-notes" class="form-control" rows="4" placeholder="What happened?"></textarea>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveLeadInteraction()">Save</button>
-        </div>
-      </div>
-    </div>`;
-  document.getElementById('modal-root').innerHTML = html;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
 }
 
-async function saveLeadInteraction() {
+async function saveLeadInteraction(editId) {
   const date = document.getElementById('li-date').value;
   const type = document.getElementById('li-type').value;
   const notes = document.getElementById('li-notes').value.trim();
   if (!date) { showStatus('Date is required', 'error'); return; }
   if (!type) { showStatus('Type is required', 'error'); return; }
   try {
-    await api('lead_interactions', 'POST', {
-      lead_id: leadData.id,
-      engagement_date: date,
-      engagement_type: type,
-      notes: notes || null,
-      created_by: currentUser?.personId || null,
-    }, '');
-    // Also bump last_touch_date on the lead
+    if (editId) {
+      // Update existing — within grace period
+      await api('lead_interactions', 'PATCH', {
+        engagement_date: date,
+        engagement_type: type,
+        notes: notes || null,
+      }, 'id=eq.' + editId);
+      showStatus('Interaction updated');
+    } else {
+      // Create new
+      await api('lead_interactions', 'POST', {
+        lead_id: leadData.id,
+        engagement_date: date,
+        engagement_type: type,
+        notes: notes || null,
+        created_by: currentUser?.personId || null,
+      }, '');
+      showStatus('Interaction logged');
+    }
+    // Bump last_touch_date on the lead (on both create and edit, since edit can change the date)
     await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id);
     leadData.last_touch_date = date;
     closeModal();
-    showStatus('Interaction logged');
     await loadLeadInteractions(leadData.id);
     renderLeadInteractions();
   } catch(e) {
