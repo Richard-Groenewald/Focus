@@ -203,7 +203,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.19</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.20</div>
   </div>
 </div>
 
@@ -222,7 +222,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.19</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.20</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -1903,9 +1903,11 @@ function buildRevGrid() {
       return `<th>${d.toLocaleDateString('en-ZA',{month:'short'})}</th>`;
     }).join('');
 
-    const revenueInputs = months.map(m =>
-      `<td><input class="rev-input" type="number" id="rev-r-${m}" value="${oppMonths[m]?.revenue||''}" placeholder="0" oninput="onRevInput('${m}')" min="0"></td>`
-    ).join('');
+    const revenueInputs = months.map(m => {
+      const v = oppMonths[m]?.revenue;
+      const display = v && +v > 0 ? Math.round(+v).toLocaleString('en-US') : '';
+      return `<td><input class="rev-input" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="0" oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
+    }).join('');
 
     const marginCalcs = months.map(m =>
       `<td class="rev-calc" id="rev-m-${m}">${formatRev(calcMargin(m))}</td>`
@@ -1955,13 +1957,28 @@ function calcMargin(month) {
 }
 
 function onRevInput(month) {
-  const val = +document.getElementById('rev-r-' + month)?.value || 0;
+  const el = document.getElementById('rev-r-' + month);
+  const raw = (el?.value || '').replace(/[^0-9.]/g, '');
+  const val = parseFloat(raw) || 0;
   if (!oppMonths[month]) oppMonths[month] = {};
   oppMonths[month].revenue = val;
-  // Update margin cell
   const marginEl = document.getElementById('rev-m-' + month);
   if (marginEl) marginEl.textContent = formatRev(calcMargin(month));
   updateRevTotals();
+}
+
+function onRevFocus(month) {
+  const el = document.getElementById('rev-r-' + month);
+  if (!el) return;
+  el.value = (el.value || '').replace(/,/g, '');
+}
+
+function onRevBlur(month) {
+  const el = document.getElementById('rev-r-' + month);
+  if (!el) return;
+  const raw = (el.value || '').replace(/[^0-9.]/g, '');
+  const val = parseFloat(raw);
+  el.value = val && val > 0 ? Math.round(val).toLocaleString('en-US') : '';
 }
 
 function recalcGrid() {
