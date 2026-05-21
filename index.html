@@ -203,7 +203,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.20</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.21</div>
   </div>
 </div>
 
@@ -222,7 +222,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.20</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.21</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -2162,6 +2162,14 @@ async function openEngagementModal(mode = 'new') {
               Next action completed
             </label>
           </div>
+          <div id="eng-completion-section" style="display:none;margin-top:8px;padding:10px 12px;background:var(--bg);border-left:3px solid #16a34a;border-radius:4px;">
+            <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.05em;font-weight:700;margin-bottom:4px;">Completion</div>
+            <div id="eng-completion-when" style="font-size:12px;color:var(--text2);margin-bottom:6px;"></div>
+            <div id="eng-completion-note-wrap" style="display:none;">
+              <div style="font-size:11px;color:var(--text3);font-weight:600;margin-bottom:2px;">Note</div>
+              <div id="eng-completion-note" style="font-size:13px;white-space:pre-wrap;color:var(--text2);"></div>
+            </div>
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2171,6 +2179,7 @@ async function openEngagementModal(mode = 'new') {
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
   window._engPeople = [];
+  if (mode === 'new') window._engEditing = null;
 }
 
 function addEngPerson() {
@@ -2223,6 +2232,16 @@ async function saveEngagement(editId) {
 
   if (!date) { showStatus('Date is required', 'error'); return; }
 
+  // Preserve completion timestamp/note when the checkbox stays ticked. If it just got
+  // ticked here in the modal, stamp it now. If it got unticked, clear both fields.
+  const prev = window._engEditing;
+  const completedAt = nextDone
+    ? (prev?.next_action_completed_at || new Date().toISOString())
+    : null;
+  const completionNote = nextDone
+    ? (prev?.next_action_completion_note || null)
+    : null;
+
   try {
     let engId = editId;
     if (editId) {
@@ -2231,6 +2250,8 @@ async function saveEngagement(editId) {
         engagement_date: date, engagement_type: type,
         notes, next_action: nextAction, next_action_date: nextDate || null,
         next_action_done: nextDone,
+        next_action_completed_at: completedAt,
+        next_action_completion_note: completionNote,
       }, 'id=eq.' + editId);
       // Remove old people and re-add
       await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + editId);
@@ -2241,6 +2262,8 @@ async function saveEngagement(editId) {
         engagement_date: date, engagement_type: type,
         notes, next_action: nextAction, next_action_date: nextDate || null,
         next_action_done: nextDone,
+        next_action_completed_at: completedAt,
+        next_action_completion_note: completionNote,
         created_by: currentUser?.personId || null,
       }, 'select=*');
       engId = result[0].id;
@@ -2292,21 +2315,32 @@ async function loadEngagements(dealId) {
       const nextDateCell = hasNext && e.next_action_date
         ? e.next_action_date
         : '<span style="color:var(--text3);">—</span>';
-      const completedCell = !hasNext
-        ? '<span style="color:var(--text3);">—</span>'
-        : (done
-            ? `<span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:#16a34a;"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 8.5l3.5 3.5L13 5" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>`
-            : `<span style="display:inline-block;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--text3);"></span>`);
+
+      // Completed checkbox: always tickable when unticked. Once ticked, only un-tickable
+      // within the same grace window measured from next_action_completed_at.
+      let completedCell;
+      if (!hasNext) {
+        completedCell = '<span style="color:var(--text3);">—</span>';
+      } else {
+        const completedAt = e.next_action_completed_at ? new Date(e.next_action_completed_at).getTime() : null;
+        const inCompletedGrace = completedAt ? (now - completedAt) < gracePeriodMs : false;
+        const tickDisabled = done && !inCompletedGrace;
+        completedCell = `<input type="checkbox" ${done ? 'checked' : ''} ${tickDisabled ? 'disabled' : ''} onclick="event.stopPropagation();" onchange="onCompletedToggle(${e.id}, this, event)" style="cursor:${tickDisabled ? 'default' : 'pointer'};width:16px;height:16px;">`;
+      }
+
+      // Type cell: badge + truncated notes preview underneath
+      const notesFull = (e.notes || '').trim();
+      const notesPreview = notesFull.length > 80 ? notesFull.slice(0, 80).trimEnd() + '…' : notesFull;
+      const typeCell = `<span class="eng-badge">${e.engagement_type || ''}</span>${notesPreview ? `<div style="font-size:11px;color:var(--text3);margin-top:3px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${notesPreview}</div>` : ''}`;
 
       const borderLeft = isEditable ? '3px solid var(--red)' : '3px solid var(--border)';
-      const lockedTag = isEditable ? '' : ' <span style="font-size:10px;color:var(--text3);font-weight:400;text-transform:none;letter-spacing:0;">(view only)</span>';
 
       return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openEngagementRow(${e.id})">
-        <td style="padding:10px 12px;font-weight:600;border-left:${borderLeft};">${e.engagement_date}${lockedTag}</td>
-        <td style="padding:10px 12px;"><span class="eng-badge">${e.engagement_type || ''}</span></td>
-        <td style="padding:10px 12px;color:var(--text2);">${nextActionCell}</td>
-        <td style="padding:10px 12px;color:var(--text2);">${nextDateCell}</td>
-        <td style="padding:10px 12px;text-align:center;">${completedCell}</td>
+        <td style="padding:10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:top;">${e.engagement_date}</td>
+        <td style="padding:10px 12px;vertical-align:top;">${typeCell}</td>
+        <td style="padding:10px 12px;color:var(--text2);vertical-align:top;">${nextActionCell}</td>
+        <td style="padding:10px 12px;color:var(--text2);vertical-align:top;">${nextDateCell}</td>
+        <td style="padding:10px 12px;text-align:center;vertical-align:top;">${completedCell}</td>
       </tr>`;
     }).join('');
 
@@ -2317,12 +2351,83 @@ async function loadEngagements(dealId) {
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Type</th>
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Next Action</th>
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Next Action Date</th>
-          <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:center;">Next Action Completed</th>
+          <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:center;">Completed</th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
   } catch(err) {
     list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);">Error: ${err.message}</div>`;
+  }
+}
+
+// Small inline prompt for a completion note. Resolves to the note string (may be ''),
+// or null if the user cancels.
+function promptCompletionNote() {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.zIndex = '1100';
+    overlay.innerHTML = `
+      <div class="modal" style="width:420px;">
+        <div class="modal-header">
+          <div class="modal-title">Mark as Completed</div>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Completion note (optional)</label>
+            <textarea id="completion-note-input" class="form-control" rows="3" placeholder="What did you do?"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" data-action="cancel">Cancel</button>
+          <button class="btn btn-primary" data-action="save">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = overlay.querySelector('#completion-note-input');
+    setTimeout(() => input?.focus(), 0);
+    overlay.querySelector('[data-action="cancel"]').onclick = () => { overlay.remove(); resolve(null); };
+    overlay.querySelector('[data-action="save"]').onclick = () => {
+      const note = (input?.value || '').trim();
+      overlay.remove();
+      resolve(note);
+    };
+  });
+}
+
+// Handles the inline Completed checkbox in the engagement list. Ticking prompts for a
+// note and stamps completed_at server-side; unticking clears both (only allowed within
+// the grace period from when it was originally ticked).
+async function onCompletedToggle(engId, checkbox, event) {
+  if (event) event.stopPropagation();
+  if (checkbox.checked) {
+    const note = await promptCompletionNote();
+    if (note === null) { checkbox.checked = false; return; }
+    try {
+      await api('engagements', 'PATCH', {
+        next_action_done: true,
+        next_action_completion_note: note || null,
+        next_action_completed_at: new Date().toISOString(),
+      }, 'id=eq.' + engId);
+      showStatus('Marked completed');
+      await loadEngagements(oppData.id);
+    } catch(e) {
+      checkbox.checked = false;
+      showStatus('Failed: ' + e.message, 'error');
+    }
+  } else {
+    try {
+      await api('engagements', 'PATCH', {
+        next_action_done: false,
+        next_action_completion_note: null,
+        next_action_completed_at: null,
+      }, 'id=eq.' + engId);
+      showStatus('Unmarked');
+      await loadEngagements(oppData.id);
+    } catch(e) {
+      checkbox.checked = true;
+      showStatus('Failed: ' + e.message, 'error');
+    }
   }
 }
 
@@ -2365,10 +2470,37 @@ async function openEditEngagementModal(engId) {
   const na = document.getElementById('eng-next-action'); if (na) na.value = eng.next_action || '';
   const nd = document.getElementById('eng-next-date'); if (nd) nd.value = eng.next_action_date || '';
   const ndone = document.getElementById('eng-next-done'); if (ndone) ndone.checked = !!eng.next_action_done;
+  populateCompletionSection(eng);
+  window._engEditing = eng;
   renderEngPeople();
 
   const saveBtn = document.querySelector('#modal-root .btn-primary');
   if (saveBtn) saveBtn.onclick = () => saveEngagement(engId);
+}
+
+// Show "Completed at <ts>" and an optional completion note inside the engagement modal
+// (used by both edit and view openers). Hides itself if the engagement isn't marked done.
+function populateCompletionSection(eng) {
+  const section = document.getElementById('eng-completion-section');
+  const whenEl = document.getElementById('eng-completion-when');
+  const noteWrap = document.getElementById('eng-completion-note-wrap');
+  const noteEl = document.getElementById('eng-completion-note');
+  if (!section) return;
+  if (!eng?.next_action_done) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  if (eng.next_action_completed_at) {
+    const ts = new Date(eng.next_action_completed_at);
+    whenEl.textContent = 'Completed at ' + ts.toLocaleString('en-ZA');
+  } else {
+    whenEl.textContent = 'Completed';
+  }
+  const note = (eng.next_action_completion_note || '').trim();
+  if (note) {
+    noteWrap.style.display = 'block';
+    noteEl.textContent = note;
+  } else {
+    noteWrap.style.display = 'none';
+  }
 }
 
 // View-only version for locked engagements.
@@ -2397,6 +2529,8 @@ async function openViewEngagementModal(engId) {
   const na = document.getElementById('eng-next-action'); if (na) na.value = eng.next_action || '';
   const nd = document.getElementById('eng-next-date'); if (nd) nd.value = eng.next_action_date || '';
   const ndone = document.getElementById('eng-next-done'); if (ndone) ndone.checked = !!eng.next_action_done;
+  populateCompletionSection(eng);
+  window._engEditing = eng;
   renderEngPeople();
 
   // Lock down everything
