@@ -203,7 +203,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.26</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.27</div>
   </div>
 </div>
 
@@ -222,7 +222,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.26</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.27</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -629,7 +629,36 @@ tr:hover td{background:#F8FAFC;}
                 <option value="New">New</option>
                 <option value="Working">Working</option>
                 <option value="Dormant">Dormant</option>
+                <option value="Dead">Dead</option>
               </select>
+            </div>
+          </div>
+
+          <!-- Dead reason block (shown only when status = Dead) -->
+          <div id="lead-dead-block" style="display:none;margin-top:8px;padding:14px 16px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:var(--radius);">
+            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#8B0F18;margin-bottom:8px;">Closing this lead</div>
+            <div class="form-group" style="margin-bottom:12px;">
+              <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+              <div style="display:flex;gap:8px;">
+                <label id="lead-dead-reason-nq-wrap" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:white;display:flex;gap:10px;align-items:flex-start;">
+                  <input type="radio" name="lead-dead-reason" id="lead-dead-reason-nq" value="not_qualified" onchange="onLeadDeadReasonChange()" style="margin-top:3px;">
+                  <div>
+                    <div style="font-weight:700;font-size:13px;">Not Qualified</div>
+                    <div style="font-size:11px;color:var(--text3);margin-top:2px;">F/T/A/C failure or a red flag (payment risk, ethical concern, conflict, capacity).</div>
+                  </div>
+                </label>
+                <label id="lead-dead-reason-dec-wrap" style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:white;display:flex;gap:10px;align-items:flex-start;">
+                  <input type="radio" name="lead-dead-reason" id="lead-dead-reason-dec" value="declined" onchange="onLeadDeadReasonChange()" style="margin-top:3px;">
+                  <div>
+                    <div style="font-weight:700;font-size:13px;">Declined</div>
+                    <div style="font-size:11px;color:var(--text3);margin-top:2px;">Viable lead, but we consciously chose not to pursue (strategic decision, relationship, etc).</div>
+                  </div>
+                </label>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label" id="lead-dead-notes-label">Notes <span style="color:var(--red)">*</span></label>
+              <textarea id="lead-dead-notes" class="form-control" rows="3" placeholder="Detail the reason — useful for reporting and learning."></textarea>
             </div>
           </div>
 
@@ -4109,6 +4138,15 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     'Dead':     'background:#fee2e2;color:#991b1b;',
   }[l.status] || 'background:#f3f4f6;color:#4b5563;';
 
+  // Tooltip on Dead badge surfaces the reason and notes (hidden in normal display).
+  let statusTooltip = '';
+  let statusSubLabel = '';
+  if (l.status === 'Dead' && l.dead_reason) {
+    const reasonLabel = l.dead_reason === 'not_qualified' ? 'Not Qualified' : 'Declined';
+    statusTooltip = `title="${reasonLabel}${l.dead_notes ? ' — ' + String(l.dead_notes).replace(/"/g,'&quot;') : ''}"`;
+    statusSubLabel = `<div style="font-size:10px;color:var(--text3);margin-top:2px;">${reasonLabel}</div>`;
+  }
+
   // Next action — red if overdue
   let nextActionCell = '—';
   if (l.next_action) {
@@ -4132,7 +4170,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
-    <td style="padding:10px 12px;"><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${l.status}</span></td>
+    <td style="padding:10px 12px;"><span ${statusTooltip} style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:${statusTooltip?'help':'default'};">${l.status}</span>${statusSubLabel}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
@@ -4478,9 +4516,15 @@ function resetLeadForm() {
   if (statusEl) statusEl.value = 'New';
   // Hide conditional sections
   ['lead-source-person-wrap','lead-source-org-wrap','lead-source-campaign-wrap',
-   'lead-source-detail-wrap'].forEach(id => {
+   'lead-source-detail-wrap','lead-dead-block'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
   });
+  // Clear Dead reason fields
+  ['lead-dead-reason-nq','lead-dead-reason-dec'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.checked = false;
+  });
+  const deadNotes = document.getElementById('lead-dead-notes');
+  if (deadNotes) deadNotes.value = '';
   // Reset qualification multi-selects
   window._leadRedFlags = [];
   window._leadStrategicDecisions = [];
@@ -4585,7 +4629,17 @@ function populateLeadForm() {
   if (leadData.status) document.getElementById('lead-status').value = leadData.status;
   if (leadData.next_action) document.getElementById('lead-next-action').value = leadData.next_action;
   if (leadData.next_action_date) document.getElementById('lead-next-action-date').value = leadData.next_action_date;
-  // Trigger conditional reveals
+  // Dead reason + notes (only relevant for Dead leads)
+  if (leadData.dead_reason === 'not_qualified') {
+    const el = document.getElementById('lead-dead-reason-nq'); if (el) el.checked = true;
+  } else if (leadData.dead_reason === 'declined') {
+    const el = document.getElementById('lead-dead-reason-dec'); if (el) el.checked = true;
+  }
+  if (leadData.dead_notes) {
+    const el = document.getElementById('lead-dead-notes'); if (el) el.value = leadData.dead_notes;
+  }
+  // Trigger conditional reveals (onLeadStatusChange will show/hide the Dead block
+  // and onLeadDeadReasonChange will set the notes label to match the loaded reason)
   onLeadSourceChange();
   onLeadStatusChange();
 }
@@ -4636,6 +4690,49 @@ function onLeadTargetPersonChange() {
 function onLeadStatusChange() {
   // Reserved for Phase 2: when status flips to 'Dormant', reveal the wake_date field
   // and require it before save. For now the handler exists so the onchange wiring stays valid.
+
+  // Dead reason block: reveal when status = Dead, hide and clear otherwise.
+  const status = document.getElementById('lead-status')?.value || '';
+  const block = document.getElementById('lead-dead-block');
+  if (!block) return;
+  if (status === 'Dead') {
+    block.style.display = '';
+    onLeadDeadReasonChange();
+  } else {
+    block.style.display = 'none';
+    // Clear the radio selection and notes when stepping away from Dead
+    const nq = document.getElementById('lead-dead-reason-nq');
+    const dec = document.getElementById('lead-dead-reason-dec');
+    if (nq) nq.checked = false;
+    if (dec) dec.checked = false;
+    const notesEl = document.getElementById('lead-dead-notes');
+    if (notesEl) notesEl.value = '';
+    const lbl = document.getElementById('lead-dead-notes-label');
+    if (lbl) lbl.innerHTML = 'Notes <span style="color:var(--red)">*</span>';
+  }
+}
+
+// Permission hook for setting a Dead reason. Returns true for everyone today —
+// when a role-based restriction is needed (e.g., only managers can mark Declined),
+// implement it here without touching call sites.
+function canSetDeadReason(reason) {
+  // Example future restriction:
+  //   if (reason === 'declined' && !currentUser?.permissions?.includes('lead_decline')) return false;
+  return true;
+}
+
+// Updates the Notes label to match the selected reason. Called from the radio onchange.
+function onLeadDeadReasonChange() {
+  const reason = document.querySelector('input[name="lead-dead-reason"]:checked')?.value || '';
+  const lbl = document.getElementById('lead-dead-notes-label');
+  if (!lbl) return;
+  if (reason === 'not_qualified') {
+    lbl.innerHTML = 'Which dimension failed and why? <span style="color:var(--red)">*</span>';
+  } else if (reason === 'declined') {
+    lbl.innerHTML = 'Why are we passing on this? <span style="color:var(--red)">*</span>';
+  } else {
+    lbl.innerHTML = 'Notes <span style="color:var(--red)">*</span>';
+  }
 }
 
 // ── Qualification dots ────────────────────────────────────
@@ -4734,6 +4831,20 @@ async function saveLead() {
   if (!description) { flagLeadField('lead-description', 'Description is required'); return; }
   if (!status)      { flagLeadField('lead-status',      'Status is required');      return; }
 
+  // Dead reason and notes are required when status is Dead, and only then.
+  let deadReason = null;
+  let deadNotes  = null;
+  if (status === 'Dead') {
+    deadReason = document.querySelector('input[name="lead-dead-reason"]:checked')?.value || '';
+    deadNotes  = (document.getElementById('lead-dead-notes')?.value || '').trim();
+    if (!deadReason)       { showStatus('Select a Dead reason', 'error'); switchLeadTab('overview', document.querySelector('#lead-page .opp-tab')); return; }
+    if (!deadNotes)        { showStatus('Notes are required when closing a lead', 'error'); switchLeadTab('overview', document.querySelector('#lead-page .opp-tab')); document.getElementById('lead-dead-notes')?.focus(); return; }
+    if (!canSetDeadReason(deadReason)) {
+      showStatus("You don't have permission to set that reason", 'error');
+      return;
+    }
+  }
+
   // Build payload — only include source-specific FK based on source type
   const sources = allData['lead_sources'] || [];
   const source = sources.find(s => +s.id === +sourceId);
@@ -4768,6 +4879,9 @@ async function saveLead() {
 
     next_action:      document.getElementById('lead-next-action').value.trim() || null,
     next_action_date: document.getElementById('lead-next-action-date').value || null,
+
+    dead_reason: deadReason,
+    dead_notes:  deadNotes,
 
     updated_at: new Date().toISOString(),
   };
