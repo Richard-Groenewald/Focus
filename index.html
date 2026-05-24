@@ -209,7 +209,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.34</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.35</div>
   </div>
 </div>
 
@@ -228,7 +228,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.34</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.35</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -581,10 +581,11 @@ tr:hover td{background:#F8FAFC;}
 
           <div class="form-group">
             <label class="form-label">Target contact person</label>
-            <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()">
-              <option value="">— pick existing or enter name below —</option>
+            <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()" style="display:none;">
+              <option value="">— pick existing affiliated contact —</option>
             </select>
             <input type="text" id="lead-target-person-name" class="form-control" placeholder="Or type contact name" style="margin-top:8px;">
+            <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing target organisation above to see its affiliated contacts.</div>
           </div>
         </div>
 
@@ -606,9 +607,13 @@ tr:hover td{background:#F8FAFC;}
             </div>
             <div class="form-group">
               <label class="form-label">Service focus</label>
-              <select id="lead-service-major-id" class="form-control">
-                <option value="">— select —</option>
+              <select id="lead-service-major-id" class="form-control" onchange="onLeadServiceMajorChange()">
+                <option value="">— select major —</option>
               </select>
+              <select id="lead-service-sub-id" class="form-control" style="margin-top:6px;">
+                <option value="">— select sub —</option>
+              </select>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Major + sub carry across to the opportunity on promote. You can still change either in the wizard.</div>
             </div>
           </div>
 
@@ -4093,7 +4098,12 @@ async function renderLeadsPage() {
     tabBar.innerHTML = tabs.map(t => {
       const count = leads.filter(t.filter).length;
       const isActiveTab = t.key === leadsViewTab;
-      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span></button>`;
+      // Inactive tabs carry a subtle status colour so the pipeline is visually
+      // scannable. Active tab keeps the existing navy/white selected look so
+      // the "you are here" cue stays strong (inline style is omitted when active
+      // so the .opp-tab.active CSS rule wins without specificity fights).
+      const tint = (!isActiveTab && LEAD_STATUS_STYLES[t.key]) ? `style="${LEAD_STATUS_STYLES[t.key]}border-color:transparent;"` : '';
+      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" ${tint} onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span></button>`;
     }).join('');
 
     // Filter to active tab
@@ -4122,7 +4132,6 @@ async function renderLeadsPage() {
           <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Target</th>
           <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Region</th>
           <th style="text-align:center;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);" title="Fit / Trigger / Access / Capacity">Qual</th>
-          <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Status</th>
           <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Owner</th>
           <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Next Action</th>
           <th style="text-align:left;padding:10px 12px;font-size:11px;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);">Last Touch</th>
@@ -4146,7 +4155,20 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   const targetOrg = l.target_org_id ? orgs.find(o => +o.id === +l.target_org_id) : null;
 
   // Target display: known org → org name; otherwise free-text name; otherwise dash
-  const targetDisplay = targetOrg?.name || l.target_org_name || '—';
+  let targetDisplay = targetOrg?.name || l.target_org_name || '—';
+
+  // On Dead leads, append a small ⓘ that surfaces the close reason on hover.
+  // Two cases:
+  //   • dead_reason set (Decline path)  → "<reason label> — <notes>"
+  //   • dead_reason null (Red flag path) → generic prompt to open the lead
+  if (l.status === 'Dead') {
+    let tip = '';
+    if (l.dead_reason === 'not_qualified') tip = 'Not Qualified';
+    else if (l.dead_reason === 'declined') tip = 'Declined';
+    if (tip && l.dead_notes) tip += ' — ' + l.dead_notes;
+    if (!tip) tip = 'Red flag — open the lead for details';
+    targetDisplay += ` <span title="${String(tip).replace(/"/g,'&quot;')}" style="display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;background:#FECACA;color:#991B1B;font-size:11px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle;">i</span>`;
+  }
 
   // Owner display
   const ownerDisplay = owner
@@ -4160,23 +4182,8 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     return `<span title="${letter}: ${val===2?'Strong':val===1?'Weak':'Unknown'}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColour(val)};margin:0 1px;"></span>`;
   }).join('');
 
-  // Status badge
-  const statusColour = {
-    'New':      'background:#dbeafe;color:#1e40af;',
-    'Working':  'background:#fef3c7;color:#92400e;',
-    'Promoted': 'background:#dcfce7;color:#166534;',
-    'Dormant':  'background:#f3f4f6;color:#4b5563;',
-    'Dead':     'background:#fee2e2;color:#991b1b;',
-  }[l.status] || 'background:#f3f4f6;color:#4b5563;';
-
-  // Tooltip on Dead badge surfaces the reason and notes (hidden in normal display).
-  let statusTooltip = '';
-  let statusSubLabel = '';
-  if (l.status === 'Dead' && l.dead_reason) {
-    const reasonLabel = l.dead_reason === 'not_qualified' ? 'Not Qualified' : 'Declined';
-    statusTooltip = `title="${reasonLabel}${l.dead_notes ? ' — ' + String(l.dead_notes).replace(/"/g,'&quot;') : ''}"`;
-    statusSubLabel = `<div style="font-size:10px;color:var(--text3);margin-top:2px;">${reasonLabel}</div>`;
-  }
+  // Status column was removed — tabs already filter by status, so showing it
+  // per-row was redundant. Dead-reason detail is still visible by opening the lead.
 
   // Next action — red if overdue
   let nextActionCell = '—';
@@ -4201,7 +4208,6 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
-    <td style="padding:10px 12px;"><span ${statusTooltip} style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;cursor:${statusTooltip?'help':'default'};">${l.status}</span>${statusSubLabel}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
@@ -4542,7 +4548,7 @@ function resetLeadForm() {
     'lead-source-id','lead-source-person-id','lead-source-org-id','lead-research-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
     'lead-target-person-name','lead-description','lead-region-id','lead-service-major-id',
-    'lead-est-value','lead-owner-id',
+    'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
     'lead-dead-reason-value','lead-dead-notes-value'
   ];
@@ -4550,6 +4556,8 @@ function resetLeadForm() {
   // Clear the target-org similarity match hints
   const matchEl = document.getElementById('lead-target-org-matches');
   if (matchEl) matchEl.innerHTML = '';
+  // Reset the target-person dropdown to its hidden, no-org-picked state
+  refreshLeadTargetPersonDropdown();
   // Status badge resets to New
   renderLeadStatusBadge('New');
   // Hide conditional sections
@@ -4571,13 +4579,16 @@ function resetLeadForm() {
 
 async function initLeadForm() {
   // Load all needed lookups in parallel
-  const [sources, regions, services, people, orgs, campaigns] = await Promise.all([
+  // NB: loadLeadQualificationLookups returns void (side-effects allData) — kept
+  // at the end of the array so destructuring lines up cleanly without `_` placeholders.
+  const [sources, regions, services, people, orgs, campaigns, serviceSubs] = await Promise.all([
     allData['lead_sources']       || apiGet('lead_sources', 'active=eq.true&select=*&order=id.asc'),
     allData['regions']            || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major']      || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people']             || apiGet('people', 'select=*&order=first_name.asc'),
     allData['organisations']      || apiGet('organisations', 'select=*&order=name.asc'),
     allData['research_campaigns'] || apiGet('research_campaigns', 'status=eq.Active&select=*&order=name.asc'),
+    allData['service_sub_all']    || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc'),
     loadLeadQualificationLookups(),
   ]);
   allData['lead_sources']        = sources;
@@ -4586,6 +4597,7 @@ async function initLeadForm() {
   allData['people']              = people;
   allData['organisations']       = orgs;
   allData['research_campaigns']  = campaigns;
+  allData['service_sub_all']     = serviceSubs;
 
   // Populate dropdowns
   const sourceSel = document.getElementById('lead-source-id');
@@ -4597,8 +4609,10 @@ async function initLeadForm() {
     regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
 
   const serviceSel = document.getElementById('lead-service-major-id');
-  serviceSel.innerHTML = '<option value="">— select —</option>' +
+  serviceSel.innerHTML = '<option value="">— select major —</option>' +
     services.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  // Service sub is filtered by the chosen major; helper repopulates it
+  refreshLeadServiceSubDropdown();
 
   // Owner: Xone people if available, else all
   const xonePeople = people.filter(p => p.is_xone);
@@ -4633,13 +4647,9 @@ async function initLeadForm() {
   tgtOrgSel.innerHTML = '<option value="">— pick existing or enter name below —</option>' +
     orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
 
-  // Target-person picker: all people
-  const tgtPersonSel = document.getElementById('lead-target-person-id');
-  tgtPersonSel.innerHTML = '<option value="">— pick existing or enter name below —</option>' +
-    people.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}">${name}</option>`;
-    }).join('');
+  // Target-person picker: populated lazily by refreshLeadTargetPersonDropdown()
+  // based on the selected target org's affiliations. Default: hidden until an
+  // org is chosen (a known contact must belong to a known org).
 }
 
 function populateLeadForm() {
@@ -4656,12 +4666,26 @@ function populateLeadForm() {
     // Surface similarity hints if the lead was saved with a free-text name
     onLeadTargetOrgNameInput();
   }
-  if (leadData.target_person_id) document.getElementById('lead-target-person-id').value = leadData.target_person_id;
+  // Populate the contact-person dropdown from the target org's affiliations
+  // (no-op if no org is set). Awaited via fire-and-forget so populateLeadForm
+  // doesn't need to become async itself.
+  refreshLeadTargetPersonDropdown().then(() => {
+    if (leadData.target_person_id) {
+      const sel = document.getElementById('lead-target-person-id');
+      if (sel) sel.value = leadData.target_person_id;
+    }
+  });
   if (leadData.target_person_name) document.getElementById('lead-target-person-name').value = leadData.target_person_name;
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
   if (leadData.service_major_id) document.getElementById('lead-service-major-id').value = leadData.service_major_id;
+  // Refilter sub options for the loaded major, then set saved sub
+  refreshLeadServiceSubDropdown();
+  if (leadData.service_sub_id) {
+    const subSel = document.getElementById('lead-service-sub-id');
+    if (subSel) subSel.value = leadData.service_sub_id;
+  }
   if (leadData.est_value != null) document.getElementById('lead-est-value').value = leadData.est_value;
   // Workflow
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
@@ -4712,6 +4736,81 @@ function onLeadTargetOrgChange() {
     const matchEl = document.getElementById('lead-target-org-matches');
     if (matchEl) matchEl.innerHTML = '';
   }
+  // Refresh the contact-person dropdown to match the chosen org's affiliations.
+  refreshLeadTargetPersonDropdown();
+}
+
+// Service-focus pair: major drives sub. When the major changes, refilter sub
+// options. Empty sub remains valid (lead can be created before sub is decided).
+function onLeadServiceMajorChange() {
+  refreshLeadServiceSubDropdown();
+}
+
+function refreshLeadServiceSubDropdown() {
+  const sel = document.getElementById('lead-service-sub-id');
+  if (!sel) return;
+  const majorId = +(document.getElementById('lead-service-major-id')?.value || 0);
+  const allSubs = allData['service_sub_all'] || [];
+  const filtered = majorId ? allSubs.filter(s => +s.major_id === majorId) : [];
+  const prev = +sel.value || +leadData.service_sub_id || 0;
+  sel.innerHTML = '<option value="">— select sub —</option>' +
+    filtered.map(s => `<option value="${s.id}">${s.name}${s.is_recurring?' (recurring)':' (project)'}</option>`).join('');
+  // Preserve prior selection only if it still belongs to the chosen major
+  sel.value = filtered.some(s => +s.id === prev) ? prev : '';
+  sel.disabled = !majorId;
+}
+
+// Filters the Target Contact Person dropdown to people affiliated with the
+// selected target organisation. Hides the dropdown entirely when no org is
+// chosen (parallels the Promote Q3 contact-picker rule — a known contact must
+// belong to a known org).
+async function refreshLeadTargetPersonDropdown() {
+  const orgId = document.getElementById('lead-target-org-id')?.value || '';
+  const sel   = document.getElementById('lead-target-person-id');
+  const hint  = document.getElementById('lead-target-person-hint');
+  if (!sel) return;
+
+  if (!orgId) {
+    sel.style.display = 'none';
+    sel.innerHTML = '<option value="">— pick existing affiliated contact —</option>';
+    sel.value = '';  // ensure stale selection doesn't survive into save payload
+    if (hint) {
+      hint.style.display = '';
+      hint.textContent = 'Pick an existing target organisation above to see its affiliated contacts.';
+    }
+    return;
+  }
+
+  let people = [];
+  try {
+    const links = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+    const all = allData['people'] || [];
+    people = links.map(l => all.find(p => +p.id === +l.person_id)).filter(Boolean);
+  } catch (e) {
+    console.warn('Could not load org affiliations:', e.message);
+  }
+
+  if (!people.length) {
+    sel.style.display = 'none';
+    sel.value = '';
+    if (hint) {
+      hint.style.display = '';
+      hint.textContent = 'This organisation has no affiliated contacts yet — enter a name below.';
+    }
+    return;
+  }
+
+  // Populate + show
+  const prevValue = +sel.value || +leadData.target_person_id || 0;
+  sel.innerHTML = '<option value="">— pick existing affiliated contact —</option>' +
+    people.map(p => {
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      return `<option value="${p.id}">${name}</option>`;
+    }).join('');
+  // Keep the previous selection only if it's still in the affiliated list
+  sel.value = people.some(p => +p.id === prevValue) ? prevValue : '';
+  sel.style.display = '';
+  if (hint) hint.style.display = 'none';
 }
 
 function onLeadTargetPersonChange() {
@@ -4782,13 +4881,16 @@ function showModal(html) {
 }
 
 // ── Status badge + workflow chrome ────────────────────────
+// One source of truth — used by the lead-form badge, the leads-list row badge,
+// and the leads-page tab headers. Palette is an orange→green progression with
+// red for Dead and slate (off-axis) for Dormant.
 const LEAD_STATUS_STYLES = {
-  'New':       'background:#dbeafe;color:#1e40af;',
-  'Working':   'background:#fef3c7;color:#92400e;',
-  'Qualified': 'background:#bbf7d0;color:#14532d;',
-  'Promoted':  'background:#dcfce7;color:#166534;',
-  'Dormant':   'background:#f3f4f6;color:#4b5563;',
-  'Dead':      'background:#fee2e2;color:#991b1b;',
+  'New':       'background:#FFEDD5;color:#9A3412;',   // warm orange — fresh, needs attention
+  'Working':   'background:#FEF3C7;color:#92400E;',   // amber — momentum
+  'Qualified': 'background:#D9F99D;color:#3F6212;',   // lime — almost there
+  'Promoted':  'background:#BBF7D0;color:#166534;',   // green — won
+  'Dormant':   'background:#E2E8F0;color:#475569;',   // slate — parked, off the axis
+  'Dead':      'background:#FECACA;color:#991B1B;',   // red — closed
 };
 
 function renderLeadStatusBadge(status) {
@@ -5546,6 +5648,12 @@ async function openPromoteQ4Screen2() {
       console.warn('Could not load service sub:', e.message);
     }
   }
+  // Pre-fill the wizard's service sub from the lead, if set. The user can
+  // still change it in this screen — Q4 wins. This keeps both lead form and
+  // wizard consistent: change freely up until commit.
+  if (!s.q4.serviceSubId && leadData.service_sub_id) {
+    s.q4.serviceSubId = +leadData.service_sub_id;
+  }
   const subs = (allData['service_sub_all'] || []).filter(s2 => +s2.major_id === +leadData.service_major_id);
   const subOpts = '<option value="">— select —</option>' +
     subs.map(s2 => `<option value="${s2.id}" data-recurring="${s2.is_recurring?1:0}" data-margin="${s2.default_margin||25}" data-duration="${s2.default_duration||0}" ${+s.q4.serviceSubId===+s2.id?'selected':''}>${s2.name}${s2.is_recurring?' (recurring)':' (project)'}</option>`).join('');
@@ -6051,6 +6159,7 @@ async function saveLead() {
     description,
     region_id:        +document.getElementById('lead-region-id').value || null,
     service_major_id: +document.getElementById('lead-service-major-id').value || null,
+    service_sub_id:   +document.getElementById('lead-service-sub-id').value   || null,
     est_value:        document.getElementById('lead-est-value').value !== '' ? +document.getElementById('lead-est-value').value : null,
 
     fit:           +leadData.fit || 0,
