@@ -160,6 +160,26 @@ tr:hover td{background:#F8FAFC;}
 .text-sm{font-size:12px;}.text-muted{color:var(--text3);}
 .divider{height:1px;background:var(--border);margin:16px 0;}
 
+/* ── Sortable / filterable table chrome (Excel-style) ──── */
+.tbl-sort-label{cursor:pointer;user-select:none;}
+.tbl-sort-arrow{margin-left:4px;font-size:10px;color:var(--text);opacity:0.9;}
+.tbl-filter-btn{display:inline-block;padding:0 4px;margin-left:4px;font-size:10px;color:var(--text3);cursor:pointer;border-radius:3px;line-height:1;vertical-align:middle;}
+.tbl-filter-btn:hover{background:var(--bg);color:var(--text);}
+.tbl-filter-btn.active{color:var(--red);font-weight:700;}
+#table-filter-popup{position:fixed;display:none;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:99997;min-width:240px;max-width:320px;padding:8px 0;font-size:13px;}
+.tbl-popup-section{display:flex;gap:6px;padding:4px 12px;}
+.tbl-popup-btn{flex:1;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text);}
+.tbl-popup-btn:hover{background:var(--bg2);}
+.tbl-popup-clear{color:var(--red);}
+.tbl-popup-divider{height:1px;background:var(--border);margin:6px 0;}
+.tbl-popup-search{display:block;width:calc(100% - 24px);margin:4px 12px;padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:12px;box-sizing:border-box;}
+.tbl-popup-row{display:flex;align-items:center;gap:8px;padding:4px 12px;cursor:pointer;}
+.tbl-popup-row:hover{background:var(--bg);}
+.tbl-popup-row input[type=checkbox]{flex-shrink:0;}
+.tbl-popup-row span{font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tbl-popup-selectall{font-weight:700;}
+.tbl-popup-list{max-height:240px;overflow-y:auto;}
+
 /* ── Opportunity Form ──────────────────────────────────── */
 .opp-page { display:none; position:fixed; inset:0; background:var(--bg); z-index:1000; overflow:hidden; flex-direction:column; }
 .opp-page.active { display:flex; }
@@ -228,7 +248,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.36</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.37</div>
   </div>
 </div>
 
@@ -247,7 +267,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.36</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.37</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -778,6 +798,9 @@ tr:hover td{background:#F8FAFC;}
   <span class="busy-overlay-label" id="busy-label">Working…</span>
 </div>
 
+<!-- Shared filter popup for sortable/filterable tables — positioned via JS -->
+<div id="table-filter-popup" role="dialog" aria-label="Column filter"></div>
+
 <script>
 'use strict';
 
@@ -906,6 +929,237 @@ function stopBusy() {
   const el = document.getElementById('busy-overlay');
   if (el) el.classList.remove('show');
 }
+
+// ── Excel-style sortable + filterable table helper ──────
+//
+// Usage:
+//   makeSortableFilterableTable({
+//     tableId:     'opportunities',                // unique key per table
+//     headRoot:    document.getElementById('table-head'),
+//     bodyRoot:    document.getElementById('table-body'),
+//     columns:     [{ key, label, get(row), sortable=true, filterable=true, align='left' }],
+//     rows:        [...rawData],
+//     rowRenderer: row => '<tr>...</tr>',
+//     emptyMessage: 'No deals match the filters',
+//   });
+//
+// Per-table state lives in _tableState[tableId]:
+//   { sortKey, sortDir ('asc'|'desc'|null), filters: { colKey: Set<excludedValue> }, ... }
+//
+// Sort is client-side; filter is value-checkbox (Excel-style) with text search
+// inside the popup. Datasets are small (<1000 rows per list) so this is fast.
+
+const _tableState = {};
+
+function makeSortableFilterableTable(cfg) {
+  const s = _tableState[cfg.tableId] = _tableState[cfg.tableId] || { sortKey: null, sortDir: null, filters: {} };
+  Object.assign(s, cfg);
+  _renderTable(cfg.tableId);
+}
+
+function _tblDisplay(col, row) {
+  const v = col.get(row);
+  if (v == null || v === '') return '(Blanks)';
+  return String(v);
+}
+
+function _renderTable(tableId) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  const { columns, rows, rowRenderer, headRoot, bodyRoot, emptyMessage } = s;
+
+  // Filter
+  let filtered = rows.filter(row => columns.every(col => {
+    if (col.filterable === false) return true;
+    const excl = s.filters[col.key];
+    if (!excl || !excl.size) return true;
+    return !excl.has(_tblDisplay(col, row));
+  }));
+
+  // Sort
+  if (s.sortKey && s.sortDir) {
+    const col = columns.find(c => c.key === s.sortKey);
+    if (col) {
+      filtered = [...filtered].sort((a, b) => {
+        const va = col.get(a), vb = col.get(b);
+        if (typeof va === 'number' && typeof vb === 'number') {
+          return s.sortDir === 'asc' ? va - vb : vb - va;
+        }
+        const sa = va == null ? '' : String(va);
+        const sb = vb == null ? '' : String(vb);
+        const cmp = sa.localeCompare(sb, undefined, { numeric: true });
+        return s.sortDir === 'asc' ? cmp : -cmp;
+      });
+    }
+  }
+
+  // Headers
+  if (headRoot) {
+    headRoot.innerHTML = '<tr>' + columns.map(c => {
+      const isSorted = s.sortKey === c.key;
+      const sortArrow = isSorted ? `<span class="tbl-sort-arrow">${s.sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
+      const sortable  = c.sortable !== false;
+      const labelHtml = sortable
+        ? `<span class="tbl-sort-label" onclick="_cycleSort('${tableId}','${c.key}')">${c.label}${sortArrow}</span>`
+        : `<span>${c.label}</span>`;
+      const filterActive = !!(s.filters[c.key] && s.filters[c.key].size);
+      const filterBtn = c.filterable !== false
+        ? `<span class="tbl-filter-btn ${filterActive ? 'active' : ''}" title="Filter" onclick="event.stopPropagation();_openFilterPopup('${tableId}','${c.key}',event)">▾</span>`
+        : '';
+      const align = c.align || 'left';
+      return `<th style="text-align:${align};">${labelHtml}${filterBtn}</th>`;
+    }).join('') + '</tr>';
+  }
+
+  // Rows
+  if (bodyRoot) {
+    if (!filtered.length) {
+      bodyRoot.innerHTML = `<tr class="empty-row"><td colspan="${columns.length}">${emptyMessage || 'No results'}</td></tr>`;
+    } else {
+      bodyRoot.innerHTML = filtered.map(rowRenderer).join('');
+    }
+  }
+}
+
+function _cycleSort(tableId, colKey) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  if (s.sortKey === colKey) {
+    if      (s.sortDir === 'asc')  s.sortDir = 'desc';
+    else if (s.sortDir === 'desc') { s.sortKey = null; s.sortDir = null; }
+  } else {
+    s.sortKey = colKey;
+    s.sortDir = 'asc';
+  }
+  _renderTable(tableId);
+}
+
+function _openFilterPopup(tableId, colKey, ev) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  const col = s.columns.find(c => c.key === colKey);
+  if (!col) return;
+
+  // Distinct values from the full row set (Excel doesn't cascade other filters)
+  const distinct = new Set();
+  for (const row of s.rows) distinct.add(_tblDisplay(col, row));
+  const sorted = Array.from(distinct).sort((a, b) =>
+    String(a).localeCompare(String(b), undefined, { numeric: true })
+  );
+  const excluded = s.filters[colKey] || new Set();
+
+  const esc = (v) => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const escAttr = (v) => String(v).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+
+  const popup = document.getElementById('table-filter-popup');
+  popup.innerHTML = `
+    <div class="tbl-popup-section">
+      <button class="tbl-popup-btn" onclick="_sortFromPopup('${tableId}','${colKey}','asc')">Sort A → Z</button>
+      <button class="tbl-popup-btn" onclick="_sortFromPopup('${tableId}','${colKey}','desc')">Sort Z → A</button>
+    </div>
+    <div class="tbl-popup-divider"></div>
+    <input type="text" id="tbl-popup-search" placeholder="Search..." oninput="_filterPopupList(this.value)" class="tbl-popup-search">
+    <div class="tbl-popup-divider"></div>
+    <label class="tbl-popup-row tbl-popup-selectall">
+      <input type="checkbox" id="tbl-popup-selectall" ${excluded.size === 0 ? 'checked' : ''} onchange="_toggleSelectAll('${tableId}','${colKey}',this.checked)">
+      <span>(Select All)</span>
+    </label>
+    <div class="tbl-popup-list" id="tbl-popup-list">
+      ${sorted.map(v => `
+        <label class="tbl-popup-row" data-value="${esc(v)}">
+          <input type="checkbox" ${!excluded.has(v) ? 'checked' : ''} onchange="_toggleValue('${tableId}','${colKey}','${escAttr(v)}',this.checked)">
+          <span>${esc(v)}</span>
+        </label>
+      `).join('')}
+    </div>
+    <div class="tbl-popup-divider"></div>
+    <div class="tbl-popup-section">
+      <button class="tbl-popup-btn tbl-popup-clear" onclick="_clearFilter('${tableId}','${colKey}')">Clear filter</button>
+      <button class="tbl-popup-btn" onclick="_closeFilterPopup()">Close</button>
+    </div>
+  `;
+
+  // Position next to the click target (the funnel button)
+  const rect = ev.target.getBoundingClientRect();
+  popup.style.display = 'block';
+  // Defer width measurement until after display so we can clamp to viewport
+  const popupW = popup.offsetWidth || 260;
+  let left = rect.left;
+  if (left + popupW > window.innerWidth - 8) left = Math.max(8, window.innerWidth - popupW - 8);
+  popup.style.left = left + 'px';
+  popup.style.top  = (rect.bottom + 4) + 'px';
+
+  s.openPopupCol = colKey;
+}
+
+function _closeFilterPopup() {
+  const popup = document.getElementById('table-filter-popup');
+  if (popup) popup.style.display = 'none';
+  for (const k of Object.keys(_tableState)) _tableState[k].openPopupCol = null;
+}
+
+function _toggleValue(tableId, colKey, value, isChecked) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  s.filters[colKey] = s.filters[colKey] || new Set();
+  if (isChecked) s.filters[colKey].delete(value);
+  else           s.filters[colKey].add(value);
+  if (s.filters[colKey].size === 0) delete s.filters[colKey];
+  _renderTable(tableId);
+  const allCb = document.getElementById('tbl-popup-selectall');
+  if (allCb) allCb.checked = !s.filters[colKey];
+}
+
+function _toggleSelectAll(tableId, colKey, checked) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  if (checked) {
+    delete s.filters[colKey];
+  } else {
+    // Exclude only currently-visible (search-matched) rows
+    const visible = document.querySelectorAll('#tbl-popup-list .tbl-popup-row');
+    const excl = new Set();
+    visible.forEach(r => { if (r.style.display !== 'none') excl.add(r.dataset.value); });
+    s.filters[colKey] = excl;
+  }
+  document.querySelectorAll('#tbl-popup-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  _renderTable(tableId);
+}
+
+function _clearFilter(tableId, colKey) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  delete s.filters[colKey];
+  _renderTable(tableId);
+  _closeFilterPopup();
+}
+
+function _sortFromPopup(tableId, colKey, dir) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  s.sortKey = colKey;
+  s.sortDir = dir;
+  _renderTable(tableId);
+  _closeFilterPopup();
+}
+
+function _filterPopupList(query) {
+  const q = (query || '').toLowerCase();
+  document.querySelectorAll('#tbl-popup-list .tbl-popup-row').forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(q) ? '' : 'none';
+  });
+}
+
+// Click outside the popup closes it (but ignore clicks on a filter funnel,
+// which is what OPENS the popup — that's handled by _openFilterPopup).
+document.addEventListener('click', (e) => {
+  const popup = document.getElementById('table-filter-popup');
+  if (!popup || popup.style.display === 'none') return;
+  if (popup.contains(e.target)) return;
+  if (e.target.classList && e.target.classList.contains('tbl-filter-btn')) return;
+  _closeFilterPopup();
+});
 
 // ── Status messages ──────────────────────────────────────
 let statusTimer;
@@ -4060,7 +4314,7 @@ async function renderOpportunitiesPage() {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
 
-  head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th><th>Actions</th></tr>';
+  head.innerHTML = '';
   body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
 
   try {
@@ -4077,15 +4331,25 @@ async function renderOpportunitiesPage() {
     document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
 
     if (!deals.length) {
+      head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th><th>Actions</th></tr>';
       body.innerHTML = '<tr class="empty-row"><td colspan="6">No opportunities yet — click "+ New Opportunity" to create one</td></tr>';
       return;
     }
 
-    body.innerHTML = deals.map(d => {
-      const org = orgs.find(o => +o.id === +d.org_id);
+    // Column metadata: each col.get(row) returns the raw value used for sort +
+    // filter checkbox labels. Display in the row stays bespoke via rowRenderer.
+    const columns = [
+      { key: 'org',        label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
+      { key: 'name',       label: 'Deal Name',    get: d => d.name || '' },
+      { key: 'order_date', label: 'Order Date',   get: d => d.order_date || '' },
+      { key: 'stage',      label: 'Stage',        get: d => (stages.find(s => +s.id === +d.stage_id)?.name) || '' },
+      { key: 'probability',label: 'Probability',  get: d => d.probability != null ? +d.probability : null, align: 'right' },
+      { key: 'actions',    label: 'Actions',      get: () => '', sortable: false, filterable: false },
+    ];
+
+    const rowRenderer = (d) => {
+      const org   = orgs.find(o => +o.id === +d.org_id);
       const stage = stages.find(s => +s.id === +d.stage_id);
-      const owner = people.find(p => +p.id === +d.owner_id);
-      const ownerName = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
       return `<tr onclick="openOpportunity(${d.id})" style="cursor:pointer;">
         <td style="font-weight:600;">${org?.name || '—'}</td>
         <td>${d.name}</td>
@@ -4097,7 +4361,17 @@ async function renderOpportunitiesPage() {
           <button class="btn btn-danger btn-sm" onclick="confirmDeleteDeal(${d.id})">Delete</button>
         </td>
       </tr>`;
-    }).join('');
+    };
+
+    makeSortableFilterableTable({
+      tableId: 'opportunities',
+      headRoot: head,
+      bodyRoot: body,
+      columns,
+      rows: deals,
+      rowRenderer,
+      emptyMessage: 'No deals match the current filters',
+    });
   } catch(e) {
     body.innerHTML = `<tr class="empty-row"><td colspan="6">Error: ${e.message}</td></tr>`;
   }
