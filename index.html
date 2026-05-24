@@ -209,7 +209,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.33</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.34</div>
   </div>
 </div>
 
@@ -228,7 +228,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.33</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.34</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -574,8 +574,9 @@ tr:hover td{background:#F8FAFC;}
                 <option value="">— pick existing or enter name below —</option>
               </select>
             </div>
-            <input type="text" id="lead-target-org-name" class="form-control" placeholder="Or type org name (use this if not yet a known client)" style="margin-top:8px;">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation, OR type a name in the second field for new prospects.</div>
+            <input type="text" id="lead-target-org-name" class="form-control" placeholder="Or type org name (use this if not yet a known client)" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
+            <div id="lead-target-org-matches" style="margin-top:8px;"></div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation, OR type a name in the second field for new prospects. We'll warn you if the typed name looks like an existing client.</div>
           </div>
 
           <div class="form-group">
@@ -4546,6 +4547,9 @@ function resetLeadForm() {
     'lead-dead-reason-value','lead-dead-notes-value'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  // Clear the target-org similarity match hints
+  const matchEl = document.getElementById('lead-target-org-matches');
+  if (matchEl) matchEl.innerHTML = '';
   // Status badge resets to New
   renderLeadStatusBadge('New');
   // Hide conditional sections
@@ -4647,7 +4651,11 @@ function populateLeadForm() {
   if (leadData.source_detail) document.getElementById('lead-source-detail').value = leadData.source_detail;
   // Target
   if (leadData.target_org_id) document.getElementById('lead-target-org-id').value = leadData.target_org_id;
-  if (leadData.target_org_name) document.getElementById('lead-target-org-name').value = leadData.target_org_name;
+  if (leadData.target_org_name) {
+    document.getElementById('lead-target-org-name').value = leadData.target_org_name;
+    // Surface similarity hints if the lead was saved with a free-text name
+    onLeadTargetOrgNameInput();
+  }
   if (leadData.target_person_id) document.getElementById('lead-target-person-id').value = leadData.target_person_id;
   if (leadData.target_person_name) document.getElementById('lead-target-person-name').value = leadData.target_person_name;
   // Details
@@ -4696,11 +4704,13 @@ function onLeadSourceChange() {
 
 function onLeadTargetOrgChange() {
   // If user picks an org from the dropdown, clear the free-text name field
-  // (the FK takes precedence)
+  // (the FK takes precedence) and clear any match hints
   const orgId = document.getElementById('lead-target-org-id').value;
   if (orgId) {
     const nameField = document.getElementById('lead-target-org-name');
     if (nameField) nameField.value = '';
+    const matchEl = document.getElementById('lead-target-org-matches');
+    if (matchEl) matchEl.innerHTML = '';
   }
 }
 
@@ -4711,6 +4721,59 @@ function onLeadTargetPersonChange() {
     const nameField = document.getElementById('lead-target-person-name');
     if (nameField) nameField.value = '';
   }
+}
+
+// Live similarity check on the free-text target org name. Surfaces an exact
+// hit (highlighted) and up to 3 close candidates, with "Use this" buttons that
+// promote the match into the dropdown FK. Stops the user from accidentally
+// creating a duplicate organisation when they could have picked the existing one.
+function onLeadTargetOrgNameInput() {
+  const matchEl = document.getElementById('lead-target-org-matches');
+  if (!matchEl) return;
+  const name = (document.getElementById('lead-target-org-name')?.value || '').trim();
+  // If the dropdown is already locked to an existing org, the free-text is
+  // irrelevant — skip the check.
+  if (document.getElementById('lead-target-org-id')?.value) { matchEl.innerHTML = ''; return; }
+  if (name.length < 3) { matchEl.innerHTML = ''; return; }
+
+  const { exact, shortlist } = _findOrgMatches(name, '');
+  let html = '';
+  if (exact) {
+    html += `
+      <div style="padding:8px 10px;border:2px solid #16a34a;border-radius:var(--radius);background:#F0FDF4;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+        <div style="font-size:13px;">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Existing org match · </span>
+          <strong>${exact.name}</strong>${exact.legal_name && exact.legal_name !== exact.name ? ` <span style="color:var(--text3);">(${exact.legal_name})</span>` : ''}
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="useLeadTargetOrgMatch(${exact.id})">Use this</button>
+      </div>`;
+  }
+  if (shortlist.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
+    html += shortlist.slice(0, 3).map(o => `
+      <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+        <div style="font-size:12px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="useLeadTargetOrgMatch(${o.id})">Use</button>
+      </div>`).join('');
+  }
+  matchEl.innerHTML = html;
+}
+
+// Picking a suggested match: drop it into the dropdown FK, clear free text + matches.
+function useLeadTargetOrgMatch(orgId) {
+  const dd = document.getElementById('lead-target-org-id');
+  if (!dd) return;
+  // The dropdown may not include this org if its options were filtered — ensure it does
+  if (!Array.from(dd.options).some(o => +o.value === +orgId)) {
+    const org = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (org) {
+      const opt = document.createElement('option');
+      opt.value = org.id; opt.textContent = org.name;
+      dd.appendChild(opt);
+    }
+  }
+  dd.value = orgId;
+  onLeadTargetOrgChange();  // clears free-text + match strip
 }
 
 // Thin wrapper around the existing modal-root pattern.
@@ -4970,13 +5033,40 @@ async function promoteWizardSaveWake() {
 //
 // State is held on window._promoteOrgState across screens.
 
+// Common organisation-name suffixes that should be stripped before matching.
+// South-African flavoured (CC for Close Corporation), plus the international set.
+// Add to this list as needed — order matters only for readability.
+const _ORG_NAME_NOISE = [
+  /\(pty\)\s*ltd\.?$/i,
+  /\bpty\.?\s*ltd\.?$/i,
+  /\blimited$/i,
+  /\bltd\.?$/i,
+  /\bincorporated$/i,
+  /\binc\.?$/i,
+  /\bllc\.?$/i,
+  /\(cc\)$/i,
+  /\bcc$/i,
+  /\bn\/a$/i,
+];
+
+function _normaliseOrgName(name) {
+  if (!name) return '';
+  let s = String(name).trim().toLowerCase();
+  // Strip common entity suffixes (repeat once in case of nested like "Foo Pty Ltd Inc")
+  for (let pass = 0; pass < 2; pass++) {
+    for (const re of _ORG_NAME_NOISE) s = s.replace(re, '').trim();
+  }
+  // Collapse punctuation and whitespace
+  return s.replace(/[.,'"&]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function _orgMatchScore(org, colloquial, legal) {
-  // Returns: 100 = exact case-insensitive hit on either name; 0..N = token
-  // overlap score for the shortlist. Falsy candidates filtered out by caller.
-  const lc = (colloquial || '').trim().toLowerCase();
-  const ll = (legal       || '').trim().toLowerCase();
-  const on = (org.name        || '').trim().toLowerCase();
-  const oL = (org.legal_name  || '').trim().toLowerCase();
+  // Returns: 100 = exact match on either name after suffix-stripping; 0..N =
+  // token overlap score for the shortlist. Falsy candidates filtered by caller.
+  const lc = _normaliseOrgName(colloquial);
+  const ll = _normaliseOrgName(legal);
+  const on = _normaliseOrgName(org.name);
+  const oL = _normaliseOrgName(org.legal_name);
   if ((lc && (on === lc || oL === lc)) || (ll && (on === ll || oL === ll))) return 100;
   const tokens = new Set([lc, ll].join(' ').split(/\s+/).filter(t => t && t.length >= 3));
   if (!tokens.size) return 0;
@@ -4987,7 +5077,8 @@ function _orgMatchScore(org, colloquial, legal) {
 }
 
 function _findOrgMatches(colloquial, legal) {
-  const orgs = allData['organisations'] || [];
+  // Exclude home organisations from match candidates — they aren't clients.
+  const orgs = (allData['organisations'] || []).filter(o => !o.home_organisation);
   const scored = orgs
     .map(o => ({ org: o, score: _orgMatchScore(o, colloquial, legal) }))
     .filter(x => x.score > 0)
@@ -5140,57 +5231,47 @@ async function _openPromoteOrgScreen2() {
         return `<span style="color:#1e40af;">Linking to:</span> <strong>${o?.name || ''}</strong>${o?.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);font-weight:400;">(${o.legal_name})</span>` : ''}`;
       })();
 
-  // Build the existing-contact candidate list:
-  //   = people affiliated with the selected org (if any)
-  //   ∪ the lead's target_person_id (if set, even when not yet affiliated)
-  // The lead's contact, if present, becomes the default selection — they're
-  // the obvious "primary" candidate. Affiliation to the org is created on
-  // commit if missing.
+  // Contact picker rules:
+  //  • NEW org           → no dropdown; always capture a new contact (it gets
+  //                         affiliated to the new org on commit).
+  //  • EXISTING org      → dropdown shows ONLY people already affiliated to
+  //                         that org. If none are affiliated yet, fall back to
+  //                         the new-contact form (no empty dropdown shown).
+  // The lead's target_person is no longer surfaced as a shortcut — if the user
+  // wants them on this deal, they must already be affiliated (or be re-added).
   let existingContactOpts = '';
   let contactToggleHtml = '';
   const people = allData['people'] || [];
-  const candidatePeople = [];   // [{ person, isPrimary, fromLead }]
-  const seenIds = new Set();
+  const candidatePeople = [];   // [{ person, isPrimary }]
 
   if (!s.isNew && s.selectedOrgId) {
     try {
       const links = await apiGet('person_organisation_roles', `org_id=eq.${s.selectedOrgId}&select=person_id,role_type,is_primary`);
+      const seen = new Set();
       for (const l of links) {
         const p = people.find(pp => +pp.id === +l.person_id);
-        if (p && !seenIds.has(+p.id)) {
-          candidatePeople.push({ person: p, isPrimary: !!l.is_primary, fromLead: false });
-          seenIds.add(+p.id);
+        if (p && !seen.has(+p.id)) {
+          candidatePeople.push({ person: p, isPrimary: !!l.is_primary });
+          seen.add(+p.id);
         }
       }
     } catch (e) {
       console.warn('Could not load existing org contacts:', e.message);
     }
   }
-  // Always offer the lead's own target_person as a candidate (even for new orgs)
-  if (leadData.target_person_id) {
-    const lp = people.find(p => +p.id === +leadData.target_person_id);
-    if (lp && !seenIds.has(+lp.id)) {
-      candidatePeople.push({ person: lp, isPrimary: false, fromLead: true });
-      seenIds.add(+lp.id);
-    }
-  }
 
-  if (candidatePeople.length) {
-    // Default selection: lead's target_person if among candidates, else first
+  if (!s.isNew && candidatePeople.length) {
+    // Existing org with affiliated contacts → show the toggle + dropdown
     if (!s.existingPersonId || !candidatePeople.some(c => +c.person.id === +s.existingPersonId)) {
-      const fromLead = candidatePeople.find(c => c.fromLead);
-      s.existingPersonId = fromLead ? +fromLead.person.id : +candidatePeople[0].person.id;
+      s.existingPersonId = +candidatePeople[0].person.id;
     }
     if (!s.contactMode) s.contactMode = 'existing';
 
     existingContactOpts = candidatePeople.map(c => {
       const name = [c.person.first_name, c.person.last_name].filter(Boolean).join(' ');
-      const tags = [];
-      if (c.isPrimary) tags.push('Primary');
-      if (c.fromLead)  tags.push('from lead');
-      const tagStr = tags.length ? ` (${tags.join(', ')})` : '';
-      const sel = (+c.person.id === +s.existingPersonId) ? 'selected' : '';
-      return `<option value="${c.person.id}" ${sel}>${name}${tagStr}</option>`;
+      const tag  = c.isPrimary ? ' (Primary)' : '';
+      const sel  = (+c.person.id === +s.existingPersonId) ? 'selected' : '';
+      return `<option value="${c.person.id}" ${sel}>${name}${tag}</option>`;
     }).join('');
     contactToggleHtml = `
       <div style="display:flex;gap:14px;margin-bottom:10px;font-size:12px;">
@@ -5204,7 +5285,9 @@ async function _openPromoteOrgScreen2() {
         </label>
       </div>`;
   } else {
+    // New org, or existing org with no affiliated contacts → new only
     s.contactMode = 'new';
+    s.existingPersonId = null;
   }
 
   const np = s.newPerson;
