@@ -248,7 +248,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.41</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.42</div>
   </div>
 </div>
 
@@ -267,7 +267,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.41</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.42</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -4981,8 +4981,11 @@ function resetLeadForm() {
   if (orgMatchEl) orgMatchEl.innerHTML = '';
   const personMatchEl = document.getElementById('lead-target-person-matches');
   if (personMatchEl) personMatchEl.innerHTML = '';
-  // Reset the target-person dropdown to its hidden, no-org-picked state
+  // Reset the target-person dropdown to its hidden, no-org-picked state, and
+  // recompute show/hide on the free-text inputs (org cleared → show free text).
   refreshLeadTargetPersonDropdown();
+  onLeadTargetOrgChange();
+  onLeadTargetPersonChange();
   // Status badge resets to New
   renderLeadStatusBadge('New');
   // Hide conditional sections
@@ -5094,11 +5097,16 @@ function populateLeadForm() {
   // Populate the contact-person dropdown from the target org's affiliations
   // (no-op if no org is set). Awaited via fire-and-forget so populateLeadForm
   // doesn't need to become async itself.
+  // Recompute show/hide on the org's free-text input based on the loaded value.
+  onLeadTargetOrgChange();
   refreshLeadTargetPersonDropdown().then(() => {
     if (leadData.target_person_id) {
       const sel = document.getElementById('lead-target-person-id');
       if (sel) sel.value = leadData.target_person_id;
     }
+    // Recompute show/hide on the person's free-text input now that the dropdown
+    // has its loaded value (or stays empty if no affiliated contacts).
+    onLeadTargetPersonChange();
   });
   if (leadData.target_person_name) {
     document.getElementById('lead-target-person-name').value = leadData.target_person_name;
@@ -5156,14 +5164,18 @@ function onLeadSourceChange() {
 }
 
 function onLeadTargetOrgChange() {
-  // If user picks an org from the dropdown, clear the free-text name field
-  // (the FK takes precedence) and clear any match hints
-  const orgId = document.getElementById('lead-target-org-id').value;
+  // Picking an existing org from the dropdown locks in that choice — the
+  // free-text "create new" input + its similarity match strip become irrelevant
+  // and are hidden. Clearing the dropdown brings them back.
+  const orgId    = document.getElementById('lead-target-org-id').value;
+  const nameField = document.getElementById('lead-target-org-name');
+  const matchEl   = document.getElementById('lead-target-org-matches');
   if (orgId) {
-    const nameField = document.getElementById('lead-target-org-name');
-    if (nameField) nameField.value = '';
-    const matchEl = document.getElementById('lead-target-org-matches');
-    if (matchEl) matchEl.innerHTML = '';
+    if (nameField) { nameField.value = ''; nameField.style.display = 'none'; }
+    if (matchEl)   { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  } else {
+    if (nameField) nameField.style.display = '';
+    if (matchEl)   matchEl.style.display = '';
   }
   // Refresh the contact-person dropdown to match the chosen org's affiliations.
   refreshLeadTargetPersonDropdown();
@@ -5245,13 +5257,17 @@ async function refreshLeadTargetPersonDropdown() {
 }
 
 function onLeadTargetPersonChange() {
-  // Same logic as org: FK wins, clear the free-text fallback + any similarity hints
-  const personId = document.getElementById('lead-target-person-id').value;
+  // Same logic as org: picking an existing affiliated contact hides the
+  // "new contact" free-text + similarity match strip. Clearing brings them back.
+  const personId  = document.getElementById('lead-target-person-id').value;
+  const nameField = document.getElementById('lead-target-person-name');
+  const matchEl   = document.getElementById('lead-target-person-matches');
   if (personId) {
-    const nameField = document.getElementById('lead-target-person-name');
-    if (nameField) nameField.value = '';
-    const matchEl = document.getElementById('lead-target-person-matches');
-    if (matchEl) matchEl.innerHTML = '';
+    if (nameField) { nameField.value = ''; nameField.style.display = 'none'; }
+    if (matchEl)   { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  } else {
+    if (nameField) nameField.style.display = '';
+    if (matchEl)   matchEl.style.display = '';
   }
 }
 
