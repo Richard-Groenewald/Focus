@@ -248,7 +248,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.43</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.44</div>
   </div>
 </div>
 
@@ -267,7 +267,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.43</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.44</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -5861,8 +5861,49 @@ function _normaliseOrgName(name) {
   return s.replace(/[.,'"&]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+// TF-IDF token weighting over the org corpus. Rare tokens (an actual company
+// name like "Mthembu") get a high IDF weight; common tokens ("Estate",
+// "Holdings", "Pty", "Trust") get low weight. Built lazily and cached on
+// allData; invalidated by callers that POST/PATCH organisations.
+function _ensureOrgIdfIndex() {
+  if (allData['_org_idf']) return allData['_org_idf'];
+  const orgs = allData['organisations'] || [];
+  const docs = orgs.map(o =>
+    new Set([_normaliseOrgName(o.name), _normaliseOrgName(o.legal_name)]
+      .join(' ').split(/\s+/).filter(t => t.length >= 2))
+  );
+  const N = docs.length || 1;
+  const df = new Map();
+  for (const tokens of docs) {
+    for (const t of tokens) df.set(t, (df.get(t) || 0) + 1);
+  }
+  const idf = new Map();
+  for (const [t, count] of df) idf.set(t, Math.log(N / count));
+  allData['_org_idf'] = idf;
+  return idf;
+}
+
+// Weighted token-overlap score, 0-100. Sums the IDF weight of query tokens
+// that appear in the target, normalised by the total IDF weight of the query.
+// 100 means every distinct query token (weighted by rarity) hit the target.
+function _tfidfOverlap(queryStr, targetStr, idfMap) {
+  const qt = new Set(queryStr.split(/\s+/).filter(t => t.length >= 2));
+  const tt = new Set(targetStr.split(/\s+/).filter(t => t.length >= 2));
+  if (!qt.size || !tt.size) return 0;
+  let shared = 0, qTotal = 0;
+  for (const t of qt) {
+    const w = idfMap.get(t) || 0;
+    qTotal += w;
+    if (tt.has(t)) shared += w;
+  }
+  return qTotal > 0 ? Math.round((shared / qTotal) * 100) : 0;
+}
+
 // Org scoring: each provided query name (colloquial + legal, if both given) is
-// compared against each of the candidate org's names. Returns the best score.
+// compared against each of the candidate org's names via Jaro-Winkler +
+// Metaphone (letter-level), then combined with a TF-IDF token-overlap score
+// (corpus-aware). Returns the max — letter-level wins on near-typos within a
+// single token; TF-IDF wins when multiple distinct rare tokens match exactly.
 // Suffix-stripping happens up front via _normaliseOrgName so "Acme (Pty) Ltd"
 // matches "Acme" cleanly.
 function _orgMatchScore(org, colloquial, legal) {
@@ -5876,6 +5917,8 @@ function _orgMatchScore(org, colloquial, legal) {
     ll && on ? _stringSimilarity(ll, on) : 0,
     ll && oL ? _stringSimilarity(ll, oL) : 0,
   ];
+  const idf = _ensureOrgIdfIndex();
+  candidates.push(_tfidfOverlap((lc + ' ' + ll).trim(), (on + ' ' + oL).trim(), idf));
   return Math.max(...candidates);
 }
 
@@ -6544,6 +6587,7 @@ async function savePromoteAll() {
       }, 'select=*');
       orgId = createdOrg[0].id;
       (allData['organisations'] = allData['organisations'] || []).push(createdOrg[0]);
+      delete allData['_org_idf'];   // corpus changed → rebuild on next match
     } else {
       const current = (allData['organisations'] || []).find(o => +o.id === +orgId) || {};
       const patch = {};
@@ -6555,6 +6599,7 @@ async function savePromoteAll() {
         const patched = await api('organisations', 'PATCH', patch, `id=eq.${orgId}&select=*`);
         const idx = (allData['organisations'] || []).findIndex(o => +o.id === +orgId);
         if (idx >= 0 && patched[0]) allData['organisations'][idx] = patched[0];
+        delete allData['_org_idf'];   // a name may have changed → rebuild on next match
       }
     }
 
