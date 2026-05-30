@@ -248,7 +248,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.45</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.46</div>
   </div>
 </div>
 
@@ -267,7 +267,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.45</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.46</div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -314,11 +314,14 @@ tr:hover td{background:#F8FAFC;}
     <div style="display:flex;gap:8px;align-items:center;">
       <div id="opp-status-badge" style="font-size:12px;color:var(--text3);"></div>
       <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeOppPage()">Cancel</button>
-      <button class="btn btn-primary" onclick="saveOpportunity()">Save</button>
+      <button class="btn btn-primary" id="opp-save-btn" onclick="saveOpportunity()">Save</button>
     </div>
   </div>
 
   <div class="opp-body">
+    <!-- Read-only banner (ownership / contract lock) -->
+    <div id="opp-readonly-banner" style="display:none;margin-bottom:16px;padding:12px 16px;background:#FFF5E5;border:1px solid #E8A33D;border-radius:var(--radius);color:#7A4F0E;font-size:13px;font-weight:600;"></div>
+
     <!-- Top Tabs -->
     <div class="opp-tabs">
       <button class="opp-tab active" onclick="switchOppTab('general', this)">General</button>
@@ -349,6 +352,15 @@ tr:hover td{background:#F8FAFC;}
           <div class="form-group">
             <label class="form-label">Deal Name <span style="color:var(--red)">*</span></label>
             <input type="text" id="opp-name" class="form-control">
+          </div>
+
+          <!-- Owner reassignment — shown only to users who can assign owners (managers/admin) -->
+          <div class="form-group" id="opp-owner-reassign-wrap" style="display:none;">
+            <label class="form-label">Owner</label>
+            <select id="opp-owner-reassign" class="form-control">
+              <option value="">— unassigned —</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Reassign this deal to another owner.</div>
           </div>
 
           <!-- Product/Service + Region + Stage + Probability -->
@@ -452,7 +464,7 @@ tr:hover td{background:#F8FAFC;}
     <!-- Engagement Tab -->
     <div class="opp-tab-content" id="opp-tab-engagement">
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-        <button class="btn btn-primary btn-sm" onclick="openEngagementModal()">+ Log Engagement</button>
+        <button class="btn btn-primary btn-sm" id="opp-log-engagement-btn" onclick="openEngagementModal()">+ Log Engagement</button>
       </div>
       <div id="engagement-list">
         <div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>
@@ -681,6 +693,7 @@ tr:hover td{background:#F8FAFC;}
                 <span id="lead-status-badge" style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;background:#f3f4f6;color:#4b5563;">—</span>
                 <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary" style="display:none;padding:6px 12px;font-size:12px;">Promote →</button>
                 <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-secondary" style="display:none;padding:6px 12px;font-size:12px;">Decline…</button>
+                <span id="lead-promotion-note" style="display:none;font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;background:#FEF3C7;color:#92400E;"></span>
               </div>
               <div style="font-size:11px;color:var(--text3);margin-top:4px;">Auto-derived from interactions, qualification, red flags and promotion.</div>
             </div>
@@ -1341,6 +1354,14 @@ const PAGES = {
     fields: [],
   },
 
+  user_regions: {
+    title: 'User Regions',
+    table: 'system_user_regions',
+    custom: true,
+    columns: [],
+    fields: [],
+  },
+
   // ── Lookups ──────────────────────────────────────────────
   industry_sectors: {
     title: 'Industry Sectors',
@@ -1598,7 +1619,7 @@ function showPage(page) {
   } else if (page === 'research_campaigns') {
     addBtn.onclick = () => openNewResearchCampaign();
     addBtn.textContent = '+ New Campaign';
-  } else if (page === 'role_permissions') {
+  } else if (page === 'role_permissions' || page === 'user_regions') {
     addBtn.style.display = 'none';
   } else {
     addBtn.onclick = () => openAddModal();
@@ -1616,6 +1637,7 @@ async function loadTable(page) {
   // Custom pages
   if (cfg.custom) {
     if (page === 'role_permissions') { await renderRolePermissions(); return; }
+    if (page === 'user_regions') { await renderUserRegions(); return; }
     if (page === 'opportunities') { await renderOpportunitiesPage(); return; }
     if (page === 'leads') { await renderLeadsPage(); return; }
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
@@ -1947,9 +1969,9 @@ const MENU = [
   {
     section: 'Pipeline',
     items: [
-      { page: 'leads',            label: 'Leads',         permission: 'manage_opportunities',
+      { page: 'leads',            label: 'Leads',         permission: 'manage_leads',
         icon: '<path d="M8 14V6M5 9l3-3 3 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M3 14h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
-      { page: 'research_campaigns', label: 'Research Campaigns', permission: 'manage_opportunities',
+      { page: 'research_campaigns', label: 'Research Campaigns', permission: 'manage_leads',
         icon: '<circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5" fill="none"/><path d="M10.5 10.5L14 14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'opportunities',    label: 'Opportunities', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
@@ -1986,6 +2008,8 @@ const MENU = [
             icon: '<rect x="5" y="1" width="6" height="6" rx="1"/><path d="M3 7h10v8H3z"/><circle cx="8" cy="11" r="1.5"/>' },
           { page: 'role_permissions', label: 'Role Permissions',   permission: 'manage_roles',
             icon: '<rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/>' },
+          { page: 'user_regions',     label: 'User Regions',       permission: 'manage_system_users',
+            icon: '<circle cx="8" cy="7" r="5"/><path d="M8 12v3M5 15h6"/>' },
         ]
       },
       {
@@ -2169,6 +2193,8 @@ async function openNewOpportunity() {
   buildRevGrid();
   await displayOwner();
   await loadCollaborators(null);
+  setupOppOwnerReassign();
+  applyOppReadOnly('full'); // creator becomes the owner — always editable
 }
 
 async function openOpportunity(id) {
@@ -2201,6 +2227,14 @@ async function openOpportunity(id) {
     await loadCollaborators(id);
     await loadOppContacts(id);
     await loadEngagements(id);
+    // Decide edit level now that collaborators are loaded:
+    //   full edit (owner/region-manager/admin) > engagement-only (collaborator) > view.
+    let level = 'view';
+    if (canEditRecord(oppData)) level = 'full';
+    else if (isCurrentUserOppCollaborator()) level = 'engagement';
+    document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
+    setupOppOwnerReassign();
+    applyOppReadOnly(level);
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
   }
@@ -2208,6 +2242,95 @@ async function openOpportunity(id) {
 
 function closeOppPage() {
   document.getElementById('opp-page').classList.remove('active');
+}
+
+// Read-only state for the open deal. true when the current user cannot edit core fields.
+let oppReadOnly = false;
+
+// Apply an edit level to the open deal form.
+//   'full'       — owner / region-matched manager / Admin: everything editable.
+//   'engagement' — collaborator: core fields locked, but the Engagement tab stays
+//                  usable so they can log engagements/interactions.
+//   'view'       — everyone else: fully view-only.
+// New deals always pass 'full' (the creator is the owner-to-be).
+function applyOppReadOnly(level) {
+  oppReadOnly = level !== 'full';
+  const page = document.getElementById('opp-page');
+  if (!page) return;
+
+  const engTab = document.getElementById('opp-tab-engagement');
+  // Disable every input/select/textarea. In 'engagement' mode, leave the
+  // Engagement tab's controls enabled so a collaborator can still log activity.
+  page.querySelectorAll('input, select, textarea').forEach(el => {
+    const inEng = engTab && engTab.contains(el);
+    el.disabled = oppReadOnly && !(level === 'engagement' && inEng);
+  });
+
+  // Core Save is only available with full edit rights.
+  const saveBtn = document.getElementById('opp-save-btn');
+  if (saveBtn) saveBtn.style.display = (level === 'full') ? '' : 'none';
+
+  // Log Engagement: available to full + engagement, hidden for pure viewers.
+  const logBtn = document.getElementById('opp-log-engagement-btn');
+  if (logBtn) logBtn.style.display = (level === 'view') ? 'none' : '';
+
+  // Banner.
+  const banner = document.getElementById('opp-readonly-banner');
+  if (banner) {
+    if (level === 'engagement') {
+      banner.textContent = '🔒 You are a collaborator on this deal. You can log engagements, but only the owner or a manager can edit deal details.';
+      banner.style.display = '';
+    } else if (level === 'view') {
+      banner.textContent = '🔒 You are not the owner of this deal. View-only — ask the owner or a manager to make changes.';
+      banner.style.display = '';
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+}
+
+// Show + populate the deal owner-reassign select for users who can assign owners;
+// hide it for everyone else. Preselects the current owner.
+function setupOppOwnerReassign() {
+  const wrap = document.getElementById('opp-owner-reassign-wrap');
+  const sel  = document.getElementById('opp-owner-reassign');
+  if (!wrap || !sel) return;
+  const allowed = canAssignOwner(oppData);
+  wrap.style.display = allowed ? '' : 'none';
+  if (!allowed) return;
+  const people = allData['people'] || [];
+  const xone = people.filter(p => p.is_xone);
+  const pool = xone.length ? xone : people;
+  const current = oppData.owner_id || currentUser?.personId || '';
+  sel.innerHTML = '<option value="">— unassigned —</option>' +
+    pool.map(p => {
+      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      return `<option value="${p.id}" ${String(current) === String(p.id) ? 'selected' : ''}>${name}</option>`;
+    }).join('');
+}
+
+// Keep deal_collaborators.is_owner in sync with deals.owner_id after a reassignment:
+// clear the flag on everyone else and set it on the new owner (inserting a
+// collaborator row if the new owner wasn't already one).
+async function syncDealOwnerCollaborator(dealId, newOwnerId) {
+  if (!dealId || !newOwnerId) return;
+  try {
+    // Demote any other owner flags.
+    await api('deal_collaborators', 'PATCH', { is_owner: false },
+      'deal_id=eq.' + dealId + '&person_id=neq.' + newOwnerId);
+    // Promote (or insert) the new owner.
+    const existing = await apiGet('deal_collaborators',
+      'deal_id=eq.' + dealId + '&person_id=eq.' + newOwnerId + '&select=id');
+    if (existing.length) {
+      await api('deal_collaborators', 'PATCH', { is_owner: true, role: 'Owner' },
+        'deal_id=eq.' + dealId + '&person_id=eq.' + newOwnerId);
+    } else {
+      await api('deal_collaborators', 'POST',
+        { deal_id: dealId, person_id: newOwnerId, role: 'Owner', is_owner: true }, '');
+    }
+  } catch(e) {
+    console.warn('Could not sync deal owner collaborator:', e.message);
+  }
 }
 
 async function initOppForm() {
@@ -2968,6 +3091,26 @@ async function openEditEngagementModal(engId) {
 
   const saveBtn = document.querySelector('#modal-root .btn-primary');
   if (saveBtn) saveBtn.onclick = () => saveEngagement(engId);
+
+  // For an auto-generated Promotion engagement, give the user a quick way to
+  // jump to the source lead — preserves the deal's origin context.
+  _maybeAddViewSourceLeadButton(eng);
+}
+
+// Injects a "View source lead →" button into the engagement modal footer when
+// the engagement's type is "Promotion". Both view and edit modals share this.
+function _maybeAddViewSourceLeadButton(eng) {
+  if (!eng || (eng.engagement_type !== 'Promotion')) return;
+  const footer = document.querySelector('#modal-root .modal-footer');
+  if (!footer) return;
+  // Avoid duplicates if called twice
+  if (footer.querySelector('.eng-view-source-lead')) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-secondary eng-view-source-lead';
+  btn.textContent = 'View source lead →';
+  btn.onclick = () => openSourceLeadFromCurrentDeal();
+  // Insert at the start of the footer so it sits to the left of Cancel / Save
+  footer.insertBefore(btn, footer.firstChild);
 }
 
 // ── Lookup helpers (shared between engagement and lead-interaction modals) ──
@@ -3096,9 +3239,19 @@ async function openViewEngagementModal(engId) {
     banner.textContent = 'View only — edit window has closed.';
     body.insertBefore(banner, body.firstChild);
   }
+
+  // Promotion engagements get an extra "View source lead →" button so the user
+  // can jump back to the lead that became this deal. Works in view-mode too.
+  _maybeAddViewSourceLeadButton(eng);
 }
 
 async function saveOpportunity() {
+  // Defensive: Save is hidden unless the user has full edit rights, but refuse
+  // cleanly if saveOpportunity() is reached for an existing deal the user can't edit.
+  if (oppData.id && !canEditRecord(oppData)) {
+    showStatus('You do not have permission to edit this deal.', 'error');
+    return;
+  }
   const name = document.getElementById('opp-name').value.trim();
   const orgId = document.getElementById('opp-org-id').value;
   const stageId = document.getElementById('opp-stage-id').value;
@@ -3107,7 +3260,14 @@ async function saveOpportunity() {
   if (!name) { showStatus('Deal name is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
   if (!orgId) { showStatus('Organisation is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
   if (!stageId) { showStatus('Stage is required', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
-  // Owner managed via collaborators tab
+
+  // Owner: only assigners (managers/admin) see the reassign select. For everyone
+  // else, keep the existing owner (edit) or default to self (new).
+  const reassignWrap = document.getElementById('opp-owner-reassign-wrap');
+  const ownerIsReassignable = reassignWrap && reassignWrap.style.display !== 'none';
+  const newOwnerId = ownerIsReassignable
+    ? (+document.getElementById('opp-owner-reassign').value || null)
+    : (oppData.owner_id || currentUser?.personId || null);
 
   const payload = {
     name,
@@ -3122,7 +3282,7 @@ async function saveOpportunity() {
     start_date: document.getElementById('opp-start-date').value || null,
     notes: document.getElementById('opp-notes').value || null,
     ext_notes: document.getElementById('opp-ext-notes').value || null,
-    owner_id: oppData.owner_id || currentUser?.personId || null,
+    owner_id: newOwnerId,
     created_by: currentUser?.personId || null,
     lost_date: document.getElementById('opp-lost-date').value || null,
     lost_to: document.getElementById('opp-lost-to').value || null,
@@ -3148,6 +3308,10 @@ async function saveOpportunity() {
     // Save collaborators
     await saveCollaborators(deal.id);
     await saveOppContacts(deal.id);
+    // If a manager reassigned the owner, keep deal_collaborators.is_owner consistent.
+    if (ownerIsReassignable && newOwnerId) {
+      await syncDealOwnerCollaborator(deal.id, newOwnerId);
+    }
 
     closeOppPage();
     await renderOpportunitiesPage();
@@ -3626,6 +3790,11 @@ async function openAddOppContactModal(editIdx) {
 }
 
 async function saveOppContact(editIdx) {
+  // Opportunity contacts are part of the core record — only full-edit users may change them.
+  if (oppData.id && !canEditRecord(oppData)) {
+    showStatus('You do not have permission to edit this deal.', 'error');
+    return;
+  }
   const personId = document.getElementById('oc-person-id')?.value;
   const dmuRoleId = document.getElementById('oc-dmu-role-id')?.value || null;
   const note = document.getElementById('oc-note')?.value || '';
@@ -4310,6 +4479,15 @@ async function doLogin() {
       currentUser.permissions = ['all'];
     }
 
+    // Load the region(s) this user covers (used by canEditRecord in increment 3
+    // to scope a manager's override permissions). Admins ignore this.
+    try {
+      const userRegions = await apiGet('system_user_regions', 'system_user_id=eq.' + userId + '&select=region_id');
+      currentUser.regions = userRegions.map(r => +r.region_id);
+    } catch(e) {
+      currentUser.regions = [];
+    }
+
     // Show app
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('main-app').style.display = 'flex';
@@ -4329,6 +4507,58 @@ function can(permission) {
   if (!currentUser) return false;
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   return currentUser.permissions.includes(permission);
+}
+
+// Row-level edit gate for leads & deals. Returns true when the current user may
+// edit the CORE record (not just log activity). Rules per the ownership model:
+//   • Admin (all) — always
+//   • Owner of the record — always, regardless of region
+//   • edit_all_records holder whose region(s) include the record's region — manager override
+// `record` is a lead or deal row carrying owner_id and region_id.
+function canEditRecord(record) {
+  if (!currentUser || !record) return false;
+  if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
+  // Owner can always edit their own record.
+  if (record.owner_id != null && +record.owner_id === +currentUser.personId) return true;
+  // Region-scoped manager override.
+  if (currentUser.permissions.includes('edit_all_records')
+      && record.region_id != null
+      && (currentUser.regions || []).map(Number).includes(+record.region_id)) {
+    return true;
+  }
+  return false;
+}
+
+// True when the current user is a collaborator on the open deal. Collaborators
+// may log engagements/interactions but not edit core fields (see applyOppReadOnly).
+function isCurrentUserOppCollaborator() {
+  if (!currentUser) return false;
+  return (oppCollaborators || []).some(c => +c.personId === +currentUser.personId);
+}
+
+// Owner-assignment gate. Stricter than canEditRecord: even a record's owner may
+// NOT reassign it — only Admins and assign_owner holders (managers) can, and a
+// manager only within their own region(s). For an unsaved record (no id), the
+// region isn't fixed yet, so the permission alone suffices.
+function canAssignOwner(record) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
+  if (!currentUser.permissions.includes('assign_owner')) return false;
+  if (!record || record.id == null) return true; // new record — region picked at save
+  return record.region_id != null
+    && (currentUser.regions || []).map(Number).includes(+record.region_id);
+}
+
+// Promotion gate. Admins and promote_lead holders (managers) within the lead's
+// region may promote. A lead's owner without this permission can only *request*
+// promotion (see requestPromotion). Requires a saved lead with a region.
+function canPromote(record) {
+  if (!currentUser) return false;
+  if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
+  if (!currentUser.permissions.includes('promote_lead')) return false;
+  if (!record || record.id == null) return false;
+  return record.region_id != null
+    && (currentUser.regions || []).map(Number).includes(+record.region_id);
 }
 
 function doLogout() {
@@ -4568,6 +4798,11 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     targetDisplay += ` <span title="${String(tip).replace(/"/g,'&quot;')}" style="display:inline-block;width:16px;height:16px;line-height:16px;text-align:center;border-radius:50%;background:#FECACA;color:#991B1B;font-size:11px;font-weight:700;cursor:help;margin-left:4px;vertical-align:middle;">i</span>`;
   }
 
+  // Pending promotion request: surface a badge so managers can spot it in the list.
+  if (l.promotion_requested_at && l.status === 'Qualified') {
+    targetDisplay += ` <span title="Promotion requested" style="display:inline-block;padding:1px 6px;border-radius:8px;background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;">⏳ promo</span>`;
+  }
+
   // Owner display
   const ownerDisplay = owner
     ? [owner.first_name, owner.last_name].filter(Boolean).join(' ')
@@ -4612,9 +4847,53 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   </tr>`;
 }
 
-// Open an existing lead for editing
+// Open an existing lead for editing.
+// When called normally (from the leads list etc.), clear any deal-context
+// stash so the back button behaves normally.
 function openLead(id) {
+  _leadOpenedFromDealId = null;
   openLeadForm(id);
+}
+
+// Tracks "I came here from a deal" so closeLeadPage can return to the deal
+// instead of the leads list. Set by openLeadFromDeal, cleared by openLead
+// (normal entry) and closeLeadPage (after redirect).
+let _leadOpenedFromDealId = null;
+
+// Open a lead from a deal's promotion engagement. The lead page's back button
+// gets relabeled so the round-trip is obvious.
+async function openLeadFromDeal(leadId, dealId) {
+  _leadOpenedFromDealId = dealId;
+  closeOppPage();
+  await openLeadForm(leadId);
+  _updateLeadBackButtonForDealContext();
+}
+
+// Relabel the lead page's header "← Back" button when opened from a deal.
+function _updateLeadBackButtonForDealContext() {
+  const page = document.getElementById('lead-page');
+  if (!page) return;
+  // The header back button is the first .btn-ghost in the topbar; the footer
+  // Cancel is .btn-secondary. Only relabel the topbar one.
+  const topbar = page.querySelector('.opp-topbar');
+  if (!topbar) return;
+  const ghostBtn = topbar.querySelector('.btn-ghost');
+  if (ghostBtn) ghostBtn.textContent = _leadOpenedFromDealId ? '← Back to Deal' : '← Back';
+}
+
+// Resolve the source lead for a given deal (the lead whose promote created
+// this deal) and open it in deal-context mode.
+async function openSourceLeadFromCurrentDeal() {
+  const dealId = oppData?.id;
+  if (!dealId) { showStatus('No active deal', 'error'); return; }
+  try {
+    const rows = await apiGet('leads', `promoted_deal_id=eq.${dealId}&select=id&limit=1`);
+    if (!rows.length) { showStatus('No source lead is linked to this deal', 'error'); return; }
+    closeModal();
+    await openLeadFromDeal(rows[0].id, dealId);
+  } catch (e) {
+    showStatus('Could not load source lead: ' + e.message, 'error');
+  }
 }
 
 
@@ -4724,6 +5003,8 @@ async function openNewLead() {
   if (ownerSel && currentUser?.personId) ownerSel.value = currentUser.personId;
   document.getElementById('lead-page-title').textContent = 'New Lead';
   applyLeadReadOnly(false);  // New leads are always editable
+  // Only managers/admin may assign an owner other than themselves.
+  if (ownerSel && !canAssignOwner(leadData)) ownerSel.disabled = true;
   document.getElementById('lead-page').classList.add('active');
   switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
   renderLeadQualification();
@@ -4740,14 +5021,25 @@ async function openLeadForm(id) {
     populateLeadForm();
     await loadLeadInteractions(id);
     await loadLeadQualificationSelections(id);
-    // Decide editability based on status. Promoted and Dead are terminal — view-only.
+    // Decide editability. Promoted and Dead are terminal — view-only for everyone.
+    // Otherwise, only the owner / a region-matched manager / an Admin may edit;
+    // leads have no collaborator concept, so non-owners are fully view-only.
     const isTerminal = ['Promoted','Dead'].includes(leadData.status);
-    document.getElementById('lead-page-title').textContent = isTerminal ? 'View Lead' : 'Edit Lead';
-    applyLeadReadOnly(isTerminal);
+    const editable = canEditRecord(leadData);
+    const readOnly = isTerminal || !editable;
+    document.getElementById('lead-page-title').textContent = readOnly ? 'View Lead' : 'Edit Lead';
+    applyLeadReadOnly(readOnly);
+    // Owner is reassignable only by managers/admin — lock the select for everyone
+    // else even when the rest of the form is editable (i.e. the owner themselves).
+    const leadOwnerSel = document.getElementById('lead-owner-id');
+    if (leadOwnerSel && !canAssignOwner(leadData)) leadOwnerSel.disabled = true;
     document.getElementById('lead-page').classList.add('active');
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
     renderLeadInteractions();
+    // Reflect current deal-context state on the back button label every time
+    // (defensive — covers the case where state was changed between opens).
+    _updateLeadBackButtonForDealContext();
   } catch(e) {
     showStatus('Failed to load lead: ' + e.message, 'error');
   }
@@ -4787,7 +5079,11 @@ function applyLeadReadOnly(on) {
         banner.style.borderColor = '#D0021B';
         banner.style.color = '#8B0F18';
       } else {
-        banner.textContent = 'This lead is view-only.';
+        // Not terminal — so it's an ownership lock.
+        banner.textContent = '🔒 You are not the owner of this lead. View-only — ask the owner or a manager to make changes.';
+        banner.style.background = '#FFF5E5';
+        banner.style.borderColor = '#E8A33D';
+        banner.style.color = '#7A4F0E';
       }
       banner.style.display = '';
     } else {
@@ -4798,6 +5094,14 @@ function applyLeadReadOnly(on) {
 
 function closeLeadPage() {
   document.getElementById('lead-page').classList.remove('active');
+  // If we arrived here from a deal's promotion engagement, return to that
+  // deal instead of the leads list (which the user may not even be on).
+  if (_leadOpenedFromDealId) {
+    const dealId = _leadOpenedFromDealId;
+    _leadOpenedFromDealId = null;
+    openOpportunity(dealId);
+    return;
+  }
   // Re-render the leads list so tab counts and rows reflect any status changes
   // that happened via wizard, decline modal, red-flag tag, or interaction logs.
   // Cheap: 1 fresh leads fetch; lookups are cached after first load.
@@ -5616,7 +5920,36 @@ function refreshLeadWorkflowChrome() {
   const wakeWrap   = document.getElementById('lead-wake-date-wrap');
   const deadBlock  = document.getElementById('lead-dead-block');
 
-  if (promoteBtn) promoteBtn.style.display = (status === 'Qualified' && !leadReadOnly) ? '' : 'none';
+  // Promote button: managers/admin (in region) get a real Promote; an owner without
+  // promote rights gets "Request promotion" (or a disabled "requested" state).
+  const promoteNote = document.getElementById('lead-promotion-note');
+  if (promoteNote) promoteNote.style.display = 'none';
+  if (promoteBtn) {
+    const showWorkflow = (status === 'Qualified' && !leadReadOnly);
+    if (!showWorkflow) {
+      promoteBtn.style.display = 'none';
+    } else if (canPromote(leadData)) {
+      promoteBtn.style.display = '';
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = 'Promote →';
+      promoteBtn.onclick = () => openPromoteWizard();
+      // Surface a pending request to the manager who can act on it.
+      if (promoteNote && leadData.promotion_requested_at) {
+        promoteNote.textContent = '⏳ Promotion requested' + _promotionRequestSuffix();
+        promoteNote.style.display = '';
+      }
+    } else if (leadData.promotion_requested_at) {
+      promoteBtn.style.display = '';
+      promoteBtn.disabled = true;
+      promoteBtn.textContent = '⏳ Promotion requested';
+      promoteBtn.onclick = null;
+    } else {
+      promoteBtn.style.display = '';
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = 'Request promotion';
+      promoteBtn.onclick = () => requestPromotion();
+    }
+  }
   if (declineBtn) declineBtn.style.display = (status !== 'Dead' && status !== 'Promoted' && !leadReadOnly) ? '' : 'none';
   if (wakeWrap)   wakeWrap.style.display   = (status === 'Dormant') ? '' : 'none';
 
@@ -5672,8 +6005,48 @@ async function reloadLeadAfterServerChange() {
 //   1. Any limiting red flags?  Y → pick flag type → insert lead_red_flags row → Dead.
 //   2. Can you make progress now?  Y → set promoted_at=now() → Promoted.
 //                                  N → ask wake_date → set wake_date → Dormant.
+// Format "by <name> on <date>" for a promotion request, using cached people.
+function _promotionRequestSuffix() {
+  let s = '';
+  const by = leadData.promotion_requested_by;
+  if (by) {
+    const p = (allData['people'] || []).find(x => +x.id === +by);
+    if (p) s += ' by ' + [p.first_name, p.last_name].filter(Boolean).join(' ');
+  }
+  if (leadData.promotion_requested_at) {
+    s += ' on ' + new Date(leadData.promotion_requested_at).toLocaleDateString('en-ZA');
+  }
+  return s;
+}
+
+// Owner-side action: flag the lead as awaiting a manager's promotion decision.
+// Lightweight stub — stamps promotion_requested_* and surfaces the flag; no
+// notification dispatch yet (deferred to the notifications architecture).
+async function requestPromotion() {
+  if (!leadData?.id) return;
+  if (leadData.status !== 'Qualified') {
+    showStatus('Promotion can only be requested for Qualified leads', 'error');
+    return;
+  }
+  try {
+    await api('leads', 'PATCH', {
+      promotion_requested_at: new Date().toISOString(),
+      promotion_requested_by: currentUser?.personId || null,
+    }, 'id=eq.' + leadData.id);
+    showStatus('Promotion requested — a manager will review it.');
+    await reloadLeadAfterServerChange(); // refetch + repaint chrome
+  } catch(e) {
+    showStatus('Could not request promotion: ' + e.message, 'error');
+  }
+}
+
 function openPromoteWizard() {
   if (!leadData?.id) return;
+  // Hard gate: only managers/admin may actually promote. Owners use Request promotion.
+  if (!canPromote(leadData)) {
+    showStatus('Only a manager or admin can promote a lead. Use Request promotion instead.', 'error');
+    return;
+  }
   if (leadData.status !== 'Qualified') {
     showStatus('Promote is only available for Qualified leads', 'error');
     return;
@@ -6698,6 +7071,34 @@ async function savePromoteAll() {
       }, '');
     }
 
+    // === 7.5. Copy historical lead_interactions to deal engagements ====
+    // Preserves the lead's narrative on the new deal so context isn't lost.
+    // Done before the promotion engagement below so that promotion is the
+    // most recent row (top of the deal's engagement list).
+    try {
+      const liRows = await apiGet('lead_interactions', `lead_id=eq.${leadData.id}&select=*&order=engagement_date.asc,id.asc`);
+      for (const li of liRows) {
+        await api('engagements', 'POST', {
+          deal_id:                     dealId,
+          engagement_date:             li.engagement_date,
+          engagement_type:             li.engagement_type || null,
+          activity_type_id:            li.activity_type_id || null,
+          notes:                       li.notes || null,
+          next_action:                 li.next_action || null,
+          next_action_id:              li.next_action_id || null,
+          action_details:              li.action_details || null,
+          next_action_date:            li.next_action_date || null,
+          next_action_done:            !!li.next_action_done,
+          next_action_completed_at:    li.next_action_completed_at || null,
+          next_action_completion_note: li.next_action_completion_note || null,
+          created_by:                  li.created_by || (currentUser?.personId || null),
+        }, '');
+      }
+    } catch (e) {
+      // Non-fatal: log and continue so a copy failure doesn't block the promote
+      console.warn('Could not copy lead interactions to engagements:', e.message);
+    }
+
     // === 8. Engagement: Q4 first-action obligation ===========
     // Try to find a 'Promotion' activity_type; if absent, leave activity_type_id null
     // and just write engagement_type as a label.
@@ -6956,7 +7357,11 @@ async function saveLead() {
 
     // status is derived server-side from this row + lead_interactions — don't write it.
 
-    owner_id: +document.getElementById('lead-owner-id').value || null,
+    // Owner can only be (re)assigned by managers/admin. For everyone else, preserve
+    // the existing owner (edit) or default to themselves (new) — ignore the field.
+    owner_id: canAssignOwner(leadData)
+      ? (+document.getElementById('lead-owner-id').value || null)
+      : (leadData.id ? (leadData.owner_id || null) : (currentUser?.personId || null)),
 
     // next_action / next_action_date are derived from lead_interactions
     // and maintained by a Postgres trigger — do not write them from this form.
@@ -7643,6 +8048,90 @@ async function toggleRolePermission(roleId, permId, grant) {
     showStatus('Failed: ' + e.message, 'error');
     // Revert checkbox
     await renderRolePermissions();
+  }
+}
+
+// ── User Regions Manager ──────────────────────────────────
+// Matrix of system users (rows) × regions (columns). Assigns the region(s)
+// a manager covers; canEditRecord() (increment 3) scopes a manager's override
+// permissions to records in these regions. Admins ignore this entirely.
+async function renderUserRegions() {
+  const body = document.getElementById('table-body');
+  const head = document.getElementById('table-head');
+
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td colspan="3">Loading...</td></tr>';
+
+  try {
+    const [users, people, regions, assignments] = await Promise.all([
+      apiGet('system_users', 'active=eq.true&select=id,person_id'),
+      allData['people']  ? Promise.resolve(allData['people'])  : apiGet('people', 'select=*'),
+      allData['regions'] ? Promise.resolve(allData['regions']) : apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+      apiGet('system_user_regions', 'select=system_user_id,region_id')
+    ]);
+
+    allData['people']  = people;
+    allData['regions'] = regions;
+
+    const nameOf = (pid) => {
+      const p = people.find(x => +x.id === +pid);
+      return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + pid;
+    };
+    const rows = users
+      .map(u => ({ ...u, _name: nameOf(u.person_id) }))
+      .sort((a, b) => a._name.localeCompare(b._name));
+
+    document.getElementById('page-sub').textContent =
+      rows.length + ' users, ' + regions.length + ' regions';
+
+    // assignment set for quick lookup
+    const assigned = new Set(assignments.map(a => a.system_user_id + '_' + a.region_id));
+
+    head.innerHTML = '<tr><th style="width:240px;">User</th>' +
+      regions.map(r => `<th style="text-align:center;white-space:nowrap;">${r.name}</th>`).join('') + '</tr>';
+
+    if (!rows.length) {
+      body.innerHTML = '<tr class="empty-row"><td colspan="' + (regions.length+1) + '">No active system users</td></tr>';
+      return;
+    }
+
+    body.innerHTML = rows.map(u => {
+      const cells = regions.map(r => {
+        const checked = assigned.has(u.id + '_' + r.id);
+        return `<td style="text-align:center;">
+          <input type="checkbox" ${checked ? 'checked' : ''}
+            style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;"
+            onchange="toggleUserRegion(${u.id}, ${r.id}, this.checked)"
+            title="${checked ? 'Remove' : 'Assign'} ${r.name} ${checked ? 'from' : 'to'} ${u._name}">
+        </td>`;
+      }).join('');
+      return `<tr>
+        <td><div style="font-weight:600;font-size:13px;">${u._name}</div></td>
+        ${cells}
+      </tr>`;
+    }).join('');
+
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="3">Error: ${e.message}</td></tr>`;
+  }
+}
+
+async function toggleUserRegion(userId, regionId, assign) {
+  try {
+    if (assign) {
+      await apiPost('system_user_regions', {
+        system_user_id: userId,
+        region_id: regionId,
+        created_by: currentUser?.personId || null,
+      });
+    } else {
+      await api('system_user_regions', 'DELETE', null,
+        'system_user_id=eq.' + userId + '&region_id=eq.' + regionId);
+    }
+    showStatus(assign ? 'Region assigned' : 'Region removed');
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+    await renderUserRegions();
   }
 }
 
