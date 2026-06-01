@@ -1,5 +1,7 @@
 const https = require('https');
-const SB = 'kevrfdjqyuhmgziqxuvs.supabase.co';
+// Host is env-driven so production vs test databases can be selected per Netlify
+// deploy context. Falls back to the production project if SUPABASE_HOST is unset.
+const SB = process.env.SUPABASE_HOST || 'kevrfdjqyuhmgziqxuvs.supabase.co';
 
 exports.handler = async (event) => {
   const KEY = process.env.SUPABASE_SECRET_KEY;
