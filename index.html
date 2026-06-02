@@ -1848,7 +1848,47 @@ function openEditModal(id) {
   editingId = id;
   const row = currentData.find(r => +r.id === +id);
   if (!row) { showStatus('Record not found', 'error'); return; }
+  if (currentPage === 'clients') { renderClientModal(row); return; }
   renderModal(row);
+}
+
+// Wide, grouped, multi-column editor for the client record. Reuses the clients
+// entity field defs (section markers) + renderField (emits id="f_<key>") and
+// saveRecord (reads those ids, forces is_client etc.), so only the layout differs.
+function renderClientModal(data) {
+  const cfg = PAGES['clients'];
+  let body = '';
+  let open = false;
+  cfg.fields.forEach(f => {
+    if (f.type === 'section') {
+      if (open) body += '</div>';
+      body += `<div class="opp-section-title" style="margin:8px 0 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--navy);border-bottom:1px solid var(--border);padding-bottom:4px;">${f.label}</div>`;
+      body += `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 18px;margin-bottom:8px;">`;
+      open = true;
+      return;
+    }
+    const val = data ? (data[f.key] ?? '') : (f.type === 'checkbox' ? false : '');
+    const full = (f.type === 'textarea') ? ' style="grid-column:1/-1;"' : '';
+    body += `<div${full}>${renderField(f, val)}</div>`;
+  });
+  if (open) body += '</div>';
+
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:960px;max-width:96vw;">
+        <div class="modal-header">
+          <div class="modal-title">${data ? 'Edit Client' : 'Add Client'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <form id="modal-form" onsubmit="saveRecord(event)">${body}</form>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveRecord()">Save</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 async function renderModal(data) {
