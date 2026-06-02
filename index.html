@@ -1865,8 +1865,9 @@ function renderTabbedForm(data) {
     const full = (f.type === 'textarea' || f.type === 'checkbox') ? ' style="grid-column:1/-1;"' : '';
     cur.html += `<div${full}>${renderField(f, val)}</div>`;
   });
-  const btns = tabs.map((t, i) => `<button type="button" class="ctab-btn" onclick="switchFormTab(${i},this)" style="padding:8px 14px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:${i === 0 ? 'var(--navy)' : 'var(--text3)'};border-bottom:2px solid ${i === 0 ? 'var(--red)' : 'transparent'};">${t.label}</button>`).join('');
-  const panels = tabs.map((t, i) => `<div class="ctab-panel" data-tab="${i}" style="display:${i === 0 ? 'grid' : 'none'};grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;">${t.html}</div>`).join('');
+  // Reuse the shared lead/opportunity tab component so tabs look identical app-wide.
+  const btns = tabs.map((t, i) => `<button type="button" class="opp-tab${i === 0 ? ' active' : ''}" onclick="switchFormTab(${i}, this)">${t.label}</button>`).join('');
+  const panels = tabs.map((t, i) => `<div class="opp-tab-content${i === 0 ? ' active' : ''}" data-tabpanel="${i}"><div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;">${t.html}</div></div>`).join('');
   const noun = currentPage === 'organisations' ? 'Organisation' : 'Client';
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
@@ -1876,8 +1877,8 @@ function renderTabbedForm(data) {
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
-          <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px;flex-wrap:wrap;">${btns}</div>
-          <form id="modal-form" onsubmit="saveRecord(event)">${panels}</form>
+          <div class="opp-tabs">${btns}</div>
+          <form id="modal-form" onsubmit="saveRecord(event)"><div id="tabform-panels">${panels}</div></form>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1885,13 +1886,24 @@ function renderTabbedForm(data) {
         </div>
       </div>
     </div>`;
+  // Lock the panel area to the tallest tab so the form doesn't resize between tabs.
+  const wrap = document.getElementById('tabform-panels');
+  if (wrap) {
+    let maxH = 0;
+    wrap.querySelectorAll('.opp-tab-content').forEach(p => {
+      const wasActive = p.classList.contains('active');
+      p.classList.add('active');
+      maxH = Math.max(maxH, p.offsetHeight);
+      if (!wasActive) p.classList.remove('active');
+    });
+    if (maxH) wrap.style.minHeight = maxH + 'px';
+  }
 }
 
 function switchFormTab(i, btn) {
-  document.querySelectorAll('.ctab-panel').forEach(p => { p.style.display = (+p.dataset.tab === i ? 'grid' : 'none'); });
-  document.querySelectorAll('.ctab-btn').forEach(b => { b.style.color = 'var(--text3)'; b.style.borderBottom = '2px solid transparent'; });
-  btn.style.color = 'var(--navy)';
-  btn.style.borderBottom = '2px solid var(--red)';
+  document.querySelectorAll('#tabform-panels .opp-tab-content').forEach(p => p.classList.toggle('active', +p.dataset.tabpanel === i));
+  btn.parentElement.querySelectorAll('.opp-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
 }
 
 async function renderModal(data) {
