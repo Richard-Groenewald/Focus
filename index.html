@@ -1266,20 +1266,60 @@ const PAGES = {
     filter: 'is_client=eq.true',
     columns: [
       { key: 'name',          label: 'Name' },
+      { key: 'account_no',    label: 'Account No', render: v => v || '<span style="color:var(--text3);">—</span>' },
       { key: 'legal_name',    label: 'Legal Name' },
-      { key: 'website',       label: 'Website' },
       { key: 'client_status', label: 'Status', render: v => {
           const cls = v === 'Active' ? 'badge-green' : v === 'Standing' ? 'badge-blue' : 'badge-gray';
           return v ? `<span class="badge ${cls}">${v}</span>` : '<span style="color:var(--text3);">—</span>';
         } },
     ],
     fields: [
-      { key: 'name',          label: 'Name', required: true },
-      { key: 'legal_name',    label: 'Legal Name' },
-      { key: 'website',       label: 'Website', type: 'url' },
-      { key: 'address',       label: 'Address', type: 'textarea' },
+      { type: 'section', label: 'Identity & Legal' },
+      { key: 'name',             label: 'Name', required: true },
+      { key: 'trading_name',     label: 'Trading Name' },
+      { key: 'legal_name',       label: 'Legal Name' },
+      { key: 'legal_form',       label: 'Legal Form', type: 'select', options: ['', '(Pty) Ltd', 'Close Corporation (CC)', 'Sole Proprietor', 'Trust', 'Partnership', 'NPC', 'Inc', 'Public (Ltd)', 'Other'] },
+      { key: 'account_no',       label: 'Account No (Pastel)', placeholder: 'Set if the client exists on Pastel' },
+      { key: 'registration_no',  label: 'Registration No' },
+      { key: 'vat_no',           label: 'VAT No' },
+      { key: 'tax_reference_no', label: 'Tax Reference No' },
+      { key: 'client_status',    label: 'Client Status', type: 'select', options: ['', 'Active', 'Standing', 'Dormant'], required: true },
+      { key: 'client_since',     label: 'Client Since', type: 'date' },
+
+      { type: 'section', label: 'B-BBEE' },
+      { key: 'bbbee_level',  label: 'B-BBEE Level', type: 'select', options: ['', '1', '2', '3', '4', '5', '6', '7', '8', 'Non-compliant', 'Exempt (EME)'] },
+      { key: 'bbbee_expiry', label: 'B-BBEE Certificate Expiry', type: 'date' },
+
+      { type: 'section', label: 'Finance' },
+      { key: 'payment_terms', label: 'Payment Terms', placeholder: 'e.g. 30 days' },
+      { key: 'credit_limit',  label: 'Credit Limit', type: 'number' },
+
+      { type: 'section', label: 'Contact Details' },
+      { key: 'switchboard_tel', label: 'Switchboard Tel' },
+      { key: 'general_email',   label: 'General Email', type: 'email' },
+      { key: 'website',         label: 'Website', type: 'url' },
+
+      { type: 'section', label: 'Physical Address' },
+      { key: 'physical_line1', label: 'Physical Address Line 1' },
+      { key: 'physical_line2', label: 'Physical Address Line 2' },
+      { key: 'physical_line3', label: 'Physical Address Line 3' },
+      { key: 'physical_line4', label: 'Physical Address Line 4' },
+      { key: 'physical_code',  label: 'Postal Code' },
+      { key: 'province',       label: 'Province', type: 'select', options: ['', 'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'] },
+      { key: 'country',        label: 'Country' },
+
+      { type: 'section', label: 'Postal Address' },
+      { key: 'postal_line1', label: 'Postal Address Line 1' },
+      { key: 'postal_line2', label: 'Postal Address Line 2' },
+      { key: 'postal_line3', label: 'Postal Address Line 3' },
+      { key: 'postal_line4', label: 'Postal Address Line 4' },
+      { key: 'postal_code',  label: 'Postal Code' },
+
+      { type: 'section', label: 'Relationship' },
+      { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
+      { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
+      { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
       { key: 'notes',         label: 'Notes', type: 'textarea' },
-      { key: 'client_status', label: 'Client Status', type: 'select', options: ['', 'Active', 'Standing', 'Dormant'], required: true },
       // is_client / home_organisation / allows_system_users are forced on save.
     ],
   },
@@ -1876,6 +1916,9 @@ async function renderModal(data) {
 }
 
 function renderField(f, val) {
+  if (f.type === 'section') {
+    return `<div class="opp-section-title" style="margin:18px 0 10px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--navy);">${f.label}</div>`;
+  }
   const adminNote = f.adminOnly ? ' <span style="color:var(--text3);font-weight:400;">(admin only)</span>' : '';
   const label = `<label class="form-label">${f.label}${f.required ? ' <span style="color:var(--red)">*</span>' : ''}${adminNote}</label>`;
 
@@ -3888,6 +3931,11 @@ async function openAddClientModal(mode) {
                   <option>Dormant</option>
                 </select>
               </div>
+              <div class="form-group">
+                <label class="form-label">Account No</label>
+                <input type="text" id="nc-account-no" class="form-control" placeholder="Set if already on Pastel">
+                <div style="font-size:11px;color:var(--text3);margin-top:4px;">A Pastel account no means the client already exists on the accounting system.</div>
+              </div>
             </div>` : ''}
             <div class="form-row">
               <div class="form-group">
@@ -4099,6 +4147,7 @@ async function saveNewClient() {
       orgPayload.is_client = true;
       orgPayload.home_organisation = false;
       orgPayload.client_status = document.getElementById('nc-client-status')?.value || null;
+      orgPayload.account_no = document.getElementById('nc-account-no')?.value.trim() || null;
     }
     const sectorId = document.getElementById('nc-org-sector')?.value;
     const regionId = document.getElementById('nc-org-region')?.value;
