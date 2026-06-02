@@ -1755,7 +1755,11 @@ async function loadTable(page) {
         }
         return `<td>${val ?? '—'}</td>`;
       }).join('');
+      const contactsBtn = currentPage === 'clients'
+        ? `<button class="btn btn-ghost btn-sm" onclick="showClientContacts(${row.id})">Contacts</button>`
+        : '';
       const actions = cfg.readOnly ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
+        ${contactsBtn}
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${row.id})">Edit</button>
         <button class="btn btn-danger btn-sm" onclick="confirmDelete(${row.id})">Delete</button>
       </td>`;
@@ -1890,6 +1894,62 @@ function renderField(f, val) {
   }
 
   return `<div class="form-group">${label}<input type="${f.type||'text'}" id="f_${f.key}" name="${f.key}" class="form-control" value="${val}" ${f.required?'required':''} ${f.placeholder?`placeholder="${f.placeholder}"`:''} autocomplete="off"></div>`;
+}
+
+// Contacts popup for a client (Manage Clients page). Lists people affiliated with
+// the organisation via person_organisation_roles, primary contact first.
+async function showClientContacts(orgId) {
+  const org = (currentData || []).find(r => +r.id === +orgId);
+  const orgName = org ? org.name : 'Client';
+  const root = document.getElementById('modal-root');
+  root.innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">Contacts — ${orgName}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="client-contacts-body">
+          <div style="text-align:center;padding:30px;color:var(--text3);">Loading contacts…</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary" onclick="closeModal();showPage('person_org_roles')">Manage Affiliations</button>
+        </div>
+      </div>
+    </div>`;
+  try {
+    const links = await apiGet('person_organisation_roles',
+      `org_id=eq.${orgId}&select=person_id,role_type,is_primary&order=is_primary.desc`);
+    const bodyEl = document.getElementById('client-contacts-body');
+    if (!bodyEl) return;
+    if (!links.length) {
+      bodyEl.innerHTML = `<div style="text-align:center;padding:30px;color:var(--text3);">No contacts linked to this client yet.<br><span style="font-size:12px;">Use “Manage Affiliations” below to add one.</span></div>`;
+      return;
+    }
+    const personIds = [...new Set(links.map(l => +l.person_id))];
+    const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=id,first_name,last_name,title,email,phone`);
+    const byId = {};
+    people.forEach(p => { byId[+p.id] = p; });
+    const rows = links.map(l => {
+      const p = byId[+l.person_id] || {};
+      const name = [p.title, p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + l.person_id);
+      const primary = l.is_primary ? ' <span class="badge badge-green">Primary</span>' : '';
+      const email = p.email ? `<a href="mailto:${p.email}">${p.email}</a>` : '—';
+      return `<tr>
+        <td>${name}${primary}</td>
+        <td>${l.role_type || '—'}</td>
+        <td>${email}</td>
+        <td>${p.phone || '—'}</td>
+      </tr>`;
+    }).join('');
+    bodyEl.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+      <thead><tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th></tr></thead>
+      <tbody>${rows}</tbody></table>`;
+  } catch(err) {
+    const bodyEl = document.getElementById('client-contacts-body');
+    if (bodyEl) bodyEl.innerHTML = `<div style="color:var(--red);padding:20px;">Failed to load contacts: ${err.message}</div>`;
+  }
 }
 
 function closeModal() {
