@@ -1188,6 +1188,52 @@ function showStatus(msg, type='success') {
   statusTimer = setTimeout(() => { el.className = 'status-bar'; }, duration);
 }
 
+// Shared org/client form fields, grouped into tab-sections (a {type:'section'}
+// marker starts a new tab). Used by both the Manage Clients form and the admin
+// Organisations form (which appends an Admin tab for the home/system flags).
+const ORG_DETAIL_FIELDS = [
+  { type: 'section', label: 'General' },
+  { key: 'name',          label: 'Name', required: true },
+  { key: 'trading_name',  label: 'Trading Name' },
+  { key: 'legal_name',    label: 'Legal Name' },
+  { key: 'legal_form',    label: 'Legal Form', type: 'select', options: ['', '(Pty) Ltd', 'Close Corporation (CC)', 'Sole Proprietor', 'Trust', 'Partnership', 'NPC', 'Inc', 'Public (Ltd)', 'Other'] },
+  { key: 'account_no',    label: 'Account No (Pastel)', placeholder: 'Set if on Pastel' },
+  { key: 'client_status', label: 'Client Status', type: 'select', options: ['', 'Active', 'Standing', 'Dormant'] },
+  { key: 'client_since',  label: 'Client Since', type: 'date' },
+  { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
+  { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
+  { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
+
+  { type: 'section', label: 'Compliance & Finance' },
+  { key: 'registration_no',  label: 'Registration No' },
+  { key: 'vat_no',           label: 'VAT No' },
+  { key: 'tax_reference_no', label: 'Tax Reference No' },
+  { key: 'bbbee_level',      label: 'B-BBEE Level', type: 'select', options: ['', '1', '2', '3', '4', '5', '6', '7', '8', 'Non-compliant', 'Exempt (EME)'] },
+  { key: 'bbbee_expiry',     label: 'B-BBEE Certificate Expiry', type: 'date' },
+  { key: 'payment_terms',    label: 'Payment Terms', placeholder: 'e.g. 30 days' },
+  { key: 'credit_limit',     label: 'Credit Limit', type: 'number' },
+
+  { type: 'section', label: 'Addresses' },
+  { key: 'physical_line1', label: 'Physical Address Line 1' },
+  { key: 'physical_line2', label: 'Physical Address Line 2' },
+  { key: 'physical_line3', label: 'Physical Address Line 3' },
+  { key: 'physical_line4', label: 'Physical Address Line 4' },
+  { key: 'physical_code',  label: 'Physical Postal Code' },
+  { key: 'province',       label: 'Province', type: 'select', options: ['', 'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'] },
+  { key: 'country',        label: 'Country' },
+  { key: 'postal_line1', label: 'Postal Address Line 1' },
+  { key: 'postal_line2', label: 'Postal Address Line 2' },
+  { key: 'postal_line3', label: 'Postal Address Line 3' },
+  { key: 'postal_line4', label: 'Postal Address Line 4' },
+  { key: 'postal_code',  label: 'Postal Postal Code' },
+
+  { type: 'section', label: 'Contact & Notes' },
+  { key: 'switchboard_tel', label: 'Switchboard Tel' },
+  { key: 'general_email',   label: 'General Email', type: 'email' },
+  { key: 'website',         label: 'Website', type: 'url' },
+  { key: 'notes',           label: 'Notes', type: 'textarea' },
+];
+
 // ── Page config ──────────────────────────────────────────
 const PAGES = {
   opportunities: {
@@ -1245,14 +1291,12 @@ const PAGES = {
       { key: 'home_organisation',   label: 'Home Org', render: v => v ? '<span class="badge badge-blue">Home</span>' : '' },
       { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
     ],
+    // Same tabbed form as Clients, plus an Admin tab for the home/system flags.
     fields: [
-      { key: 'name',                label: 'Name', required: true },
-      { key: 'legal_name',          label: 'Legal Name' },
-      { key: 'website',             label: 'Website', type: 'url' },
-      { key: 'address',             label: 'Address', type: 'textarea' },
-      { key: 'notes',               label: 'Notes', type: 'textarea' },
+      ...ORG_DETAIL_FIELDS,
+      { type: 'section', label: 'Admin' },
       { key: 'home_organisation',   label: 'Home Organisation', type: 'checkbox', adminOnly: true },
-      { key: 'allows_system_users', label: 'Eligible for System Users (Admin only)', type: 'checkbox', adminOnly: true },
+      { key: 'allows_system_users', label: 'Eligible for System Users', type: 'checkbox', adminOnly: true },
     ],
   },
 
@@ -1273,55 +1317,9 @@ const PAGES = {
           return v ? `<span class="badge ${cls}">${v}</span>` : '<span style="color:var(--text3);">—</span>';
         } },
     ],
-    fields: [
-      { type: 'section', label: 'Identity & Legal' },
-      { key: 'name',             label: 'Name', required: true },
-      { key: 'trading_name',     label: 'Trading Name' },
-      { key: 'legal_name',       label: 'Legal Name' },
-      { key: 'legal_form',       label: 'Legal Form', type: 'select', options: ['', '(Pty) Ltd', 'Close Corporation (CC)', 'Sole Proprietor', 'Trust', 'Partnership', 'NPC', 'Inc', 'Public (Ltd)', 'Other'] },
-      { key: 'account_no',       label: 'Account No (Pastel)', placeholder: 'Set if the client exists on Pastel' },
-      { key: 'registration_no',  label: 'Registration No' },
-      { key: 'vat_no',           label: 'VAT No' },
-      { key: 'tax_reference_no', label: 'Tax Reference No' },
-      { key: 'client_status',    label: 'Client Status', type: 'select', options: ['', 'Active', 'Standing', 'Dormant'], required: true },
-      { key: 'client_since',     label: 'Client Since', type: 'date' },
-
-      { type: 'section', label: 'B-BBEE' },
-      { key: 'bbbee_level',  label: 'B-BBEE Level', type: 'select', options: ['', '1', '2', '3', '4', '5', '6', '7', '8', 'Non-compliant', 'Exempt (EME)'] },
-      { key: 'bbbee_expiry', label: 'B-BBEE Certificate Expiry', type: 'date' },
-
-      { type: 'section', label: 'Finance' },
-      { key: 'payment_terms', label: 'Payment Terms', placeholder: 'e.g. 30 days' },
-      { key: 'credit_limit',  label: 'Credit Limit', type: 'number' },
-
-      { type: 'section', label: 'Contact Details' },
-      { key: 'switchboard_tel', label: 'Switchboard Tel' },
-      { key: 'general_email',   label: 'General Email', type: 'email' },
-      { key: 'website',         label: 'Website', type: 'url' },
-
-      { type: 'section', label: 'Physical Address' },
-      { key: 'physical_line1', label: 'Physical Address Line 1' },
-      { key: 'physical_line2', label: 'Physical Address Line 2' },
-      { key: 'physical_line3', label: 'Physical Address Line 3' },
-      { key: 'physical_line4', label: 'Physical Address Line 4' },
-      { key: 'physical_code',  label: 'Postal Code' },
-      { key: 'province',       label: 'Province', type: 'select', options: ['', 'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'] },
-      { key: 'country',        label: 'Country' },
-
-      { type: 'section', label: 'Postal Address' },
-      { key: 'postal_line1', label: 'Postal Address Line 1' },
-      { key: 'postal_line2', label: 'Postal Address Line 2' },
-      { key: 'postal_line3', label: 'Postal Address Line 3' },
-      { key: 'postal_line4', label: 'Postal Address Line 4' },
-      { key: 'postal_code',  label: 'Postal Code' },
-
-      { type: 'section', label: 'Relationship' },
-      { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
-      { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
-      { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
-      { key: 'notes',         label: 'Notes', type: 'textarea' },
-      // is_client / home_organisation / allows_system_users are forced on save.
-    ],
+    // Tabbed client form (see renderTabbedForm). is_client / home_organisation /
+    // allows_system_users are forced on save (clients can't be home/system orgs).
+    fields: ORG_DETAIL_FIELDS,
   },
 
   // Contacts for a specific client — reached via the Contacts popup's expand
@@ -1841,6 +1839,7 @@ let editingId = null;
 
 function openAddModal() {
   editingId = null;
+  if (currentPage === 'organisations') { renderTabbedForm(null); return; }
   renderModal(null);
 }
 
@@ -1848,40 +1847,37 @@ function openEditModal(id) {
   editingId = id;
   const row = currentData.find(r => +r.id === +id);
   if (!row) { showStatus('Record not found', 'error'); return; }
-  if (currentPage === 'clients') { renderClientModal(row); return; }
+  if (currentPage === 'clients' || currentPage === 'organisations') { renderTabbedForm(row); return; }
   renderModal(row);
 }
 
-// Wide, grouped, multi-column editor for the client record. Reuses the clients
-// entity field defs (section markers) + renderField (emits id="f_<key>") and
-// saveRecord (reads those ids, forces is_client etc.), so only the layout differs.
-function renderClientModal(data) {
-  const cfg = PAGES['clients'];
-  let body = '';
-  let open = false;
+// Tabbed editor shared by Manage Clients and the admin Organisations page. Tabs
+// come from {type:'section'} markers in the entity's fields; each tab is a 2-col
+// grid. Reuses renderField (id="f_<key>") + saveRecord, so only layout differs.
+function renderTabbedForm(data) {
+  const cfg = PAGES[currentPage];
+  const tabs = [];
+  let cur = null;
   cfg.fields.forEach(f => {
-    if (f.type === 'section') {
-      if (open) body += '</div>';
-      body += `<div class="opp-section-title" style="margin:8px 0 10px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--navy);border-bottom:1px solid var(--border);padding-bottom:4px;">${f.label}</div>`;
-      body += `<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 18px;margin-bottom:8px;">`;
-      open = true;
-      return;
-    }
+    if (f.type === 'section') { cur = { label: f.label, html: '' }; tabs.push(cur); return; }
+    if (!cur) { cur = { label: 'General', html: '' }; tabs.push(cur); }
     const val = data ? (data[f.key] ?? '') : (f.type === 'checkbox' ? false : '');
-    const full = (f.type === 'textarea') ? ' style="grid-column:1/-1;"' : '';
-    body += `<div${full}>${renderField(f, val)}</div>`;
+    const full = (f.type === 'textarea' || f.type === 'checkbox') ? ' style="grid-column:1/-1;"' : '';
+    cur.html += `<div${full}>${renderField(f, val)}</div>`;
   });
-  if (open) body += '</div>';
-
+  const btns = tabs.map((t, i) => `<button type="button" class="ctab-btn" onclick="switchFormTab(${i},this)" style="padding:8px 14px;border:none;background:none;cursor:pointer;font-size:13px;font-weight:600;color:${i === 0 ? 'var(--navy)' : 'var(--text3)'};border-bottom:2px solid ${i === 0 ? 'var(--red)' : 'transparent'};">${t.label}</button>`).join('');
+  const panels = tabs.map((t, i) => `<div class="ctab-panel" data-tab="${i}" style="display:${i === 0 ? 'grid' : 'none'};grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px;">${t.html}</div>`).join('');
+  const noun = currentPage === 'organisations' ? 'Organisation' : 'Client';
   document.getElementById('modal-root').innerHTML = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:960px;max-width:96vw;">
+      <div class="modal" style="width:760px;max-width:96vw;">
         <div class="modal-header">
-          <div class="modal-title">${data ? 'Edit Client' : 'Add Client'}</div>
+          <div class="modal-title">${data ? 'Edit' : 'Add'} ${noun}</div>
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
-          <form id="modal-form" onsubmit="saveRecord(event)">${body}</form>
+          <div style="display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:16px;flex-wrap:wrap;">${btns}</div>
+          <form id="modal-form" onsubmit="saveRecord(event)">${panels}</form>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -1889,6 +1885,13 @@ function renderClientModal(data) {
         </div>
       </div>
     </div>`;
+}
+
+function switchFormTab(i, btn) {
+  document.querySelectorAll('.ctab-panel').forEach(p => { p.style.display = (+p.dataset.tab === i ? 'grid' : 'none'); });
+  document.querySelectorAll('.ctab-btn').forEach(b => { b.style.color = 'var(--text3)'; b.style.borderBottom = '2px solid transparent'; });
+  btn.style.color = 'var(--navy)';
+  btn.style.borderBottom = '2px solid var(--red)';
 }
 
 async function renderModal(data) {
