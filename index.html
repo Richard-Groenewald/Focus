@@ -1284,6 +1284,13 @@ const PAGES = {
     ],
   },
 
+  // Contacts for a specific client — reached via the Contacts popup's expand
+  // button (not in the sidebar). Custom-rendered; context is _contactsClientId.
+  client_contacts: {
+    title: 'Contacts',
+    custom: true,
+  },
+
   person_org_roles: {
     title: 'Affiliations',
     table: 'person_organisation_roles',
@@ -1656,6 +1663,12 @@ function showPage(page) {
     addBtn.textContent = '+ New Campaign';
   } else if (page === 'role_permissions' || page === 'user_regions') {
     addBtn.style.display = 'none';
+  } else if (page === 'clients') {
+    addBtn.onclick = () => openAddClientModal('clients');
+    addBtn.textContent = '+ Add Client';
+  } else if (page === 'client_contacts') {
+    addBtn.onclick = () => openAddContactToClient();
+    addBtn.textContent = '+ Add Contact';
   } else {
     addBtn.onclick = () => openAddModal();
     addBtn.textContent = '+ Add';
@@ -1679,6 +1692,7 @@ async function loadTable(page) {
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'opportunity_contacts') { await renderAllOppContacts(); return; }
+    if (page === 'client_contacts') { await renderClientContactsPage(); return; }
   }
 
   const body = document.getElementById('table-body');
@@ -1907,14 +1921,17 @@ async function showClientContacts(orgId) {
       <div class="modal">
         <div class="modal-header">
           <div class="modal-title">Contacts — ${orgName}</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button class="modal-close" title="Open as full page" onclick="openClientContactsPage(${orgId})" style="font-size:17px;">⤢</button>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
         </div>
         <div class="modal-body" id="client-contacts-body">
           <div style="text-align:center;padding:30px;color:var(--text3);">Loading contacts…</div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Close</button>
-          <button class="btn btn-primary" onclick="closeModal();showPage('person_org_roles')">Manage Affiliations</button>
+          <button class="btn btn-primary" onclick="openClientContactsPage(${orgId})">Manage Contacts</button>
         </div>
       </div>
     </div>`;
@@ -1949,6 +1966,203 @@ async function showClientContacts(orgId) {
   } catch(err) {
     const bodyEl = document.getElementById('client-contacts-body');
     if (bodyEl) bodyEl.innerHTML = `<div style="color:var(--red);padding:20px;">Failed to load contacts: ${err.message}</div>`;
+  }
+}
+
+// ── Client Contacts full page (expand target from the contacts popup) ────────
+let _contactsClientId = null;
+
+function openClientContactsPage(orgId) {
+  _contactsClientId = +orgId;
+  closeModal();
+  showPage('client_contacts');
+}
+
+async function renderClientContactsPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  const addBtn = document.getElementById('add-btn');
+  const viewBar = document.getElementById('view-filter-bar');
+  if (viewBar) viewBar.innerHTML = `<button class="btn btn-secondary btn-sm" onclick="showPage('clients')">← Clients</button>`;
+
+  if (!_contactsClientId) {
+    document.getElementById('page-title').textContent = 'Contacts';
+    if (addBtn) addBtn.style.display = 'none';
+    head.innerHTML = '<tr><th>Name</th></tr>';
+    body.innerHTML = '<tr class="empty-row"><td>Open a client and click Contacts to manage its contacts.</td></tr>';
+    return;
+  }
+
+  if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
+  const org = (allData['organisations'] || []).find(o => +o.id === +_contactsClientId);
+  document.getElementById('page-title').textContent = 'Contacts — ' + (org ? org.name : 'Client');
+  if (addBtn) { addBtn.style.display = ''; addBtn.onclick = () => openAddContactToClient(); addBtn.textContent = '+ Add Contact'; }
+
+  head.innerHTML = '<tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Actions</th></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading…</td></tr>';
+
+  const links = await apiGet('person_organisation_roles',
+    `org_id=eq.${_contactsClientId}&select=id,person_id,role_type,is_primary&order=is_primary.desc`);
+  document.getElementById('page-sub').textContent = links.length + ' contact' + (links.length !== 1 ? 's' : '');
+  if (!links.length) {
+    body.innerHTML = '<tr class="empty-row"><td colspan="5">No contacts yet — click “+ Add Contact”.</td></tr>';
+    return;
+  }
+  const personIds = [...new Set(links.map(l => +l.person_id))];
+  const people = await apiGet('people', `id=in.(${personIds.join(',')})&select=id,first_name,last_name,title,email,phone`);
+  const byId = {}; people.forEach(p => { byId[+p.id] = p; });
+  body.innerHTML = links.map(l => {
+    const p = byId[+l.person_id] || {};
+    const name = [p.title, p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + l.person_id);
+    const primary = l.is_primary ? ' <span class="badge badge-green">Primary</span>' : '';
+    const email = p.email ? `<a href="mailto:${p.email}">${p.email}</a>` : '—';
+    return `<tr>
+      <td>${name}${primary}</td>
+      <td>${l.role_type || '—'}</td>
+      <td>${email}</td>
+      <td>${p.phone || '—'}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="removeClientContact(${l.id})">Remove</button></td>
+    </tr>`;
+  }).join('');
+}
+
+// Add a contact: creates a new person by default, but as the name is typed we
+// surface similar existing people and let the user link one instead (dedupe).
+let _addContactSelectedPersonId = null;
+function openAddContactToClient() {
+  if (!_contactsClientId) { showStatus('No client selected', 'error'); return; }
+  _addContactSelectedPersonId = null;
+  if (!allData['people']) { apiGet('people', 'select=*').then(d => { allData['people'] = d; }); }
+  const org = (allData['organisations'] || []).find(o => +o.id === +_contactsClientId);
+  const orgName = org ? org.name : 'Client';
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:560px;">
+        <div class="modal-header">
+          <div class="modal-title">Add Contact — ${orgName}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row">
+            <div class="form-group" style="flex:0 0 80px;">
+              <label class="form-label">Title</label>
+              <select id="acc-title" class="form-control"><option value="">—</option><option>Mr</option><option>Mrs</option><option>Ms</option><option>Dr</option><option>Prof</option></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="acc-first" class="form-control" oninput="checkContactPersonSimilarity()">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+              <input type="text" id="acc-last" class="form-control" oninput="checkContactPersonSimilarity()">
+            </div>
+          </div>
+          <div id="acc-person-warning" style="display:none;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;margin-bottom:10px;"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Position</label><input type="text" id="acc-position" class="form-control" placeholder="e.g. Financial Director"></div>
+            <div class="form-group"><label class="form-label">Email</label><input type="email" id="acc-email" class="form-control"></div>
+            <div class="form-group"><label class="form-label">Phone</label><input type="text" id="acc-phone" class="form-control"></div>
+          </div>
+          <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+            <input type="checkbox" id="acc-primary" style="width:16px;height:16px;accent-color:var(--red);">
+            <label for="acc-primary" class="form-label" style="margin:0;">Primary contact</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveAddContactToClient()">Add Contact</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+let _accCheckTimer;
+function checkContactPersonSimilarity() {
+  clearTimeout(_accCheckTimer);
+  _accCheckTimer = setTimeout(() => {
+    // Typing a name clears any prior "use existing" selection — it's a fresh person
+    // unless the user explicitly clicks "Use this person" again.
+    _addContactSelectedPersonId = null;
+    const first = document.getElementById('acc-first')?.value || '';
+    const last = document.getElementById('acc-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const warningEl = document.getElementById('acc-person-warning');
+    if (!warningEl) return;
+    if (fullName.length < 3) { warningEl.style.display = 'none'; return; }
+    const people = allData['people'] || [];
+    const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      warningEl.style.display = 'block';
+      warningEl.innerHTML = '⚠️ Similar existing people: ' +
+        matches.map(m => {
+          const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+          return `<strong>${nm}</strong> (${m.score}%) <button type="button" class="btn btn-secondary btn-sm" onclick="useExistingContactPerson(${m.item.id})">Use this person</button>`;
+        }).join(' ') +
+        '. If it’s the same person click “Use this person”; otherwise a new person is created.';
+    } else {
+      warningEl.style.display = 'none';
+    }
+  }, 400);
+}
+
+function useExistingContactPerson(personId) {
+  _addContactSelectedPersonId = +personId;
+  const p = (allData['people'] || []).find(x => +x.id === +personId);
+  if (p) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+    set('acc-title', p.title); set('acc-first', p.first_name); set('acc-last', p.last_name);
+    set('acc-email', p.email); set('acc-phone', p.phone);
+  }
+  const warningEl = document.getElementById('acc-person-warning');
+  if (warningEl) warningEl.innerHTML = '✓ Will link existing person: <strong>' +
+    ([p?.first_name, p?.last_name].filter(Boolean).join(' ')) + '</strong> — no duplicate created.';
+}
+
+async function saveAddContactToClient() {
+  const first = document.getElementById('acc-first')?.value.trim();
+  const last = document.getElementById('acc-last')?.value.trim();
+  if (!_addContactSelectedPersonId && (!first || !last)) { showStatus('First and last name are required', 'error'); return; }
+  const isPrimary = document.getElementById('acc-primary')?.checked || false;
+  const position = document.getElementById('acc-position')?.value.trim() || '';
+  try {
+    let personId = _addContactSelectedPersonId;
+    if (!personId) {
+      const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+      const personResult = await api('people', 'POST', {
+        first_name: first, last_name: last,
+        title: document.getElementById('acc-title')?.value || null,
+        email: document.getElementById('acc-email')?.value.trim() || null,
+        phone: document.getElementById('acc-phone')?.value.trim() || null,
+        initials,
+      }, 'select=*');
+      personId = personResult[0].id;
+      allData['people'] = null;
+    }
+    // Don't link the same person to this client twice.
+    const existing = await apiGet('person_organisation_roles',
+      `org_id=eq.${_contactsClientId}&person_id=eq.${personId}&select=id`);
+    if (existing.length) { showStatus('That person is already a contact for this client', 'error'); return; }
+    await api('person_organisation_roles', 'POST', {
+      person_id: personId, org_id: _contactsClientId,
+      role_type: position || 'Contact', is_primary: isPrimary,
+    }, '');
+    showStatus('Contact added');
+    closeModal();
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+    await renderClientContactsPage();
+  } catch(e) {
+    showStatus('Failed to add contact: ' + e.message, 'error');
+  }
+}
+
+async function removeClientContact(affiliationId) {
+  if (!confirm('Remove this contact from the client? The person record is kept.')) return;
+  try {
+    await api('person_organisation_roles', 'DELETE', null, 'id=eq.' + affiliationId);
+    showStatus('Contact removed');
+    await renderClientContactsPage();
+  } catch(e) {
+    showStatus('Failed to remove contact: ' + e.message, 'error');
   }
 }
 
@@ -3530,7 +3744,12 @@ function findSimilar(name, list, labelFn, threshold) {
 // ── Add Client Modal ──────────────────────────────────────
 let newClientContacts = [];
 
-async function openAddClientModal() {
+// Add-Client modal is shared by two departure points: the sales opportunity
+// quick-create (default) and Manage Clients (mode='clients', which also captures
+// client status and flags the org is_client). Behaviour branches on _addClientMode.
+let _addClientMode = 'opportunity';
+async function openAddClientModal(mode) {
+  _addClientMode = (mode === 'clients') ? 'clients' : 'opportunity';
   newClientContacts = [];
 
   // Ensure organisations and people are loaded
@@ -3560,6 +3779,18 @@ async function openAddClientModal() {
                 <input type="text" id="nc-org-legal" class="form-control" placeholder="Full registered name">
               </div>
             </div>
+            ${_addClientMode === 'clients' ? `
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Client Status <span style="color:var(--red)">*</span></label>
+                <select id="nc-client-status" class="form-control">
+                  <option value="">— select —</option>
+                  <option>Active</option>
+                  <option>Standing</option>
+                  <option>Dormant</option>
+                </select>
+              </div>
+            </div>` : ''}
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Industry Sector</label>
@@ -3624,16 +3855,18 @@ function checkOrgSimilarity() {
   clearTimeout(_orgCheckTimer);
   _orgCheckTimer = setTimeout(() => {
     const name = document.getElementById('nc-org-name')?.value || '';
+    const legal = document.getElementById('nc-org-legal')?.value || '';
     const warningEl = document.getElementById('nc-org-warning');
     if (!warningEl) return;
-    if (name.length < 3) { warningEl.style.display = 'none'; return; }
-    const orgs = allData['organisations'] || [];
-    const matches = findSimilar(name, orgs, o => o.name);
-    if (matches.length) {
+    if (name.trim().length < 3) { warningEl.style.display = 'none'; return; }
+    // Comprehensive matcher — same phonetic + TF-IDF engine the lead form uses.
+    const { exact, shortlist } = _findOrgMatches(name, legal);
+    const hits = [exact, ...shortlist].filter(Boolean)
+      .map(o => `<strong>${o.name}</strong>${o.legal_name && o.legal_name !== o.name ? ` (${o.legal_name})` : ''}`);
+    if (hits.length) {
       warningEl.style.display = 'block';
-      warningEl.innerHTML = '⚠️ Similar clients found: ' +
-        matches.map(m => `<strong>${m.item.name}</strong> (${m.score}% match)`).join(', ') +
-        '. Please confirm this is a new client.';
+      warningEl.innerHTML = '⚠️ Possible existing ' + (hits.length === 1 ? 'client' : 'clients') + ': ' +
+        hits.join(', ') + '. Please confirm this is a new client.';
     } else {
       warningEl.style.display = 'none';
     }
@@ -3746,6 +3979,17 @@ async function saveNewClient() {
   }
 
   try {
+    // Manage-Clients mode: require a status and run a final comprehensive
+    // duplicate guard before committing (the live check runs while typing).
+    if (_addClientMode === 'clients') {
+      const status = document.getElementById('nc-client-status')?.value || '';
+      if (!status) { showStatus('Client status is required', 'error'); return; }
+      const dup = _findOrgMatches(orgName, document.getElementById('nc-org-legal')?.value || '');
+      if (dup.exact && !confirm('“' + dup.exact.name + '” looks like an existing client. Create a new client anyway?')) {
+        return;
+      }
+    }
+
     // Create organisation
     const orgPayload = {
       name: orgName,
@@ -3753,6 +3997,11 @@ async function saveNewClient() {
       active: true,
       allows_system_users: false,
     };
+    if (_addClientMode === 'clients') {
+      orgPayload.is_client = true;
+      orgPayload.home_organisation = false;
+      orgPayload.client_status = document.getElementById('nc-client-status')?.value || null;
+    }
     const sectorId = document.getElementById('nc-org-sector')?.value;
     const regionId = document.getElementById('nc-org-region')?.value;
 
@@ -3782,12 +4031,19 @@ async function saveNewClient() {
     showStatus('Client created successfully');
     closeModal();
 
-    // Reload organisations and select the new one
+    // Reload organisations cache.
     allData['organisations'] = await apiGet('organisations', 'select=*&order=name.asc');
-    const orgSel = document.getElementById('opp-org-id');
-    if (orgSel) {
-      orgSel.innerHTML = '<option value="">— select client —</option>' +
-        allData['organisations'].map(o => `<option value="${o.id}" ${o.id===org.id?'selected':''}>${o.name}</option>`).join('');
+
+    if (_addClientMode === 'clients') {
+      // Manage Clients departure point — refresh the clients list.
+      if (currentPage === 'clients') await loadTable('clients');
+    } else {
+      // Opportunity quick-create — repopulate + select in the opp org dropdown.
+      const orgSel = document.getElementById('opp-org-id');
+      if (orgSel) {
+        orgSel.innerHTML = '<option value="">— select client —</option>' +
+          allData['organisations'].map(o => `<option value="${o.id}" ${o.id===org.id?'selected':''}>${o.name}</option>`).join('');
+      }
     }
 
   } catch(e) {
