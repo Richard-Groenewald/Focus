@@ -2082,7 +2082,7 @@ function openAddContactToClient() {
 let _accCheckTimer;
 function checkContactPersonSimilarity() {
   clearTimeout(_accCheckTimer);
-  _accCheckTimer = setTimeout(() => {
+  _accCheckTimer = setTimeout(async () => {
     // Typing a name clears any prior "use existing" selection — it's a fresh person
     // unless the user explicitly clicks "Use this person" again.
     _addContactSelectedPersonId = null;
@@ -2094,17 +2094,29 @@ function checkContactPersonSimilarity() {
     if (fullName.length < 3) { warningEl.style.display = 'none'; return; }
     const people = allData['people'] || [];
     const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
-    if (matches.length) {
-      warningEl.style.display = 'block';
-      warningEl.innerHTML = '⚠️ Similar existing people: ' +
-        matches.map(m => {
-          const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
-          return `<strong>${nm}</strong> (${m.score}%) <button type="button" class="btn btn-secondary btn-sm" onclick="useExistingContactPerson(${m.item.id})">Use this person</button>`;
-        }).join(' ') +
-        '. If it’s the same person click “Use this person”; otherwise a new person is created.';
-    } else {
-      warningEl.style.display = 'none';
+    if (!matches.length) { warningEl.style.display = 'none'; return; }
+    // Describe each match with its current affiliation(s), tel and email so the
+    // user can decide whether it's truly the same person.
+    if (!allData['person_organisation_roles']) {
+      try { allData['person_organisation_roles'] = await apiGet('person_organisation_roles', 'select=person_id,org_id,role_type,is_primary'); }
+      catch (e) { allData['person_organisation_roles'] = []; }
     }
+    if (!allData['organisations']) {
+      try { allData['organisations'] = await apiGet('organisations', 'select=*'); } catch (e) {}
+    }
+    const links = allData['person_organisation_roles'] || [];
+    const orgs = allData['organisations'] || [];
+    const orgName = id => (orgs.find(o => +o.id === +id)?.name) || ('Org #' + id);
+    warningEl.style.display = 'block';
+    warningEl.innerHTML = matches.map(m => {
+      const p = m.item;
+      const nm = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      const affs = links.filter(l => +l.person_id === +p.id).map(l => orgName(l.org_id));
+      const affStr = affs.length ? affs.join(', ') : 'no current organisation';
+      const tel = p.phone || '—';
+      const email = p.email || '—';
+      return `<div style="margin-bottom:8px;">A similar person (${m.score}% match) with the name <strong>${nm}</strong>, affiliated with <strong>${affStr}</strong>, Tel No ${tel} and email ${email} exists. If this is the same person click <button type="button" class="btn btn-secondary btn-sm" onclick="useExistingContactPerson(${p.id})">Use this person</button>; otherwise a new person is created.</div>`;
+    }).join('');
   }, 400);
 }
 
@@ -2116,9 +2128,9 @@ function useExistingContactPerson(personId) {
     set('acc-title', p.title); set('acc-first', p.first_name); set('acc-last', p.last_name);
     set('acc-email', p.email); set('acc-phone', p.phone);
   }
+  const nm = [p?.first_name, p?.last_name].filter(Boolean).join(' ');
   const warningEl = document.getElementById('acc-person-warning');
-  if (warningEl) warningEl.innerHTML = '✓ Will link existing person: <strong>' +
-    ([p?.first_name, p?.last_name].filter(Boolean).join(' ')) + '</strong> — no duplicate created.';
+  if (warningEl) warningEl.innerHTML = `✓ Linking existing person: <strong>${nm}</strong>. Their existing affiliation(s) will <strong>remain</strong> — they'll be affiliated with this client <strong>in addition</strong> to those — and their existing details (name, title, email, phone) will be used as-is.`;
 }
 
 async function saveAddContactToClient() {
