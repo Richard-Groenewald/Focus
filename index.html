@@ -1918,7 +1918,7 @@ async function showClientContacts(orgId) {
   const root = document.getElementById('modal-root');
   root.innerHTML = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal">
+      <div class="modal" style="width:820px;max-width:95vw;">
         <div class="modal-header">
           <div class="modal-title">Contacts — ${orgName}</div>
           <div style="display:flex;align-items:center;gap:6px;">
@@ -1960,8 +1960,8 @@ async function showClientContacts(orgId) {
         <td>${p.phone || '—'}</td>
       </tr>`;
     }).join('');
-    bodyEl.innerHTML = `<table style="width:100%;border-collapse:collapse;">
-      <thead><tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th></tr></thead>
+    bodyEl.innerHTML = `<table style="width:100%;border-collapse:collapse;white-space:nowrap;">
+      <thead><tr><th style="text-align:left;padding-right:18px;">Name</th><th style="text-align:left;padding-right:18px;">Role</th><th style="text-align:left;padding-right:18px;">Email</th><th style="text-align:left;">Phone</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   } catch(err) {
     const bodyEl = document.getElementById('client-contacts-body');
@@ -2021,7 +2021,10 @@ async function renderClientContactsPage() {
       <td>${l.role_type || '—'}</td>
       <td>${email}</td>
       <td>${p.phone || '—'}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="removeClientContact(${l.id})">Remove</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-ghost btn-sm" onclick="openEditClientContact(${l.id}, ${l.person_id})">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="removeClientContact(${l.id})">Remove</button>
+      </td>
     </tr>`;
   }).join('');
 }
@@ -2152,6 +2155,83 @@ async function saveAddContactToClient() {
     await renderClientContactsPage();
   } catch(e) {
     showStatus('Failed to add contact: ' + e.message, 'error');
+  }
+}
+
+// Edit an existing contact — updates the person record and their affiliation
+// (role + primary). No dedupe check here: it's already an existing person.
+async function openEditClientContact(affiliationId, personId) {
+  try {
+    const [affs, ppl] = await Promise.all([
+      apiGet('person_organisation_roles', `id=eq.${affiliationId}&select=id,role_type,is_primary`),
+      apiGet('people', `id=eq.${personId}&select=*`),
+    ]);
+    const a = affs[0] || {}; const p = ppl[0] || {};
+    const titleOpts = ['', 'Mr', 'Mrs', 'Ms', 'Dr', 'Prof']
+      .map(t => `<option value="${t}" ${(p.title || '') === t ? 'selected' : ''}>${t || '—'}</option>`).join('');
+    document.getElementById('modal-root').innerHTML = `
+      <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+        <div class="modal" style="width:560px;">
+          <div class="modal-header">
+            <div class="modal-title">Edit Contact</div>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="form-row">
+              <div class="form-group" style="flex:0 0 80px;"><label class="form-label">Title</label>
+                <select id="ec-title" class="form-control">${titleOpts}</select></div>
+              <div class="form-group"><label class="form-label">First Name <span style="color:var(--red)">*</span></label>
+                <input type="text" id="ec-first" class="form-control" value="${p.first_name || ''}"></div>
+              <div class="form-group"><label class="form-label">Last Name <span style="color:var(--red)">*</span></label>
+                <input type="text" id="ec-last" class="form-control" value="${p.last_name || ''}"></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label class="form-label">Position</label>
+                <input type="text" id="ec-position" class="form-control" value="${a.role_type || ''}"></div>
+              <div class="form-group"><label class="form-label">Email</label>
+                <input type="email" id="ec-email" class="form-control" value="${p.email || ''}"></div>
+              <div class="form-group"><label class="form-label">Phone</label>
+                <input type="text" id="ec-phone" class="form-control" value="${p.phone || ''}"></div>
+            </div>
+            <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" id="ec-primary" ${a.is_primary ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--red);">
+              <label for="ec-primary" class="form-label" style="margin:0;">Primary contact</label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="saveEditClientContact(${affiliationId}, ${personId})">Save</button>
+          </div>
+        </div>
+      </div>`;
+  } catch (e) {
+    showStatus('Could not load contact: ' + e.message, 'error');
+  }
+}
+
+async function saveEditClientContact(affiliationId, personId) {
+  const first = document.getElementById('ec-first')?.value.trim();
+  const last = document.getElementById('ec-last')?.value.trim();
+  if (!first || !last) { showStatus('First and last name are required', 'error'); return; }
+  try {
+    const initials = ((first[0] || '') + (last[0] || '')).toUpperCase();
+    await api('people', 'PATCH', {
+      first_name: first, last_name: last,
+      title: document.getElementById('ec-title')?.value || null,
+      email: document.getElementById('ec-email')?.value.trim() || null,
+      phone: document.getElementById('ec-phone')?.value.trim() || null,
+      initials,
+    }, 'id=eq.' + personId);
+    await api('person_organisation_roles', 'PATCH', {
+      role_type: document.getElementById('ec-position')?.value.trim() || 'Contact',
+      is_primary: document.getElementById('ec-primary')?.checked || false,
+    }, 'id=eq.' + affiliationId);
+    showStatus('Contact updated');
+    closeModal();
+    allData['people'] = null;
+    await renderClientContactsPage();
+  } catch (e) {
+    showStatus('Failed to update contact: ' + e.message, 'error');
   }
 }
 
