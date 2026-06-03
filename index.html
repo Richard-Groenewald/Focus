@@ -303,7 +303,10 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+    <div style="margin-top:8px;">
+              <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+            </div>
   </div>
 </div>
 
@@ -322,7 +325,10 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+        <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
+              <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+            </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -880,19 +886,32 @@ const APP_VERSION = 'v1.0';
 // Build / environment stamp — distinguishes prod vs test vs local at a glance.
 // Netlify's build command (netlify.toml) substitutes these placeholders per deploy;
 // run locally they stay as '__…__', so we fall back to hostname detection.
+// RELEASE stamp reflects the actual deployed CODE: branch + commit injected by the
+// Netlify build command (netlify.toml). Locally the placeholders remain → 'local'.
 const BUILD = { branch: '__BUILD_BRANCH__', commit: '__BUILD_COMMIT__' };
 function buildStampText() {
-  const host = location.hostname || '';
-  const env = host.indexOf('test--') === 0 ? 'TEST'
-            : (host.indexOf('localhost') !== -1 || host === '127.0.0.1' || location.protocol === 'file:') ? 'LOCAL'
-            : 'PROD';
   const branch = BUILD.branch.indexOf('__') === 0 ? '' : BUILD.branch;
   const commit = BUILD.commit.indexOf('__') === 0 ? '' : BUILD.commit.slice(0, 7);
-  return [env, branch, commit].filter(Boolean).join(' · ');
+  const parts = [branch, commit].filter(Boolean);
+  return parts.length ? '· ' + parts.join(' · ') : '· local';
 }
 function setBuildStamps() {
   const t = buildStampText();
   document.querySelectorAll('.build-stamp').forEach(el => el.textContent = t);
+}
+// ENVIRONMENT label ("Production"/"Development") is authoritative to the DATA SOURCE:
+// it comes from the `environment` row in the connected database's `settings` table,
+// NOT from the code or hostname. Shown above the version.
+function setEnvLabel() {
+  const name = (typeof appSettings !== 'undefined' && appSettings['environment']) ? appSettings['environment'] : '';
+  document.querySelectorAll('.env-label').forEach(el => el.textContent = name);
+}
+async function loadEnvironment() {
+  try {
+    const rows = await apiGet('settings', 'key=eq.environment&select=value');
+    if (rows && rows[0]) appSettings['environment'] = rows[0].value;
+  } catch(e) { /* offline/login screen — leave blank */ }
+  setEnvLabel();
 }
 const SB_HOST = 'kevrfdjqyuhmgziqxuvs.supabase.co';
 const FN_URL = '/.netlify/functions/sb';
@@ -5195,6 +5214,7 @@ async function doLogin() {
     // Skip the extra checkConnection() ping (one fewer function invocation).
     setOnline(true);
     await loadAppSettings();
+    setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
     buildNav();
   } catch(e) {
     errEl.textContent = 'Login failed: ' + e.message;
@@ -9715,6 +9735,9 @@ async function loadEligiblePeople() {
 // ── Init ─────────────────────────────────────────────────
 async function init() {
   setBuildStamps();
+  // Environment label comes from the connected DB (settings.environment) — fetch it
+  // up front so the login screen already shows Production vs Development.
+  loadEnvironment();
   // Load users for login dropdown
   await loadLoginUsers();
 }
