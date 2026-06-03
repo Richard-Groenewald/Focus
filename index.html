@@ -303,7 +303,7 @@ tr:hover td{background:#F8FAFC;}
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
     <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
-    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.48</div>
+    <div style="margin-top:8px;font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
   </div>
 </div>
 
@@ -322,7 +322,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:8px;" id="sidebar-user-role"></div>
       <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
-        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.48</div>
+        <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
     </div>
@@ -876,6 +876,24 @@ tr:hover td{background:#F8FAFC;}
 
 // ── Config ───────────────────────────────────────────────
 const APP_VERSION = 'v1.0';
+
+// Build / environment stamp — distinguishes prod vs test vs local at a glance.
+// Netlify's build command (netlify.toml) substitutes these placeholders per deploy;
+// run locally they stay as '__…__', so we fall back to hostname detection.
+const BUILD = { branch: '__BUILD_BRANCH__', commit: '__BUILD_COMMIT__' };
+function buildStampText() {
+  const host = location.hostname || '';
+  const env = host.indexOf('test--') === 0 ? 'TEST'
+            : (host.indexOf('localhost') !== -1 || host === '127.0.0.1' || location.protocol === 'file:') ? 'LOCAL'
+            : 'PROD';
+  const branch = BUILD.branch.indexOf('__') === 0 ? '' : BUILD.branch;
+  const commit = BUILD.commit.indexOf('__') === 0 ? '' : BUILD.commit.slice(0, 7);
+  return [env, branch, commit].filter(Boolean).join(' · ');
+}
+function setBuildStamps() {
+  const t = buildStampText();
+  document.querySelectorAll('.build-stamp').forEach(el => el.textContent = t);
+}
 const SB_HOST = 'kevrfdjqyuhmgziqxuvs.supabase.co';
 const FN_URL = '/.netlify/functions/sb';
 
@@ -9696,6 +9714,7 @@ async function loadEligiblePeople() {
 
 // ── Init ─────────────────────────────────────────────────
 async function init() {
+  setBuildStamps();
   // Load users for login dropdown
   await loadLoginUsers();
 }
