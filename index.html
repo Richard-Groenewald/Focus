@@ -721,7 +721,8 @@ tr:hover td{background:#F8FAFC;}
           <div class="opp-section-title">Details</div>
 
           <div class="form-group">
-            <label class="form-label">Description <span style="color:var(--red)">*</span></label>
+            <label class="form-label" id="lead-description-label">Description <span style="color:var(--red)">*</span></label>
+            <div id="lead-description-history" style="display:none;margin-bottom:8px;"></div>
             <textarea id="lead-description" class="form-control" rows="4" placeholder="What's the opportunity here? Why is this a lead?"></textarea>
           </div>
 
@@ -779,6 +780,19 @@ tr:hover td{background:#F8FAFC;}
             <div id="lead-target-person-matches" style="margin-top:8px;"></div>
             <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
+
+          <!-- Additional contacts (lead_contacts) -->
+          <div class="form-group" id="lead-additional-contacts-group">
+            <label class="form-label">Additional contacts</label>
+            <div id="lead-additional-contacts" style="margin-bottom:8px;"></div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <input type="text" id="lead-contact-add-name"  class="form-control" placeholder="Name"  style="flex:2;min-width:120px;">
+              <input type="text" id="lead-contact-add-email" class="form-control" placeholder="Email" style="flex:2;min-width:120px;">
+              <input type="text" id="lead-contact-add-phone" class="form-control" placeholder="Phone" style="flex:1;min-width:100px;">
+              <button class="btn btn-secondary btn-sm" onclick="addLeadContact()">Add</button>
+            </div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The primary contact is above. Add others involved in the deal here.</div>
+          </div>
         </div>
 
         <!-- Workflow section -->
@@ -804,6 +818,9 @@ tr:hover td{background:#F8FAFC;}
               <div style="font-size:11px;color:var(--text3);margin-top:4px;">Auto-derived from interactions, qualification, red flags and promotion.</div>
             </div>
           </div>
+
+          <!-- Peer review panel (visible only when status = Qualified) -->
+          <div id="lead-peer-review" style="display:none;margin-top:8px;"></div>
 
           <!-- Wake date (visible only when status = Dormant) -->
           <div class="form-row" id="lead-wake-date-wrap" style="display:none;">
@@ -6441,6 +6458,8 @@ function openSalesCampaign(id) {
 // State for the currently open lead
 let leadData = {};
 let leadInteractions = [];
+let leadDescriptionLog = [];   // append-only description thread for the open lead
+let leadContacts = [];         // additional (non-primary) lead_contacts for the open lead
 // Read-only mode: true when the open lead has status Promoted or Dead.
 // Disables all inputs, hides Save and Log Interaction buttons, hides qual dots from clicking, shows a banner.
 let leadReadOnly = false;
@@ -6470,6 +6489,8 @@ async function openLeadForm(id) {
     leadData = rows[0] || { id };
     resetLeadForm();
     await initLeadForm();
+    await loadLeadDescriptionLog(id);
+    await loadLeadContacts(id);
     // Populate fields from leadData
     populateLeadForm();
     await loadLeadInteractions(id);
@@ -6802,6 +6823,10 @@ function resetLeadForm() {
   refreshLeadStrategicDecisionPool();
   if (typeof renderLeadQualification === 'function') renderLeadQualification();
   applyLeadFormLayout();
+  leadDescriptionLog = [];
+  applyLeadDescriptionMode();
+  leadContacts = [];
+  renderAdditionalContacts();
 }
 
 async function initLeadForm() {
@@ -6881,6 +6906,110 @@ async function initLeadForm() {
   // org is chosen (a known contact must belong to a known org).
 }
 
+// ── Additional contacts (lead_contacts; the primary stays in target_person_*) ─
+async function loadLeadContacts(leadId) {
+  if (!leadId) { leadContacts = []; return; }
+  try { leadContacts = await apiGet('lead_contacts', `lead_id=eq.${leadId}&is_primary=eq.false&select=*&order=id`); }
+  catch (e) { leadContacts = []; }
+}
+
+function renderAdditionalContacts() {
+  const el = document.getElementById('lead-additional-contacts');
+  if (!el) return;
+  if (!leadContacts.length) {
+    el.innerHTML = '<span style="font-size:12px;color:var(--text3);">None yet</span>';
+    return;
+  }
+  el.innerHTML = leadContacts.map(c => {
+    const bits = [c.contact_name, c.contact_email, c.contact_phone].filter(Boolean).join(' · ');
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;padding:4px 10px;border-radius:999px;margin:0 6px 6px 0;">
+      ${String(bits || 'Contact').replace(/</g, '&lt;')}
+      <button onclick="removeLeadContact(${c.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:var(--text3);cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0;">×</button>
+    </span>`;
+  }).join('');
+}
+
+async function addLeadContact() {
+  if (leadReadOnly) return;
+  const name  = (document.getElementById('lead-contact-add-name')?.value  || '').trim();
+  const email = (document.getElementById('lead-contact-add-email')?.value || '').trim();
+  const phone = (document.getElementById('lead-contact-add-phone')?.value || '').trim();
+  if (!name && !email && !phone) { showStatus('Enter a name or contact detail', 'error'); return; }
+  // Contacts persist immediately, so the lead must exist — auto-save a new lead first.
+  if (!leadData.id) {
+    const ok = await saveLead({ keepOpen: true });
+    if (!ok || !leadData.id) return;
+  }
+  startBusy('Adding contact…');
+  try {
+    await api('lead_contacts', 'POST', {
+      lead_id: leadData.id, contact_name: name || null, contact_email: email || null,
+      contact_phone: phone || null, is_primary: false, created_by: currentUser?.personId || null,
+    }, '');
+    ['lead-contact-add-name', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    await loadLeadContacts(leadData.id);
+    renderAdditionalContacts();
+    showStatus('Contact added');
+  } catch (e) { showStatus('Could not add contact: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+async function removeLeadContact(id) {
+  if (leadReadOnly) return;
+  startBusy('Removing…');
+  try {
+    await api('lead_contacts', 'DELETE', null, 'id=eq.' + id);
+    await loadLeadContacts(leadData.id);
+    renderAdditionalContacts();
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// ── Description thread (original retained; updates appended once past New) ─────
+async function loadLeadDescriptionLog(leadId) {
+  if (!leadId) { leadDescriptionLog = []; return; }
+  try { leadDescriptionLog = await apiGet('lead_description_log', `lead_id=eq.${leadId}&select=*&order=created_at.desc,id.desc`); }
+  catch (e) { leadDescriptionLog = []; }
+}
+
+function renderLeadDescriptionHistory() {
+  const hist = document.getElementById('lead-description-history');
+  if (!hist) return;
+  const fmtWho = (id) => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; };
+  const card = (body, meta, original) => `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:${original ? '#FFFDF5' : '#fff'};">
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:3px;">${original ? 'Original' : 'Update'}${meta ? (' · ' + meta) : ''}</div>
+      <div style="font-size:13px;white-space:pre-wrap;">${String(body || '').replace(/</g, '&lt;')}</div>
+    </div>`;
+  let html = '';
+  (leadDescriptionLog || []).forEach(e => {
+    const meta = [(e.created_at ? new Date(e.created_at).toLocaleString('en-ZA') : ''), fmtWho(e.created_by)].filter(Boolean).join(' · ');
+    html += card(e.body, meta, false);
+  });
+  if (leadData.description) {
+    const meta = [(leadData.created_at ? new Date(leadData.created_at).toLocaleString('en-ZA') : ''), fmtWho(leadData.created_by)].filter(Boolean).join(' · ');
+    html += card(leadData.description, meta, true);
+  }
+  hist.innerHTML = html || '<div style="font-size:12px;color:var(--text3);">No description yet.</div>';
+}
+
+// New → editable description; past New → "Add to description" with the thread shown.
+function applyLeadDescriptionMode() {
+  const label = document.getElementById('lead-description-label');
+  const ta    = document.getElementById('lead-description');
+  const hist  = document.getElementById('lead-description-history');
+  const appendMode = !!(leadData.id && leadData.status && leadData.status !== 'New');
+  if (appendMode) {
+    if (label) label.innerHTML = 'Add to description';
+    if (ta) { ta.value = ''; ta.placeholder = 'Add an update — the original and earlier notes are kept below.'; }
+    if (hist) hist.style.display = '';
+    renderLeadDescriptionHistory();
+  } else {
+    if (label) label.innerHTML = 'Description <span style="color:var(--red)">*</span>';
+    if (ta) ta.placeholder = "What's the opportunity here? Why is this a lead?";
+    if (hist) { hist.style.display = 'none'; hist.innerHTML = ''; }
+  }
+}
+
 function populateLeadForm() {
   // Source
   if (leadData.source_id) document.getElementById('lead-source-id').value = leadData.source_id;
@@ -6943,6 +7072,8 @@ function populateLeadForm() {
   // Render derived status + action buttons + conditional blocks
   renderLeadStatusBadge(leadData.status);
   refreshLeadWorkflowChrome();
+  applyLeadDescriptionMode();
+  renderAdditionalContacts();
   onLeadSourceChange();
 }
 
@@ -7627,7 +7758,8 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (promoteBtn) {
-    const showWorkflow = (status === 'Qualified' && !leadReadOnly);
+    // Promote is unlocked only once a Qualified lead's peer review is Approved (spec c).
+    const showWorkflow = (status === 'Qualified' && !leadReadOnly && leadData.peer_review_status === 'Approved');
     if (!showWorkflow) {
       promoteBtn.style.display = 'none';
     } else if (canPromote(leadData)) {
@@ -7690,7 +7822,62 @@ function refreshLeadWorkflowChrome() {
       deadBlock.style.display = 'none';
     }
   }
+  renderLeadPeerReview(status);
   applyLeadFormLayout();
+}
+
+// Peer review (simulated): Qualified leads must be reviewed before Promote.
+function renderLeadPeerReview(status) {
+  const el = document.getElementById('lead-peer-review');
+  if (!el) return;
+  if (status !== 'Qualified' || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  const prs = leadData.peer_review_status || 'Pending';
+  const btn = (val, label, bg) =>
+    `<button type="button" onclick="setLeadPeerReview('${val}')" style="padding:5px 10px;font-size:12px;border-radius:6px;cursor:pointer;${prs===val?`background:${bg};color:#fff;border:1px solid ${bg};font-weight:700;`:'background:#fff;color:var(--text2);border:1px solid var(--border);'}">${label}</button>`;
+  const reviewedAt = leadData.peer_review_at ? ('Last set ' + new Date(leadData.peer_review_at).toLocaleString('en-ZA')) : '';
+  el.innerHTML = `
+    <div style="padding:12px 14px;background:#F8FAFC;border:1px solid var(--border);border-radius:var(--radius);">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);margin-bottom:8px;">Peer review — required before promote</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+        ${btn('Pending', 'Pending', '#6b7280')}
+        ${btn('Approved', 'Approved', '#16a34a')}
+        ${btn('Rejected', 'Rejected', '#b91c1c')}
+      </div>
+      <button type="button" onclick="demoteLeadToWorking()" class="btn btn-secondary" style="padding:5px 10px;font-size:12px;">← Demote to Working</button>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button · park via Promote → "can't progress now". ${reviewedAt}</div>
+    </div>`;
+}
+
+async function setLeadPeerReview(val) {
+  if (!leadData || !leadData.id) return;
+  startBusy('Saving review…');
+  try {
+    const patch = { peer_review_status: val, peer_review_at: new Date().toISOString(), peer_review_by: currentUser?.personId || null, updated_at: new Date().toISOString() };
+    const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
+    if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
+    populateLeadForm();
+    showStatus('Peer review: ' + val);
+  } catch (e) { showStatus('Could not save review: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+async function demoteLeadToWorking() {
+  if (!leadData || !leadData.id) return;
+  startBusy('Demoting…');
+  try {
+    // Hold blocks re-qualification; pin working_at so it lands on Working.
+    await api('leads', 'PATCH', {
+      qualification_demoted: true,
+      peer_review_status: null,
+      peer_review_at: null,
+      working_at: leadData.working_at || new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, 'id=eq.' + leadData.id);
+    await reloadLeadAfterServerChange();   // recompute → Working
+    showStatus('Demoted to Working');
+  } catch (e) { showStatus('Could not demote: ' + e.message, 'error'); }
+  finally { stopBusy(); }
 }
 
 // Permission hook for setting a Dead reason via the Decline modal.
@@ -9153,6 +9340,9 @@ function renderLeadQualification() {
 function setLeadQual(key, level) {
   if (leadReadOnly) return;
   leadData[key] = level;
+  // Changing a score re-opens qualification: drop any demote hold and stale review.
+  leadData.qualification_demoted = false;
+  leadData.peer_review_status = null;
   renderLeadQualification();
 }
 
@@ -9273,7 +9463,8 @@ function computeLeadStatus(l, ctx) {
   if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
   if (l.wake_date) return 'Dormant';
   const hasEst = l.est_value != null && +l.est_value > 0;
-  if (LEAD_GREEN(l) && hasEst) return 'Qualified';
+  // Qualified needs all-green + an estimate, and must not be under a peer-review demote hold.
+  if (LEAD_GREEN(l) && hasEst && !l.qualification_demoted) return 'Qualified';
   // Working is sticky once reached; otherwise gated by prereqs + next step + wait.
   if (l.working_at) return 'Working';
   if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l) && leadWaitElapsed(l, now))
@@ -9293,13 +9484,16 @@ async function recomputeOpenLeadStatus() {
   const status = computeLeadStatus(view, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
   let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
   let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
+  let peerReviewStatus = leadData.peer_review_status || null;
+  if (status === 'Qualified' && !peerReviewStatus) peerReviewStatus = 'Pending';  // schedule review (spec c)
   const changed = status !== leadData.status
     || workingEligibleAt !== (leadData.working_eligible_at || null)
     || workingAt !== (leadData.working_at || null)
-    || qualifiedAt !== (leadData.qualified_at || null);
+    || qualifiedAt !== (leadData.qualified_at || null)
+    || peerReviewStatus !== (leadData.peer_review_status || null);
   if (!changed) return;
   try {
-    const patch = { status, working_eligible_at: workingEligibleAt, working_at: workingAt, qualified_at: qualifiedAt, updated_at: nowIso };
+    const patch = { status, working_eligible_at: workingEligibleAt, working_at: workingAt, qualified_at: qualifiedAt, peer_review_status: peerReviewStatus, updated_at: nowIso };
     const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
     if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
   } catch (e) { console.warn('Lead status persist failed:', e.message); }
@@ -9335,11 +9529,15 @@ async function saveLead(opts) {
   }
   clearLeadFieldErrors();
 
-  const sourceId = document.getElementById('lead-source-id').value;
-  const description = document.getElementById('lead-description').value.trim();
+  const sourceId  = document.getElementById('lead-source-id').value;
+  const descInput = document.getElementById('lead-description').value.trim();
+  // Past New, the description box is an append field; the New-phase text stays the
+  // original (in leads.description) and new entries go to lead_description_log.
+  const appendMode  = !!(leadData.id && leadData.status && leadData.status !== 'New');
+  const description = appendMode ? (leadData.description || '') : descInput;
 
-  if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return; }
-  if (!description) { flagLeadField('lead-description', 'Description is required'); return; }
+  if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return false; }
+  if (!description) { flagLeadField('lead-description', 'Description is required'); return false; }
 
   // Status is derived server-side. Red flag tags live in lead_red_flags (synced
   // by saveLeadQualificationSelections) — their existence drives Dead-by-red-flag.
@@ -9428,6 +9626,9 @@ async function saveLead(opts) {
   payload.working_eligible_at = workingEligibleAt;
   payload.working_at          = workingAt;
   payload.qualified_at        = qualifiedAt;
+  payload.qualification_demoted = !!leadData.qualification_demoted;
+  // Becoming Qualified schedules a peer review (spec c).
+  if (status === 'Qualified' && !leadData.peer_review_status) payload.peer_review_status = 'Pending';
 
   startBusy('Saving lead…');
   try {
@@ -9443,6 +9644,12 @@ async function saveLead(opts) {
     }
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
+    // Description thread: in append-mode a new note becomes a log entry; the
+    // New-phase description stays as the original in leads.description.
+    if (appendMode && descInput) {
+      try { await api('lead_description_log', 'POST', { lead_id: leadData.id, body: descInput, created_by: currentUser?.personId || null }, ''); } catch(e) {}
+      await loadLeadDescriptionLog(leadData.id);
+    }
     if (opts.keepOpen) {
       // Stay on the form (e.g. auto-save before logging the first interaction).
       populateLeadForm();
