@@ -634,10 +634,10 @@ tr:hover td{background:#F8FAFC;}
     <div class="opp-tab-content active" id="lead-tab-overview">
       <div style="display:flex;gap:16px;align-items:flex-start;max-width:1160px;">
         <!-- Left column -->
-        <div style="flex:1;min-width:0;">
+        <div style="flex:1;min-width:0;" id="lead-left-col">
 
         <!-- Source section -->
-        <div class="opp-section">
+        <div class="opp-section" id="lead-source-section">
           <div class="opp-section-title">Source</div>
 
           <div class="form-group">
@@ -717,7 +717,7 @@ tr:hover td{background:#F8FAFC;}
         </div>
 
         <!-- Details section -->
-        <div class="opp-section">
+        <div class="opp-section" id="lead-details-section">
           <div class="opp-section-title">Details</div>
 
           <div class="form-group">
@@ -752,10 +752,10 @@ tr:hover td{background:#F8FAFC;}
         </div>
 
         <!-- Right column -->
-        <div style="flex:1;min-width:0;">
+        <div style="flex:1;min-width:0;" id="lead-right-col">
 
         <!-- Target section -->
-        <div class="opp-section">
+        <div class="opp-section" id="lead-target-section">
           <div class="opp-section-title">Target Client</div>
 
           <div class="form-group">
@@ -782,7 +782,7 @@ tr:hover td{background:#F8FAFC;}
         </div>
 
         <!-- Workflow section -->
-        <div class="opp-section">
+        <div class="opp-section" id="lead-workflow-section">
           <div class="opp-section-title">Workflow</div>
 
           <div class="form-row">
@@ -1773,6 +1773,43 @@ const PAGES = {
     fields: [
       { key: 'name',        label: 'Name', required: true },
       { key: 'description', label: 'Description', type: 'textarea' },
+      { key: 'sort_order',  label: 'Sort Order', type: 'number' },
+      { key: 'active',      label: 'Active', type: 'checkbox' },
+    ],
+  },
+
+  decline_reasons: {
+    title: 'Decline Reasons',
+    table: 'decline_reasons',
+    columns: [
+      { key: 'name',        label: 'Name' },
+      { key: 'description', label: 'Description' },
+      { key: 'sort_order',  label: 'Sort Order' },
+      { key: 'active',      label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',        label: 'Name', required: true },
+      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: 'sort_order',  label: 'Sort Order', type: 'number' },
+      { key: 'active',      label: 'Active', type: 'checkbox' },
+    ],
+  },
+
+  qualification_dimensions: {
+    title: 'Qualification Dimensions',
+    table: 'qualification_dimensions',
+    columns: [
+      { key: 'label',       label: 'Dimension' },
+      { key: 'key',         label: 'Field key' },
+      { key: 'description', label: 'Description (shown on hover)' },
+      { key: 'sort_order',  label: 'Sort Order' },
+      { key: 'active',      label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    // `key` is intentionally NOT editable — it maps to the leads score columns
+    // (fit / trigger_score / access / capacity). Admins edit label + hover help.
+    fields: [
+      { key: 'label',       label: 'Label', required: true },
+      { key: 'description', label: 'Description (shown on hover over the dimension)', type: 'textarea' },
       { key: 'sort_order',  label: 'Sort Order', type: 'number' },
       { key: 'active',      label: 'Active', type: 'checkbox' },
     ],
@@ -2799,6 +2836,10 @@ const MENU = [
             icon: '<path d="M3 2v12M3 2h9l-2 3 2 3H3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'strategic_decisions', label: 'Strategic Decisions', permission: 'manage_lookups',
             icon: '<path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="8" cy="8" r="2"/>' },
+          { page: 'decline_reasons', label: 'Decline Reasons', permission: 'manage_lookups',
+            icon: '<circle cx="8" cy="8" r="6"/><path d="M5 5l6 6M11 5l-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'qualification_dimensions', label: 'Qualification Dimensions', permission: 'manage_lookups',
+            icon: '<circle cx="4" cy="8" r="2"/><circle cx="8" cy="8" r="2"/><circle cx="12" cy="8" r="2"/>' },
         ]
       },
     ]
@@ -6003,6 +6044,10 @@ async function renderLeadsPage() {
     allData['organisations']      = orgs;
     allData['research_campaigns'] = campaigns;
 
+    // App-layer New→Working sweep: flip eligible New leads whose waiting period
+    // has elapsed (replaces the retired DB status trigger).
+    leads = await sweepNewToWorking(leads);
+
     // Apply the ownership view (own / all / team) before the status tabs/counts.
     leads = filterLeadsByView(leads, leadsOwnerView);
 
@@ -6551,11 +6596,11 @@ async function loadLeadQualificationSelections(leadId) {
     const allSd = allData['strategic_decisions'] || [];
     window._leadRedFlags = rfLinks.map(l => {
       const x = allRf.find(r => +r.id === +l.red_flag_id);
-      return { id: +l.red_flag_id, name: x?.name || 'Unknown' };
+      return { id: +l.red_flag_id, name: x?.name || 'Unknown', comment: l.comment || '' };
     });
     window._leadStrategicDecisions = sdLinks.map(l => {
       const x = allSd.find(r => +r.id === +l.strategic_decision_id);
-      return { id: +l.strategic_decision_id, name: x?.name || 'Unknown' };
+      return { id: +l.strategic_decision_id, name: x?.name || 'Unknown', comment: l.comment || '' };
     });
   } catch(e) {
     console.warn('Could not load lead qualification selections:', e.message);
@@ -6594,7 +6639,7 @@ function addLeadRedFlag() {
   if (!id) return;
   const item = (allData['red_flags'] || []).find(x => +x.id === id);
   if (!item) return;
-  window._leadRedFlags.push({ id, name: item.name });
+  window._leadRedFlags.push({ id, name: item.name, comment: '' });
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   sel.value = '';
@@ -6606,7 +6651,7 @@ function addLeadStrategicDecision() {
   if (!id) return;
   const item = (allData['strategic_decisions'] || []).find(x => +x.id === id);
   if (!item) return;
-  window._leadStrategicDecisions.push({ id, name: item.name });
+  window._leadStrategicDecisions.push({ id, name: item.name, comment: '' });
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   sel.value = '';
@@ -6624,6 +6669,18 @@ function removeLeadStrategicDecision(id) {
   refreshLeadStrategicDecisionPool();
 }
 
+// Per-item justification comments (stored in the junction `comment` column).
+function setLeadRedFlagComment(id, val) {
+  if (leadReadOnly) return;
+  const x = (window._leadRedFlags || []).find(f => +f.id === +id);
+  if (x) x.comment = val;
+}
+function setLeadStrategicDecisionComment(id, val) {
+  if (leadReadOnly) return;
+  const x = (window._leadStrategicDecisions || []).find(f => +f.id === +id);
+  if (x) x.comment = val;
+}
+
 function renderLeadRedFlags() {
   const el = document.getElementById('lead-red-flags-selected');
   if (!el) return;
@@ -6632,10 +6689,15 @@ function renderLeadRedFlags() {
     return;
   }
   el.innerHTML = window._leadRedFlags.map(x =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:#D0021B;color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
-      ${x.name}
-      <button onclick="removeLeadRedFlag(${x.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:white;cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0 2px;">×</button>
-    </span>`
+    `<div style="width:100%;margin-bottom:8px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:#D0021B;color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
+        ${x.name}
+        <button onclick="removeLeadRedFlag(${x.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:white;cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0 2px;">×</button>
+      </span>
+      <input type="text" value="${(x.comment || '').replace(/"/g, '&quot;')}" ${leadReadOnly ? 'disabled' : ''}
+        oninput="setLeadRedFlagComment(${x.id}, this.value)"
+        placeholder="Brief comment…" class="form-control" style="margin-top:4px;font-size:12px;padding:5px 9px;">
+    </div>`
   ).join('');
 }
 
@@ -6647,10 +6709,15 @@ function renderLeadStrategicDecisions() {
     return;
   }
   el.innerHTML = window._leadStrategicDecisions.map(x =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
-      ${x.name}
-      <button onclick="removeLeadStrategicDecision(${x.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:white;cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0 2px;">×</button>
-    </span>`
+    `<div style="width:100%;margin-bottom:8px;">
+      <span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
+        ${x.name}
+        <button onclick="removeLeadStrategicDecision(${x.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:white;cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0 2px;">×</button>
+      </span>
+      <input type="text" value="${(x.comment || '').replace(/"/g, '&quot;')}" ${leadReadOnly ? 'disabled' : ''}
+        oninput="setLeadStrategicDecisionComment(${x.id}, this.value)"
+        placeholder="Brief comment…" class="form-control" style="margin-top:4px;font-size:12px;padding:5px 9px;">
+    </div>`
   ).join('');
 }
 
@@ -6660,10 +6727,10 @@ async function saveLeadQualificationSelections(leadId) {
     await api('lead_red_flags',           'DELETE', null, `lead_id=eq.${leadId}`);
     await api('lead_strategic_decisions', 'DELETE', null, `lead_id=eq.${leadId}`);
     for (const x of window._leadRedFlags) {
-      try { await api('lead_red_flags', 'POST', { lead_id: leadId, red_flag_id: x.id }, ''); } catch(e) {}
+      try { await api('lead_red_flags', 'POST', { lead_id: leadId, red_flag_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
     }
     for (const x of window._leadStrategicDecisions) {
-      try { await api('lead_strategic_decisions', 'POST', { lead_id: leadId, strategic_decision_id: x.id }, ''); } catch(e) {}
+      try { await api('lead_strategic_decisions', 'POST', { lead_id: leadId, strategic_decision_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
     }
   } catch(e) {
     console.warn('Failed to save lead qualification selections:', e.message);
@@ -6733,6 +6800,8 @@ function resetLeadForm() {
   renderLeadStrategicDecisions();
   refreshLeadRedFlagPool();
   refreshLeadStrategicDecisionPool();
+  if (typeof renderLeadQualification === 'function') renderLeadQualification();
+  applyLeadFormLayout();
 }
 
 async function initLeadForm() {
@@ -7604,17 +7673,128 @@ function refreshLeadWorkflowChrome() {
       } else {
         reasonLabel = '—';
       }
+      // Append the specific decline reason (lookup) if one was recorded.
+      if (leadData.decline_reason_id) {
+        if (!allData['decline_reasons']) {
+          apiGet('decline_reasons', 'select=*')
+            .then(rs => { allData['decline_reasons'] = rs || []; refreshLeadWorkflowChrome(); })
+            .catch(() => { allData['decline_reasons'] = []; });
+        } else {
+          const dr = allData['decline_reasons'].find(x => +x.id === +leadData.decline_reason_id);
+          if (dr) reasonLabel += ' — ' + dr.name;
+        }
+      }
       if (reasonEl) reasonEl.textContent = reasonLabel;
       if (notesEl)  notesEl.textContent  = notesText;
     } else {
       deadBlock.style.display = 'none';
     }
   }
+  applyLeadFormLayout();
 }
 
 // Permission hook for setting a Dead reason via the Decline modal.
 function canSetDeadReason(reason) {
   return true;
+}
+
+// ── Stateful Overview layout (New vs Working+) ────────────────────────────────
+// Target Client is always top-left, Details bottom-left.
+//   New     → Source top-right (editable), Workflow bottom-right.
+//   Working+→ Workflow top-right, Source locked & compact bottom-right.
+function applyLeadFormLayout() {
+  const leftCol  = document.getElementById('lead-left-col');
+  const rightCol = document.getElementById('lead-right-col');
+  const target   = document.getElementById('lead-target-section');
+  const details  = document.getElementById('lead-details-section');
+  const source   = document.getElementById('lead-source-section');
+  const workflow = document.getElementById('lead-workflow-section');
+  if (!leftCol || !rightCol || !target || !details || !source || !workflow) return;
+
+  const status = leadData.status || 'New';
+  const isNew  = !leadData.id || status === 'New';
+
+  // Left column: Target Client above Details (always). insertBefore relocates the
+  // node, pulling Target out of whichever column it currently sits in.
+  leftCol.insertBefore(target, details);
+
+  // Right column order by state.
+  if (isNew) {
+    rightCol.insertBefore(source, workflow);   // Source top, Workflow bottom
+  } else {
+    rightCol.appendChild(workflow);            // Workflow top …
+    rightCol.appendChild(source);              // … Source bottom
+  }
+
+  applyLeadSourceLock(!isNew);
+  applyLeadTargetOrgLock(!isNew);
+}
+
+// Once past New the target organisation is frozen (spec b2 — contact can still
+// change). leadReadOnly (Promoted/Dead) already disables everything globally.
+function applyLeadTargetOrgLock(locked) {
+  const sel  = document.getElementById('lead-target-org-id');
+  const name = document.getElementById('lead-target-org-name');
+  const hint = document.getElementById('lead-target-org-hint');
+  if (locked) {
+    if (sel)  sel.disabled = true;
+    if (name) name.style.display = 'none';
+    if (hint) hint.style.display = 'none';
+  } else {
+    if (sel)  sel.disabled = false;
+    if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
+  }
+}
+
+// Once a lead is past New the Source is frozen and shown compactly (spec b1).
+function applyLeadSourceLock(locked) {
+  const section = document.getElementById('lead-source-section');
+  if (!section) return;
+  let compact = document.getElementById('lead-source-compact');
+  if (!compact) {
+    compact = document.createElement('div');
+    compact.id = 'lead-source-compact';
+    compact.style.cssText = 'font-size:13px;color:var(--text2);line-height:1.6;';
+    section.appendChild(compact);
+  }
+  const groups = section.querySelectorAll('.form-group');
+  if (locked) {
+    groups.forEach(g => g.style.display = 'none');
+    compact.style.display = 'block';
+    compact.innerHTML = leadSourceSummaryHtml();
+  } else {
+    compact.style.display = 'none';
+    groups.forEach(g => { g.style.display = ''; });
+    // Re-collapse the conditional source fields that don't apply to the chosen source.
+    if (typeof onLeadSourceChange === 'function') onLeadSourceChange();
+  }
+}
+
+function leadSourceSummaryHtml() {
+  const src = (allData['lead_sources'] || []).find(s => +s.id === +leadData.source_id);
+  const name = src ? src.name : '—';
+  let detail = '';
+  if (name === 'Referral') {
+    detail = leadData.source_person_name || '';
+    if (leadData.source_person_id) {
+      const p = (allData['people'] || []).find(x => +x.id === +leadData.source_person_id);
+      if (p) detail = [p.first_name, p.last_name].filter(Boolean).join(' ');
+    }
+  } else if (name === 'Client Expansion') {
+    const o = (allData['organisations'] || []).find(x => +x.id === +leadData.source_org_id);
+    detail = o ? o.name : '';
+  } else if (name === 'Sales Campaign') {
+    const c = (allData['sales_campaigns'] || []).find(x => +x.id === +leadData.sales_campaign_id);
+    detail = c ? c.name : '';
+  } else if (name === 'Research Campaign' || name === 'Research') {
+    const c = (allData['research_campaigns'] || []).find(x => +x.id === +leadData.research_campaign_id);
+    detail = c ? c.name : '';
+  } else {
+    detail = leadData.source_detail || '';
+  }
+  const safe = String(detail).replace(/</g, '&lt;');
+  return `<span style="display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);margin-bottom:4px;">🔒 Source (locked)</span><br>
+    <span style="font-weight:700;">${name}</span>${safe ? ' — ' + safe : ''}`;
 }
 
 // Refetch the lead row after a derived-status change (red flag tick, promote wizard,
@@ -7626,6 +7806,7 @@ async function reloadLeadAfterServerChange() {
     const rows = await apiGet('leads', `id=eq.${leadData.id}&select=*`);
     if (rows && rows[0]) {
       leadData = rows[0];
+      await recomputeOpenLeadStatus();   // derive + persist status (app-layer engine)
       populateLeadForm();
     }
   } catch (e) {
@@ -7781,7 +7962,7 @@ async function promoteWizardSaveRedFlag() {
     const flagRow = (allData['red_flags'] || []).find(f => +f.id === flagId);
     if (flagRow) {
       window._leadRedFlags = window._leadRedFlags || [];
-      window._leadRedFlags.push({ id: flagId, name: flagRow.name });
+      window._leadRedFlags.push({ id: flagId, name: flagRow.name, comment: '' });
     }
     closeModal();
     await reloadLeadAfterServerChange();
@@ -8810,8 +8991,15 @@ async function savePromoteAll() {
 // ── Decline modal ─────────────────────────────────────────
 // Available whenever status is not already Dead/Promoted. Captures dead_reason +
 // dead_notes; the trigger flips status to Dead on save.
-function openDeclineModal() {
+async function openDeclineModal() {
   if (!leadData?.id) return;
+  let reasons = allData['decline_reasons'];
+  if (!reasons) {
+    try { reasons = await apiGet('decline_reasons', 'active=eq.true&select=*&order=sort_order,name'); allData['decline_reasons'] = reasons; }
+    catch (e) { reasons = []; }
+  }
+  const reasonOpts = '<option value="">— select a reason —</option>' +
+    (reasons || []).map(r => `<option value="${r.id}">${(r.name || '').replace(/</g, '&lt;')}</option>`).join('');
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:560px;">
@@ -8821,7 +9009,7 @@ function openDeclineModal() {
         </div>
         <div class="modal-body">
           <div class="form-group" style="margin-bottom:12px;">
-            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <label class="form-label">Category <span style="color:var(--red)">*</span></label>
             <div style="display:flex;gap:8px;">
               <label style="flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:white;display:flex;gap:10px;align-items:flex-start;">
                 <input type="radio" name="decline-reason" value="not_qualified" onchange="updateDeclineNotesLabel()" style="margin-top:3px;">
@@ -8839,9 +9027,14 @@ function openDeclineModal() {
               </label>
             </div>
           </div>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <select id="decline-reason-id" class="form-control">${reasonOpts}</select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Manage these options in Admin → Lookups → Decline Reasons.</div>
+          </div>
           <div class="form-group" style="margin-bottom:0;">
-            <label class="form-label" id="decline-notes-label">Notes <span style="color:var(--red)">*</span></label>
-            <textarea id="decline-notes" class="form-control" rows="3" placeholder="Detail the reason — useful for reporting and learning."></textarea>
+            <label class="form-label" id="decline-notes-label">Notes</label>
+            <textarea id="decline-notes" class="form-control" rows="3" placeholder="Optional free-text detail — useful for reporting and learning."></textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -8857,16 +9050,17 @@ function updateDeclineNotesLabel() {
   const reason = document.querySelector('input[name="decline-reason"]:checked')?.value || '';
   const lbl = document.getElementById('decline-notes-label');
   if (!lbl) return;
-  if (reason === 'not_qualified')  lbl.innerHTML = 'Which dimension failed and why? <span style="color:var(--red)">*</span>';
-  else if (reason === 'declined')  lbl.innerHTML = 'Why are we passing on this? <span style="color:var(--red)">*</span>';
-  else                             lbl.innerHTML = 'Notes <span style="color:var(--red)">*</span>';
+  if (reason === 'not_qualified')  lbl.innerHTML = 'Which dimension failed and why? <span style="font-weight:400;color:var(--text3);">(optional)</span>';
+  else if (reason === 'declined')  lbl.innerHTML = 'Why are we passing on this? <span style="font-weight:400;color:var(--text3);">(optional)</span>';
+  else                             lbl.innerHTML = 'Notes';
 }
 
 async function saveDecline() {
-  const reason = document.querySelector('input[name="decline-reason"]:checked')?.value || '';
-  const notes  = (document.getElementById('decline-notes')?.value || '').trim();
-  if (!reason) { showStatus('Pick a reason', 'error'); return; }
-  if (!notes)  { showStatus('Notes are required', 'error'); document.getElementById('decline-notes')?.focus(); return; }
+  const reason   = document.querySelector('input[name="decline-reason"]:checked')?.value || '';
+  const reasonId = +document.getElementById('decline-reason-id')?.value || null;
+  const notes    = (document.getElementById('decline-notes')?.value || '').trim();
+  if (!reason)   { showStatus('Pick a category', 'error'); return; }
+  if (!reasonId) { showStatus('Select a reason', 'error'); document.getElementById('decline-reason-id')?.focus(); return; }
   if (!canSetDeadReason(reason)) {
     showStatus("You don't have permission to set that reason", 'error');
     return;
@@ -8874,9 +9068,10 @@ async function saveDecline() {
   startBusy('Closing lead…');
   try {
     await api('leads', 'PATCH', {
-      dead_reason: reason,
-      dead_notes:  notes,
-      updated_at:  new Date().toISOString(),
+      dead_reason:       reason,
+      decline_reason_id: reasonId,
+      dead_notes:        notes || null,
+      updated_at:        new Date().toISOString(),
     }, 'id=eq.' + leadData.id);
     closeModal();
     await reloadLeadAfterServerChange();
@@ -8889,6 +9084,9 @@ async function saveDecline() {
 }
 
 // ── Qualification dots ────────────────────────────────────
+// QUAL_DIMENSIONS holds the canonical key/label + a hardcoded fallback help.
+// The hover descriptions are admin-editable in the qualification_dimensions
+// table and merged over these at render time (qualDimMeta).
 const QUAL_DIMENSIONS = [
   { key: 'fit',           label: 'Fit',      help: 'Are they in your ideal client profile? (sector, size, region you serve)' },
   { key: 'trigger_score', label: 'Trigger',  help: 'Is there a reason now? (new site, incident, renewal coming up, change of FM)' },
@@ -8896,27 +9094,57 @@ const QUAL_DIMENSIONS = [
   { key: 'capacity',      label: 'Capacity', help: 'Can you serve them if you win? (region coverage, manpower vs tech)' },
 ];
 
+// Map a dimension key to its leads comment column (trigger_score → trigger_comment).
+function qualCommentKey(key) { return (key === 'trigger_score' ? 'trigger' : key) + '_comment'; }
+
+// Merge admin-editable descriptions over the hardcoded fallbacks, matched on key.
+function qualDimMeta(key) {
+  const dbRow = (allData['qualification_dimensions'] || []).find(d => d.key === key);
+  const base  = QUAL_DIMENSIONS.find(d => d.key === key) || { key, label: key, help: '' };
+  return {
+    key,
+    label: (dbRow && dbRow.label)       || base.label,
+    help:  (dbRow && dbRow.description) || base.help || '',
+  };
+}
+
 function renderLeadQualification() {
   const wrap = document.getElementById('lead-qual-rows');
   if (!wrap) return;
-  wrap.innerHTML = QUAL_DIMENSIONS.map(d => {
-    const val = leadData[d.key] || 0;
-    return `<div style="display:flex;align-items:center;gap:16px;padding:14px;border-bottom:1px solid var(--border);">
-      <div style="flex:1;">
-        <div style="font-size:14px;font-weight:700;color:var(--text);">${d.label}</div>
-        <div style="font-size:12px;color:var(--text3);margin-top:2px;">${d.help}</div>
+  // Lazy-load the admin-editable descriptions once, then re-render.
+  if (!allData['qualification_dimensions']) {
+    apiGet('qualification_dimensions', 'select=*&order=sort_order')
+      .then(rows => { allData['qualification_dimensions'] = rows || []; renderLeadQualification(); })
+      .catch(() => { allData['qualification_dimensions'] = []; });
+  }
+  wrap.innerHTML = QUAL_DIMENSIONS.map(dim => {
+    const d = qualDimMeta(dim.key);
+    const val = +leadData[dim.key] || 0;
+    const cKey = qualCommentKey(dim.key);
+    const comment = leadData[cKey] || '';
+    const helpAttr = String(d.help).replace(/"/g, '&quot;');
+    return `<div style="padding:14px;border-bottom:1px solid var(--border);">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="flex:1;">
+          <div title="${helpAttr}" style="font-size:14px;font-weight:700;color:var(--text);border-bottom:1px dotted var(--text3);display:inline-block;cursor:help;">${d.label}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${d.help}</div>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          ${[0,1,2].map(level => {
+            const isActive = val === level;
+            const colour = level === 2 ? '#16a34a' : level === 1 ? '#f59e0b' : '#cbd5e1';
+            const ring = isActive ? `box-shadow:0 0 0 3px ${colour}33;` : '';
+            return `<button onclick="setLeadQual('${dim.key}', ${level})" title="${level===2?'Strong':level===1?'Weak':'Unknown'}" style="width:24px;height:24px;border-radius:50%;background:${colour};border:none;cursor:${leadReadOnly?'default':'pointer'};${ring}opacity:${isActive?'1':'0.4'};transition:all 0.15s;"></button>`;
+          }).join('')}
+        </div>
+        <div style="width:80px;text-align:right;font-size:12px;font-weight:600;color:${val===2?'#16a34a':val===1?'#f59e0b':'var(--text3)'};">
+          ${val===2?'Strong':val===1?'Weak':'Unknown'}
+        </div>
       </div>
-      <div style="display:flex;gap:6px;flex-shrink:0;">
-        ${[0,1,2].map(level => {
-          const isActive = +val === level;
-          const colour = level === 2 ? '#16a34a' : level === 1 ? '#f59e0b' : '#cbd5e1';
-          const ring = isActive ? `box-shadow:0 0 0 3px ${colour}33;` : '';
-          return `<button onclick="setLeadQual('${d.key}', ${level})" title="${level===2?'Strong':level===1?'Weak':'Unknown'}" style="width:24px;height:24px;border-radius:50%;background:${colour};border:none;cursor:${leadReadOnly?'default':'pointer'};${ring}opacity:${isActive?'1':'0.4'};transition:all 0.15s;"></button>`;
-        }).join('')}
-      </div>
-      <div style="width:80px;text-align:right;font-size:12px;font-weight:600;color:${val===2?'#16a34a':val===1?'#f59e0b':'var(--text3)'};">
-        ${val===2?'Strong':val===1?'Weak':'Unknown'}
-      </div>
+      <input type="text" value="${comment.replace(/"/g,'&quot;')}" ${leadReadOnly?'disabled':''}
+        oninput="setLeadQualComment('${cKey}', this.value)"
+        placeholder="Brief note to justify this rating…"
+        class="form-control" style="margin-top:8px;font-size:12px;padding:6px 10px;">
     </div>`;
   }).join('');
   updateLeadReadiness();
@@ -8926,6 +9154,13 @@ function setLeadQual(key, level) {
   if (leadReadOnly) return;
   leadData[key] = level;
   renderLeadQualification();
+}
+
+// Per-rating justification comment (stored on leadData, persisted by saveLead).
+// No re-render — that would steal focus while typing.
+function setLeadQualComment(cKey, val) {
+  if (leadReadOnly) return;
+  leadData[cKey] = val;
 }
 
 function updateLeadReadiness() {
@@ -8965,6 +9200,127 @@ function flagLeadField(fieldId, message) {
     }, 50);
   }
   showStatus(message, 'error');
+}
+
+// ── Lead status engine (app-layer; replaces the retired DB status triggers) ───
+// Status is derived here on every write path + a New→Working sweep on list load.
+// Priority: Promoted → Dead → Dormant → Qualified → Working → New.
+const LEAD_GREEN = (l) => +l.fit===2 && +l.trigger_score===2 && +l.access===2 && +l.capacity===2;
+
+function leadWaitingMinutes() {
+  const v = +((typeof appSettings !== 'undefined' && appSettings['new_lead_waiting_minutes']));
+  return isNaN(v) ? 0 : Math.max(0, v);
+}
+
+// cond1 — source completed in full (per source type).
+function leadSourceComplete(l) {
+  if (!l || !l.source_id) return false;
+  const src = (allData['lead_sources'] || []).find(s => +s.id === +l.source_id);
+  const name = src ? src.name : '';
+  if (name === 'Referral')
+    return !!(l.source_person_id || (l.source_person_name && (l.source_person_email || l.source_person_phone)));
+  if (name === 'Client Expansion')                         return !!l.source_org_id;
+  if (name === 'Research Campaign' || name === 'Research')  return !!l.research_campaign_id;
+  if (name === 'Sales Campaign')                            return !!l.sales_campaign_id;
+  // Inbound / Outbound / Tender / Other → need a free-text detail
+  return !!(l.source_detail && String(l.source_detail).trim());
+}
+
+// cond2 — at least a description.
+function leadDetailsComplete(l) {
+  return !!(l && l.description && String(l.description).trim());
+}
+
+// cond3 — target organisation + a contact with contact detail. A primaryContact
+// (from lead_contacts) wins; otherwise fall back to the legacy target_person_* fields.
+function leadTargetComplete(l, primaryContact) {
+  if (!l) return false;
+  const hasOrg = !!(l.target_org_id || (l.target_org_name && String(l.target_org_name).trim()));
+  let hasContact;
+  if (primaryContact) {
+    hasContact = !!(primaryContact.person_id ||
+      (primaryContact.contact_name && (primaryContact.contact_email || primaryContact.contact_phone)));
+  } else {
+    hasContact = !!(l.target_person_id || (l.target_person_name && String(l.target_person_name).trim()));
+  }
+  return hasOrg && hasContact;
+}
+
+// cond4 — a confirmed next step + date. The kept refresh_lead_next_action trigger
+// denormalises the earliest pending next action onto the lead row, so this reads
+// straight off the lead (no need to load interactions in list views).
+function leadHasNextStep(l) {
+  return !!(l && l.next_action && l.next_action_date);
+}
+
+// conds 1-3 — the gate that starts the waiting clock.
+function leadWorkingPrereqsMet(l, primaryContact) {
+  return leadSourceComplete(l) && leadDetailsComplete(l) && leadTargetComplete(l, primaryContact);
+}
+
+// cond5 — the new-lead waiting period has elapsed since the clock started.
+function leadWaitElapsed(l, now) {
+  if (!l || !l.working_eligible_at) return false;
+  const ms = leadWaitingMinutes() * 60000;
+  return ((now || new Date()).getTime() - new Date(l.working_eligible_at).getTime()) >= ms;
+}
+
+// Pure status computation. ctx: { redFlagCount, primaryContact, now }
+function computeLeadStatus(l, ctx) {
+  ctx = ctx || {};
+  const now = ctx.now || new Date();
+  if (l.promoted_at) return 'Promoted';
+  if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
+  if (l.wake_date) return 'Dormant';
+  const hasEst = l.est_value != null && +l.est_value > 0;
+  if (LEAD_GREEN(l) && hasEst) return 'Qualified';
+  // Working is sticky once reached; otherwise gated by prereqs + next step + wait.
+  if (l.working_at) return 'Working';
+  if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l) && leadWaitElapsed(l, now))
+    return 'Working';
+  return 'New';
+}
+
+// Derive + persist status (and lifecycle stamps) for the currently-open lead.
+// Called from reloadLeadAfterServerChange() so interaction / decline / promote /
+// dormant / red-flag paths all converge here.
+async function recomputeOpenLeadStatus() {
+  if (!leadData || !leadData.id) return;
+  const nowIso = new Date().toISOString();
+  let workingEligibleAt = leadData.working_eligible_at || null;
+  if (!workingEligibleAt && leadWorkingPrereqsMet(leadData, null)) workingEligibleAt = nowIso;
+  const view = Object.assign({}, leadData, { working_eligible_at: workingEligibleAt });
+  const status = computeLeadStatus(view, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
+  let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
+  let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
+  const changed = status !== leadData.status
+    || workingEligibleAt !== (leadData.working_eligible_at || null)
+    || workingAt !== (leadData.working_at || null)
+    || qualifiedAt !== (leadData.qualified_at || null);
+  if (!changed) return;
+  try {
+    const patch = { status, working_eligible_at: workingEligibleAt, working_at: workingAt, qualified_at: qualifiedAt, updated_at: nowIso };
+    const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
+    if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
+  } catch (e) { console.warn('Lead status persist failed:', e.message); }
+}
+
+// New→Working sweep for the leads list: flips eligible New leads whose waiting
+// period has elapsed. working_eligible_at being set means conds 1-3 were satisfied
+// when it was stamped, so we trust it here rather than reloading each lead's contacts.
+async function sweepNewToWorking(leads) {
+  const now = new Date();
+  const toFlip = (leads || []).filter(l =>
+    l.status === 'New' && !l.dead_reason && !l.wake_date && !l.promoted_at &&
+    l.working_eligible_at && leadHasNextStep(l) && leadWaitElapsed(l, now));
+  for (const l of toFlip) {
+    try {
+      const patch = { status: 'Working', working_at: l.working_at || now.toISOString(), updated_at: now.toISOString() };
+      await api('leads', 'PATCH', patch, 'id=eq.' + l.id);
+      l.status = 'Working'; l.working_at = patch.working_at;
+    } catch (e) { /* non-fatal — leave New, retry on next load */ }
+  }
+  return leads;
 }
 
 async function saveLead() {
@@ -9029,6 +9385,12 @@ async function saveLead() {
     access:        +leadData.access || 0,
     capacity:      +leadData.capacity || 0,
 
+    // Per-rating justification comments (Qualification tab).
+    fit_comment:      (leadData.fit_comment      || '').trim() || null,
+    trigger_comment:  (leadData.trigger_comment  || '').trim() || null,
+    access_comment:   (leadData.access_comment   || '').trim() || null,
+    capacity_comment: (leadData.capacity_comment || '').trim() || null,
+
     // status is derived server-side from this row + lead_interactions — don't write it.
 
     // Owner can only be (re)assigned by managers/admin. For everyone else, preserve
@@ -9048,6 +9410,21 @@ async function saveLead() {
 
     updated_at: new Date().toISOString(),
   };
+
+  // ── App-layer status derivation (replaces the retired DB triggers) ──
+  // Start the waiting clock the first time source + details + target are all complete.
+  const nowIso = new Date().toISOString();
+  const merged = Object.assign({}, leadData, payload);
+  let workingEligibleAt = leadData.working_eligible_at || null;
+  if (!workingEligibleAt && leadWorkingPrereqsMet(merged, null)) workingEligibleAt = nowIso;
+  merged.working_eligible_at = workingEligibleAt;
+  const status = computeLeadStatus(merged, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
+  let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
+  let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
+  payload.status              = status;
+  payload.working_eligible_at = workingEligibleAt;
+  payload.working_at          = workingAt;
+  payload.qualified_at        = qualifiedAt;
 
   startBusy('Saving lead…');
   try {
@@ -9778,6 +10155,16 @@ async function renderSettingsPage() {
           }).join('')}
         </div>
       </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Lead Lifecycle</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">New-lead waiting period (minutes)</label>
+            <input type="number" id="setting-new-lead-wait" class="form-control" min="0" step="1" value="${appSettings['new_lead_waiting_minutes']||'10'}">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Once source, details and target org/contact are complete, a new lead waits this many minutes before it can advance to Working (an interaction with a next step + date is still required).</div>
+          </div>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
@@ -9792,17 +10179,20 @@ async function saveSettings() {
 
     const similarity = document.getElementById('setting-similarity').value;
     const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
+    const newLeadWait = document.getElementById('setting-new-lead-wait').value || '0';
     await Promise.all([
       api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
       api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
       api('settings', 'PATCH', { value: similarity, updated_at: new Date().toISOString() }, 'key=eq.similarity_threshold'),
       api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
+      api('settings', 'PATCH', { value: newLeadWait, updated_at: new Date().toISOString() }, 'key=eq.new_lead_waiting_minutes'),
     ]);
 
     appSettings['fy_start_month'] = fyStart;
     appSettings['escalation_month'] = escMonth;
     appSettings['similarity_threshold'] = similarity;
     appSettings['eligible_collaborator_roles'] = collabRoles;
+    appSettings['new_lead_waiting_minutes'] = newLeadWait;
     showStatus('Settings saved');
   } catch(e) {
     showStatus('Failed to save: ' + e.message, 'error');
