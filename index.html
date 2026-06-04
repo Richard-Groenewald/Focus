@@ -614,6 +614,7 @@ tr:hover td{background:#F8FAFC;}
     <div class="opp-topbar-title" id="lead-page-title">New Lead</div>
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
+      <span id="lead-save-indicator" style="font-size:12px;font-weight:600;"></span>
       <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">Cancel</button>
       <button class="btn btn-primary" id="lead-save-btn" onclick="saveLead()">Save</button>
     </div>
@@ -6481,6 +6482,7 @@ async function openNewLead() {
   switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
   renderLeadQualification();
   renderLeadInteractions();
+  resetLeadDirty();
 }
 
 async function openLeadForm(id) {
@@ -6511,6 +6513,7 @@ async function openLeadForm(id) {
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
     renderLeadInteractions();
+    resetLeadDirty();
     // Reflect current deal-context state on the back button label every time
     // (defensive — covers the case where state was changed between opens).
     _updateLeadBackButtonForDealContext();
@@ -6566,7 +6569,85 @@ function applyLeadReadOnly(on) {
   }
 }
 
-function closeLeadPage() {
+// ── Lead autosave + leave-guard ───────────────────────────────────────────────
+let leadFormDirty = false;
+let _leadAutoSaveTimer = null;
+let _leadAutoSaveInFlight = false;
+
+function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New'); }
+
+// The obligatory fields that must be present before a lead can be persisted.
+function leadObligatoryFilled() {
+  const src  = document.getElementById('lead-source-id')?.value;
+  const desc = (document.getElementById('lead-description')?.value || '').trim();
+  return !!src && (leadIsAppendMode() ? true : !!desc);
+}
+
+function setLeadSaveIndicator(state) {
+  const el = document.getElementById('lead-save-indicator');
+  if (!el) return;
+  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'] };
+  const [t, c] = map[state] || ['', ''];
+  el.textContent = t; el.style.color = c;
+}
+
+function markLeadDirty(e) {
+  if (leadReadOnly) return;
+  leadFormDirty = true;
+  setLeadSaveIndicator('unsaved');
+  // The description add-box (append-mode) is committed on Save / the leave-guard,
+  // never by autosave — autosave must not create duplicate thread entries.
+  if (e && e.target && e.target.id === 'lead-description' && leadIsAppendMode()) return;
+  clearTimeout(_leadAutoSaveTimer);
+  _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1500);
+}
+
+async function leadAutoSaveNow() {
+  clearTimeout(_leadAutoSaveTimer);
+  if (leadReadOnly || _leadAutoSaveInFlight || !leadFormDirty) return;
+  if (!leadObligatoryFilled()) { setLeadSaveIndicator('unsaved'); return; }
+  _leadAutoSaveInFlight = true;
+  setLeadSaveIndicator('saving');
+  let ok = false;
+  try { ok = await saveLead({ keepOpen: true, silent: true }); } catch (e) { ok = false; }
+  _leadAutoSaveInFlight = false;
+  // A typed-but-uncommitted description note keeps the form "unsaved" until an
+  // explicit Save / the leave-guard writes it as a thread entry.
+  const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
+  if (ok) { leadFormDirty = pendingNote; setLeadSaveIndicator(pendingNote ? 'unsaved' : 'saved'); }
+  else setLeadSaveIndicator('unsaved');
+}
+
+// Reset dirty tracking and (once) attach input + beforeunload guards.
+function resetLeadDirty() {
+  clearTimeout(_leadAutoSaveTimer);
+  leadFormDirty = false;
+  setLeadSaveIndicator('');
+  if (window._leadGuardsAttached) return;
+  const page = document.getElementById('lead-page');
+  if (!page) return;
+  const h = (e) => { if (e.target.closest && e.target.closest('.modal-overlay')) return; markLeadDirty(e); };
+  page.addEventListener('input', h);
+  page.addEventListener('change', h);
+  window.addEventListener('beforeunload', (e) => {
+    if (page.classList.contains('active') && leadFormDirty && !leadReadOnly) { e.preventDefault(); e.returnValue = ''; }
+  });
+  window._leadGuardsAttached = true;
+}
+
+async function closeLeadPage(opts) {
+  opts = opts || {};
+  clearTimeout(_leadAutoSaveTimer);
+  // Don't lose unsaved work: flush a savable lead, else confirm discard.
+  if (!opts.force && leadFormDirty && !leadReadOnly) {
+    if (leadObligatoryFilled()) {
+      await saveLead({ keepOpen: true });   // commits core + any pending description note
+    } else if (!confirm('This lead has unsaved changes but can’t be saved yet (Source and Description are required). Leave and discard them?')) {
+      return;
+    }
+  }
+  leadFormDirty = false;
+  setLeadSaveIndicator('');
   document.getElementById('lead-page').classList.remove('active');
   // If we arrived here from a deal's promotion engagement, return to that
   // deal instead of the leads list (which the user may not even be on).
@@ -6664,6 +6745,7 @@ function addLeadRedFlag() {
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   sel.value = '';
+  markLeadDirty();
 }
 
 function addLeadStrategicDecision() {
@@ -6676,18 +6758,21 @@ function addLeadStrategicDecision() {
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   sel.value = '';
+  markLeadDirty();
 }
 
 function removeLeadRedFlag(id) {
   window._leadRedFlags = window._leadRedFlags.filter(x => +x.id !== +id);
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
+  markLeadDirty();
 }
 
 function removeLeadStrategicDecision(id) {
   window._leadStrategicDecisions = window._leadStrategicDecisions.filter(x => +x.id !== +id);
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
+  markLeadDirty();
 }
 
 // Per-item justification comments (stored in the junction `comment` column).
@@ -7095,6 +7180,11 @@ function onLeadSourceChange() {
   campaignWrap.style.display = 'none';
   salesCampaignWrap.style.display = 'none';
   detailWrap.style.display = 'none';
+
+  // Once past New the whole Source block (the dropdown AND its selection — the
+  // referrer/org/campaign) is frozen and shown via the compact summary. Don't
+  // re-reveal the conditional field here.
+  if (leadData && leadData.id && leadData.status && leadData.status !== 'New') return;
 
   // Show the relevant one
   if (name === 'Referral') { personWrap.style.display = ''; syncLeadSourcePersonUI(); }
@@ -9344,6 +9434,7 @@ function setLeadQual(key, level) {
   leadData.qualification_demoted = false;
   leadData.peer_review_status = null;
   renderLeadQualification();
+  markLeadDirty();
 }
 
 // Per-rating justification comment (stored on leadData, persisted by saveLead).
@@ -9615,6 +9706,7 @@ async function saveLead(opts) {
   // ── App-layer status derivation (replaces the retired DB triggers) ──
   // Start the waiting clock the first time source + details + target are all complete.
   const nowIso = new Date().toISOString();
+  const prevStatus = leadData.status || null;
   const merged = Object.assign({}, leadData, payload);
   let workingEligibleAt = leadData.working_eligible_at || null;
   if (!workingEligibleAt && leadWorkingPrereqsMet(merged, null)) workingEligibleAt = nowIso;
@@ -9635,24 +9727,32 @@ async function saveLead(opts) {
     if (leadData.id) {
       const result = await api('leads', 'PATCH', payload, 'id=eq.' + leadData.id + '&select=*');
       leadData = result[0];
-      showStatus('Lead updated');
+      if (!opts.silent) showStatus('Lead updated');
     } else {
       payload.created_by = currentUser?.personId || null;
       const result = await api('leads', 'POST', payload, 'select=*');
       leadData = result[0];
-      showStatus('Lead created');
+      if (!opts.silent) showStatus('Lead created');
     }
+    leadFormDirty = false;
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
-    // Description thread: in append-mode a new note becomes a log entry; the
-    // New-phase description stays as the original in leads.description.
-    if (appendMode && descInput) {
+    // Description thread: in append-mode an explicit save commits the add-box as a
+    // new log entry. NEVER on a silent autosave — that would create duplicate notes.
+    if (appendMode && descInput && !opts.silent) {
       try { await api('lead_description_log', 'POST', { lead_id: leadData.id, body: descInput, created_by: currentUser?.personId || null }, ''); } catch(e) {}
       await loadLeadDescriptionLog(leadData.id);
     }
     if (opts.keepOpen) {
-      // Stay on the form (e.g. auto-save before logging the first interaction).
-      populateLeadForm();
+      if (opts.silent) {
+        // Autosave: update only the status badge, and relayout only if the status
+        // actually changed — avoids reparenting (focus loss) while the user types.
+        renderLeadStatusBadge(leadData.status);
+        if (leadData.status !== prevStatus) refreshLeadWorkflowChrome();
+      } else {
+        // Explicit keep-open save (interaction/contact flow, leave-guard): full refresh.
+        populateLeadForm();
+      }
       return true;
     }
     // closeLeadPage refreshes the list itself now — no separate call needed.
