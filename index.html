@@ -305,7 +305,7 @@ tr:hover td{background:#F8FAFC;}
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -327,7 +327,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -632,7 +632,9 @@ tr:hover td{background:#F8FAFC;}
 
     <!-- Overview Tab -->
     <div class="opp-tab-content active" id="lead-tab-overview">
-      <div style="max-width:720px;">
+      <div style="display:flex;gap:16px;align-items:flex-start;max-width:1160px;">
+        <!-- Left column -->
+        <div style="flex:1;min-width:0;">
 
         <!-- Source section -->
         <div class="opp-section">
@@ -645,12 +647,36 @@ tr:hover td{background:#F8FAFC;}
             </select>
           </div>
 
-          <!-- Conditional: Referral → person picker -->
+          <!-- Conditional: Referral → free-type referrer + similarity test.
+               Existing person → use them (FK + their stored contact detail).
+               Unknown → capture name + contact detail on the lead; the people
+               row is only created when the lead is promoted to an opportunity. -->
           <div class="form-group" id="lead-source-person-wrap" style="display:none;">
             <label class="form-label">Referred by</label>
-            <select id="lead-source-person-id" class="form-control">
-              <option value="">— select person —</option>
-            </select>
+            <!-- Hidden FK: set only when an existing person is matched & chosen -->
+            <input type="hidden" id="lead-source-person-id" value="">
+            <input type="text" id="lead-source-person-name" class="form-control" placeholder="Name of the person who referred this lead" oninput="onLeadSourcePersonNameInput()">
+            <div id="lead-source-person-matches" style="margin-top:8px;"></div>
+            <!-- Existing-person confirmation (shown after a match is chosen) -->
+            <div id="lead-source-person-selected" style="display:none;margin-top:8px;"></div>
+            <!-- Unknown referrer → capture contact detail (person created on promote) -->
+            <div id="lead-source-person-contact" style="display:none;margin-top:8px;">
+              <div class="form-group" style="margin-bottom:8px;">
+                <label class="form-label">Job title</label>
+                <input type="text" id="lead-source-person-title" class="form-control" placeholder="e.g. Procurement Manager">
+              </div>
+              <div class="form-row">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label">Email</label>
+                  <input type="email" id="lead-source-person-email" class="form-control" placeholder="referrer@example.com">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label">Phone</label>
+                  <input type="text" id="lead-source-person-phone" class="form-control" placeholder="+27 …">
+                </div>
+              </div>
+            </div>
+            <div id="lead-source-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Type the referrer's name. If we already know them, pick the match; otherwise add their contact details — we'll create the contact when this lead is promoted.</div>
           </div>
 
           <!-- Conditional: Client Expansion → org picker -->
@@ -672,37 +698,21 @@ tr:hover td{background:#F8FAFC;}
             </div>
           </div>
 
+          <!-- Conditional: Sales Campaign → campaign picker + create button -->
+          <div class="form-group" id="lead-source-sales-campaign-wrap" style="display:none;">
+            <label class="form-label">Sales Campaign</label>
+            <div style="display:flex;gap:8px;">
+              <select id="lead-sales-campaign-id" class="form-control" style="flex:1;">
+                <option value="">— select campaign —</option>
+              </select>
+              <button class="btn btn-sm" onclick="openNewSalesCampaignFromLead()" style="white-space:nowrap;background:var(--navy);color:white;flex-shrink:0;">+ Create New</button>
+            </div>
+          </div>
+
           <!-- Conditional: free text source detail (for Inbound, Outbound, Tender, Other) -->
           <div class="form-group" id="lead-source-detail-wrap" style="display:none;">
             <label class="form-label">Source detail</label>
             <input type="text" id="lead-source-detail" class="form-control" placeholder="e.g. LinkedIn, website form, RFP reference">
-          </div>
-        </div>
-
-        <!-- Target section -->
-        <div class="opp-section">
-          <div class="opp-section-title">Target Client</div>
-
-          <div class="form-group">
-            <label class="form-label">Target organisation</label>
-            <div style="display:flex;gap:8px;">
-              <select id="lead-target-org-id" class="form-control" style="flex:1;" onchange="onLeadTargetOrgChange()">
-                <option value="">Pick from known organisations in our database or create a new one below</option>
-              </select>
-            </div>
-            <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
-            <div id="lead-target-org-matches" style="margin-top:8px;"></div>
-            <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Target contact person</label>
-            <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()" style="display:none;">
-              <option value="">— pick existing affiliated contact —</option>
-            </select>
-            <input type="text" id="lead-target-person-name" class="form-control" placeholder="New contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()">
-            <div id="lead-target-person-matches" style="margin-top:8px;"></div>
-            <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
         </div>
 
@@ -737,6 +747,37 @@ tr:hover td{background:#F8FAFC;}
           <div class="form-group">
             <label class="form-label">Estimated annual value (ZAR)</label>
             <input type="number" id="lead-est-value" class="form-control" placeholder="Back-of-envelope estimate, optional" step="1000">
+          </div>
+        </div>
+        </div>
+
+        <!-- Right column -->
+        <div style="flex:1;min-width:0;">
+
+        <!-- Target section -->
+        <div class="opp-section">
+          <div class="opp-section-title">Target Client</div>
+
+          <div class="form-group">
+            <label class="form-label">Target organisation</label>
+            <div style="display:flex;gap:8px;">
+              <select id="lead-target-org-id" class="form-control" style="flex:1;" onchange="onLeadTargetOrgChange()">
+                <option value="">Pick from known organisations in our database or create a new one below</option>
+              </select>
+            </div>
+            <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
+            <div id="lead-target-org-matches" style="margin-top:8px;"></div>
+            <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Target contact person</label>
+            <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()" style="display:none;">
+              <option value="">— pick existing affiliated contact —</option>
+            </select>
+            <input type="text" id="lead-target-person-name" class="form-control" placeholder="New contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()">
+            <div id="lead-target-person-matches" style="margin-top:8px;"></div>
+            <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
         </div>
 
@@ -797,13 +838,15 @@ tr:hover td{background:#F8FAFC;}
             </div>
           </div>
         </div>
+        </div>
 
       </div>
     </div>
 
     <!-- Qualification Tab -->
     <div class="opp-tab-content" id="lead-tab-qualification">
-      <div style="max-width:720px;">
+      <div style="display:flex;gap:16px;align-items:flex-start;max-width:1160px;">
+        <div style="flex:1;min-width:0;">
         <div class="opp-section">
           <div class="opp-section-title">Qualification Dimensions</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:20px;">
@@ -817,8 +860,10 @@ tr:hover td{background:#F8FAFC;}
             <div id="lead-qual-readiness" style="font-size:14px;font-weight:600;">—</div>
           </div>
         </div>
+        </div>
 
-        <div class="opp-section" style="margin-top:20px;">
+        <div style="flex:1;min-width:0;">
+        <div class="opp-section">
           <div class="opp-section-title">Red Flags</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">
             Concerns that could derail the deal. Select all that apply.
@@ -844,6 +889,7 @@ tr:hover td{background:#F8FAFC;}
             </select>
             <button class="btn btn-secondary btn-sm" onclick="addLeadStrategicDecision()">Add</button>
           </div>
+        </div>
         </div>
       </div>
     </div>
@@ -1362,6 +1408,13 @@ const PAGES = {
     columns: [],
     fields: [],
   },
+  sales_campaigns: {
+    title: 'Sales Campaigns',
+    table: 'sales_campaigns',
+    custom: true,
+    columns: [],
+    fields: [],
+  },
 
   people: {
     title: 'People',
@@ -1825,6 +1878,9 @@ function showPage(page) {
   } else if (page === 'research_campaigns') {
     addBtn.onclick = () => openNewResearchCampaign();
     addBtn.textContent = '+ New Campaign';
+  } else if (page === 'sales_campaigns') {
+    addBtn.onclick = () => openNewSalesCampaign();
+    addBtn.textContent = '+ New Campaign';
   } else if (page === 'revenue_pipeline') {
     addBtn.style.display = 'none';
   } else if (page === 'role_permissions' || page === 'user_regions') {
@@ -1856,6 +1912,7 @@ async function loadTable(page) {
     if (page === 'revenue_pipeline') { await RPP.render(); return; }
     if (page === 'leads') { await renderLeadsPage(); return; }
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
+    if (page === 'sales_campaigns') { await renderSalesCampaignsPage(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'opportunity_contacts') { await renderAllOppContacts(); return; }
@@ -2658,6 +2715,8 @@ const MENU = [
         icon: '<path d="M8 14V6M5 9l3-3 3 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M3 14h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'research_campaigns', label: 'Research Campaigns', permission: 'manage_leads',
         icon: '<circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5" fill="none"/><path d="M10.5 10.5L14 14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      { page: 'sales_campaigns', label: 'Sales Campaigns', permission: 'manage_leads',
+        icon: '<path d="M2 6h7l4-3v10l-4-3H2z" stroke="white" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5 9v3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'opportunities',    label: 'Opportunities', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'revenue_pipeline', label: 'Revenue Pipeline', permission: 'view_revenue_pipeline',
@@ -6245,6 +6304,94 @@ function openResearchCampaign(id) {
 }
 
 
+// ── Sales Campaigns Page ──────────────────────────────────
+// Identical in structure to the Research Campaigns page; separate sales_campaigns table.
+async function renderSalesCampaignsPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td colspan="7">Loading…</td></tr>';
+
+  try {
+    const [campaigns, regions, services, people] = await Promise.all([
+      apiGet('sales_campaigns', 'select=*&order=created_at.desc'),
+      allData['regions']       || apiGet('regions', 'select=*'),
+      allData['service_major'] || apiGet('service_major', 'select=*'),
+      allData['people']        || apiGet('people', 'select=*'),
+    ]);
+    allData['regions']       = regions;
+    allData['service_major'] = services;
+    allData['people']        = people;
+    allData['sales_campaigns'] = campaigns;
+
+    document.getElementById('page-sub').textContent =
+      campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
+
+    if (!campaigns.length) {
+      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">No sales campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
+      return;
+    }
+
+    const ownerName = (c) => {
+      const p = people.find(x => +x.id === +c.owner_id);
+      return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
+    };
+    const STATUS_STYLE = {
+      'Active':    'background:#dcfce7;color:#166534;',
+      'Paused':    'background:#fef3c7;color:#92400e;',
+      'Completed': 'background:#e0e7ff;color:#3730a3;',
+      'Abandoned': 'background:#fee2e2;color:#991b1b;',
+    };
+
+    const cols = [
+      { key: 'name',    label: 'Name',          get: c => c.name || '' },
+      { key: 'segment', label: 'Segment',       get: c => c.segment || '' },
+      { key: 'region',  label: 'Region',        get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
+      { key: 'service', label: 'Service Focus', get: c => (services.find(s => +s.id === +c.service_major_id)?.name) || '' },
+      { key: 'status',  label: 'Status',        get: c => c.status || '' },
+      { key: 'owner',   label: 'Owner',         get: c => ownerName(c) },
+      { key: 'created', label: 'Created',       get: c => c.created_at || '' },
+    ];
+
+    const rowRenderer = (c) => {
+      const region  = regions.find(r => +r.id === +c.region_id);
+      const service = services.find(s => +s.id === +c.service_major_id);
+      const owner   = people.find(p => +p.id === +c.owner_id);
+      const ownerLabel = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
+      const statusColour = STATUS_STYLE[c.status] || 'background:#f3f4f6;color:#4b5563;';
+      return `<tr onclick="openSalesCampaign(${c.id})" style="cursor:pointer;">
+        <td style="font-weight:600;">${c.name}</td>
+        <td>${c.segment || '—'}</td>
+        <td>${region?.name || '—'}</td>
+        <td>${service?.name || '—'}</td>
+        <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
+        <td>${ownerLabel}</td>
+        <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
+      </tr>`;
+    };
+
+    makeSortableFilterableTable({
+      tableId: 'sales_campaigns',
+      headRoot: head,
+      bodyRoot: body,
+      columns: cols,
+      rows: campaigns,
+      rowRenderer,
+      emptyMessage: 'No campaigns match the current filters',
+    });
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="7">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// Open an existing sales campaign for editing
+function openSalesCampaign(id) {
+  openSalesCampaignModal(id);
+}
+
+
 // ── Lead Form ─────────────────────────────────────────────
 // State for the currently open lead
 let leadData = {};
@@ -6533,7 +6680,9 @@ function switchLeadTab(tab, btn) {
 
 function resetLeadForm() {
   const ids = [
-    'lead-source-id','lead-source-person-id','lead-source-org-id','lead-research-campaign-id',
+    'lead-source-id','lead-source-person-id','lead-source-person-name',
+    'lead-source-person-title','lead-source-person-email','lead-source-person-phone',
+    'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
     'lead-target-person-name','lead-description','lead-region-id','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
@@ -6546,6 +6695,16 @@ function resetLeadForm() {
   if (orgMatchEl) orgMatchEl.innerHTML = '';
   const personMatchEl = document.getElementById('lead-target-person-matches');
   if (personMatchEl) personMatchEl.innerHTML = '';
+  // Clear referrer (source person) similarity + confirmation + contact strips
+  ['lead-source-person-matches','lead-source-person-selected'].forEach(id => {
+    const el = document.getElementById(id); if (el) { el.innerHTML = ''; el.style.display = 'none'; }
+  });
+  const srcContact = document.getElementById('lead-source-person-contact');
+  if (srcContact) srcContact.style.display = 'none';
+  const srcName = document.getElementById('lead-source-person-name');
+  if (srcName) srcName.style.display = '';
+  const srcHint = document.getElementById('lead-source-person-hint');
+  if (srcHint) srcHint.style.display = '';
   // Reset the target-person dropdown to its hidden, no-org-picked state, and
   // recompute show/hide on the free-text inputs (org cleared → show free text).
   refreshLeadTargetPersonDropdown();
@@ -6555,6 +6714,7 @@ function resetLeadForm() {
   renderLeadStatusBadge('New');
   // Hide conditional sections
   ['lead-source-person-wrap','lead-source-org-wrap','lead-source-campaign-wrap',
+   'lead-source-sales-campaign-wrap',
    'lead-source-detail-wrap','lead-dead-block','lead-wake-date-wrap',
    'lead-promote-btn','lead-decline-btn'].forEach(id => {
     const el = document.getElementById(id); if (el) el.style.display = 'none';
@@ -6574,13 +6734,14 @@ async function initLeadForm() {
   // Load all needed lookups in parallel
   // NB: loadLeadQualificationLookups returns void (side-effects allData) — kept
   // at the end of the array so destructuring lines up cleanly without `_` placeholders.
-  const [sources, regions, services, people, orgs, campaigns, serviceSubs] = await Promise.all([
+  const [sources, regions, services, people, orgs, campaigns, salesCampaigns, serviceSubs] = await Promise.all([
     allData['lead_sources']       || apiGet('lead_sources', 'active=eq.true&select=*&order=id.asc'),
     allData['regions']            || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major']      || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people']             || apiGet('people', 'select=*&order=first_name.asc'),
     allData['organisations']      || apiGet('organisations', 'select=*&order=name.asc'),
     allData['research_campaigns'] || apiGet('research_campaigns', 'status=eq.Active&select=*&order=name.asc'),
+    allData['sales_campaigns']    || apiGet('sales_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['service_sub_all']    || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc'),
     loadLeadQualificationLookups(),
   ]);
@@ -6590,6 +6751,7 @@ async function initLeadForm() {
   allData['people']              = people;
   allData['organisations']       = orgs;
   allData['research_campaigns']  = campaigns;
+  allData['sales_campaigns']     = salesCampaigns;
   allData['service_sub_all']     = serviceSubs;
 
   // Populate dropdowns
@@ -6617,13 +6779,8 @@ async function initLeadForm() {
       return `<option value="${p.id}">${name}</option>`;
     }).join('');
 
-  // Source-person picker: all people
-  const srcPersonSel = document.getElementById('lead-source-person-id');
-  srcPersonSel.innerHTML = '<option value="">— select person —</option>' +
-    people.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}">${name}</option>`;
-    }).join('');
+  // Source-person (referrer) is a free-type field with similarity matching —
+  // no dropdown to populate. The hidden FK is set only when a match is chosen.
 
   // Source-org picker: all orgs
   const srcOrgSel = document.getElementById('lead-source-org-id');
@@ -6634,6 +6791,11 @@ async function initLeadForm() {
   const campaignSel = document.getElementById('lead-research-campaign-id');
   campaignSel.innerHTML = '<option value="">— select campaign —</option>' +
     campaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+
+  // Sales campaign picker
+  const salesCampaignSel = document.getElementById('lead-sales-campaign-id');
+  salesCampaignSel.innerHTML = '<option value="">— select campaign —</option>' +
+    salesCampaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 
   // Target-org picker: all orgs
   const tgtOrgSel = document.getElementById('lead-target-org-id');
@@ -6649,8 +6811,14 @@ function populateLeadForm() {
   // Source
   if (leadData.source_id) document.getElementById('lead-source-id').value = leadData.source_id;
   if (leadData.source_person_id) document.getElementById('lead-source-person-id').value = leadData.source_person_id;
+  // Referrer free-text + deferred contact detail (when not an existing person)
+  if (leadData.source_person_name)  document.getElementById('lead-source-person-name').value  = leadData.source_person_name;
+  if (leadData.source_person_title) document.getElementById('lead-source-person-title').value = leadData.source_person_title;
+  if (leadData.source_person_email) document.getElementById('lead-source-person-email').value = leadData.source_person_email;
+  if (leadData.source_person_phone) document.getElementById('lead-source-person-phone').value = leadData.source_person_phone;
   if (leadData.source_org_id) document.getElementById('lead-source-org-id').value = leadData.source_org_id;
   if (leadData.research_campaign_id) document.getElementById('lead-research-campaign-id').value = leadData.research_campaign_id;
+  if (leadData.sales_campaign_id) document.getElementById('lead-sales-campaign-id').value = leadData.sales_campaign_id;
   if (leadData.source_detail) document.getElementById('lead-source-detail').value = leadData.source_detail;
   // Target
   if (leadData.target_org_id) document.getElementById('lead-target-org-id').value = leadData.target_org_id;
@@ -6713,18 +6881,25 @@ function onLeadSourceChange() {
   const personWrap = document.getElementById('lead-source-person-wrap');
   const orgWrap = document.getElementById('lead-source-org-wrap');
   const campaignWrap = document.getElementById('lead-source-campaign-wrap');
+  const salesCampaignWrap = document.getElementById('lead-source-sales-campaign-wrap');
   const detailWrap = document.getElementById('lead-source-detail-wrap');
 
   // Hide all conditional wraps first
   personWrap.style.display = 'none';
   orgWrap.style.display = 'none';
   campaignWrap.style.display = 'none';
+  salesCampaignWrap.style.display = 'none';
   detailWrap.style.display = 'none';
 
   // Show the relevant one
-  if (name === 'Referral') personWrap.style.display = '';
-  else if (name === 'Client Expansion') orgWrap.style.display = '';
+  if (name === 'Referral') { personWrap.style.display = ''; syncLeadSourcePersonUI(); }
+  // Client Expansion: preselect the target org from the chosen "Expanding from
+  // client" whenever the section is (re)shown — onLeadSourceOrgChange keeps its
+  // own "only fill when target is empty" guard, so a target you've already
+  // picked is never clobbered and stays fully editable.
+  else if (name === 'Client Expansion') { orgWrap.style.display = ''; onLeadSourceOrgChange(); }
   else if (name === 'Research') campaignWrap.style.display = '';
+  else if (name === 'Sales Campaign') salesCampaignWrap.style.display = '';
   else if (name) detailWrap.style.display = ''; // Inbound, Outbound, Tender, Other
 }
 
@@ -7167,6 +7342,151 @@ function useLeadTargetPersonMatch(personId) {
   if (matchEl) matchEl.innerHTML = '';
   const hint = document.getElementById('lead-target-person-hint');
   if (hint) hint.style.display = 'none';
+}
+
+// ── Referral source: free-type referrer + similarity test ──
+// Reuses the same person matcher as the target-contact field. An existing
+// person → use them (FK + their stored contact detail). An unknown referrer →
+// capture name + contact detail on the lead; the people row is only created
+// when the lead is promoted (see savePromoteAll).
+
+// Live similarity check on the typed referrer name.
+async function onLeadSourcePersonNameInput() {
+  const matchEl = document.getElementById('lead-source-person-matches');
+  if (!matchEl) return;
+  // Editing the name invalidates any previously chosen existing person.
+  _clearLeadSourcePersonSelection();
+  const name = (document.getElementById('lead-source-person-name')?.value || '').trim();
+  const contactEl = document.getElementById('lead-source-person-contact');
+  if (name.length < 3) {
+    matchEl.innerHTML = '';
+    if (contactEl) contactEl.style.display = 'none';
+    return;
+  }
+  // Lazy-load affiliations the first time we need them (for the meta label)
+  await _ensurePersonAffiliationsLoaded();
+
+  const { exact, shortlist } = _findPersonMatches(name);
+  const candidates = [exact, ...shortlist].filter(Boolean);
+
+  // No known person at all → it's a new contact: go straight to capture.
+  if (!candidates.length) {
+    matchEl.innerHTML = '';
+    if (contactEl) contactEl.style.display = '';
+    return;
+  }
+
+  // Known candidate(s) → ask "Use this" or "No". Keep the contact-capture
+  // fields hidden until the user explicitly rejects all of them.
+  if (contactEl) contactEl.style.display = 'none';
+  const render = (p, isExact) => {
+    const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ');
+    const contact  = [p.email, p.phone].filter(Boolean).join(' · ');
+    const meta     = [p.title, contact || _personAffiliationsLabel(p.id)].filter(Boolean).join(' · ');
+    const colour   = isExact ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
+    return `
+      <div style="padding:8px 10px;border:${colour};border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+        <div style="font-size:13px;">
+          ${isExact ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Exact name match · </span>' : ''}
+          <strong>${fullName}</strong>
+          ${meta ? ` <span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${meta} — same person?</span>` : ''}
+        </div>
+        <button type="button" class="btn ${isExact ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="useLeadSourcePersonMatch(${p.id})">Use this</button>
+      </div>`;
+  };
+
+  let html = '';
+  if (exact) html += render(exact, true);
+  if (shortlist.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
+    html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
+  }
+  // "No" — none of these are the referrer → capture them as a new contact.
+  html += `
+    <button type="button" class="btn btn-secondary btn-sm" onclick="declineLeadSourcePersonMatches()" style="margin-top:2px;">No — none of these, add new contact</button>`;
+  matchEl.innerHTML = html;
+}
+
+// "No" on the match prompt: dismiss the suggestions and open the contact-detail
+// fields so the referrer can be captured as a new contact.
+function declineLeadSourcePersonMatches() {
+  _clearLeadSourcePersonSelection();
+  const matchEl = document.getElementById('lead-source-person-matches');
+  if (matchEl) matchEl.innerHTML = '';
+  const contactEl = document.getElementById('lead-source-person-contact');
+  if (contactEl) contactEl.style.display = '';
+  const titleField = document.getElementById('lead-source-person-title');
+  if (titleField) titleField.focus();
+}
+
+// Chose an existing person: lock the FK, show a confirmation with their stored
+// contact detail, and hide the name input + new-contact capture (we use the
+// person's existing details).
+function useLeadSourcePersonMatch(personId) {
+  const person = (allData['people'] || []).find(p => +p.id === +personId);
+  document.getElementById('lead-source-person-id').value = personId;
+  const matchEl = document.getElementById('lead-source-person-matches');
+  if (matchEl) matchEl.innerHTML = '';
+  const contactEl = document.getElementById('lead-source-person-contact');
+  if (contactEl) contactEl.style.display = 'none';
+  const nameField = document.getElementById('lead-source-person-name');
+  if (nameField) nameField.style.display = 'none';
+  const hint = document.getElementById('lead-source-person-hint');
+  if (hint) hint.style.display = 'none';
+  const sel = document.getElementById('lead-source-person-selected');
+  if (sel) {
+    const fullName = person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : ('Person #' + personId);
+    const contact  = person ? [person.title, person.email, person.phone].filter(Boolean).join(' · ') : '';
+    sel.style.display = '';
+    sel.innerHTML = `
+      <div style="padding:8px 10px;border:2px solid #16a34a;border-radius:var(--radius);background:#F0FDF4;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="font-size:13px;">
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Existing contact · </span>
+          <strong>${fullName}</strong>
+          ${contact ? `<span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${contact}</span>` : ''}
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="changeLeadSourcePerson()">Change</button>
+      </div>`;
+  }
+}
+
+// "Change" on the confirmation: drop the FK and return to free-type entry.
+function changeLeadSourcePerson() {
+  _clearLeadSourcePersonSelection();
+  const nameField = document.getElementById('lead-source-person-name');
+  if (nameField) { nameField.style.display = ''; nameField.focus(); }
+  const hint = document.getElementById('lead-source-person-hint');
+  if (hint) hint.style.display = '';
+  onLeadSourcePersonNameInput();
+}
+
+// Clears the chosen-existing-person state (FK + confirmation panel) only,
+// leaving the typed name intact. Called whenever the user edits the name.
+function _clearLeadSourcePersonSelection() {
+  const fk = document.getElementById('lead-source-person-id');
+  if (fk) fk.value = '';
+  const sel = document.getElementById('lead-source-person-selected');
+  if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+}
+
+// Renders the referrer sub-UI from current field state. Called when the
+// Referral wrap is shown (manual source change or form populate): an existing
+// FK shows the confirmation; otherwise free-type mode with contact capture
+// surfaced once enough of a name is typed.
+function syncLeadSourcePersonUI() {
+  const fk = +(document.getElementById('lead-source-person-id')?.value || 0);
+  if (fk) { useLeadSourcePersonMatch(fk); return; }
+  const sel = document.getElementById('lead-source-person-selected');
+  if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+  const nameField = document.getElementById('lead-source-person-name');
+  if (nameField) nameField.style.display = '';
+  const hint = document.getElementById('lead-source-person-hint');
+  if (hint) hint.style.display = '';
+  const matchEl = document.getElementById('lead-source-person-matches');
+  if (matchEl) matchEl.innerHTML = '';
+  const name = (nameField?.value || '').trim();
+  const contactEl = document.getElementById('lead-source-person-contact');
+  if (contactEl) contactEl.style.display = name.length >= 3 ? '' : 'none';
 }
 
 // Thin wrapper around the existing modal-root pattern.
@@ -8407,12 +8727,42 @@ async function savePromoteAll() {
       created_by:       currentUser?.personId || null,
     }, '');
 
+    // === 8.5. Referrer: create the deferred referral contact =====
+    // A lead sourced via Referral may carry a typed referrer + contact detail
+    // that we intentionally did NOT persist as a person until promotion. Create
+    // the people row now and link it; if an existing person was already chosen
+    // (source_person_id) we keep that and skip creation.
+    let sourcePersonId = leadData.source_person_id || null;
+    if (!sourcePersonId && leadData.source_person_name) {
+      try {
+        const parts = leadData.source_person_name.trim().split(/\s+/);
+        const first = parts.shift() || leadData.source_person_name.trim();
+        const last  = parts.join(' ') || null;
+        const createdRef = await api('people', 'POST', {
+          first_name: first, last_name: last,
+          title: leadData.source_person_title || null,
+          email: leadData.source_person_email || null,
+          phone: leadData.source_person_phone || null,
+        }, 'select=*');
+        sourcePersonId = createdRef[0].id;
+        (allData['people'] = allData['people'] || []).push(createdRef[0]);
+      } catch (e) {
+        // Non-fatal: a referrer-creation failure shouldn't block the promote.
+        console.warn('Could not create referral contact on promote:', e.message);
+      }
+    }
+
     // === 9. Lead: link org/person/deal, set promoted_at ======
     await api('leads', 'PATCH', {
       target_org_id:      +orgId,
       target_org_name:    null,
       target_person_id:   +personId,
       target_person_name: null,
+      source_person_id:   sourcePersonId,
+      source_person_name:  null,
+      source_person_title: null,
+      source_person_email: null,
+      source_person_phone: null,
       promoted_at:        new Date().toISOString(),
       promoted_deal_id:   +dealId,
       updated_at:         new Date().toISOString(),
@@ -8619,8 +8969,19 @@ async function saveLead() {
   const payload = {
     source_id: +sourceId,
     source_person_id: sourceName === 'Referral'         ? (+document.getElementById('lead-source-person-id').value || null) : null,
+    // Referrer free-text + contact detail: stored only when Referral AND no
+    // existing person was matched (FK wins). Resolved into a people row on promote.
+    source_person_name:  (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
+      ? (document.getElementById('lead-source-person-name').value.trim()  || null) : null,
+    source_person_title: (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
+      ? (document.getElementById('lead-source-person-title').value.trim() || null) : null,
+    source_person_email: (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
+      ? (document.getElementById('lead-source-person-email').value.trim() || null) : null,
+    source_person_phone: (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
+      ? (document.getElementById('lead-source-person-phone').value.trim() || null) : null,
     source_org_id:    sourceName === 'Client Expansion' ? (+document.getElementById('lead-source-org-id').value || null) : null,
     research_campaign_id: sourceName === 'Research'     ? (+document.getElementById('lead-research-campaign-id').value || null) : null,
+    sales_campaign_id:    sourceName === 'Sales Campaign' ? (+document.getElementById('lead-sales-campaign-id').value || null) : null,
     source_detail: (sourceName !== 'Referral' && sourceName !== 'Client Expansion' && sourceName !== 'Research')
       ? (document.getElementById('lead-source-detail').value.trim() || null) : null,
 
@@ -9129,6 +9490,166 @@ async function saveResearchCampaign() {
       }
     } else if (currentPage === 'research_campaigns') {
       await renderResearchCampaignsPage();
+    }
+  } catch(e) {
+    showStatus('Save failed: ' + e.message, 'error');
+  }
+}
+
+
+// ── Sales Campaign Modal ──────────────────────────────────
+// Mirror of the Research Campaign modal; targets the sales_campaigns table and
+// the lead form's Sales Campaign picker (lead-sales-campaign-id).
+let salesCampaignData = {};
+// Tracks where the modal was opened from, so we can refresh that view on save
+let salesCampaignReturnContext = 'page'; // 'page' or 'lead'
+
+async function openNewSalesCampaign() {
+  salesCampaignData = {};
+  salesCampaignReturnContext = 'page';
+  await renderSalesCampaignModal();
+}
+
+async function openNewSalesCampaignFromLead() {
+  salesCampaignData = {};
+  salesCampaignReturnContext = 'lead';
+  await renderSalesCampaignModal();
+}
+
+async function openSalesCampaignModal(id) {
+  salesCampaignReturnContext = 'page';
+  try {
+    const rows = await apiGet('sales_campaigns', 'id=eq.' + id + '&select=*');
+    salesCampaignData = rows[0] || { id };
+    await renderSalesCampaignModal();
+  } catch(e) {
+    showStatus('Failed to load campaign: ' + e.message, 'error');
+  }
+}
+
+async function renderSalesCampaignModal() {
+  // Load lookups if not cached
+  const [regions, services, people] = await Promise.all([
+    allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+    allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
+    allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
+  ]);
+  allData['regions']       = regions;
+  allData['service_major'] = services;
+  allData['people']        = people;
+
+  const xonePeople = people.filter(p => p.is_xone);
+  const ownerPool = xonePeople.length ? xonePeople : people;
+
+  const isEdit = !!salesCampaignData.id;
+  const title = isEdit ? 'Edit Sales Campaign' : 'New Sales Campaign';
+  const d = salesCampaignData;
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:560px;">
+        <div class="modal-header">
+          <div class="modal-title">${title}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Campaign name <span style="color:var(--red)">*</span></label>
+            <input type="text" id="sc-name" class="form-control" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Q3 Western Cape estates push">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Target segment</label>
+            <input type="text" id="sc-segment" class="form-control" value="${(d.segment||'').replace(/"/g,'&quot;')}" placeholder="Who are you targeting? e.g. Residential estates in the Winelands">
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Region</label>
+              <select id="sc-region-id" class="form-control">
+                <option value="">— select —</option>
+                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Service focus</label>
+              <select id="sc-service-major-id" class="form-control">
+                <option value="">— select —</option>
+                ${services.map(s => `<option value="${s.id}" ${d.service_major_id==s.id?'selected':''}>${s.name}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select id="sc-status" class="form-control">
+                ${['Active','Paused','Completed','Abandoned'].map(s => `<option value="${s}" ${(d.status||'Active')==s?'selected':''}>${s}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Owner</label>
+              <select id="sc-owner-id" class="form-control">
+                <option value="">— unassigned —</option>
+                ${ownerPool.map(p => {
+                  const name = [p.first_name,p.last_name].filter(Boolean).join(' ');
+                  const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':'';
+                  return `<option value="${p.id}" ${sel}>${name}</option>`;
+                }).join('')}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Notes</label>
+            <textarea id="sc-notes" class="form-control" rows="3" placeholder="Approach, target list, talking points…">${d.notes||''}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveSalesCampaign()">${isEdit?'Update':'Create'}</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function saveSalesCampaign() {
+  const name = document.getElementById('sc-name').value.trim();
+  if (!name) { showStatus('Campaign name is required', 'error'); return; }
+  const payload = {
+    name,
+    segment: document.getElementById('sc-segment').value.trim() || null,
+    region_id: +document.getElementById('sc-region-id').value || null,
+    service_major_id: +document.getElementById('sc-service-major-id').value || null,
+    status: document.getElementById('sc-status').value,
+    notes: document.getElementById('sc-notes').value.trim() || null,
+    owner_id: +document.getElementById('sc-owner-id').value || null,
+  };
+  try {
+    let saved;
+    if (salesCampaignData.id) {
+      const result = await api('sales_campaigns', 'PATCH', payload, 'id=eq.' + salesCampaignData.id + '&select=*');
+      saved = result[0];
+      showStatus('Campaign updated');
+    } else {
+      payload.created_by = currentUser?.personId || null;
+      const result = await api('sales_campaigns', 'POST', payload, 'select=*');
+      saved = result[0];
+      showStatus('Campaign created');
+    }
+    // Refresh the campaigns cache so the lead form picker stays current
+    allData['sales_campaigns'] = null;
+    closeModal();
+    // Where do we go next?
+    if (salesCampaignReturnContext === 'lead') {
+      // Reload campaigns dropdown on the lead form and select the just-saved one
+      const fresh = await apiGet('sales_campaigns', 'status=eq.Active&select=*&order=name.asc');
+      allData['sales_campaigns'] = fresh;
+      const sel = document.getElementById('lead-sales-campaign-id');
+      if (sel) {
+        sel.innerHTML = '<option value="">— select campaign —</option>' +
+          fresh.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+        sel.value = saved.id;
+      }
+    } else if (currentPage === 'sales_campaigns') {
+      await renderSalesCampaignsPage();
     }
   } catch(e) {
     showStatus('Save failed: ' + e.message, 'error');
