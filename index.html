@@ -762,10 +762,16 @@ tr:hover td{background:#F8FAFC;}
 
           <div class="form-group">
             <label class="form-label">Organisation name</label>
-            <div style="display:flex;gap:8px;">
+            <div id="lead-target-org-picker" style="display:flex;gap:8px;">
               <select id="lead-target-org-id" class="form-control" style="flex:1;" onchange="onLeadTargetOrgChange()">
                 <option value="">Pick from known organisations in our database or create a new one below</option>
               </select>
+            </div>
+            <!-- Shown once an existing org is locked in: name + a Change affordance
+                 that drops back to the picker. The button is hidden when read-only. -->
+            <div id="lead-target-org-chosen" style="display:none;align-items:center;gap:10px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="lead-target-org-change-btn" onclick="changeLeadTargetOrg()">Change</button>
+              <span id="lead-target-org-chosen-name" style="font-weight:600;"></span>
             </div>
             <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
             <div id="lead-target-org-matches" style="margin-top:8px;"></div>
@@ -989,8 +995,269 @@ let currentData = [];
 let allData = {}; // cache for lookups
 let currentUser = null; // logged in user
 
+// ── Local mock mode (offline test data) ──────────────────
+// Lets the app run fully client-side against a seeded in-memory DB, so you can
+// test UI flows WITHOUT the Supabase backend or a Netlify deploy.
+//   • Enable:  open the app with  ?mock=1   (the choice is remembered)
+//   • Disable: open with          ?mock=0
+//   • Reset seed data:            ?mock=reset   (or call mockReset() in console)
+// Only the query features the app actually uses are emulated: eq / in / neq /
+// gt(e) / lt(e) / is filters, single- or multi-column order, limit, and POST/
+// PATCH/DELETE. Unseeded tables return [] so the app degrades gracefully.
+const MOCK = (() => {
+  let on = false;
+  try {
+    const v = new URLSearchParams(location.search).get('mock');
+    if (v != null) {
+      if (v === '0' || v === 'off' || v === 'false') localStorage.removeItem('focus_mock');
+      else localStorage.setItem('focus_mock', '1');
+      if (v === 'reset') localStorage.removeItem('focus_mock_db');
+    }
+    on = localStorage.getItem('focus_mock') === '1';
+  } catch (e) {}
+  if (on) console.info('%c[FOCUS MOCK MODE]%c local seed data — no backend. mockReset() to reseed.', 'background:#FA0A11;color:#fff;padding:2px 6px;border-radius:3px;font-weight:700', '');
+  return on;
+})();
+
+function mockReset() {
+  try { localStorage.removeItem('focus_mock_db'); } catch (e) {}
+  _mockDB = null;
+  location.reload();
+}
+
+let _mockDB = null;
+function _mockStore() {
+  if (_mockDB) return _mockDB;
+  try {
+    const saved = localStorage.getItem('focus_mock_db');
+    if (saved) { _mockDB = JSON.parse(saved); return _mockDB; }
+  } catch (e) {}
+  _mockDB = _mockSeed();
+  _mockPersist();
+  return _mockDB;
+}
+function _mockPersist() { try { localStorage.setItem('focus_mock_db', JSON.stringify(_mockDB)); } catch (e) {} }
+function _mockNextId(rows) { return rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) + 1; }
+
+function _mockCoerce(v) {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (v === 'null') return null;
+  if (v !== '' && !isNaN(v)) return Number(v);
+  return v;
+}
+function _mockLooseEq(a, b) {
+  if (a == null || b == null) return a == null && b == null;
+  if (typeof b === 'number')  return Number(a) === b;
+  if (typeof b === 'boolean') return Boolean(a) === b;
+  return String(a) === String(b);
+}
+function _mockParseParams(params) {
+  const out = { filters: [], order: null, limit: null };
+  if (!params) return out;
+  params.split('&').forEach(kv => {
+    if (!kv) return;
+    const i = kv.indexOf('=');
+    if (i < 0) return;
+    const key = kv.slice(0, i), val = kv.slice(i + 1);
+    if (key === 'select') return;
+    if (key === 'order') { out.order = val; return; }
+    if (key === 'limit') { out.limit = parseInt(val, 10); return; }
+    const dot = val.indexOf('.');
+    if (dot < 0) return;
+    out.filters.push({ col: key, op: val.slice(0, dot), val: val.slice(dot + 1) });
+  });
+  return out;
+}
+function _mockMatch(row, filters) {
+  return filters.every(f => {
+    const cell = row[f.col];
+    switch (f.op) {
+      case 'eq':  return _mockLooseEq(cell, _mockCoerce(f.val));
+      case 'neq': return !_mockLooseEq(cell, _mockCoerce(f.val));
+      case 'in': {
+        const list = f.val.replace(/^\(|\)$/g, '').split(',').map(s => _mockCoerce(s.trim()));
+        return list.some(x => _mockLooseEq(cell, x));
+      }
+      case 'gte': return cell != null && cell >= _mockCoerce(f.val);
+      case 'lte': return cell != null && cell <= _mockCoerce(f.val);
+      case 'gt':  return cell != null && cell >  _mockCoerce(f.val);
+      case 'lt':  return cell != null && cell <  _mockCoerce(f.val);
+      case 'is':  return f.val === 'null' ? cell == null : cell != null;
+      default:    return true;
+    }
+  });
+}
+function _mockSort(rows, spec) {
+  const keys = spec.split(',').map(s => { const [col, dir] = s.split('.'); return { col, desc: dir === 'desc' }; });
+  return rows.slice().sort((a, b) => {
+    for (const k of keys) {
+      let av = a[k.col], bv = b[k.col];
+      if (av == null && bv == null) continue;
+      if (av == null) return 1;          // nulls last
+      if (bv == null) return -1;
+      if (av < bv) return k.desc ? 1 : -1;
+      if (av > bv) return k.desc ? -1 : 1;
+    }
+    return 0;
+  });
+}
+function mockApi(table, method, body, params) {
+  const db = _mockStore();
+  if (!db[table]) db[table] = [];
+  const rows = db[table];
+  const { filters, order, limit } = _mockParseParams(params);
+  const clone = x => JSON.parse(JSON.stringify(x));
+  if (method === 'GET') {
+    let out = rows.filter(r => _mockMatch(r, filters));
+    if (order) out = _mockSort(out, order);
+    if (limit != null) out = out.slice(0, limit);
+    return Promise.resolve(clone(out));
+  }
+  if (method === 'POST') {
+    const items = Array.isArray(body) ? body : [body];
+    const created = items.map(it => {
+      const row = { ...it };
+      if (row.id == null) row.id = _mockNextId(rows);
+      if (!('created_at' in row)) row.created_at = new Date().toISOString();
+      rows.push(row);
+      return row;
+    });
+    _mockPersist();
+    return Promise.resolve(clone(created));
+  }
+  if (method === 'PATCH') {
+    const updated = [];
+    rows.forEach(r => { if (_mockMatch(r, filters)) { Object.assign(r, body, { updated_at: new Date().toISOString() }); updated.push(r); } });
+    _mockPersist();
+    return Promise.resolve(clone(updated));
+  }
+  if (method === 'DELETE') {
+    db[table] = rows.filter(r => !_mockMatch(r, filters));
+    _mockPersist();
+    return Promise.resolve([]);
+  }
+  return Promise.resolve([]);
+}
+
+// Seed: enough to log in (as Admin "Richard") and exercise the Leads flow,
+// including several "Acme …" orgs to test the org-name match list + "Use as new".
+function _mockSeed() {
+  const now = '2026-06-05T08:00:00Z';
+  return {
+    regions: [
+      { id: 1, name: 'Western Cape', active: true },
+      { id: 2, name: 'Gauteng',      active: true },
+    ],
+    roles: [
+      { id: 1, name: 'Admin',   description: 'Full access', is_system: true },
+      { id: 2, name: 'Sales',   description: 'Sales rep',   is_system: true },
+      { id: 3, name: 'Manager', description: 'Regional manager', is_system: true },
+    ],
+    permissions: [
+      { id: 1, name: 'create_leads' },
+      { id: 2, name: 'view_all_records' },
+      { id: 3, name: 'edit_all_records' },
+      { id: 4, name: 'manage_users' },
+    ],
+    role_permissions: [
+      { role_id: 2, permission_id: 1 },
+      { role_id: 2, permission_id: 2 },
+      { role_id: 3, permission_id: 1 },
+      { role_id: 3, permission_id: 2 },
+      { role_id: 3, permission_id: 3 },
+    ],
+    user_roles: [
+      { user_id: 1, role_id: 1 },
+      { user_id: 2, role_id: 2 },
+    ],
+    people: [
+      { id: 1, first_name: 'Richard', last_name: 'Groenewald', title: 'Director',        email: 'richard@xone.co.za', phone: '+27 82 000 0001', is_xone: true,  created_at: now },
+      { id: 2, first_name: 'Thandi',  last_name: 'Nkosi',      title: 'Sales Executive', email: 'thandi@xone.co.za',  phone: '+27 82 000 0002', is_xone: true,  created_at: now },
+      { id: 3, first_name: 'John',    last_name: 'Smith',      title: 'Procurement Lead', email: 'john@acmemining.co.za', phone: '+27 83 111 2222', is_xone: false, created_at: now },
+      { id: 4, first_name: 'Jane',    last_name: 'Doe',        title: 'Estate Manager',   email: 'jane@suncity.co.za',    phone: '+27 83 333 4444', is_xone: false, created_at: now },
+    ],
+    system_users: [
+      { id: 1, person_id: 1, username: 'richard', password: 'mock', active: true, created_at: now },
+      { id: 2, person_id: 2, username: 'thandi',  password: 'mock', active: true, created_at: now },
+    ],
+    system_user_regions: [
+      { id: 1, system_user_id: 1, region_id: 1, created_at: now, created_by: 1 },
+      { id: 2, system_user_id: 1, region_id: 2, created_at: now, created_by: 1 },
+      { id: 3, system_user_id: 2, region_id: 1, created_at: now, created_by: 1 },
+    ],
+    organisations: [
+      { id: 1, name: 'Xone Integrated Security', legal_name: 'Xone Integrated Security (Pty) Ltd', active: true, home_organisation: true,  created_at: now },
+      { id: 2, name: 'Acme Mining',     legal_name: 'Acme Mining (Pty) Ltd',     active: true, home_organisation: false, created_at: now },
+      { id: 3, name: 'Acme Holdings',   legal_name: 'Acme Holdings Ltd',         active: true, home_organisation: false, created_at: now },
+      { id: 4, name: 'Acme Logistics',  legal_name: 'Acme Logistics CC',         active: true, home_organisation: false, created_at: now },
+      { id: 5, name: 'Sun City Resorts',legal_name: 'Sun City Resorts (Pty) Ltd',active: true, home_organisation: false, created_at: now },
+      { id: 6, name: 'Sunrise Estates', legal_name: 'Sunrise Estates HOA',       active: true, home_organisation: false, created_at: now },
+      { id: 7, name: 'Golden Fields FMCG', legal_name: 'Golden Fields (Pty) Ltd',active: true, home_organisation: false, created_at: now },
+      { id: 8, name: 'Anglo Platinum',  legal_name: 'Anglo American Platinum Ltd',active: true, home_organisation: false, created_at: now },
+    ],
+    person_organisation_roles: [
+      { id: 1, person_id: 3, org_id: 2, role_type: 'Contact', is_primary: true },
+      { id: 2, person_id: 4, org_id: 5, role_type: 'Contact', is_primary: true },
+    ],
+    lead_sources: [
+      { id: 1, name: 'Inbound',          active: true, created_at: now },
+      { id: 2, name: 'Outbound',         active: true, created_at: now },
+      { id: 3, name: 'Referral',         active: true, created_at: now },
+      { id: 4, name: 'Research',         active: true, created_at: now },
+      { id: 5, name: 'Client Expansion', active: true, created_at: now },
+      { id: 6, name: 'Sales Campaign',   active: true, created_at: now },
+      { id: 7, name: 'Tender',           active: true, created_at: now },
+      { id: 8, name: 'Other',            active: true, created_at: now },
+    ],
+    service_major: [
+      { id: 1, name: 'Manpower',         active: true, created_at: now },
+      { id: 2, name: 'Technology Works', active: true, created_at: now },
+    ],
+    service_sub: [
+      { id: 1, major_id: 1, name: 'On-Site Guarding',        is_recurring: true,  default_margin: 25, active: true, default_duration: 12, created_at: now },
+      { id: 2, major_id: 1, name: 'Off-Site Control Rooms',  is_recurring: true,  default_margin: 30, active: true, default_duration: 12, created_at: now },
+      { id: 3, major_id: 2, name: 'Project',                 is_recurring: false, default_margin: 25, active: true, default_duration: 1,  created_at: now },
+    ],
+    research_campaigns: [
+      { id: 1, name: 'Mining Sector Q3 Sweep', status: 'Active', created_at: now },
+    ],
+    sales_campaigns: [
+      { id: 1, name: 'Estate Security Drive', status: 'Active', created_at: now },
+    ],
+    industry_sectors: [
+      { id: 1, name: 'Mining',       active: true },
+      { id: 2, name: 'Hospitality',  active: true },
+      { id: 3, name: 'Residential Estates', active: true },
+      { id: 4, name: 'FMCG',         active: true },
+    ],
+    red_flags: [
+      { id: 1, name: 'Budget not confirmed', active: true, sort_order: 1 },
+      { id: 2, name: 'No clear decision-maker', active: true, sort_order: 2 },
+      { id: 3, name: 'Incumbent strongly entrenched', active: true, sort_order: 3 },
+    ],
+    strategic_decisions: [
+      { id: 1, name: 'Strategic logo win', active: true, sort_order: 1 },
+      { id: 2, name: 'Reference account', active: true, sort_order: 2 },
+    ],
+    settings: [
+      { id: 1, key: 'environment',      value: 'Development' },
+      { id: 2, key: 'fy_start_month',   value: 'July' },
+      { id: 3, key: 'escalation_month', value: 'July' },
+    ],
+    // Tables the leads flow writes to — start empty.
+    leads: [],
+    lead_contacts: [],
+    lead_interactions: [],
+    lead_description_log: [],
+    lead_red_flags: [],
+    lead_strategic_decisions: [],
+  };
+}
+
 // ── API ──────────────────────────────────────────────────
 async function api(table, method='GET', body=null, params='') {
+  if (MOCK) return mockApi(table, method, body, params);
   const url = `${FN_URL}/${table}${params ? '?' + params : ''}`;
   const opts = {
     method,
@@ -6533,6 +6800,11 @@ function applyLeadReadOnly(on) {
   // Toggle every input/select/textarea inside the page
   page.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = leadReadOnly; });
 
+  // The "Change organisation" button is an edit affordance — drop it when locked,
+  // leaving just the org name visible.
+  const orgChangeBtn = document.getElementById('lead-target-org-change-btn');
+  if (orgChangeBtn) orgChangeBtn.style.display = leadReadOnly ? 'none' : '';
+
   // Hide / show Save button
   const saveBtn = document.getElementById('lead-save-btn');
   if (saveBtn) saveBtn.style.display = leadReadOnly ? 'none' : '';
@@ -7227,15 +7499,25 @@ function onLeadTargetOrgChange() {
   // free-text "create new" input, its similarity match strip, and the
   // "we'll warn you" hint all become irrelevant and are hidden. Clearing
   // the dropdown brings them back.
-  const orgId    = document.getElementById('lead-target-org-id').value;
+  const dd        = document.getElementById('lead-target-org-id');
+  const orgId     = dd.value;
+  const picker    = document.getElementById('lead-target-org-picker');
+  const chosen    = document.getElementById('lead-target-org-chosen');
+  const chosenNm  = document.getElementById('lead-target-org-chosen-name');
   const nameField = document.getElementById('lead-target-org-name');
   const matchEl   = document.getElementById('lead-target-org-matches');
   const hintEl    = document.getElementById('lead-target-org-hint');
   if (orgId) {
+    // Existing org locked in — swap the dropdown for a static name + Change button.
+    if (chosenNm) chosenNm.textContent = dd.options[dd.selectedIndex]?.text || '(selected organisation)';
+    if (picker)   picker.style.display = 'none';
+    if (chosen)   chosen.style.display = 'flex';
     if (nameField) { nameField.value = ''; nameField.style.display = 'none'; }
     if (matchEl)   { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
     if (hintEl)    hintEl.style.display = 'none';
   } else {
+    if (picker)   picker.style.display = 'flex';
+    if (chosen)   chosen.style.display = 'none';
     if (nameField) nameField.style.display = '';
     if (matchEl)   matchEl.style.display = '';
     if (hintEl)    hintEl.style.display = '';
@@ -7386,6 +7668,15 @@ function confirmLeadTargetOrgNew() {
   window._leadTargetOrgNewConfirmed = name.toLowerCase();
   const matchEl = document.getElementById('lead-target-org-matches');
   if (matchEl) matchEl.innerHTML = '';
+}
+
+// "Change" on the locked-in org display: clear the FK and bring the picker back.
+function changeLeadTargetOrg() {
+  const dd = document.getElementById('lead-target-org-id');
+  if (!dd) return;
+  dd.value = '';
+  onLeadTargetOrgChange();  // reveals picker + free-text, hides chosen display
+  dd.focus();
 }
 
 // Picking a suggested match: drop it into the dropdown FK, clear free text + matches.
