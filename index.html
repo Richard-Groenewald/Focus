@@ -783,13 +783,19 @@ tr:hover td{background:#F8FAFC;}
             <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()" style="display:none;">
               <option value="">— pick existing affiliated contact —</option>
             </select>
-            <input type="text" id="lead-target-person-name" class="form-control" placeholder="New contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()">
+            <input type="text" id="lead-target-person-name" class="form-control" placeholder="Contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()">
             <div id="lead-target-person-matches" style="margin-top:8px;"></div>
+            <!-- Telephone + email for a new (free-text) contact. Optional at this
+                 stage; hidden when an existing affiliated contact is picked. -->
+            <div id="lead-target-person-contact" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
+              <input type="text" id="lead-target-person-phone" class="form-control" placeholder="Telephone (optional)" style="flex:1;min-width:120px;">
+              <input type="text" id="lead-target-person-email" class="form-control" placeholder="Email (optional)" style="flex:1;min-width:120px;">
+            </div>
             <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
 
           <!-- Additional contacts (lead_contacts) -->
-          <div class="form-group" id="lead-additional-contacts-group">
+          <div class="form-group" id="lead-additional-contacts-group" style="display:none;">
             <label class="form-label">Additional contacts</label>
             <div id="lead-additional-contacts" style="margin-bottom:8px;"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
@@ -7129,7 +7135,8 @@ function resetLeadForm() {
     'lead-source-person-title','lead-source-person-email','lead-source-person-phone',
     'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
-    'lead-target-person-name','lead-description','lead-region-id','lead-service-major-id',
+    'lead-target-person-name','lead-target-person-phone','lead-target-person-email',
+    'lead-description','lead-region-id','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
     'lead-dead-reason-value','lead-dead-notes-value'
@@ -7184,6 +7191,7 @@ function resetLeadForm() {
   applyLeadDescriptionMode();
   leadContacts = [];
   renderAdditionalContacts();
+  updateLeadAdditionalContactsAvailability();
 }
 
 async function initLeadForm() {
@@ -7392,6 +7400,9 @@ function populateLeadForm() {
   // doesn't need to become async itself.
   // Recompute show/hide on the org's free-text input based on the loaded value.
   onLeadTargetOrgChange();
+  // A lead saved with a free-text new org (name, no FK) collapses to the same
+  // chosen-org chip the create flow produces — consistent "picked" state.
+  if (!leadData.target_org_id && leadData.target_org_name) confirmLeadTargetOrgNew();
   refreshLeadTargetPersonDropdown().then(() => {
     if (leadData.target_person_id) {
       const sel = document.getElementById('lead-target-person-id');
@@ -7406,6 +7417,8 @@ function populateLeadForm() {
     // Surface similarity hints if the lead was saved with a free-text contact name
     onLeadTargetPersonNameInput();
   }
+  if (leadData.target_person_phone) document.getElementById('lead-target-person-phone').value = leadData.target_person_phone;
+  if (leadData.target_person_email) document.getElementById('lead-target-person-email').value = leadData.target_person_email;
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
@@ -7561,8 +7574,17 @@ async function refreshLeadTargetPersonDropdown() {
     sel.innerHTML = '<option value="">— pick existing affiliated contact —</option>';
     sel.value = '';  // ensure stale selection doesn't survive into save payload
     if (hint) {
-      hint.style.display = '';
-      hint.textContent = 'Pick an existing target organisation above to see its affiliated contacts.';
+      // A confirmed new org is a chosen org — no affiliated contacts on file yet,
+      // and no guidance needed (the name/phone/email fields speak for themselves).
+      // Only the "pick an org first" nudge applies when nothing is chosen at all.
+      const newOrgChosen = document.getElementById('lead-target-org-chosen')?.style.display !== 'none'
+        && (document.getElementById('lead-target-org-name')?.value || '').trim();
+      if (newOrgChosen) {
+        hint.style.display = 'none';
+      } else {
+        hint.style.display = '';
+        hint.textContent = 'Pick an existing target organisation above to see its affiliated contacts.';
+      }
     }
     return;
   }
@@ -7603,17 +7625,35 @@ async function refreshLeadTargetPersonDropdown() {
 
 function onLeadTargetPersonChange() {
   // Same logic as org: picking an existing affiliated contact hides the
-  // "new contact" free-text + similarity match strip. Clearing brings them back.
+  // "new contact" free-text, its phone/email fields, and the similarity match
+  // strip (an existing person already carries those). Clearing brings them back.
   const personId  = document.getElementById('lead-target-person-id').value;
   const nameField = document.getElementById('lead-target-person-name');
   const matchEl   = document.getElementById('lead-target-person-matches');
+  const contactEl = document.getElementById('lead-target-person-contact');
   if (personId) {
     if (nameField) { nameField.value = ''; nameField.style.display = 'none'; }
     if (matchEl)   { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+    if (contactEl) {
+      contactEl.style.display = 'none';
+      ['lead-target-person-phone','lead-target-person-email'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    }
   } else {
     if (nameField) nameField.style.display = '';
     if (matchEl)   matchEl.style.display = '';
+    if (contactEl) contactEl.style.display = 'flex';
   }
+  updateLeadAdditionalContactsAvailability();
+}
+
+// Additional contacts only become available once a primary target contact is
+// identified — either an existing affiliated person (FK) or a typed new name.
+function updateLeadAdditionalContactsAvailability() {
+  const grp = document.getElementById('lead-additional-contacts-group');
+  if (!grp) return;
+  const hasFk   = !!document.getElementById('lead-target-person-id')?.value;
+  const hasName = !!(document.getElementById('lead-target-person-name')?.value || '').trim();
+  grp.style.display = (hasFk || hasName) ? '' : 'none';
 }
 
 // Live similarity check on the free-text target org name. Surfaces an exact
@@ -7651,23 +7691,46 @@ function onLeadTargetOrgNameInput() {
         <button type="button" class="btn btn-primary btn-sm" onclick="confirmLeadTargetOrgNew()">Use as new</button>
       </div>`;
   } else {
-    // No matches at all → reassure the user this looks like a genuine new client.
+    // No matches at all → reassure the user this looks like a genuine new client,
+    // and give them the same one-click confirm the matches case offers so the
+    // typed name locks in exactly like picking an existing org.
     html = `
-      <div style="padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;align-items:center;gap:8px;">
-        <span style="font-size:14px;">✨</span>
-        <div style="font-size:12px;color:var(--text2);">Looks like a new organisation — not in our existing list.</div>
+      <div style="padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:14px;">✨</span>
+          <div style="font-size:12px;color:var(--text2);">Looks like a new organisation — not in our existing list.</div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmLeadTargetOrgNew()">Use as new</button>
       </div>`;
   }
   matchEl.innerHTML = html;
 }
 
-// User rejected every suggestion → commit the typed name as a brand-new org and
-// close the match strip. Remembers the name so it stays closed until edited.
+// User rejected every suggestion (or there were none) → commit the typed name as
+// a brand-new org. Collapses into the same chosen-org chip an existing pick
+// produces — name + Change — so a new org "acts like it was picked". The FK
+// stays empty; the typed name (kept in the hidden input) is what gets saved.
 function confirmLeadTargetOrgNew() {
-  const name = (document.getElementById('lead-target-org-name')?.value || '').trim();
+  const nameField = document.getElementById('lead-target-org-name');
+  const name = (nameField?.value || '').trim();
+  if (!name) return;
   window._leadTargetOrgNewConfirmed = name.toLowerCase();
-  const matchEl = document.getElementById('lead-target-org-matches');
-  if (matchEl) matchEl.innerHTML = '';
+
+  const picker   = document.getElementById('lead-target-org-picker');
+  const chosen   = document.getElementById('lead-target-org-chosen');
+  const chosenNm = document.getElementById('lead-target-org-chosen-name');
+  const matchEl  = document.getElementById('lead-target-org-matches');
+  const hintEl   = document.getElementById('lead-target-org-hint');
+
+  if (chosenNm) chosenNm.innerHTML = `${name.replace(/</g,'&lt;')} <span style="font-weight:400;color:var(--text3);font-size:11px;">(new organisation)</span>`;
+  if (picker)   picker.style.display = 'none';
+  if (chosen)   chosen.style.display = 'flex';
+  if (nameField) nameField.style.display = 'none';   // keep .value — it's the choice
+  if (matchEl)  { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  if (hintEl)    hintEl.style.display = 'none';
+
+  // No FK → contact picker stays in "new contact" mode for this new org.
+  refreshLeadTargetPersonDropdown();
 }
 
 // "Change" on the locked-in org display: clear the FK and bring the picker back.
@@ -7882,6 +7945,8 @@ async function onLeadTargetPersonNameInput() {
   const matchEl = document.getElementById('lead-target-person-matches');
   if (!matchEl) return;
   const name = (document.getElementById('lead-target-person-name')?.value || '').trim();
+  // Typing a name unlocks the Additional contacts section (clearing it re-hides).
+  updateLeadAdditionalContactsAvailability();
   // If an affiliated contact is already picked from the dropdown, free-text is irrelevant.
   if (document.getElementById('lead-target-person-id')?.value) { matchEl.innerHTML = ''; return; }
   if (name.length < 3) { matchEl.innerHTML = ''; return; }
@@ -7940,13 +8005,19 @@ function useLeadTargetPersonMatch(personId) {
   }
   dd.value = personId;
   dd.style.display = '';
-  // Clear free-text + match strip
+  // Clear free-text + match strip + the new-contact phone/email row
   const free = document.getElementById('lead-target-person-name');
   if (free) free.value = '';
   const matchEl = document.getElementById('lead-target-person-matches');
   if (matchEl) matchEl.innerHTML = '';
+  const contactEl = document.getElementById('lead-target-person-contact');
+  if (contactEl) {
+    contactEl.style.display = 'none';
+    ['lead-target-person-phone','lead-target-person-email'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  }
   const hint = document.getElementById('lead-target-person-hint');
   if (hint) hint.style.display = 'none';
+  updateLeadAdditionalContactsAvailability();
 }
 
 // ── Referral source: free-type referrer + similarity test ──
@@ -8716,6 +8787,10 @@ async function openPromoteOrgConfirm() {
   // Initial state — pre-fill from existing linked org if any, else from free text
   const orgs = allData['organisations'] || [];
   const linked = leadData.target_org_id ? orgs.find(o => +o.id === +leadData.target_org_id) : null;
+  // Prefill the new-contact fields from the lead's free-text target contact so the
+  // name/phone/email captured on the lead carry into the promote wizard.
+  const tpName  = (leadData.target_person_name || '').trim();
+  const tpParts = tpName.split(/\s+/).filter(Boolean);
   window._promoteOrgState = {
     colloquial: linked?.name || leadData.target_org_name || '',
     legal:      linked?.legal_name || '',
@@ -8725,7 +8800,13 @@ async function openPromoteOrgConfirm() {
     website: '', address: '',
     contactMode: 'new',
     existingPersonId: null,
-    newPerson: { first_name: '', last_name: '', title: '', email: '', phone: '' },
+    newPerson: {
+      first_name: tpParts.shift() || tpName || '',
+      last_name:  tpParts.join(' ') || '',
+      title: '',
+      email: leadData.target_person_email || '',
+      phone: leadData.target_person_phone || '',
+    },
   };
   _renderPromoteOrgScreen1();
 }
@@ -9546,6 +9627,8 @@ async function savePromoteAll() {
       target_org_name:    null,
       target_person_id:   +personId,
       target_person_name: null,
+      target_person_phone: null,
+      target_person_email: null,
       source_person_id:   sourcePersonId,
       source_person_name:  null,
       source_person_title: null,
@@ -9967,6 +10050,12 @@ async function saveLead(opts) {
     target_org_name:    document.getElementById('lead-target-org-name').value.trim() || null,
     target_person_id:   +document.getElementById('lead-target-person-id').value || null,
     target_person_name: document.getElementById('lead-target-person-name').value.trim() || null,
+    // Phone/email captured only for a new (free-text) contact — an existing FK
+    // person already carries them. Resolved into the people row on promote.
+    target_person_phone: (!(+document.getElementById('lead-target-person-id').value))
+      ? (document.getElementById('lead-target-person-phone').value.trim() || null) : null,
+    target_person_email: (!(+document.getElementById('lead-target-person-id').value))
+      ? (document.getElementById('lead-target-person-email').value.trim() || null) : null,
 
     description,
     region_id:        +document.getElementById('lead-region-id').value || null,
