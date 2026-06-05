@@ -761,7 +761,7 @@ tr:hover td{background:#F8FAFC;}
           <div class="opp-section-title">Target Client</div>
 
           <div class="form-group">
-            <label class="form-label">Target organisation</label>
+            <label class="form-label">Organisation name</label>
             <div style="display:flex;gap:8px;">
               <select id="lead-target-org-id" class="form-control" style="flex:1;" onchange="onLeadTargetOrgChange()">
                 <option value="">Pick from known organisations in our database or create a new one below</option>
@@ -7346,29 +7346,30 @@ function onLeadTargetOrgNameInput() {
   // irrelevant — skip the check.
   if (document.getElementById('lead-target-org-id')?.value) { matchEl.innerHTML = ''; return; }
   if (name.length < 3) { matchEl.innerHTML = ''; return; }
+  // User already confirmed this exact name is a new org — keep the strip closed
+  // until they edit the name again.
+  if (window._leadTargetOrgNewConfirmed === name.toLowerCase()) { matchEl.innerHTML = ''; return; }
+  window._leadTargetOrgNewConfirmed = null;
 
-  const { exact, shortlist } = _findOrgMatches(name, '');
+  const { exact, shortlist } = _findOrgMatches(name, '', 5);
+  // Treat every hit the same — the exact match just sits at the top of one list.
+  const matches = [exact, ...shortlist].filter(Boolean).slice(0, 5);
   let html = '';
-  if (exact) {
-    html += `
-      <div style="padding:8px 10px;border:2px solid #16a34a;border-radius:var(--radius);background:#F0FDF4;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
-        <div style="font-size:13px;">
-          <span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Existing org match · </span>
-          <strong>${exact.name}</strong>${exact.legal_name && exact.legal_name !== exact.name ? ` <span style="color:var(--text3);">(${exact.legal_name})</span>` : ''}
-        </div>
-        <button type="button" class="btn btn-primary btn-sm" onclick="useLeadTargetOrgMatch(${exact.id})">Use this</button>
-      </div>`;
-  }
-  if (shortlist.length) {
+  if (matches.length) {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
-    html += shortlist.slice(0, 3).map(o => `
+    html += matches.map(o => `
       <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
         <div style="font-size:12px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
         <button type="button" class="btn btn-secondary btn-sm" onclick="useLeadTargetOrgMatch(${o.id})">Use</button>
       </div>`).join('');
-  }
-  // No matches at all → reassure the user this looks like a genuine new client.
-  if (!exact && !shortlist.length) {
+    // None of these is the right one → confirm it's a brand-new org and dismiss the strip.
+    html += `
+      <div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+        <div style="font-size:12px;color:var(--text2);">None of these — it's a new organisation.</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmLeadTargetOrgNew()">Use as new</button>
+      </div>`;
+  } else {
+    // No matches at all → reassure the user this looks like a genuine new client.
     html = `
       <div style="padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;align-items:center;gap:8px;">
         <span style="font-size:14px;">✨</span>
@@ -7376,6 +7377,15 @@ function onLeadTargetOrgNameInput() {
       </div>`;
   }
   matchEl.innerHTML = html;
+}
+
+// User rejected every suggestion → commit the typed name as a brand-new org and
+// close the match strip. Remembers the name so it stays closed until edited.
+function confirmLeadTargetOrgNew() {
+  const name = (document.getElementById('lead-target-org-name')?.value || '').trim();
+  window._leadTargetOrgNewConfirmed = name.toLowerCase();
+  const matchEl = document.getElementById('lead-target-org-matches');
+  if (matchEl) matchEl.innerHTML = '';
 }
 
 // Picking a suggested match: drop it into the dropdown FK, clear free text + matches.
@@ -8398,7 +8408,7 @@ function _orgMatchScore(org, colloquial, legal) {
   return Math.max(...candidates);
 }
 
-function _findOrgMatches(colloquial, legal) {
+function _findOrgMatches(colloquial, legal, limit = 5) {
   // Exclude home organisations from match candidates — they aren't clients.
   const orgs = (allData['organisations'] || []).filter(o => !o.home_organisation);
   const scored = orgs
@@ -8406,7 +8416,8 @@ function _findOrgMatches(colloquial, legal) {
     .filter(x => x.score >= 70)
     .sort((a, b) => b.score - a.score);
   const exact = scored.find(x => x.score >= 90) || null;
-  const shortlist = scored.filter(x => x !== exact).slice(0, 5).map(x => x.org);
+  const rest = scored.filter(x => x !== exact);
+  const shortlist = (limit === Infinity ? rest : rest.slice(0, limit)).map(x => x.org);
   return { exact: exact ? exact.org : null, shortlist };
 }
 
