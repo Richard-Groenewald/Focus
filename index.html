@@ -678,7 +678,7 @@ tr:hover td{background:#F8FAFC;}
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label">Phone <span id="lead-source-person-phone-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                  <input type="tel" id="lead-source-person-phone" class="form-control" placeholder="+27 …" onfocus="leadPhoneDefault(this)" oninput="onLeadSourcePersonPairInput()" onblur="validateLeadPhone(this)">
+                  <input type="tel" id="lead-source-person-phone" class="form-control" placeholder="+27 …" oninput="onLeadSourcePersonPairInput()">
                 </div>
               </div>
             </div>
@@ -796,7 +796,7 @@ tr:hover td{background:#F8FAFC;}
             <div id="lead-target-person-contact" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
               <div style="flex:1;min-width:120px;">
                 <label class="form-label" style="font-size:11px;margin-bottom:2px;">Telephone <span id="lead-target-person-phone-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                <input type="tel" id="lead-target-person-phone" class="form-control" placeholder="+27 …" style="width:100%;" onfocus="leadPhoneDefault(this)" oninput="onLeadContactPairInput()" onblur="validateLeadPhone(this)">
+                <input type="tel" id="lead-target-person-phone" class="form-control" placeholder="+27 …" style="width:100%;" oninput="onLeadContactPairInput()">
               </div>
               <div style="flex:1;min-width:120px;">
                 <label class="form-label" style="font-size:11px;margin-bottom:2px;">Email <span id="lead-target-person-email-star" class="lead-req-star" style="color:var(--red)">*</span></label>
@@ -6972,6 +6972,80 @@ function applyLeadGraceLock() {
   stars.forEach(s => s.style.display = editable ? '' : 'none');
   if (editable) { onLeadContactPairInput(); onLeadSourcePersonPairInput(); }  // restore either-or visibility
 }
+
+// ── FocusPhone: international phone-format enforcement on every phone field ──
+// Keeps the full international number in the input itself (so existing save/load
+// paths are unchanged). Defaults to +27 (changeable by editing the code); strips
+// non-digits, drops a leading 0 on the national part, caps + checks length, and
+// formats as you type. Applied to all phone inputs via attachAll + an observer.
+const FocusPhone = (() => {
+  const C = [
+    { cc: '27', len: 9 }, { cc: '264', len: 9 }, { cc: '267', len: 8 }, { cc: '263', len: 9 },
+    { cc: '260', len: 9 }, { cc: '258', len: 9 }, { cc: '265', len: 9 }, { cc: '266', len: 8 },
+    { cc: '268', len: 8 }, { cc: '255', len: 9 }, { cc: '254', len: 9 }, { cc: '234', len: 10 },
+    { cc: '44', len: 10 }, { cc: '1', len: 10 }, { cc: '61', len: 9 }, { cc: '91', len: 10 },
+    { cc: '971', len: 9 }, { cc: '49', len: 11 },
+  ];
+  const byCc = {}; C.forEach(c => byCc[c.cc] = c);
+  const order = C.map(c => c.cc).sort((a, b) => b.length - a.length);   // longest code first
+  function group(d) {
+    if (d.length <= 2) return d;
+    if (d.length <= 5) return d.replace(/(\d{2})(\d+)/, '$1 $2');
+    return d.replace(/(\d{2})(\d{3})(\d+)/, '$1 $2 $3').trim();
+  }
+  function splitKnown(digits) {
+    for (const cc of order) if (digits.startsWith(cc)) return { cc, nat: digits.slice(cc.length) };
+    return null;
+  }
+  function normalize(raw) {
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s) return { display: '', valid: true, has: false };
+    const digits = s.replace(/\D/g, '');
+    let cc, nat;
+    if (s[0] === '+') {
+      const m = splitKnown(digits);
+      if (!m) return { display: '+' + digits, valid: digits.length >= 8 && digits.length <= 15, has: digits.length > 0 };
+      cc = m.cc; nat = m.nat;
+    } else {
+      cc = '27'; nat = digits.replace(/^0+/, '');   // a local number → default ZA
+    }
+    const c = byCc[cc];
+    nat = nat.slice(0, c ? c.len : 14);
+    const display = '+' + cc + (nat ? ' ' + group(nat) : ' ');
+    const valid = c ? nat.length === c.len : nat.length >= 6;
+    return { display, valid, has: !!nat };
+  }
+  function enforce(input) {
+    const r = normalize(input.value);
+    if (input.value !== r.display) input.value = r.display;
+    input.style.borderColor = !r.has ? '' : (r.valid ? 'var(--green,#16a34a)' : 'var(--red)');
+    input.title = (!r.has || r.valid) ? '' : 'Enter a full number in international format, e.g. +27 82 123 4567';
+  }
+  function attach(input) {
+    if (!input || input.dataset.fxPhone || input.type === 'hidden') return;
+    input.dataset.fxPhone = '1';
+    input.type = 'tel'; input.setAttribute('autocomplete', 'tel');
+    if (!input.placeholder || /optional/i.test(input.placeholder)) input.placeholder = '+27 82 123 4567';
+    input.addEventListener('focus', () => { if (!input.value.trim()) input.value = '+27 '; });
+    input.addEventListener('input', () => enforce(input));
+    input.addEventListener('blur', () => { if (input.value.replace(/\D/g, '').length <= 3) input.value = ''; enforce(input); });
+    if (input.value) enforce(input);
+  }
+  function attachAll(root) {
+    try { (root || document).querySelectorAll('input[type="tel"],input[id*="phone" i],input[id*="mobile" i]').forEach(attach); }
+    catch (e) {}
+  }
+  return { attach, attachAll, normalize };
+})();
+function _fxPhoneInit() {
+  FocusPhone.attachAll();
+  try {
+    new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) FocusPhone.attachAll(n); })
+      .observe(document.body || document.documentElement, { childList: true, subtree: true });
+  } catch (e) {}
+}
+if (document.readyState !== 'loading') _fxPhoneInit();
+else document.addEventListener('DOMContentLoaded', _fxPhoneInit);
 
 function markLeadDirty(e) {
   if (leadReadOnly) return;
