@@ -103,8 +103,9 @@ tr:hover td{background:#F8FAFC;}
 .form-control{width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg2);color:var(--text);transition:border-color 0.15s;}
 .form-control:focus{outline:none;border-color:var(--red);box-shadow:0 0 0 3px rgba(208,2,27,0.08);}
 .form-control.field-error{border-color:var(--red);background:#FEF2F2;box-shadow:0 0 0 3px rgba(208,2,27,0.12);}
-/* Locked / uneditable fields read as such — muted fill, no caret. */
-#lead-page .form-control:disabled{background:#EEF2F7;color:var(--text2);cursor:not-allowed;border-style:dashed;}
+/* Locked / uneditable fields read as such — muted fill, neutral dashed edge (no
+   validation green/red), no caret. !important beats the inline validation colour. */
+#lead-page .form-control:disabled{background:#EEF2F7;color:var(--text2);cursor:not-allowed;border-style:dashed !important;border-color:#cbd5e1 !important;}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
 .form-row-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
 
@@ -617,8 +618,7 @@ tr:hover td{background:#F8FAFC;}
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
       <span id="lead-save-indicator" style="font-size:12px;font-weight:600;"></span>
-      <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">Cancel</button>
-      <button class="btn btn-primary" id="lead-save-btn" onclick="saveLead()">Save</button>
+      <button class="btn btn-secondary btn-sm" id="lead-revert-btn" onclick="revertLead()" title="Undo every change made since you opened this lead">↺ Revert changes</button>
     </div>
   </div>
 
@@ -803,20 +803,23 @@ tr:hover td{background:#F8FAFC;}
                 <input type="email" id="lead-target-person-email" class="form-control" placeholder="name@example.com" style="width:100%;" oninput="onLeadContactPairInput()" onblur="validateLeadEmail(this)">
               </div>
             </div>
+            <div id="lead-target-person-dupe" style="font-size:11px;color:#b45309;margin-top:6px;"></div>
             <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
 
           <!-- Additional contacts (lead_contacts) -->
           <div class="form-group" id="lead-additional-contacts-group" style="display:none;">
             <label class="form-label">Additional contacts</label>
+            <div style="font-size:11px;color:var(--text3);margin:-2px 0 8px;">The primary contact is above. Add others involved in the deal here.</div>
             <div id="lead-additional-contacts" style="margin-bottom:8px;"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <input type="text" id="lead-contact-add-name"  class="form-control" placeholder="Name"  style="flex:2;min-width:120px;">
-              <input type="text" id="lead-contact-add-email" class="form-control" placeholder="Email" style="flex:2;min-width:120px;">
-              <input type="text" id="lead-contact-add-phone" class="form-control" placeholder="Phone" style="flex:1;min-width:100px;">
+              <input type="text" id="lead-contact-add-name"  class="form-control" placeholder="First and last name" style="flex:2;min-width:120px;" oninput="onLeadAddContactNameInput()">
+              <input type="email" id="lead-contact-add-email" class="form-control" placeholder="Email" style="flex:2;min-width:120px;" oninput="onLeadAddContactDetailInput()" onblur="validateLeadEmail(this)">
+              <input type="text" id="lead-contact-add-phone" class="form-control" placeholder="Phone" style="flex:1;min-width:100px;" oninput="onLeadAddContactDetailInput()">
               <button class="btn btn-secondary btn-sm" onclick="addLeadContact()">Add</button>
             </div>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The primary contact is above. Add others involved in the deal here.</div>
+            <div id="lead-contact-add-matches" style="margin-top:8px;"></div>
+            <div id="lead-contact-add-dupe" style="font-size:11px;color:#b45309;margin-top:6px;"></div>
           </div>
         </div>
 
@@ -6786,6 +6789,7 @@ async function openNewLead() {
   if (ownerSel && currentUser?.personId) ownerSel.value = currentUser.personId;
   document.getElementById('lead-page-title').textContent = 'New Lead';
   applyLeadReadOnly(false);  // New leads are always editable
+  window._leadRevert = { lead: {}, contacts: [], interactions: [], descLog: [] };  // revert = discard the new lead
   // Only managers/admin may assign an owner other than themselves.
   if (ownerSel && !canAssignOwner(leadData)) ownerSel.disabled = true;
   document.getElementById('lead-page').classList.add('active');
@@ -6807,6 +6811,7 @@ async function openLeadForm(id) {
     populateLeadForm();
     await loadLeadInteractions(id);
     await loadLeadQualificationSelections(id);
+    _snapshotLeadForRevert();   // baseline for the Revert button (full undo of this session)
     // Decide editability. Promoted and Dead are terminal — view-only for everyone.
     // Otherwise, only the owner / a region-matched manager / an Admin may edit;
     // leads have no collaborator concept, so non-owners are fully view-only.
@@ -6849,9 +6854,9 @@ function applyLeadReadOnly(on) {
   const orgChangeBtn = document.getElementById('lead-target-org-change-btn');
   if (orgChangeBtn) orgChangeBtn.style.display = leadReadOnly ? 'none' : '';
 
-  // Hide / show Save button
-  const saveBtn = document.getElementById('lead-save-btn');
-  if (saveBtn) saveBtn.style.display = leadReadOnly ? 'none' : '';
+  // Hide / show the Revert button (nothing to revert on a view-only lead)
+  const revertBtn = document.getElementById('lead-revert-btn');
+  if (revertBtn) revertBtn.style.display = leadReadOnly ? 'none' : '';
 
   // Hide / show + Log Interaction button
   const logBtn = document.getElementById('lead-log-interaction-btn');
@@ -6940,6 +6945,22 @@ function onLeadContactPairInput() {
   const phone = document.getElementById('lead-target-person-phone')?.value || '';
   const email = (document.getElementById('lead-target-person-email')?.value || '').trim();
   _eitherOrStars(leadHasPhone(phone), !!email, 'lead-target-person-phone-star', 'lead-target-person-email-star');
+  // Duplicate email/phone warning — only for a free-text primary (skip a picked person).
+  const out = document.getElementById('lead-target-person-dupe');
+  if (out) {
+    if (document.getElementById('lead-target-person-id')?.value) out.innerHTML = '';
+    else _warnPrimaryContactDupe();
+  }
+}
+async function _warnPrimaryContactDupe() {
+  const out = document.getElementById('lead-target-person-dupe'); if (!out) return;
+  await _ensureAllLeadContactsLoaded();
+  const email = document.getElementById('lead-target-person-email')?.value || '';
+  const phone = document.getElementById('lead-target-person-phone')?.value || '';
+  const dupes = _findContactDupes(email, phone);
+  out.innerHTML = dupes.length
+    ? ('⚠ Already on file: ' + dupes.slice(0, 3).map(d => String(d).replace(/</g, '&lt;')).join(', ') + (dupes.length > 3 ? '…' : '') + '. You can still use it.')
+    : '';
 }
 function onLeadSourcePersonPairInput() {
   const email = (document.getElementById('lead-source-person-email')?.value || '').trim();
@@ -7074,6 +7095,135 @@ function _fxPhoneInit() {
 }
 if (document.readyState !== 'loading') _fxPhoneInit();
 else document.addEventListener('DOMContentLoaded', _fxPhoneInit);
+
+// ── Contact name rule: must have a first AND last name ──
+function leadNameHasTwoParts(s) { return String(s || '').trim().split(/\s+/).filter(Boolean).length >= 2; }
+function validateLeadName(el) {
+  if (!el) return;
+  const v = (el.value || '').trim();
+  const ok = !v || leadNameHasTwoParts(v);
+  el.style.borderColor = ok ? '' : 'var(--red)';
+  el.title = ok ? '' : 'Enter both a first and last name';
+}
+
+// ── Additional-contact: name similarity + duplicate email/phone warning ──
+function onLeadAddContactNameInput() {
+  const el = document.getElementById('lead-contact-add-name');
+  validateLeadName(el);
+  const out = document.getElementById('lead-contact-add-matches');
+  if (!out) return;
+  const name = (el?.value || '').trim();
+  if (name.length < 3) { out.innerHTML = ''; return; }
+  const { exact, shortlist } = _findPersonMatches(name);
+  const render = (p, isExact) => {
+    const full = [p.first_name, p.last_name].filter(Boolean).join(' ');
+    const colour = isExact ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
+    return `<div style="padding:8px 10px;border:${colour};border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
+      <div style="font-size:13px;">${isExact ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Exact name match · </span>' : ''}<strong>${full}</strong>${p.title ? ` <span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${p.title} — same person?</span>` : ''}</div>
+      <button type="button" class="btn ${isExact ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="useLeadAddContactMatch(${p.id})">Use this</button>
+    </div>`;
+  };
+  let html = '';
+  if (exact) html += render(exact, true);
+  if (shortlist.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0;">Possible matches</div>`;
+    html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
+  }
+  out.innerHTML = html;
+}
+function useLeadAddContactMatch(personId) {
+  const p = (allData['people'] || []).find(x => +x.id === +personId);
+  if (!p) return;
+  const setv = (id, v) => { const e = document.getElementById(id); if (e) { e.value = v || ''; e.dispatchEvent(new Event('input', { bubbles: true })); } };
+  setv('lead-contact-add-name', [p.first_name, p.last_name].filter(Boolean).join(' '));
+  setv('lead-contact-add-email', p.email || '');
+  setv('lead-contact-add-phone', p.phone || '');
+  if (typeof FocusPhone !== 'undefined') FocusPhone.refreshAll();
+  const out = document.getElementById('lead-contact-add-matches'); if (out) out.innerHTML = '';
+  onLeadAddContactDetailInput();
+}
+async function _ensureAllLeadContactsLoaded() {
+  if (allData['lead_contacts_all']) return;
+  try { allData['lead_contacts_all'] = await apiGet('lead_contacts', 'select=id,lead_id,contact_name,contact_email,contact_phone'); }
+  catch (e) { allData['lead_contacts_all'] = []; }
+}
+function _phoneDigits(v) { return String(v || '').replace(/\D/g, ''); }
+// Find existing people / lead-contacts that share an email or phone (warn, never block).
+function _findContactDupes(email, phone) {
+  email = (email || '').trim().toLowerCase();
+  const pd = _phoneDigits(phone);
+  const emailMatch = e => email && e && String(e).trim().toLowerCase() === email;
+  const phoneMatch = p => { const d = _phoneDigits(p); return pd.length >= 7 && d.length >= 7 && (d === pd || d.slice(-9) === pd.slice(-9)); };
+  const out = [];
+  (allData['people'] || []).forEach(p => { if (emailMatch(p.email) || phoneMatch(p.phone)) out.push([p.first_name, p.last_name].filter(Boolean).join(' ') || 'a known contact'); });
+  (allData['lead_contacts_all'] || []).forEach(c => { if (emailMatch(c.contact_email) || phoneMatch(c.contact_phone)) out.push(c.contact_name || 'another lead contact'); });
+  return [...new Set(out)];
+}
+async function onLeadAddContactDetailInput() {
+  await _ensureAllLeadContactsLoaded();
+  const out = document.getElementById('lead-contact-add-dupe'); if (!out) return;
+  const email = document.getElementById('lead-contact-add-email')?.value || '';
+  const phone = document.getElementById('lead-contact-add-phone')?.value || '';
+  const dupes = _findContactDupes(email, phone);
+  out.innerHTML = dupes.length
+    ? ('⚠ Already on file: ' + dupes.slice(0, 3).map(d => String(d).replace(/</g, '&lt;')).join(', ') + (dupes.length > 3 ? '…' : '') + '. You can still add this contact.')
+    : '';
+}
+
+// ── Revert-to-before-opening (full undo of this edit session) ──
+function _snapshotLeadForRevert() {
+  window._leadRevert = {
+    lead: JSON.parse(JSON.stringify(leadData || {})),
+    contacts:     (leadContacts || []).map(c => c.id),
+    interactions: (leadInteractions || []).map(i => i.id),
+    descLog:      (leadDescriptionLog || []).map(d => d.id),
+  };
+}
+async function _revertChildAdditions(table, leadId, keepIds) {
+  try {
+    const rows = await apiGet(table, `lead_id=eq.${leadId}&select=id`);
+    const keep = new Set((keepIds || []).map(String));
+    for (const r of rows) if (!keep.has(String(r.id))) await api(table, 'DELETE', null, 'id=eq.' + r.id);
+  } catch (e) { /* best-effort */ }
+}
+async function _deleteLeadCascade(id) {
+  for (const t of ['lead_contacts', 'lead_interactions', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
+    try { await api(t, 'DELETE', null, 'lead_id=eq.' + id); } catch (e) {}
+  }
+  try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
+}
+async function revertLead() {
+  if (leadReadOnly) return;
+  const snap = window._leadRevert;
+  if (!snap) { closeLeadPage({ force: true }); return; }
+  if (!confirm('Revert every change made since you opened this lead? This also removes contacts, interactions and notes added during this session.')) return;
+  startBusy('Reverting…');
+  try {
+    const id = snap.lead && snap.lead.id;
+    if (!id) {
+      // Lead was created this session → remove it entirely.
+      if (leadData.id) await _deleteLeadCascade(leadData.id);
+      leadFormDirty = false;
+      closeLeadPage({ force: true });
+      return;
+    }
+    await _revertChildAdditions('lead_contacts', id, snap.contacts);
+    await _revertChildAdditions('lead_interactions', id, snap.interactions);
+    await _revertChildAdditions('lead_description_log', id, snap.descLog);
+    const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
+    delete restore.id;
+    const res = await api('leads', 'PATCH', restore, 'id=eq.' + id + '&select=*');
+    if (res && res[0]) leadData = res[0];
+    leadFormDirty = false;
+    await loadLeadContacts(id); await loadLeadInteractions(id); await loadLeadDescriptionLog(id);
+    await loadLeadQualificationSelections(id);
+    populateLeadForm(); renderAdditionalContacts(); renderLeadInteractions();
+    _snapshotLeadForRevert();   // the reverted state is the new baseline
+    setLeadSaveIndicator('saved');
+    showStatus('Reverted to opening state');
+  } catch (e) { showStatus('Revert failed: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
 
 function markLeadDirty(e) {
   if (leadReadOnly) return;
@@ -7507,6 +7657,7 @@ async function addLeadContact() {
   const email = (document.getElementById('lead-contact-add-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-add-phone')?.value || '').trim();
   if (!name && !email && !phone) { showStatus('Enter a name or contact detail', 'error'); return; }
+  if (name && !leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name for the contact', 'error'); return; }
   // Contacts persist immediately, so the lead must exist — auto-save a new lead first.
   if (!leadData.id) {
     const ok = await saveLead({ keepOpen: true });
@@ -8158,6 +8309,11 @@ async function onLeadTargetPersonNameInput() {
   const name = (document.getElementById('lead-target-person-name')?.value || '').trim();
   // Typing a name unlocks the Additional contacts section (clearing it re-hides).
   updateLeadAdditionalContactsAvailability();
+  // Once a name is being entered the "pick / no affiliated contacts" hint is moot.
+  const tpHint = document.getElementById('lead-target-person-hint');
+  if (tpHint) tpHint.style.display = name ? 'none' : '';
+  // Require first + last name (visual cue; the Working gate enforces it too).
+  validateLeadName(document.getElementById('lead-target-person-name'));
   // If an affiliated contact is already picked from the dropdown, free-text is irrelevant.
   if (document.getElementById('lead-target-person-id')?.value) { matchEl.innerHTML = ''; return; }
   if (name.length < 3) { matchEl.innerHTML = ''; return; }
@@ -8243,6 +8399,7 @@ async function onLeadSourcePersonNameInput() {
   if (!matchEl) return;
   // Editing the name invalidates any previously chosen existing person.
   _clearLeadSourcePersonSelection();
+  validateLeadName(document.getElementById('lead-source-person-name'));   // first + last required
   const name = (document.getElementById('lead-source-person-name')?.value || '').trim();
   const contactEl = document.getElementById('lead-source-person-contact');
   if (name.length < 3) {
@@ -10124,7 +10281,7 @@ function leadSourceComplete(l) {
   const src = (allData['lead_sources'] || []).find(s => +s.id === +l.source_id);
   const name = src ? src.name : '';
   if (name === 'Referral')
-    return !!(l.source_person_id || (l.source_person_name && ((l.source_person_email && String(l.source_person_email).trim()) || leadHasPhone(l.source_person_phone))));
+    return !!(l.source_person_id || (leadNameHasTwoParts(l.source_person_name) && ((l.source_person_email && String(l.source_person_email).trim()) || leadHasPhone(l.source_person_phone))));
   if (name === 'Client Expansion')                         return !!l.source_org_id;
   if (name === 'Research Campaign' || name === 'Research')  return !!l.research_campaign_id;
   if (name === 'Sales Campaign')                            return !!l.sales_campaign_id;
@@ -10149,7 +10306,7 @@ function leadTargetComplete(l, primaryContact) {
   } else {
     // Free-text contact: a name AND at least one of email / telephone (an existing
     // affiliated person carries its own stored detail, so a FK alone suffices).
-    const nm = l.target_person_name && String(l.target_person_name).trim();
+    const nm = leadNameHasTwoParts(l.target_person_name);   // first + last required
     const detail = (l.target_person_email && String(l.target_person_email).trim()) || leadHasPhone(l.target_person_phone);
     hasContact = !!(l.target_person_id || (nm && detail));
   }
