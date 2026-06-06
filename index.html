@@ -827,6 +827,7 @@ tr:hover td{background:#F8FAFC;}
                 <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary" style="display:none;padding:6px 12px;font-size:12px;">Promote →</button>
                 <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-secondary" style="display:none;padding:6px 12px;font-size:12px;">Decline…</button>
                 <span id="lead-promotion-note" style="display:none;font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;background:#FEF3C7;color:#92400E;"></span>
+                <span id="lead-edit-countdown"></span>
               </div>
               <div style="font-size:11px;color:var(--text3);margin-top:4px;">Auto-derived from interactions, qualification, red flags and promotion.</div>
             </div>
@@ -1247,9 +1248,22 @@ function _mockSeed() {
       { id: 2, name: 'Reference account', active: true, sort_order: 2 },
     ],
     settings: [
-      { id: 1, key: 'environment',      value: 'Development' },
-      { id: 2, key: 'fy_start_month',   value: 'July' },
-      { id: 3, key: 'escalation_month', value: 'July' },
+      { id: 1, key: 'environment',            value: 'Development' },
+      { id: 2, key: 'fy_start_month',         value: 'July' },
+      { id: 3, key: 'escalation_month',       value: 'July' },
+      { id: 4, key: 'new_lead_waiting_minutes', value: '10' },
+    ],
+    decline_reasons: [
+      { id: 1, name: 'Budget too low',          description: 'Deal size below our minimum.', sort_order: 1, active: true, created_at: now },
+      { id: 2, name: 'No decision-maker access', description: 'Cannot reach an economic buyer.', sort_order: 2, active: true, created_at: now },
+      { id: 3, name: 'Lost to incumbent',       description: 'Existing provider strongly entrenched.', sort_order: 3, active: true, created_at: now },
+      { id: 4, name: 'Out of footprint',        description: 'Outside our serviceable regions.', sort_order: 4, active: true, created_at: now },
+    ],
+    qualification_dimensions: [
+      { id: 1, key: 'fit',           label: 'Fit',      description: 'How well the prospect matches our ideal client profile (sector, size, footprint).', sort_order: 1, active: true, created_at: now },
+      { id: 2, key: 'trigger_score', label: 'Trigger',  description: 'Is there a compelling event driving them to act now?', sort_order: 2, active: true, created_at: now },
+      { id: 3, key: 'access',        label: 'Access',    description: 'Can we reach the economic decision-maker?', sort_order: 3, active: true, created_at: now },
+      { id: 4, key: 'capacity',      label: 'Capacity',  description: 'Do they have the budget and authority to buy?', sort_order: 4, active: true, created_at: now },
     ],
     // Tables the leads flow writes to — start empty.
     leads: [],
@@ -4071,6 +4085,7 @@ async function loadEngagements(dealId) {
       const ageMs = now - createdAt;
       const gracePeriodMs = graceMins * 60 * 1000;
       const isEditable = ageMs < gracePeriodMs;
+      const cdChip = editCountdownChipHtml(createdAt, graceMins, 'engagement', { expiredLabel: '🔒 locked' });
 
       const hasNext = !!e.next_action;
       const done = !!e.next_action_done;
@@ -4106,7 +4121,7 @@ async function loadEngagements(dealId) {
       const borderLeft = isEditable ? '3px solid var(--red)' : '3px solid var(--border)';
 
       return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openEngagementRow(${e.id})">
-        <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date}</td>
+        <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date}<div style="margin-top:3px;font-weight:400;">${cdChip}</div></td>
         <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;">${typeCell}</td>
         <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextActionCell}</td>
         <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextDateCell}</td>
@@ -4125,6 +4140,7 @@ async function loadEngagements(dealId) {
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>`;
+    startEditCountdownTicker();   // drive the per-engagement edit-window countdowns
   } catch(err) {
     list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);">Error: ${err.message}</div>`;
   }
@@ -6362,7 +6378,16 @@ async function renderLeadsPage() {
       // the "you are here" cue stays strong (inline style is omitted when active
       // so the .opp-tab.active CSS rule wins without specificity fights).
       const tint = (!isActiveTab && LEAD_STATUS_STYLES[t.key]) ? `style="${LEAD_STATUS_STYLES[t.key]}border-color:transparent;"` : '';
-      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" ${tint} onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span></button>`;
+      // New lane: roll up the soonest edit-window to lock so it's visible without opening the tab.
+      let extra = '';
+      if (t.key === 'New') {
+        const counting = leads.filter(l => l.status === 'New' && l.working_eligible_at && leadHasNextStep(l));
+        if (counting.length) {
+          const soonest = Math.min(...counting.map(l => new Date(l.working_eligible_at).getTime()));
+          extra = ' ' + editCountdownChipHtml(soonest, leadWaitingMinutes(), 'lead', { expiredLabel: '🔒' });
+        }
+      }
+      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" ${tint} onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span>${extra}</button>`;
     }).join('');
 
     // Filter to active tab
@@ -6425,6 +6450,7 @@ async function renderLeadsPage() {
       rowRenderer: (l) => renderLeadRow(l, sources, regions, people, orgs),
       emptyMessage: 'No leads in this tab match the current filters.',
     });
+    startEditCountdownTicker();   // drive any New-lane / lane-header countdown chips
   } catch(e) {
     document.getElementById('leads-table-wrap').innerHTML =
       `<div style="padding:20px;color:var(--red);">Error loading leads: ${e.message}</div>`;
@@ -6492,8 +6518,16 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
   }
 
-  return `<tr onclick="openLead(${l.id})" style="cursor:pointer;border-bottom:1px solid var(--border);">
-    <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}</td>
+  // Edit-window countdown: New leads with a logged next-action show remaining
+  // editable time + a red left edge while still editable.
+  let cdChip = '', rowBorder = 'border-bottom:1px solid var(--border);';
+  if (l.status === 'New' && l.working_eligible_at && leadHasNextStep(l)) {
+    cdChip = ' ' + editCountdownChipHtml(new Date(l.working_eligible_at).getTime(), leadWaitingMinutes(), 'lead', { expiredLabel: '🔒 locking…' });
+    rowBorder += 'box-shadow:inset 3px 0 0 0 var(--red);';
+  }
+
+  return `<tr onclick="openLead(${l.id})" style="cursor:pointer;${rowBorder}">
+    <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
@@ -8210,6 +8244,7 @@ function renderLeadStatusBadge(status) {
 // and after any wizard/modal save that refetches the lead.
 function refreshLeadWorkflowChrome() {
   const status = leadData.status || 'New';
+  updateLeadFormCountdown();   // edit-window countdown chip next to the status badge
   const promoteBtn = document.getElementById('lead-promote-btn');
   const declineBtn = document.getElementById('lead-decline-btn');
   const wakeWrap   = document.getElementById('lead-wake-date-wrap');
@@ -9954,8 +9989,10 @@ function computeLeadStatus(l, ctx) {
 async function recomputeOpenLeadStatus() {
   if (!leadData || !leadData.id) return;
   const nowIso = new Date().toISOString();
-  let workingEligibleAt = leadData.working_eligible_at || null;
-  if (!workingEligibleAt && leadWorkingPrereqsMet(leadData, null)) workingEligibleAt = nowIso;
+  // Open (never reset) the editable window — e.g. when a logged interaction first
+  // supplies the next-action. Reset-on-edit is owned by saveLead.
+  let workingEligibleAt = nextWorkingEligibleAt(leadData, leadData.working_eligible_at || null, nowIso,
+    { reset: false, redFlagCount: (window._leadRedFlags || []).length });
   const view = Object.assign({}, leadData, { working_eligible_at: workingEligibleAt });
   const status = computeLeadStatus(view, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
   let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
@@ -9993,10 +10030,93 @@ async function sweepNewToWorking(leads) {
   return leads;
 }
 
+// Decide the New-lead editable-window start stamp (`working_eligible_at`). The
+// window opens once the lead has its prereqs (source/details/target) AND a logged
+// next-action while still New, and RESETS on each committed edit (reset-on-edit) so
+// "still editable" tracks time-since-last-touch — the lock fires a full waiting
+// period after the last change. Frozen once the lead moves past New.
+function nextWorkingEligibleAt(rec, prevEligible, nowIso, opts) {
+  opts = opts || {};
+  const pastNew = rec.working_at || rec.qualified_at || rec.promoted_at || rec.wake_date || rec.dead_reason || (opts.redFlagCount || 0) > 0;
+  if (pastNew) return prevEligible || null;
+  const eligible = leadWorkingPrereqsMet(rec, null) && leadHasNextStep(rec);
+  if (!eligible) return prevEligible || null;        // can't start — no next-action yet
+  if (!prevEligible) return nowIso;                  // open the editable window
+  return opts.reset ? nowIso : prevEligible;         // reset-on-edit, else keep counting
+}
+
+// ── Edit-grace countdown (shared: New-leads + engagements) ────────────────
+// Both surfaces are "editable for a while, then locked". A single 1s ticker
+// updates every on-screen .edit-cd chip and fires the lock at zero.
+function fmtCountdown(ms) {
+  if (ms <= 0) return '0:00';
+  const t = Math.ceil(ms / 1000);
+  return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0');
+}
+// Renders a live countdown chip. kind ∈ {'lead','engagement'} drives the at-zero
+// behaviour in the ticker. opts: {openForm, expiredLabel}.
+function editCountdownChipHtml(startMs, graceMins, kind, opts) {
+  opts = opts || {};
+  const remain = (startMs + graceMins * 60000) - Date.now();
+  const expired = remain <= 0;
+  const expiredLabel = opts.expiredLabel || '🔒 locked';
+  const label = expired ? expiredLabel : '⏳ ' + fmtCountdown(remain);
+  const bg = expired ? '#F1F5F9' : '#FEF3C7', fg = expired ? '#64748B' : '#92400E';
+  const attrs = `data-cd-start="${startMs}" data-cd-grace="${graceMins}" data-cd-kind="${kind}"`
+    + (opts.openForm ? ' data-cd-openform="1"' : '')
+    + ` data-cd-expired-label="${expiredLabel.replace(/"/g, '&quot;')}"`;
+  return `<span class="edit-cd" ${attrs} style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${fg};" title="${expired ? 'Edit window closed' : 'Editable for ' + fmtCountdown(remain) + ' more'}">${label}</span>`;
+}
+// Lead form chip (or a hint when New but the window hasn't started yet).
+function leadEditCountdownHtml(l) {
+  if (!l || l.status !== 'New') return '';
+  if (l.working_eligible_at && leadHasNextStep(l))
+    return editCountdownChipHtml(new Date(l.working_eligible_at).getTime(), leadWaitingMinutes(), 'lead', { openForm: true, expiredLabel: '🔒 locking…' });
+  return `<span style="font-size:11px;color:var(--text3);">✎ Editable — log a next action to start the lock countdown</span>`;
+}
+function updateLeadFormCountdown() {
+  const el = document.getElementById('lead-edit-countdown');
+  if (!el) return;
+  el.innerHTML = leadEditCountdownHtml(leadData);
+  startEditCountdownTicker();
+}
+let _editCdTimer = null;
+function startEditCountdownTicker() { if (!_editCdTimer) _editCdTimer = setInterval(tickEditCountdowns, 1000); }
+function stopEditCountdownTicker() { if (_editCdTimer) { clearInterval(_editCdTimer); _editCdTimer = null; } }
+function tickEditCountdowns() {
+  // Visible chips only: a closed overlay (lead form / deal page) leaves its chip in
+  // the hidden DOM — ignoring those lets the ticker self-stop and prevents a stale
+  // hidden form-chip from triggering a flip.
+  const els = [...document.querySelectorAll('.edit-cd')].filter(el => el.offsetParent !== null);
+  if (!els.length) { stopEditCountdownTicker(); return; }
+  const now = Date.now();
+  let listExpired = false, openLeadExpired = false;
+  els.forEach(el => {
+    const remain = (+el.dataset.cdStart + (+el.dataset.cdGrace) * 60000) - now;
+    const expired = remain <= 0;
+    el.textContent = expired ? (el.dataset.cdExpiredLabel || '🔒 locked') : '⏳ ' + fmtCountdown(remain);
+    el.style.background = expired ? '#F1F5F9' : '#FEF3C7';
+    el.style.color = expired ? '#64748B' : '#92400E';
+    if (expired && el.dataset.cdDone !== '1') {
+      el.dataset.cdDone = '1';
+      if (el.dataset.cdKind === 'lead') { if (el.dataset.cdOpenform === '1') openLeadExpired = true; else listExpired = true; }
+    }
+  });
+  if (openLeadExpired) _onOpenLeadEditWindowClosed();
+  else if (listExpired && currentPage === 'leads') renderLeadsPage();
+}
+// Open lead's window hit zero → flip New→Working and re-lock the form in place.
+async function _onOpenLeadEditWindowClosed() {
+  if (!leadData || !leadData.id || leadData.status !== 'New') return;
+  await recomputeOpenLeadStatus();
+  if (leadData.status !== 'New') populateLeadForm();
+}
+
 async function saveLead(opts) {
   // opts.keepOpen → save without closing the form (used when auto-saving a new
   // lead before logging its first interaction). Returns true on success.
   opts = opts || {};
+  const wasDirty = leadFormDirty;   // captured before save clears it — drives reset-on-edit
   // Defensive: the Save button is hidden in read-only mode, but if anything ever calls
   // saveLead() programmatically while a Promoted/Dead lead is open, refuse cleanly.
   if (leadReadOnly) {
@@ -10099,8 +10219,10 @@ async function saveLead(opts) {
   const nowIso = new Date().toISOString();
   const prevStatus = leadData.status || null;
   const merged = Object.assign({}, leadData, payload);
-  let workingEligibleAt = leadData.working_eligible_at || null;
-  if (!workingEligibleAt && leadWorkingPrereqsMet(merged, null)) workingEligibleAt = nowIso;
+  // Editable window opens once prereqs + a logged next-action exist while New, and
+  // resets on every committed edit (silent autosaves count). See nextWorkingEligibleAt.
+  let workingEligibleAt = nextWorkingEligibleAt(merged, leadData.working_eligible_at || null, nowIso,
+    { reset: wasDirty, redFlagCount: (window._leadRedFlags || []).length });
   merged.working_eligible_at = workingEligibleAt;
   const status = computeLeadStatus(merged, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
   let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
@@ -10139,6 +10261,7 @@ async function saveLead(opts) {
         // Autosave: update only the status badge, and relayout only if the status
         // actually changed — avoids reparenting (focus loss) while the user types.
         renderLeadStatusBadge(leadData.status);
+        updateLeadFormCountdown();   // reflect any window reset from this autosave
         if (leadData.status !== prevStatus) refreshLeadWorkflowChrome();
       } else {
         // Explicit keep-open save (interaction/contact flow, leave-guard): full refresh.
