@@ -634,7 +634,7 @@ tr:hover td{background:#F8FAFC;}
     <!-- Overview Tab -->
     <div class="opp-tab-content active" id="lead-tab-overview">
       <div style="max-width:1160px;margin:0 0 14px;padding:9px 14px;border-left:3px solid var(--red);background:#FFF5F5;border-radius:6px;font-size:12px;color:var(--text2);line-height:1.5;">
-        Fields marked <span style="color:var(--red);font-weight:700;">*</span> must be completed for this lead to advance from <strong>New</strong> to <strong>Working</strong>: a source (with its detail), a description, a target organisation + contact, and a logged next action (Interactions tab). Once all are set, the edit-window countdown runs and the lead then locks to Working.
+        Fields marked <span style="color:var(--red);font-weight:700;">*</span> are required to promote this lead from <strong>New</strong> to <strong>Working</strong>: a source (with its detail), a description, a target organisation + contact (name + email or telephone), and a logged next action (Interactions tab). The moment they're all set the lead becomes <strong>Working</strong>; these fields then stay editable for a short grace window (the countdown) before they lock — and an edit that breaks the requirements drops it back to New.
       </div>
       <div style="display:flex;gap:16px;align-items:flex-start;max-width:1160px;">
         <!-- Left column -->
@@ -671,12 +671,12 @@ tr:hover td{background:#F8FAFC;}
               </div>
               <div class="form-row">
                 <div class="form-group" style="margin-bottom:0;">
-                  <label class="form-label">Email</label>
-                  <input type="email" id="lead-source-person-email" class="form-control" placeholder="referrer@example.com">
+                  <label class="form-label">Email <span id="lead-source-person-email-star" style="color:var(--red)">*</span></label>
+                  <input type="email" id="lead-source-person-email" class="form-control" placeholder="referrer@example.com" oninput="onLeadSourcePersonPairInput()" onblur="validateLeadEmail(this)">
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
-                  <label class="form-label">Phone</label>
-                  <input type="text" id="lead-source-person-phone" class="form-control" placeholder="+27 …">
+                  <label class="form-label">Phone <span id="lead-source-person-phone-star" style="color:var(--red)">*</span></label>
+                  <input type="tel" id="lead-source-person-phone" class="form-control" placeholder="+27 …" onfocus="leadPhoneDefault(this)" oninput="onLeadSourcePersonPairInput()" onblur="validateLeadPhone(this)">
                 </div>
               </div>
             </div>
@@ -788,11 +788,18 @@ tr:hover td{background:#F8FAFC;}
             </select>
             <input type="text" id="lead-target-person-name" class="form-control" placeholder="Contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()">
             <div id="lead-target-person-matches" style="margin-top:8px;"></div>
-            <!-- Telephone + email for a new (free-text) contact. Optional at this
-                 stage; hidden when an existing affiliated contact is picked. -->
+            <!-- Telephone OR email for a new (free-text) contact (one is required;
+                 filling either drops the other's asterisk). Hidden when an existing
+                 affiliated contact is picked. -->
             <div id="lead-target-person-contact" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-              <input type="text" id="lead-target-person-phone" class="form-control" placeholder="Telephone (optional)" style="flex:1;min-width:120px;">
-              <input type="text" id="lead-target-person-email" class="form-control" placeholder="Email (optional)" style="flex:1;min-width:120px;">
+              <div style="flex:1;min-width:120px;">
+                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Telephone <span id="lead-target-person-phone-star" style="color:var(--red)">*</span></label>
+                <input type="tel" id="lead-target-person-phone" class="form-control" placeholder="+27 …" style="width:100%;" onfocus="leadPhoneDefault(this)" oninput="onLeadContactPairInput()" onblur="validateLeadPhone(this)">
+              </div>
+              <div style="flex:1;min-width:120px;">
+                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Email <span id="lead-target-person-email-star" style="color:var(--red)">*</span></label>
+                <input type="email" id="lead-target-person-email" class="form-control" placeholder="name@example.com" style="width:100%;" oninput="onLeadContactPairInput()" onblur="validateLeadEmail(this)">
+              </div>
             </div>
             <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
@@ -6381,12 +6388,12 @@ async function renderLeadsPage() {
       // the "you are here" cue stays strong (inline style is omitted when active
       // so the .opp-tab.active CSS rule wins without specificity fights).
       const tint = (!isActiveTab && LEAD_STATUS_STYLES[t.key]) ? `style="${LEAD_STATUS_STYLES[t.key]}border-color:transparent;"` : '';
-      // New lane: roll up the soonest edit-window to lock so it's visible without opening the tab.
+      // Working lane: roll up the soonest grace window to lock so it's visible without opening the tab.
       let extra = '';
-      if (t.key === 'New') {
-        const counting = leads.filter(l => l.status === 'New' && l.working_eligible_at && leadHasNextStep(l));
-        if (counting.length) {
-          const soonest = Math.min(...counting.map(l => new Date(l.working_eligible_at).getTime()));
+      if (t.key === 'Working') {
+        const inGrace = leads.filter(l => leadInEditGrace(l));
+        if (inGrace.length) {
+          const soonest = Math.min(...inGrace.map(l => new Date(l.working_at).getTime()));
           extra = ' ' + editCountdownChipHtml(soonest, leadWaitingMinutes(), 'lead', { expiredLabel: '🔒' });
         }
       }
@@ -6521,11 +6528,11 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
   }
 
-  // Edit-window countdown: New leads with a logged next-action show remaining
-  // editable time + a red left edge while still editable.
+  // Edit-grace countdown: Working leads still in their editable window show the
+  // remaining time + a red left edge until the fields lock.
   let cdChip = '', rowBorder = 'border-bottom:1px solid var(--border);';
-  if (l.status === 'New' && l.working_eligible_at && leadHasNextStep(l)) {
-    cdChip = ' ' + editCountdownChipHtml(new Date(l.working_eligible_at).getTime(), leadWaitingMinutes(), 'lead', { expiredLabel: '🔒 locking…' });
+  if (leadInEditGrace(l)) {
+    cdChip = ' ' + editCountdownChipHtml(new Date(l.working_at).getTime(), leadWaitingMinutes(), 'lead', { expiredLabel: '🔒 locked' });
     rowBorder += 'box-shadow:inset 3px 0 0 0 var(--red);';
   }
 
@@ -6819,6 +6826,7 @@ async function openLeadForm(id) {
     // else even when the rest of the form is editable (i.e. the owner themselves).
     const leadOwnerSel = document.getElementById('lead-owner-id');
     if (leadOwnerSel && !canAssignOwner(leadData)) leadOwnerSel.disabled = true;
+    applyLeadGraceLock();   // re-lock qualifying fields after applyLeadReadOnly re-enabled them
     document.getElementById('lead-page').classList.add('active');
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
@@ -6906,10 +6914,62 @@ function setLeadSaveIndicator(state) {
   el.textContent = t; el.style.color = c;
 }
 
+// ── Contact / referrer: either-or asterisks + phone(+27 default)/email validation ──
+const LEAD_PHONE_RE = /^\+\d{1,3}[\s-]?(?:\d[\s-]?){6,}\d$/;
+const LEAD_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// A "real" phone has a country code + subscriber digits (not just a bare dialling code).
+function leadHasPhone(v) { return String(v || '').replace(/\D/g, '').length >= 7; }
+function leadPhoneDefault(el) { if (el && !el.value.trim()) el.value = '+27 '; }   // default code, changeable
+function _setLeadFieldValid(el, ok, msg) {
+  if (!el) return;
+  el.style.borderColor = ok ? '' : 'var(--red)';
+  if (ok) el.removeAttribute('title'); else el.title = msg;
+}
+function validateLeadPhone(el) {
+  if (!el) return;
+  let v = el.value.trim();
+  if (v.replace(/\D/g, '').length <= 3) { el.value = ''; v = ''; }   // bare dialling code → clear
+  _setLeadFieldValid(el, !v || LEAD_PHONE_RE.test(v), 'Use international format, e.g. +27 82 123 4567');
+  onLeadContactPairInput(); onLeadSourcePersonPairInput();
+}
+function validateLeadEmail(el) {
+  if (!el) return;
+  const v = el.value.trim();
+  _setLeadFieldValid(el, !v || LEAD_EMAIL_RE.test(v), 'Enter a valid email, e.g. name@example.com');
+}
+// Either-or pair: filling one drops the other's asterisk (only one is required).
+function _eitherOrStars(hasA, hasB, starAId, starBId) {
+  const sa = document.getElementById(starAId), sb = document.getElementById(starBId);
+  if (sa) sa.style.visibility = hasB ? 'hidden' : 'visible';
+  if (sb) sb.style.visibility = hasA ? 'hidden' : 'visible';
+}
+function onLeadContactPairInput() {
+  const phone = document.getElementById('lead-target-person-phone')?.value || '';
+  const email = (document.getElementById('lead-target-person-email')?.value || '').trim();
+  _eitherOrStars(leadHasPhone(phone), !!email, 'lead-target-person-phone-star', 'lead-target-person-email-star');
+}
+function onLeadSourcePersonPairInput() {
+  const email = (document.getElementById('lead-source-person-email')?.value || '').trim();
+  const phone = document.getElementById('lead-source-person-phone')?.value || '';
+  _eitherOrStars(!!email, leadHasPhone(phone), 'lead-source-person-email-star', 'lead-source-person-phone-star');
+}
+// Lock the contact inputs once the lead is past its editable window. Called after
+// applyLeadReadOnly (which re-enables non-terminal forms) so the lock wins.
+function applyLeadGraceLock() {
+  if (leadReadOnly) return;
+  const editable = !leadData.id || (leadData.status || 'New') === 'New' || leadInEditGrace(leadData);
+  ['lead-target-person-id','lead-target-person-name','lead-target-person-phone','lead-target-person-email',
+   'lead-contact-add-name','lead-contact-add-email','lead-contact-add-phone'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.disabled = !editable;
+  });
+}
+
 function markLeadDirty(e) {
   if (leadReadOnly) return;
   leadFormDirty = true;
-  setLeadSaveIndicator('unsaved');
+  // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
+  // indicator shown is "Saved" after a successful save (below).
+  setLeadSaveIndicator('');
   // The description add-box (append-mode) is committed on Save / the leave-guard,
   // never by autosave — autosave must not create duplicate thread entries.
   if (e && e.target && e.target.id === 'lead-description' && leadIsAppendMode()) return;
@@ -6920,17 +6980,16 @@ function markLeadDirty(e) {
 async function leadAutoSaveNow() {
   clearTimeout(_leadAutoSaveTimer);
   if (leadReadOnly || _leadAutoSaveInFlight || !leadFormDirty) return;
-  if (!leadObligatoryFilled()) { setLeadSaveIndicator('unsaved'); return; }
+  if (!leadObligatoryFilled()) { setLeadSaveIndicator(''); return; }
   _leadAutoSaveInFlight = true;
-  setLeadSaveIndicator('saving');
+  // Save silently — no "saving…" indicator.
   let ok = false;
   try { ok = await saveLead({ keepOpen: true, silent: true }); } catch (e) { ok = false; }
   _leadAutoSaveInFlight = false;
-  // A typed-but-uncommitted description note keeps the form "unsaved" until an
-  // explicit Save / the leave-guard writes it as a thread entry.
+  // A typed-but-uncommitted description note stays pending until an explicit Save.
   const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
-  if (ok) { leadFormDirty = pendingNote; setLeadSaveIndicator(pendingNote ? 'unsaved' : 'saved'); }
-  else setLeadSaveIndicator('unsaved');
+  if (ok) { leadFormDirty = pendingNote; setLeadSaveIndicator('saved'); }
+  else setLeadSaveIndicator('');
 }
 
 // Reset dirty tracking and (once) attach input + beforeunload guards.
@@ -7482,6 +7541,9 @@ function populateLeadForm() {
   applyLeadDescriptionMode();
   renderAdditionalContacts();
   onLeadSourceChange();
+  // Initial either-or asterisk state for the contact + referrer pairs.
+  onLeadContactPairInput();
+  onLeadSourcePersonPairInput();
 }
 
 function onLeadSourceChange() {
@@ -8399,36 +8461,65 @@ function applyLeadFormLayout() {
   if (!leftCol || !rightCol || !target || !details || !source || !workflow) return;
 
   const status = leadData.status || 'New';
-  const isNew  = !leadData.id || status === 'New';
+  // Fields stay editable while New, and while Working during the edit-grace window;
+  // they lock once the grace expires (or in any later stage).
+  const editable = !leadData.id || status === 'New' || leadInEditGrace(leadData);
 
   // Left column: Target Client above Details (always). insertBefore relocates the
   // node, pulling Target out of whichever column it currently sits in.
   leftCol.insertBefore(target, details);
 
-  // Right column order by state.
-  if (isNew) {
+  // Right column order: editable → Source top; locked → Workflow top, Source compact below.
+  if (editable) {
     rightCol.insertBefore(source, workflow);   // Source top, Workflow bottom
   } else {
     rightCol.appendChild(workflow);            // Workflow top …
     rightCol.appendChild(source);              // … Source bottom
   }
 
-  applyLeadSourceLock(!isNew);
-  applyLeadTargetOrgLock(!isNew);
+  applyLeadSourceLock(!editable);
+  applyLeadTargetOrgLock(!editable);
+  applyLeadGraceLock();
 }
 
 // Once past New the target organisation is frozen (spec b2 — contact can still
 // change). leadReadOnly (Promoted/Dead) already disables everything globally.
 function applyLeadTargetOrgLock(locked) {
-  const sel  = document.getElementById('lead-target-org-id');
-  const name = document.getElementById('lead-target-org-name');
-  const hint = document.getElementById('lead-target-org-hint');
-  if (locked) {
-    if (sel)  sel.disabled = true;
-    if (name) name.style.display = 'none';
-    if (hint) hint.style.display = 'none';
+  const dd        = document.getElementById('lead-target-org-id');
+  const picker    = document.getElementById('lead-target-org-picker');
+  const chosen    = document.getElementById('lead-target-org-chosen');
+  const chosenNm  = document.getElementById('lead-target-org-chosen-name');
+  const nameField = document.getElementById('lead-target-org-name');
+  const matchEl   = document.getElementById('lead-target-org-matches');
+  const hintEl    = document.getElementById('lead-target-org-hint');
+  const changeBtn = document.getElementById('lead-target-org-change-btn');
+  if (dd) dd.disabled = locked;
+  const hasExisting = !!leadData.target_org_id;
+  const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
+  if (hasExisting || hasNew) {
+    // A chosen org stays in the "picked" chip on reopen (existing FK or free-text new
+    // org), with a Change button only while editable. Fixes the dropdown reappearing.
+    let label;
+    if (hasExisting) {
+      const o = (allData['organisations'] || []).find(x => +x.id === +leadData.target_org_id);
+      label = (o?.name || dd?.options?.[dd.selectedIndex]?.text || '(selected organisation)').replace(/</g, '&lt;');
+    } else {
+      label = `${String(leadData.target_org_name).replace(/</g, '&lt;')} <span style="font-weight:400;color:var(--text3);font-size:11px;">(new organisation)</span>`;
+    }
+    if (chosenNm) chosenNm.innerHTML = label;
+    if (picker)    picker.style.display = 'none';
+    if (chosen)    chosen.style.display = 'flex';
+    if (nameField) nameField.style.display = 'none';
+    if (matchEl)  { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+    if (hintEl)    hintEl.style.display = 'none';
+    if (changeBtn) changeBtn.style.display = locked ? 'none' : '';
+  } else if (locked) {
+    if (picker)    picker.style.display = 'flex';
+    if (chosen)    chosen.style.display = 'none';
+    if (nameField) nameField.style.display = 'none';
+    if (hintEl)    hintEl.style.display = 'none';
   } else {
-    if (sel)  sel.disabled = false;
+    // Editable, nothing chosen yet → live picker + free-text via the change handler.
     if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
   }
 }
@@ -9922,7 +10013,7 @@ function leadSourceComplete(l) {
   const src = (allData['lead_sources'] || []).find(s => +s.id === +l.source_id);
   const name = src ? src.name : '';
   if (name === 'Referral')
-    return !!(l.source_person_id || (l.source_person_name && (l.source_person_email || l.source_person_phone)));
+    return !!(l.source_person_id || (l.source_person_name && ((l.source_person_email && String(l.source_person_email).trim()) || leadHasPhone(l.source_person_phone))));
   if (name === 'Client Expansion')                         return !!l.source_org_id;
   if (name === 'Research Campaign' || name === 'Research')  return !!l.research_campaign_id;
   if (name === 'Sales Campaign')                            return !!l.sales_campaign_id;
@@ -9945,7 +10036,11 @@ function leadTargetComplete(l, primaryContact) {
     hasContact = !!(primaryContact.person_id ||
       (primaryContact.contact_name && (primaryContact.contact_email || primaryContact.contact_phone)));
   } else {
-    hasContact = !!(l.target_person_id || (l.target_person_name && String(l.target_person_name).trim()));
+    // Free-text contact: a name AND at least one of email / telephone (an existing
+    // affiliated person carries its own stored detail, so a FK alone suffices).
+    const nm = l.target_person_name && String(l.target_person_name).trim();
+    const detail = (l.target_person_email && String(l.target_person_email).trim()) || leadHasPhone(l.target_person_phone);
+    hasContact = !!(l.target_person_id || (nm && detail));
   }
   return hasOrg && hasContact;
 }
@@ -9962,11 +10057,18 @@ function leadWorkingPrereqsMet(l, primaryContact) {
   return leadSourceComplete(l) && leadDetailsComplete(l) && leadTargetComplete(l, primaryContact);
 }
 
-// cond5 — the new-lead waiting period has elapsed since the clock started.
-function leadWaitElapsed(l, now) {
-  if (!l || !l.working_eligible_at) return false;
+// Has the post-promotion edit-grace window elapsed? Anchored on working_at (when
+// the lead became Working). During the grace the qualifying fields stay editable;
+// once it elapses, Working locks in (the fields can no longer be changed).
+function leadEditGraceExpired(l, now) {
+  if (!l || !l.working_at) return false;
   const ms = leadWaitingMinutes() * 60000;
-  return ((now || new Date()).getTime() - new Date(l.working_eligible_at).getTime()) >= ms;
+  return ((now || new Date()).getTime() - new Date(l.working_at).getTime()) >= ms;
+}
+
+// Is the lead currently in its editable grace window (Working, not yet locked)?
+function leadInEditGrace(l, now) {
+  return !!(l && l.status === 'Working' && l.working_at && !leadEditGraceExpired(l, now));
 }
 
 // Pure status computation. ctx: { redFlagCount, primaryContact, now }
@@ -9979,10 +10081,12 @@ function computeLeadStatus(l, ctx) {
   const hasEst = l.est_value != null && +l.est_value > 0;
   // Qualified needs all-green + an estimate, and must not be under a peer-review demote hold.
   if (LEAD_GREEN(l) && hasEst && !l.qualification_demoted) return 'Qualified';
-  // Working is sticky once reached; otherwise gated by prereqs + next step + wait.
-  if (l.working_at) return 'Working';
-  if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l) && leadWaitElapsed(l, now))
-    return 'Working';
+  // Once the grace has elapsed, Working is locked in (sticky) and stays Working.
+  if (l.working_at && leadEditGraceExpired(l, now)) return 'Working';
+  // Meeting the mandatory fields promotes to Working immediately (editable grace runs).
+  // If a later edit breaks the criteria during the grace, this falls through to New
+  // ("becomes new again") and the persist layer clears working_at.
+  if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l)) return 'Working';
   return 'New';
 }
 
@@ -9992,37 +10096,36 @@ function computeLeadStatus(l, ctx) {
 async function recomputeOpenLeadStatus() {
   if (!leadData || !leadData.id) return;
   const nowIso = new Date().toISOString();
-  // Open (never reset) the editable window — e.g. when a logged interaction first
-  // supplies the next-action. Reset-on-edit is owned by saveLead.
-  let workingEligibleAt = nextWorkingEligibleAt(leadData, leadData.working_eligible_at || null, nowIso,
-    { reset: false, redFlagCount: (window._leadRedFlags || []).length });
-  const view = Object.assign({}, leadData, { working_eligible_at: workingEligibleAt });
-  const status = computeLeadStatus(view, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
-  let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
+  const status = computeLeadStatus(leadData, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
+  // working_at anchors the editable grace window: stamped when the lead first
+  // becomes Working, cleared if it drops back to New ("becomes new again").
+  let workingAt = leadData.working_at || null;
+  if (status === 'Working' && !workingAt) workingAt = nowIso;
+  if (status === 'New') workingAt = null;
   let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
   let peerReviewStatus = leadData.peer_review_status || null;
   if (status === 'Qualified' && !peerReviewStatus) peerReviewStatus = 'Pending';  // schedule review (spec c)
   const changed = status !== leadData.status
-    || workingEligibleAt !== (leadData.working_eligible_at || null)
     || workingAt !== (leadData.working_at || null)
     || qualifiedAt !== (leadData.qualified_at || null)
     || peerReviewStatus !== (leadData.peer_review_status || null);
   if (!changed) return;
   try {
-    const patch = { status, working_eligible_at: workingEligibleAt, working_at: workingAt, qualified_at: qualifiedAt, peer_review_status: peerReviewStatus, updated_at: nowIso };
+    const patch = { status, working_at: workingAt, qualified_at: qualifiedAt, peer_review_status: peerReviewStatus, updated_at: nowIso };
     const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
     if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
   } catch (e) { console.warn('Lead status persist failed:', e.message); }
 }
 
-// New→Working sweep for the leads list: flips eligible New leads whose waiting
-// period has elapsed. working_eligible_at being set means conds 1-3 were satisfied
-// when it was stamped, so we trust it here rather than reloading each lead's contacts.
+// New→Working sweep for the leads list: promotes any New lead that already meets
+// the mandatory fields (promotion is immediate — no waiting period).
 async function sweepNewToWorking(leads) {
   const now = new Date();
+  // Promotion to Working is immediate once the mandatory fields are met. This keeps
+  // list rows consistent for any lead whose persisted status lags its data.
   const toFlip = (leads || []).filter(l =>
     l.status === 'New' && !l.dead_reason && !l.wake_date && !l.promoted_at &&
-    l.working_eligible_at && leadHasNextStep(l) && leadWaitElapsed(l, now));
+    leadWorkingPrereqsMet(l, null) && leadHasNextStep(l));
   for (const l of toFlip) {
     try {
       const patch = { status: 'Working', working_at: l.working_at || now.toISOString(), updated_at: now.toISOString() };
@@ -10031,21 +10134,6 @@ async function sweepNewToWorking(leads) {
     } catch (e) { /* non-fatal — leave New, retry on next load */ }
   }
   return leads;
-}
-
-// Decide the New-lead editable-window start stamp (`working_eligible_at`). The
-// window opens once the lead has its prereqs (source/details/target) AND a logged
-// next-action while still New, and RESETS on each committed edit (reset-on-edit) so
-// "still editable" tracks time-since-last-touch — the lock fires a full waiting
-// period after the last change. Frozen once the lead moves past New.
-function nextWorkingEligibleAt(rec, prevEligible, nowIso, opts) {
-  opts = opts || {};
-  const pastNew = rec.working_at || rec.qualified_at || rec.promoted_at || rec.wake_date || rec.dead_reason || (opts.redFlagCount || 0) > 0;
-  if (pastNew) return prevEligible || null;
-  const eligible = leadWorkingPrereqsMet(rec, null) && leadHasNextStep(rec);
-  if (!eligible) return prevEligible || null;        // can't start — no next-action yet
-  if (!prevEligible) return nowIso;                  // open the editable window
-  return opts.reset ? nowIso : prevEligible;         // reset-on-edit, else keep counting
 }
 
 // ── Edit-grace countdown (shared: New-leads + engagements) ────────────────
@@ -10070,12 +10158,15 @@ function editCountdownChipHtml(startMs, graceMins, kind, opts) {
     + ` data-cd-expired-label="${expiredLabel.replace(/"/g, '&quot;')}"`;
   return `<span class="edit-cd" ${attrs} style="display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap;background:${bg};color:${fg};" title="${expired ? 'Edit window closed' : 'Editable for ' + fmtCountdown(remain) + ' more'}">${label}</span>`;
 }
-// Lead form chip (or a hint when New but the window hasn't started yet).
+// Lead form chip: a countdown while the lead sits in its editable grace (Working,
+// not yet locked); a prompt while still New (fields incomplete).
 function leadEditCountdownHtml(l) {
-  if (!l || l.status !== 'New') return '';
-  if (l.working_eligible_at && leadHasNextStep(l))
-    return editCountdownChipHtml(new Date(l.working_eligible_at).getTime(), leadWaitingMinutes(), 'lead', { openForm: true, expiredLabel: '🔒 locking…' });
-  return `<span style="font-size:11px;color:var(--text3);">✎ Editable — log a next action to start the lock countdown</span>`;
+  if (!l) return '';
+  if (l.status === 'Working' && l.working_at && !leadEditGraceExpired(l))
+    return editCountdownChipHtml(new Date(l.working_at).getTime(), leadWaitingMinutes(), 'lead', { openForm: true, expiredLabel: '🔒 locked' });
+  if (l.status === 'New')
+    return `<span style="font-size:11px;color:var(--text3);">✎ Complete the <span style="color:var(--red);font-weight:700;">*</span> fields to promote this lead to Working.</span>`;
+  return '';
 }
 function updateLeadFormCountdown() {
   const el = document.getElementById('lead-edit-countdown');
@@ -10108,11 +10199,11 @@ function tickEditCountdowns() {
   if (openLeadExpired) _onOpenLeadEditWindowClosed();
   else if (listExpired && currentPage === 'leads') renderLeadsPage();
 }
-// Open lead's window hit zero → flip New→Working and re-lock the form in place.
+// Open lead's grace hit zero → lock the qualifying fields in place.
 async function _onOpenLeadEditWindowClosed() {
-  if (!leadData || !leadData.id || leadData.status !== 'New') return;
-  await recomputeOpenLeadStatus();
-  if (leadData.status !== 'New') populateLeadForm();
+  if (!leadData || !leadData.id) return;
+  await recomputeOpenLeadStatus();   // status stays Working; refreshes leadData
+  populateLeadForm();                // re-applies the now-expired lock + clears the chip
 }
 
 async function saveLead(opts) {
@@ -10222,16 +10313,14 @@ async function saveLead(opts) {
   const nowIso = new Date().toISOString();
   const prevStatus = leadData.status || null;
   const merged = Object.assign({}, leadData, payload);
-  // Editable window opens once prereqs + a logged next-action exist while New, and
-  // resets on every committed edit (silent autosaves count). See nextWorkingEligibleAt.
-  let workingEligibleAt = nextWorkingEligibleAt(merged, leadData.working_eligible_at || null, nowIso,
-    { reset: wasDirty, redFlagCount: (window._leadRedFlags || []).length });
-  merged.working_eligible_at = workingEligibleAt;
   const status = computeLeadStatus(merged, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
-  let workingAt   = leadData.working_at   || null;  if (status === 'Working'   && !workingAt)   workingAt   = nowIso;
+  // working_at anchors the editable grace: stamped when the lead first becomes
+  // Working, cleared if an edit drops it back to New ("becomes new again").
+  let workingAt   = leadData.working_at   || null;
+  if (status === 'Working' && !workingAt) workingAt = nowIso;
+  if (status === 'New') workingAt = null;
   let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
   payload.status              = status;
-  payload.working_eligible_at = workingEligibleAt;
   payload.working_at          = workingAt;
   payload.qualified_at        = qualifiedAt;
   payload.qualification_demoted = !!leadData.qualification_demoted;
@@ -10251,6 +10340,7 @@ async function saveLead(opts) {
       if (!opts.silent) showStatus('Lead created');
     }
     leadFormDirty = false;
+    if (!opts.silent) setLeadSaveIndicator('saved');   // explicit saves confirm with "Saved"
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
     // Description thread: in append-mode an explicit save commits the add-box as a
