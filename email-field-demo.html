@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email field — format enforcement</title>
+<style>
+  :root{
+    --red:#FA0A11; --navy:#003057; --border:#d7dde3; --bg:#f4f6f8;
+    --text:#0b1726; --text3:#6b7785; --green:#16a34a; --amber:#b45309; --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:var(--text);
+       display:flex;min-height:100vh;align-items:center;justify-content:center;padding:24px;}
+  .card{background:#fff;border:1px solid var(--border);border-radius:16px;max-width:460px;width:100%;
+        padding:28px 28px 24px;box-shadow:0 10px 30px rgba(0,48,87,.08);}
+  h1{font-size:18px;margin:0 0 4px;color:var(--navy);}
+  .sub{font-size:13px;color:var(--text3);margin:0 0 20px;}
+  label{display:block;font-size:13px;font-weight:700;margin-bottom:6px;color:var(--navy);}
+  input{font-family:inherit;font-size:15px;padding:11px 12px;border:1px solid var(--border);
+        border-radius:var(--radius);background:#fff;color:var(--text);width:100%;
+        transition:border-color .15s,box-shadow .15s;}
+  input:focus{outline:none;border-color:var(--navy);box-shadow:0 0 0 3px rgba(0,48,87,.10);}
+  .field.valid input{border-color:var(--green);box-shadow:0 0 0 3px rgba(22,163,74,.10);}
+  .field.invalid input{border-color:var(--red);box-shadow:0 0 0 3px rgba(250,10,17,.10);}
+  .msg{font-size:12px;margin-top:8px;min-height:16px;display:flex;align-items:center;gap:6px;}
+  .msg.ok{color:var(--green);} .msg.err{color:var(--red);} .msg.warn{color:var(--amber);}
+  .msg a{color:var(--amber);font-weight:700;cursor:pointer;text-decoration:underline;}
+  .out{margin-top:18px;padding:12px 14px;background:var(--bg);border-radius:var(--radius);font-size:13px;}
+  .out b{color:var(--navy);} .out code{font-family:ui-monospace,Menlo,Consolas,monospace;}
+  .hint{font-size:11px;color:var(--text3);margin-top:6px;}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Email address</h1>
+    <p class="sub">Format-validated as you type, normalised on save, with typo suggestions.</p>
+
+    <label for="email">Email <span style="color:var(--red)">*</span></label>
+    <div class="field" id="field">
+      <input id="email" type="email" inputmode="email" autocomplete="email"
+             placeholder="name@example.com" aria-describedby="msg" spellcheck="false">
+    </div>
+    <div class="msg" id="msg" role="status" aria-live="polite"></div>
+    <div class="hint">Trimmed and lower-cased; checks for a valid local part, domain and TLD.</div>
+
+    <div class="out">
+      Stored value: <b><code id="stored">—</code></b><br>
+      Valid: <b id="valid">no</b>
+    </div>
+  </div>
+
+<script>
+  const field = document.getElementById('field');
+  const email = document.getElementById('email');
+  const msg   = document.getElementById('msg');
+  const stored= document.getElementById('stored');
+  const validEl = document.getElementById('valid');
+
+  // Pragmatic but strict format check: local@domain.tld, no spaces, sane chars,
+  // a dotted domain with a 2+ char TLD, no consecutive/edge dots.
+  const RE = /^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$/;
+  function structurallyOk(v){
+    if(!RE.test(v)) return false;
+    const [local, domain] = v.split('@');
+    if(local.startsWith('.')||local.endsWith('.')||local.includes('..')) return false;
+    if(domain.startsWith('.')||domain.endsWith('.')||domain.includes('..')||domain.startsWith('-')) return false;
+    return true;
+  }
+
+  // Common domain typos → suggestion.
+  const FIX = {
+    'gmail.con':'gmail.com','gmail.co':'gmail.com','gmial.com':'gmail.com','gmai.com':'gmail.com','gmail.cm':'gmail.com',
+    'hotmail.con':'hotmail.com','hotnail.com':'hotmail.com','hotmai.com':'hotmail.com',
+    'outlook.con':'outlook.com','outlok.com':'outlook.com','yahoo.con':'yahoo.com','yaho.com':'yahoo.com'
+  };
+  function suggestion(v){
+    const at = v.lastIndexOf('@'); if(at<0) return null;
+    const domain = v.slice(at+1).toLowerCase();
+    if(FIX[domain]) return v.slice(0,at+1)+FIX[domain];
+    return null;
+  }
+
+  function render(){
+    const v = email.value.trim().toLowerCase();
+    const ok = structurallyOk(v);
+    const sug = suggestion(v);   // flag a likely typo even when the address is structurally valid
+
+    field.classList.toggle('valid', ok && !sug);
+    field.classList.toggle('invalid', v.length>0 && !ok);
+
+    if(!v.length){ msg.className='msg'; msg.textContent=''; }
+    else if(sug){ msg.className='msg warn'; msg.innerHTML='Did you mean <a id="sug">'+sug+'</a>?';
+      document.getElementById('sug').onclick=()=>{ email.value=sug; render(); email.focus(); }; }
+    else if(ok){ msg.className='msg ok'; msg.textContent='✓ Looks good'; }
+    else { msg.className='msg err'; msg.textContent='Enter a valid email — name@example.com'; }
+
+    stored.textContent = v.length ? v : '—';     // stored normalised (trim + lower-case)
+    validEl.textContent = ok ? 'yes' : 'no';
+    validEl.style.color = ok ? 'var(--green)' : 'var(--red)';
+  }
+
+  email.addEventListener('input', render);
+  email.addEventListener('blur', ()=>{ email.value = email.value.trim().toLowerCase(); render(); });
+  render();
+</script>
+</body>
+</html>

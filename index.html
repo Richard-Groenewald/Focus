@@ -6971,23 +6971,24 @@ function applyLeadGraceLock() {
   if (banner) banner.style.display = editable ? '' : 'none';
   stars.forEach(s => s.style.display = editable ? '' : 'none');
   if (editable) { onLeadContactPairInput(); onLeadSourcePersonPairInput(); }  // restore either-or visibility
+  if (typeof FocusPhone !== 'undefined') FocusPhone.syncDisabled();   // mirror lock state to phone code+national
 }
 
-// ── FocusPhone: international phone-format enforcement on every phone field ──
-// Keeps the full international number in the input itself (so existing save/load
-// paths are unchanged). Defaults to +27 (changeable by editing the code); strips
-// non-digits, drops a leading 0 on the national part, caps + checks length, and
-// formats as you type. Applied to all phone inputs via attachAll + an observer.
+// ── FocusPhone: international phone field with a separate country-code dropdown ──
+// Each phone input is enhanced into [ country-code <select> | national <input> ].
+// The ORIGINAL input is kept (hidden) and holds the full international number, so
+// every existing save/load path that reads it by id is unchanged. Enforces digits
+// only, drops a leading 0, caps + checks length per country, formats as you type.
 const FocusPhone = (() => {
-  const C = [
-    { cc: '27', len: 9 }, { cc: '264', len: 9 }, { cc: '267', len: 8 }, { cc: '263', len: 9 },
-    { cc: '260', len: 9 }, { cc: '258', len: 9 }, { cc: '265', len: 9 }, { cc: '266', len: 8 },
-    { cc: '268', len: 8 }, { cc: '255', len: 9 }, { cc: '254', len: 9 }, { cc: '234', len: 10 },
-    { cc: '44', len: 10 }, { cc: '1', len: 10 }, { cc: '61', len: 9 }, { cc: '91', len: 10 },
-    { cc: '971', len: 9 }, { cc: '49', len: 11 },
+  const COUNTRIES = [
+    { cc: '27', len: 9, flag: '🇿🇦' }, { cc: '264', len: 9, flag: '🇳🇦' }, { cc: '267', len: 8, flag: '🇧🇼' },
+    { cc: '263', len: 9, flag: '🇿🇼' }, { cc: '260', len: 9, flag: '🇿🇲' }, { cc: '258', len: 9, flag: '🇲🇿' },
+    { cc: '44', len: 10, flag: '🇬🇧' }, { cc: '1', len: 10, flag: '🇺🇸' }, { cc: '61', len: 9, flag: '🇦🇺' },
+    { cc: '91', len: 10, flag: '🇮🇳' }, { cc: '971', len: 9, flag: '🇦🇪' }, { cc: '49', len: 11, flag: '🇩🇪' },
   ];
-  const byCc = {}; C.forEach(c => byCc[c.cc] = c);
-  const order = C.map(c => c.cc).sort((a, b) => b.length - a.length);   // longest code first
+  const byCc = {}; COUNTRIES.forEach(c => byCc[c.cc] = c);
+  const order = COUNTRIES.map(c => c.cc).sort((a, b) => b.length - a.length);   // longest code first
+  const reg = [];   // { orig, sel, nat, refresh }
   function group(d) {
     if (d.length <= 2) return d;
     if (d.length <= 5) return d.replace(/(\d{2})(\d+)/, '$1 $2');
@@ -6997,45 +6998,72 @@ const FocusPhone = (() => {
     for (const cc of order) if (digits.startsWith(cc)) return { cc, nat: digits.slice(cc.length) };
     return null;
   }
-  function normalize(raw) {
+  // Parse a stored value (e.g. "+27 82 123 4567" / "+27821234567" / "0821234567") → {cc, nat}.
+  function parse(raw) {
     const s = String(raw == null ? '' : raw).trim();
-    if (!s) return { display: '', valid: true, has: false };
+    if (!s) return { cc: '27', nat: '' };
     const digits = s.replace(/\D/g, '');
-    let cc, nat;
-    if (s[0] === '+') {
-      const m = splitKnown(digits);
-      if (!m) return { display: '+' + digits, valid: digits.length >= 8 && digits.length <= 15, has: digits.length > 0 };
-      cc = m.cc; nat = m.nat;
-    } else {
-      cc = '27'; nat = digits.replace(/^0+/, '');   // a local number → default ZA
+    if (s[0] === '+') { const m = splitKnown(digits); return m || { cc: '27', nat: digits }; }
+    return { cc: '27', nat: digits.replace(/^0+/, '') };
+  }
+  function attach(orig) {
+    if (!orig || orig.dataset.fxPhone || orig.type === 'hidden') return;
+    orig.dataset.fxPhone = '1';
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:6px;width:100%;align-items:stretch;';
+    const sel = document.createElement('select');
+    sel.className = 'form-control';
+    sel.style.cssText = 'flex:0 0 96px;min-width:0;padding:9px 6px 9px 8px;';
+    COUNTRIES.forEach(c => { const o = document.createElement('option'); o.value = c.cc; o.textContent = c.flag + ' +' + c.cc; sel.appendChild(o); });
+    const nat = document.createElement('input');
+    nat.type = 'tel'; nat.inputMode = 'numeric';
+    nat.dataset.fxPhone = '1';   // the national input is itself a tel field — don't re-enhance it
+    nat.className = orig.className || 'form-control';
+    nat.style.cssText = 'flex:1;min-width:0;';
+    nat.placeholder = '82 123 4567';
+    orig.parentNode.insertBefore(wrap, orig);
+    wrap.appendChild(sel); wrap.appendChild(nat); wrap.appendChild(orig);
+    orig.style.display = 'none';
+    function border() {
+      const c = byCc[sel.value] || { len: 14 };
+      const d = nat.value.replace(/\D/g, '');
+      const ok = c.len ? d.length === c.len : d.length >= 6;
+      nat.style.borderColor = !d ? '' : (ok ? 'var(--green,#16a34a)' : 'var(--red)');
+      nat.title = (!d || ok) ? '' : ('Enter ' + (c.len || '') + ' digits for +' + sel.value);
     }
-    const c = byCc[cc];
-    nat = nat.slice(0, c ? c.len : 14);
-    const display = '+' + cc + (nat ? ' ' + group(nat) : ' ');
-    const valid = c ? nat.length === c.len : nat.length >= 6;
-    return { display, valid, has: !!nat };
-  }
-  function enforce(input) {
-    const r = normalize(input.value);
-    if (input.value !== r.display) input.value = r.display;
-    input.style.borderColor = !r.has ? '' : (r.valid ? 'var(--green,#16a34a)' : 'var(--red)');
-    input.title = (!r.has || r.valid) ? '' : 'Enter a full number in international format, e.g. +27 82 123 4567';
-  }
-  function attach(input) {
-    if (!input || input.dataset.fxPhone || input.type === 'hidden') return;
-    input.dataset.fxPhone = '1';
-    input.type = 'tel'; input.setAttribute('autocomplete', 'tel');
-    if (!input.placeholder || /optional/i.test(input.placeholder)) input.placeholder = '+27 82 123 4567';
-    input.addEventListener('focus', () => { if (!input.value.trim()) input.value = '+27 '; });
-    input.addEventListener('input', () => enforce(input));
-    input.addEventListener('blur', () => { if (input.value.replace(/\D/g, '').length <= 3) input.value = ''; enforce(input); });
-    if (input.value) enforce(input);
+    function sync(dispatch) {
+      const c = byCc[sel.value] || { len: 14 };
+      const d = nat.value.replace(/\D/g, '').replace(/^0+/, '').slice(0, c.len);
+      nat.value = group(d);
+      border();
+      const full = d ? ('+' + sel.value + ' ' + group(d)) : '';
+      if (orig.value !== full) {
+        orig.value = full;
+        if (dispatch) { orig.dispatchEvent(new Event('input', { bubbles: true })); orig.dispatchEvent(new Event('change', { bubbles: true })); }
+      }
+    }
+    const rec = { orig, sel, nat, refresh() {
+      const p = parse(orig.value);
+      sel.value = byCc[p.cc] ? p.cc : '27';
+      const c = byCc[sel.value] || { len: 14 };
+      nat.value = group((p.nat || '').slice(0, c.len));
+      border();
+    } };
+    nat.addEventListener('input', () => sync(true));
+    sel.addEventListener('change', () => { nat.focus(); sync(true); });
+    reg.push(rec);
+    rec.refresh();
   }
   function attachAll(root) {
     try { (root || document).querySelectorAll('input[type="tel"],input[id*="phone" i],input[id*="mobile" i]').forEach(attach); }
     catch (e) {}
   }
-  return { attach, attachAll, normalize };
+  // Re-sync the visible controls from the (hidden) original — call after code sets a
+  // phone value programmatically (e.g. populateLeadForm).
+  function refreshAll() { reg.forEach(r => { if (r.orig.isConnected) r.refresh(); }); }
+  // Mirror the original's disabled state to the visible controls (grace-lock etc.).
+  function syncDisabled() { reg.forEach(r => { if (r.orig.isConnected) { r.sel.disabled = r.nat.disabled = !!r.orig.disabled; } }); }
+  return { attach, attachAll, refreshAll, syncDisabled };
 })();
 function _fxPhoneInit() {
   FocusPhone.attachAll();
@@ -7627,6 +7655,7 @@ function populateLeadForm() {
   // Initial either-or asterisk state for the contact + referrer pairs.
   onLeadContactPairInput();
   onLeadSourcePersonPairInput();
+  if (typeof FocusPhone !== 'undefined') FocusPhone.refreshAll();   // sync phone code+national from loaded values
 }
 
 function onLeadSourceChange() {
