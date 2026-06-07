@@ -632,7 +632,7 @@ tr:hover td{background:#F8FAFC;}
 <div class="opp-page" id="lead-page">
   <div class="opp-topbar">
     <button class="btn btn-ghost btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">← Back</button>
-    <div class="opp-topbar-title" id="lead-page-title" style="flex:0 0 auto;">New Lead</div>
+    <div class="opp-topbar-title" id="lead-page-title" style="flex:0 0 auto;">Load Lead</div>
     <!-- Lead status badge sits right after the title; edit-window countdown + promotion note follow it. -->
     <span id="lead-status-badge" style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;background:#f3f4f6;color:#4b5563;">—</span>
     <span id="lead-edit-countdown"></span>
@@ -679,7 +679,7 @@ tr:hover td{background:#F8FAFC;}
 
         <!-- Source section -->
         <div class="opp-section" id="lead-source-section">
-          <div class="opp-section-title">Source</div>
+          <div class="opp-section-title">Lead Origin</div>
 
           <div class="form-group">
             <label class="form-label">Source <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
@@ -757,33 +757,38 @@ tr:hover td{background:#F8FAFC;}
           </div>
         </div>
 
-        <!-- Service focus (own card; applyLeadFormLayout places it above Details) -->
+        <!-- Product/Service Opportunity (own card; applyLeadFormLayout places it above Details) -->
         <div class="opp-section" id="lead-service-section">
-          <div class="opp-section-title">Service focus</div>
+          <div class="opp-section-title">Principle Service Focus</div>
           <div class="form-group" style="margin-bottom:0;">
-            <select id="lead-service-major-id" class="form-control" onchange="onLeadServiceMajorChange()">
-              <option value="">— select major —</option>
+            <!-- Single dropdown: an optgroup per major, with the major itself selectable
+                 as "(general)" plus each of its subs. The hidden inputs keep the major/sub
+                 split so save + promote are unchanged. -->
+            <select id="lead-service-combo" class="form-control" onchange="onLeadServiceComboChange()">
+              <option value="">— select —</option>
             </select>
-            <select id="lead-service-sub-id" class="form-control" style="margin-top:6px;">
-              <option value="">— select sub —</option>
-            </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Major + sub carry across to the opportunity on promote. You can still change either in the wizard.</div>
+            <input type="hidden" id="lead-service-major-id">
+            <input type="hidden" id="lead-service-sub-id">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Carries across to the opportunity on promote. You can still change it in the wizard.</div>
           </div>
         </div>
 
         <!-- Details section -->
         <div class="opp-section" id="lead-details-section">
-          <div class="opp-section-title">Details</div>
+          <div class="opp-section-title">Details and Notes</div>
 
           <div class="form-group">
             <label class="form-label" id="lead-description-label">Description <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <textarea id="lead-description" class="form-control" rows="4" placeholder="What's the opportunity here? Why is this a lead?"></textarea>
             <div id="lead-description-history" style="display:none;margin-top:8px;"></div>
           </div>
+        </div>
 
-          <div class="form-group">
-            <label class="form-label">Estimated annual value (ZAR)</label>
-            <input type="number" id="lead-est-value" class="form-control" placeholder="Back-of-envelope estimate, optional" step="1000">
+        <!-- Estimated Deal Value (own card; applyLeadFormLayout places it between Target and Source) -->
+        <div class="opp-section" id="lead-estvalue-section">
+          <div class="opp-section-title">Estimated Deal Value</div>
+          <div class="form-group" style="margin-bottom:0;">
+            <input type="number" id="lead-est-value" class="form-control" placeholder="Back-of-envelope estimate (ZAR), optional" step="1000">
           </div>
         </div>
         </div>
@@ -796,7 +801,7 @@ tr:hover td{background:#F8FAFC;}
           <div class="opp-section-title">Target Client</div>
 
           <div class="form-group">
-            <label class="form-label">Organisation name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+            <label class="form-label"><span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <div id="lead-target-org-picker" style="display:flex;gap:8px;">
               <select id="lead-target-org-id" class="form-control" style="flex:1;" onchange="onLeadTargetOrgChange()">
                 <option value="">Pick from known organisations in our database or create a new one below</option>
@@ -6856,7 +6861,7 @@ async function openNewLead() {
   // Default owner = current user
   const ownerSel = document.getElementById('lead-owner-id');
   if (ownerSel && currentUser?.personId) ownerSel.value = currentUser.personId;
-  document.getElementById('lead-page-title').textContent = 'New Lead';
+  document.getElementById('lead-page-title').textContent = 'Load Lead';
   applyLeadReadOnly(false);  // New leads are always editable
   window._leadRevert = { lead: {}, contacts: [], interactions: [], descLog: [] };  // revert = discard the new lead
   // Only managers/admin may assign an owner other than themselves.
@@ -7573,7 +7578,7 @@ function resetLeadForm() {
     'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
     'lead-target-person-name','lead-target-person-phone','lead-target-person-email',
-    'lead-description','lead-region-id','lead-service-major-id',
+    'lead-description','lead-region-id','lead-service-combo','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
     'lead-dead-reason-value','lead-dead-notes-value'
@@ -7674,11 +7679,8 @@ async function initLeadForm() {
   regionSel.innerHTML = '<option value="">— select —</option>' +
     regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
 
-  const serviceSel = document.getElementById('lead-service-major-id');
-  serviceSel.innerHTML = '<option value="">— select major —</option>' +
-    services.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-  // Service sub is filtered by the chosen major; helper repopulates it
-  refreshLeadServiceSubDropdown();
+  // Single combined Product/Service dropdown (optgroup per major + its subs).
+  populateLeadServiceCombo();
 
   // Owner: Xone people if available, else all
   const xonePeople = people.filter(p => p.is_xone);
@@ -7870,13 +7872,9 @@ function populateLeadForm() {
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
-  if (leadData.service_major_id) document.getElementById('lead-service-major-id').value = leadData.service_major_id;
-  // Refilter sub options for the loaded major, then set saved sub
-  refreshLeadServiceSubDropdown();
-  if (leadData.service_sub_id) {
-    const subSel = document.getElementById('lead-service-sub-id');
-    if (subSel) subSel.value = leadData.service_sub_id;
-  }
+  document.getElementById('lead-service-major-id').value = leadData.service_major_id || '';
+  document.getElementById('lead-service-sub-id').value   = leadData.service_sub_id   || '';
+  setLeadServiceComboFromHidden();   // reflect the stored major/sub in the combined dropdown
   if (leadData.est_value != null) document.getElementById('lead-est-value').value = leadData.est_value;
   // Workflow
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
@@ -7999,6 +7997,58 @@ function onLeadTargetOrgChange() {
 // options. Empty sub remains valid (lead can be created before sub is decided).
 function onLeadServiceMajorChange() {
   refreshLeadServiceSubDropdown();
+}
+
+// ── Combined Product/Service dropdown ─────────────────────────────────────────
+// One <select> with an optgroup per major: the major itself is selectable as a
+// "(general)" choice, plus each of its subs. The selection is mirrored into the
+// hidden lead-service-major-id / lead-service-sub-id inputs so save + promote
+// (which read those by id) are unchanged.
+function populateLeadServiceCombo() {
+  const sel = document.getElementById('lead-service-combo');
+  if (!sel) return;
+  const majors = allData['service_major'] || [];
+  const subs   = allData['service_sub_all'] || [];
+  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+  let html = '<option value="">— select —</option>';
+  majors.forEach(m => {
+    const ms = subs.filter(s => +s.major_id === +m.id);
+    html += `<optgroup label="${esc(m.name)}">`;
+    html += `<option value="m:${m.id}">${esc(m.name)} — (general)</option>`;
+    ms.forEach(s => { html += `<option value="s:${s.id}">${esc(s.name)}${s.is_recurring ? ' (recurring)' : ' (project)'}</option>`; });
+    html += `</optgroup>`;
+  });
+  sel.innerHTML = html;
+  setLeadServiceComboFromHidden();
+}
+
+// Mirror the combined selection into the hidden major/sub inputs. "m:<id>" is
+// major-only (sub cleared); "s:<id>" sets the sub and derives its parent major.
+function onLeadServiceComboChange() {
+  const sel = document.getElementById('lead-service-combo');
+  const maj = document.getElementById('lead-service-major-id');
+  const sub = document.getElementById('lead-service-sub-id');
+  if (!sel || !maj || !sub) return;
+  const v = sel.value || '';
+  if (v.startsWith('s:')) {
+    const subId = +v.slice(2);
+    const row = (allData['service_sub_all'] || []).find(s => +s.id === subId);
+    sub.value = subId || '';
+    maj.value = row ? row.major_id : '';
+  } else if (v.startsWith('m:')) {
+    maj.value = v.slice(2); sub.value = '';
+  } else {
+    maj.value = ''; sub.value = '';
+  }
+}
+
+// Set the combined dropdown from the hidden major/sub values (sub wins if present).
+function setLeadServiceComboFromHidden() {
+  const sel = document.getElementById('lead-service-combo');
+  if (!sel) return;
+  const majorId = +(document.getElementById('lead-service-major-id')?.value || 0);
+  const subId   = +(document.getElementById('lead-service-sub-id')?.value || 0);
+  sel.value = subId ? ('s:' + subId) : (majorId ? ('m:' + majorId) : '');
 }
 
 function refreshLeadServiceSubDropdown() {
@@ -8862,6 +8912,7 @@ function applyLeadFormLayout() {
   const details  = document.getElementById('lead-details-section');
   const source   = document.getElementById('lead-source-section');
   const service  = document.getElementById('lead-service-section');
+  const estval   = document.getElementById('lead-estvalue-section');
   const workflow = document.getElementById('lead-workflow-section');
   if (!leftCol || !rightCol || !target || !details || !source) return;
 
@@ -8874,7 +8925,7 @@ function applyLeadFormLayout() {
   // then the status-specific blocks. Reparent only when the order is actually wrong —
   // needlessly moving a section blurs whatever field the user is mid-editing (notably
   // during the New→Working autosave flip, which makes the typed value look lost).
-  _ensureLeadColumnOrder(leftCol,  [target, source]);
+  _ensureLeadColumnOrder(leftCol,  [target, estval, source].filter(Boolean));
   _ensureLeadColumnOrder(rightCol, [service, details, workflow].filter(Boolean));
 
   applyLeadProgressiveReveal();
@@ -8892,11 +8943,13 @@ function applyLeadProgressiveReveal() {
   const target  = document.getElementById('lead-target-section');
   const details = document.getElementById('lead-details-section');
   const service = document.getElementById('lead-service-section');
+  const estval  = document.getElementById('lead-estvalue-section');
   if (!target || !details) return;
   const showAll = !!leadData.id || leadLiveSourceComplete();
   target.style.display  = showAll ? '' : 'none';
   details.style.display = showAll ? '' : 'none';
   if (service) service.style.display = showAll ? '' : 'none';
+  if (estval)  estval.style.display  = showAll ? '' : 'none';
 }
 
 // Mirror the current Source form fields into a lead-shaped object and run the shared
