@@ -251,6 +251,9 @@ tr:hover td{background:#F8FAFC;}
 .opp-tab.active:hover { background:var(--navy); color:#fff; }
 .opp-tab-content { display:none; padding-top:20px; }
 .opp-tab-content.active { display:block; }
+/* Lead tab panel: a subtle cool tint beneath the tabs so the working area reads as
+   a distinct panel (white cards pop against it). Scoped to the lead page only. */
+#lead-page .opp-tab-content { background:#EAEFF5; border:1px solid var(--border); border-radius:0 var(--radius) var(--radius) var(--radius); padding:20px; }
 .opp-section { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:16px; }
 .opp-section-title { font-size:12px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:16px; }
 .opp-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -7577,6 +7580,16 @@ async function initLeadForm() {
   sourceSel.innerHTML = '<option value="">— select source —</option>' +
     sources.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
 
+  // Progressive reveal also depends on the source's follow-up detail, so re-check on
+  // any edit within the Source section (typed referrer/detail, campaign/client pick).
+  // Bound once via a flag on the element.
+  const srcSection = document.getElementById('lead-source-section');
+  if (srcSection && !srcSection._revealBound) {
+    srcSection._revealBound = true;
+    srcSection.addEventListener('input',  applyLeadProgressiveReveal);
+    srcSection.addEventListener('change', applyLeadProgressiveReveal);
+  }
+
   const regionSel = document.getElementById('lead-region-id');
   regionSel.innerHTML = '<option value="">— select —</option>' +
     regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
@@ -8506,6 +8519,7 @@ function useLeadSourcePersonMatch(personId) {
         <button type="button" class="btn btn-secondary btn-sm" onclick="changeLeadSourcePerson()">Change</button>
       </div>`;
   }
+  applyLeadProgressiveReveal();   // FK set programmatically — re-check completeness
 }
 
 // "Change" on the confirmation: drop the FK and return to free-type entry.
@@ -8525,6 +8539,7 @@ function _clearLeadSourcePersonSelection() {
   if (fk) fk.value = '';
   const sel = document.getElementById('lead-source-person-selected');
   if (sel) { sel.style.display = 'none'; sel.innerHTML = ''; }
+  applyLeadProgressiveReveal();   // FK cleared programmatically — re-check completeness
 }
 
 // Renders the referrer sub-UI from current field state. Called when the
@@ -8739,6 +8754,16 @@ function canSetDeadReason(reason) {
   return true;
 }
 
+// Set a column's children to exactly `nodes` in order, but ONLY if they aren't
+// already so — a no-op when nothing moves, which avoids blurring a focused input.
+function _ensureLeadColumnOrder(parent, nodes) {
+  if (!parent) return;
+  const cur = Array.from(parent.children);
+  const same = cur.length === nodes.length && nodes.every((n, i) => cur[i] === n);
+  if (same) return;
+  nodes.forEach(n => parent.appendChild(n));
+}
+
 // ── Stateful Overview layout ──────────────────────────────────────────────────
 // Left column: Target Client (top) + Source (bottom). Right column: Details, with
 // the status-specific blocks (peer review / wake / dead) beneath it. Source stays a
@@ -8759,13 +8784,12 @@ function applyLeadFormLayout() {
   // they lock once the grace expires (or in any later stage).
   const editable = !leadData.id || status === 'New' || leadInEditGrace(leadData);
 
-  // Left column: Target Client (top) then Source (bottom). appendChild relocates
-  // each node, pulling it out of whichever column it currently sits in.
-  leftCol.appendChild(target);
-  leftCol.appendChild(source);
-  // Right column: Details, then the status-specific blocks below it.
-  rightCol.appendChild(details);
-  if (workflow) rightCol.appendChild(workflow);
+  // Left column: Target Client (top) then Source (bottom). Right column: Details,
+  // then the status-specific blocks. Reparent only when the order is actually wrong —
+  // needlessly moving a section blurs whatever field the user is mid-editing (notably
+  // during the New→Working autosave flip, which makes the typed value look lost).
+  _ensureLeadColumnOrder(leftCol,  [target, source]);
+  _ensureLeadColumnOrder(rightCol, [details, workflow].filter(Boolean));
 
   applyLeadProgressiveReveal();
   applyLeadSourceLock(!editable);
@@ -8773,17 +8797,35 @@ function applyLeadFormLayout() {
   applyLeadGraceLock();
 }
 
-// Brand-new leads reveal progressively: only the Source question shows until a
-// source is chosen, then Target Client + Details appear. Any saved lead (has an id)
-// always shows everything.
+// Brand-new leads reveal progressively: the Source question shows alone until the
+// source is *complete* — both the source type AND its follow-up detail (referrer /
+// client / campaign / detail text) — then Target Client + Details appear. Any saved
+// lead (has an id) always shows everything. Reuses leadSourceComplete() against the
+// live form fields so the completeness rule stays in one place.
 function applyLeadProgressiveReveal() {
   const target  = document.getElementById('lead-target-section');
   const details = document.getElementById('lead-details-section');
   if (!target || !details) return;
-  const sourceChosen = !!(document.getElementById('lead-source-id') || {}).value;
-  const showAll = sourceChosen || !!leadData.id;
+  const showAll = !!leadData.id || leadLiveSourceComplete();
   target.style.display  = showAll ? '' : 'none';
   details.style.display = showAll ? '' : 'none';
+}
+
+// Mirror the current Source form fields into a lead-shaped object and run the shared
+// completeness check — covers each source type's required follow-up field.
+function leadLiveSourceComplete() {
+  const v = id => ((document.getElementById(id) || {}).value || '');
+  return leadSourceComplete({
+    source_id:           v('lead-source-id'),
+    source_person_id:    v('lead-source-person-id'),
+    source_person_name:  v('lead-source-person-name'),
+    source_person_email: v('lead-source-person-email'),
+    source_person_phone: v('lead-source-person-phone'),
+    source_org_id:       v('lead-source-org-id'),
+    research_campaign_id:v('lead-research-campaign-id'),
+    sales_campaign_id:   v('lead-sales-campaign-id'),
+    source_detail:       v('lead-source-detail'),
+  });
 }
 
 // Once past New the target organisation is frozen (spec b2 — contact can still
@@ -8798,6 +8840,11 @@ function applyLeadTargetOrgLock(locked) {
   const hintEl    = document.getElementById('lead-target-org-hint');
   const changeBtn = document.getElementById('lead-target-org-change-btn');
   if (dd) dd.disabled = locked;
+  // Mid-type protection: if the user is actively editing a free-text new-org name when
+  // a relayout fires (notably the New→Working autosave flip), don't collapse the input
+  // into the chosen chip — that reads as the typed name vanishing. It collapses on the
+  // next relayout once the field no longer has focus.
+  if (!locked && !leadData.target_org_id && nameField && document.activeElement === nameField) return;
   const hasExisting = !!leadData.target_org_id;
   const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
   if (hasExisting || hasNew) {
