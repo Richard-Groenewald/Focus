@@ -757,33 +757,28 @@ tr:hover td{background:#F8FAFC;}
           </div>
         </div>
 
+        <!-- Service focus (own card; applyLeadFormLayout places it above Details) -->
+        <div class="opp-section" id="lead-service-section">
+          <div class="opp-section-title">Service focus</div>
+          <div class="form-group" style="margin-bottom:0;">
+            <select id="lead-service-major-id" class="form-control" onchange="onLeadServiceMajorChange()">
+              <option value="">— select major —</option>
+            </select>
+            <select id="lead-service-sub-id" class="form-control" style="margin-top:6px;">
+              <option value="">— select sub —</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Major + sub carry across to the opportunity on promote. You can still change either in the wizard.</div>
+          </div>
+        </div>
+
         <!-- Details section -->
         <div class="opp-section" id="lead-details-section">
           <div class="opp-section-title">Details</div>
 
           <div class="form-group">
             <label class="form-label" id="lead-description-label">Description <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-            <div id="lead-description-history" style="display:none;margin-bottom:8px;"></div>
             <textarea id="lead-description" class="form-control" rows="4" placeholder="What's the opportunity here? Why is this a lead?"></textarea>
-          </div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Region</label>
-              <select id="lead-region-id" class="form-control">
-                <option value="">— select —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Service focus</label>
-              <select id="lead-service-major-id" class="form-control" onchange="onLeadServiceMajorChange()">
-                <option value="">— select major —</option>
-              </select>
-              <select id="lead-service-sub-id" class="form-control" style="margin-top:6px;">
-                <option value="">— select sub —</option>
-              </select>
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Major + sub carry across to the opportunity on promote. You can still change either in the wizard.</div>
-            </div>
+            <div id="lead-description-history" style="display:none;margin-top:8px;"></div>
           </div>
 
           <div class="form-group">
@@ -816,6 +811,14 @@ tr:hover td{background:#F8FAFC;}
             <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
             <div id="lead-target-org-matches" style="margin-top:8px;"></div>
             <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
+          </div>
+
+          <!-- Region (moved here — below the client / Organisation name) -->
+          <div class="form-group">
+            <label class="form-label">Region</label>
+            <select id="lead-region-id" class="form-control">
+              <option value="">— select —</option>
+            </select>
           </div>
 
           <div class="form-group">
@@ -7889,6 +7892,7 @@ function populateLeadForm() {
   refreshLeadWorkflowChrome();
   applyLeadDescriptionMode();
   renderAdditionalContacts();
+  updateLeadAdditionalContactsAvailability();   // re-show the Add-contact row on reopen (New/Working/Qualified/Dormant)
   onLeadSourceChange();
   // Initial either-or asterisk state for the contact + referrer pairs.
   onLeadContactPairInput();
@@ -8857,6 +8861,7 @@ function applyLeadFormLayout() {
   const target   = document.getElementById('lead-target-section');
   const details  = document.getElementById('lead-details-section');
   const source   = document.getElementById('lead-source-section');
+  const service  = document.getElementById('lead-service-section');
   const workflow = document.getElementById('lead-workflow-section');
   if (!leftCol || !rightCol || !target || !details || !source) return;
 
@@ -8870,7 +8875,7 @@ function applyLeadFormLayout() {
   // needlessly moving a section blurs whatever field the user is mid-editing (notably
   // during the New→Working autosave flip, which makes the typed value look lost).
   _ensureLeadColumnOrder(leftCol,  [target, source]);
-  _ensureLeadColumnOrder(rightCol, [details, workflow].filter(Boolean));
+  _ensureLeadColumnOrder(rightCol, [service, details, workflow].filter(Boolean));
 
   applyLeadProgressiveReveal();
   applyLeadSourceLock(!editable);
@@ -8886,10 +8891,12 @@ function applyLeadFormLayout() {
 function applyLeadProgressiveReveal() {
   const target  = document.getElementById('lead-target-section');
   const details = document.getElementById('lead-details-section');
+  const service = document.getElementById('lead-service-section');
   if (!target || !details) return;
   const showAll = !!leadData.id || leadLiveSourceComplete();
   target.style.display  = showAll ? '' : 'none';
   details.style.display = showAll ? '' : 'none';
+  if (service) service.style.display = showAll ? '' : 'none';
 }
 
 // Mirror the current Source form fields into a lead-shaped object and run the shared
@@ -10874,7 +10881,13 @@ function renderLeadInteractions() {
 
     const notesFull = (i.notes || '').trim();
     const notesPreview = notesFull.length > 100 ? notesFull.slice(0, 100).trimEnd() + '…' : notesFull;
+    // Chain marker: this interaction was logged as related to an earlier one.
+    const chainParent = i.related_interaction_id ? leadInteractions.find(x => +x.id === +i.related_interaction_id) : null;
+    const chainMark = chainParent
+      ? `<span title="Related to ${((chainParent.engagement_date || '') + (chainParent.engagement_type ? ' · ' + chainParent.engagement_type : '')).replace(/"/g,'&quot;')}" style="color:var(--navy);font-weight:700;flex-shrink:0;">↳</span>`
+      : '';
     const typeCell = `<div style="display:flex;align-items:center;gap:10px;min-width:0;">
+      ${chainMark}
       <span class="eng-badge" style="flex-shrink:0;">${i.engagement_type || ''}</span>
       ${notesPreview ? `<span style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${notesPreview}</span>` : ''}
     </div>`;
@@ -10926,13 +10939,26 @@ function renderLeadInteractionModalHtml(mode, interaction) {
   const actionDetailsValue = (i.action_details || '').replace(/</g,'&lt;');
   const nextDateValue = i.next_action_date || '';
   const nextDone = !!i.next_action_done;
-  const banner = isView
-    ? `<div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">View only — edit window has closed.</div>`
-    : '';
+  // After the edit window closes the interaction is mostly view-only, but Action
+  // Details and the completion status (done + completion note) stay editable/savable.
   const dis = isView ? 'disabled' : '';
+  const banner = isView
+    ? `<div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">Edit window closed — only <b>Action Details</b> and the <b>completion</b> status can still be updated.</div>`
+    : '';
+  // Related-interaction chain: a follow-up created from an existing interaction points
+  // back to it (related_interaction_id). Show that link at the top of the modal.
+  const relatedToId   = mode === 'new' ? (window._liRelatedTo || null) : (i.related_interaction_id || null);
+  const relatedParent = relatedToId ? (leadInteractions || []).find(x => +x.id === +relatedToId) : null;
+  const relatedNote = relatedParent
+    ? `<div style="margin:-4px 0 12px;padding:8px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);">↳ Related to: <strong>${(relatedParent.engagement_date || '')}${relatedParent.engagement_type ? ' · ' + String(relatedParent.engagement_type).replace(/</g,'&lt;') : ''}</strong></div>`
+    : '';
+  const relatedBtn = (mode !== 'new' && i.id)
+    ? `<button class="btn btn-secondary" onclick="openLeadInteractionRelated(${i.id})" style="margin-right:auto;">+ Related interaction</button>`
+    : '';
   const footer = isView
-    ? `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
-    : `<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+    ? `${relatedBtn}<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+       <button class="btn btn-primary" onclick="saveLeadInteraction(${i.id})">Save</button>`
+    : `${relatedBtn}<button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
        <button class="btn btn-primary" onclick="saveLeadInteraction(${mode === 'edit' ? i.id : 'null'})">Save</button>`;
 
   return `
@@ -10944,6 +10970,7 @@ function renderLeadInteractionModalHtml(mode, interaction) {
         </div>
         <div class="modal-body">
           ${banner}
+          ${relatedNote}
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Date</label>
@@ -10974,18 +11001,18 @@ function renderLeadInteractionModalHtml(mode, interaction) {
           </div>
           <div class="form-group">
             <label class="form-label">Action Details</label>
-            <textarea id="li-action-details" class="form-control" rows="2" placeholder="More on what happens next..." ${dis}>${actionDetailsValue}</textarea>
+            <textarea id="li-action-details" class="form-control" rows="2" placeholder="More on what happens next...">${actionDetailsValue}</textarea>
           </div>
           <div class="form-group" style="margin-top:-4px;">
             <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer;flex-wrap:wrap;">
-              <input type="checkbox" id="li-next-done" ${nextDone ? 'checked' : ''} ${dis} style="margin:0;" onchange="document.getElementById('li-completion-note-wrap').style.display=this.checked?'block':'none'">
+              <input type="checkbox" id="li-next-done" ${nextDone ? 'checked' : ''} style="margin:0;" onchange="document.getElementById('li-completion-note-wrap').style.display=this.checked?'block':'none'">
               <span>Next action completed</span>
               <span id="li-completed-at-inline" style="font-size:12px;color:var(--text3);font-weight:600;"></span>
             </label>
           </div>
           <div class="form-group" id="li-completion-note-wrap" style="display:none;margin-top:6px;">
             <label class="form-label">Completion Note</label>
-            <textarea id="li-completion-note-input" class="form-control" rows="2" placeholder="What did you do?" ${dis}></textarea>
+            <textarea id="li-completion-note-input" class="form-control" rows="2" placeholder="What did you do?"></textarea>
           </div>
         </div>
         <div class="modal-footer">${footer}</div>
@@ -11024,6 +11051,17 @@ async function openLeadInteractionModal() {
     const ok = await saveLead({ keepOpen: true });
     if (!ok || !leadData.id) return;
   }
+  window._liRelatedTo = null;   // a plain new interaction is not part of a chain
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
+  window._liEditing = null;
+  await loadLiLookups();
+}
+
+// Initiate a NEW interaction that references an existing one (the chain parent).
+// Nothing carries over except the link (related_interaction_id, written on save).
+async function openLeadInteractionRelated(parentId) {
+  if (!leadData.id) return;
+  window._liRelatedTo = +parentId || null;
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -11103,8 +11141,10 @@ async function saveLeadInteraction(editId) {
       await api('lead_interactions', 'POST', {
         ...payload,
         lead_id: leadData.id,
+        related_interaction_id: window._liRelatedTo || null,
         created_by: currentUser?.personId || null,
       }, '');
+      window._liRelatedTo = null;
       showStatus('Interaction logged');
     }
     // Bump last_touch_date on the lead (on both create and edit, since edit can change the date)
