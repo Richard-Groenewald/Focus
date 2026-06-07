@@ -254,6 +254,21 @@ tr:hover td{background:#F8FAFC;}
 /* Lead tab panel: a subtle cool tint beneath the tabs so the working area reads as
    a distinct panel (white cards pop against it). Scoped to the lead page only. */
 #lead-page .opp-tab-content { background:#EAEFF5; border:1px solid var(--border); border-radius:0 var(--radius) var(--radius) var(--radius); padding:20px; }
+/* Next-action arrow cue: points at the Interactions tab when a follow-up is needed,
+   or at the next-action text once one exists. The horizontal flip and the nudge
+   animation live on separate elements so their transforms don't clobber each other. */
+@keyframes leadArrowNudge     { 0%,100%{transform:translateX(0)}            50%{transform:translateX(5px)} }
+@keyframes leadArrowNudgeFlip { 0%,100%{transform:scaleX(-1) translateX(0)} 50%{transform:scaleX(-1) translateX(5px)} }
+.lead-na-arrow { display:inline-flex; align-items:center; flex-shrink:0; }
+/* Flip is baked into the keyframe (not a separate static transform) so the scaleX
+   and the nudge translateX live on one animated property and never clobber. */
+.lead-na-arrow .nudge { display:inline-flex; animation:leadArrowNudge 1s ease-in-out infinite; }
+.lead-na-arrow.flip .nudge { animation-name:leadArrowNudgeFlip; }
+.lead-na-arrow svg { display:block; }
+/* Qualification hover popup: shows immediately on hover over a dimension's name +
+   display-description block, preserving the formatted (tabs/bullets) hover text. */
+.qual-hover-wrap .qual-hover-pop { display:none; position:absolute; top:100%; left:0; margin-top:6px; z-index:60; min-width:240px; max-width:420px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); box-shadow:0 8px 24px rgba(0,0,0,0.14); padding:10px 13px; font-size:12px; line-height:1.55; color:var(--text); white-space:pre-wrap; tab-size:4; }
+.qual-hover-wrap:hover .qual-hover-pop { display:block; }
 .opp-section { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:16px; }
 .opp-section-title { font-size:12px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.06em; margin-bottom:16px; }
 .opp-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
@@ -643,7 +658,7 @@ tr:hover td{background:#F8FAFC;}
         <button class="opp-tab" onclick="switchLeadTab('interactions', this)">Interactions</button>
       </div>
       <!-- Next action / "follow-up required" prompt — rendered by renderLeadNextActionChip() -->
-      <span id="lead-next-action-chip" style="font-size:12px;line-height:1.4;padding-bottom:10px;"></span>
+      <span id="lead-next-action-chip" style="display:inline-flex;align-items:center;gap:8px;font-size:12px;line-height:1.4;padding-bottom:8px;"></span>
       <div style="flex:1;"></div>
       <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;" id="lead-owner-chip">
         <label class="form-label" style="margin:0;white-space:nowrap;">Owner</label>
@@ -2117,19 +2132,21 @@ const PAGES = {
     title: 'Qualification Dimensions',
     table: 'qualification_dimensions',
     columns: [
-      { key: 'label',       label: 'Dimension' },
-      { key: 'key',         label: 'Field key' },
-      { key: 'description', label: 'Description (shown on hover)' },
-      { key: 'sort_order',  label: 'Sort Order' },
-      { key: 'active',      label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+      { key: 'label',               label: 'Dimension' },
+      { key: 'key',                 label: 'Field key' },
+      { key: 'display_description',  label: 'Description (Display)' },
+      { key: 'description',         label: 'Description (Show on hover)' },
+      { key: 'sort_order',          label: 'Sort Order' },
+      { key: 'active',              label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
     ],
     // `key` is intentionally NOT editable — it maps to the leads score columns
-    // (fit / trigger_score / access / capacity). Admins edit label + hover help.
+    // (fit / trigger_score / access / capacity). Admins edit label + both descriptions.
     fields: [
-      { key: 'label',       label: 'Label', required: true },
-      { key: 'description', label: 'Description (shown on hover over the dimension)', type: 'textarea' },
-      { key: 'sort_order',  label: 'Sort Order', type: 'number' },
-      { key: 'active',      label: 'Active', type: 'checkbox' },
+      { key: 'label',               label: 'Label', required: true },
+      { key: 'display_description',  label: 'Description (Display) — short, shown permanently under the dimension', placeholder: 'Short line shown under the dimension name' },
+      { key: 'description',         label: 'Description (Show on hover) — formatted; Tab indents, • for bullets', type: 'richtext' },
+      { key: 'sort_order',          label: 'Sort Order', type: 'number' },
+      { key: 'active',              label: 'Active', type: 'checkbox' },
     ],
   },
 
@@ -2529,6 +2546,17 @@ function renderField(f, val) {
     return `<div class="form-group">${label}<textarea id="f_${f.key}" name="${f.key}" class="form-control" rows="3" ${f.required?'required':''}>${val}</textarea></div>`;
   }
 
+  // Formatted plain-text: a textarea where Tab inserts a real tab (indent) and Enter on
+  // a "• " line continues the bullet list. Stored as plain text; rendered elsewhere with
+  // white-space:pre-wrap so tabs / indents / bullets / line breaks are preserved.
+  if (f.type === 'richtext') {
+    return `<div class="form-group">${label}
+      <div style="font-size:11px;color:var(--text3);margin:-2px 0 5px;">Press <b>Tab</b> to indent · <b>Enter</b> on a bullet line continues the list · use the button to start a bullet.</div>
+      <div style="margin-bottom:5px;"><button type="button" class="btn btn-secondary btn-sm" onclick="qualRichInsertBullet('f_${f.key}')">• Bullet</button></div>
+      <textarea id="f_${f.key}" name="${f.key}" class="form-control" rows="6" style="tab-size:4;" onkeydown="qualRichKeydown(event)" ${f.required?'required':''}>${val}</textarea>
+    </div>`;
+  }
+
   if (f.type === 'select') {
     const onchange = (currentPage === 'parties' && f.key === 'party_type') ? ' onchange="onPartyTypeChange(this.value)"' : '';
     const opts = f.options.map(o => `<option value="${o}" ${val==o?'selected':''}>${o||'— select —'}</option>`).join('');
@@ -2547,6 +2575,46 @@ function renderField(f, val) {
   }
 
   return `<div class="form-group">${label}<input type="${f.type||'text'}" id="f_${f.key}" name="${f.key}" class="form-control" value="${val}" ${f.required?'required':''} ${f.placeholder?`placeholder="${f.placeholder}"`:''} autocomplete="off"></div>`;
+}
+
+// Keyboard support for `richtext` textareas (qualification hover descriptions):
+// Tab inserts a real tab instead of moving focus; Enter on a bullet line continues
+// the list (an empty bullet ends it).
+function qualRichKeydown(e) {
+  const ta = e.target;
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    const s = ta.selectionStart, en = ta.selectionEnd;
+    ta.value = ta.value.slice(0, s) + '\t' + ta.value.slice(en);
+    ta.selectionStart = ta.selectionEnd = s + 1;
+  } else if (e.key === 'Enter') {
+    const s = ta.selectionStart;
+    const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+    const line = ta.value.slice(lineStart, s);
+    const m = line.match(/^(\s*)•\s/);
+    if (!m) return;
+    e.preventDefault();
+    if (line.trim() === '•') {            // empty bullet → end the list
+      ta.value = ta.value.slice(0, lineStart) + ta.value.slice(ta.selectionEnd);
+      ta.selectionStart = ta.selectionEnd = lineStart;
+      return;
+    }
+    const insert = '\n' + m[1] + '• ';    // continue the list (same indent)
+    ta.value = ta.value.slice(0, s) + insert + ta.value.slice(ta.selectionEnd);
+    ta.selectionStart = ta.selectionEnd = s + insert.length;
+  }
+}
+
+// Insert a bullet at the start of the current line (called by the • Bullet button).
+function qualRichInsertBullet(id) {
+  const ta = document.getElementById(id);
+  if (!ta) return;
+  const s = ta.selectionStart;
+  const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+  const insert = (s === lineStart ? '' : '\n') + '• ';
+  ta.value = ta.value.slice(0, s) + insert + ta.value.slice(ta.selectionEnd);
+  ta.selectionStart = ta.selectionEnd = s + insert.length;
+  ta.focus();
 }
 
 // Contacts popup for a client (Manage Clients page). Lists people affiliated with
@@ -6895,7 +6963,11 @@ let leadFormDirty = false;
 let _leadAutoSaveTimer = null;
 let _leadAutoSaveInFlight = false;
 
-function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New'); }
+// Append mode (frozen ORIGINAL + UPDATE log) begins only once the edit/grace window
+// has CLOSED — i.e. past New AND no longer in the editable grace. Through New and the
+// grace window the description is a single freely-editable field that just overwrites
+// leads.description; it bakes in as the ORIGINAL exactly once, when the window closes.
+function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New' && !leadInEditGrace(leadData)); }
 
 // The obligatory fields that must be present before a lead can be persisted.
 function leadObligatoryFilled() {
@@ -6988,8 +7060,13 @@ function applyLeadGraceLock() {
   });
   const changeBtn = document.getElementById('lead-target-org-change-btn');
   if (changeBtn) changeBtn.style.display = editable ? '' : 'none';
-  // The * markers + the "Fields marked *" banner only apply while still editable.
-  if (banner) banner.style.display = editable ? '' : 'none';
+  // The mandatory banner only applies while still New (requirements not yet met): it
+  // disappears the moment the lead reaches Working, and returns if an edit during the
+  // grace window breaks the requirements and drops it back to New (the status recompute
+  // on autosave handles that revert). The * markers stay tied to the editable window —
+  // the fields remain editable during the grace.
+  const isNew = (leadData.status || 'New') === 'New';
+  if (banner) banner.style.display = isNew ? '' : 'none';
   stars.forEach(s => s.style.display = editable ? '' : 'none');
   if (editable) { onLeadContactPairInput(); onLeadSourcePersonPairInput(); }  // restore either-or visibility
   if (typeof FocusPhone !== 'undefined') FocusPhone.syncDisabled();   // mirror lock state to phone code+national
@@ -7730,7 +7807,7 @@ function applyLeadDescriptionMode() {
   const label = document.getElementById('lead-description-label');
   const ta    = document.getElementById('lead-description');
   const hist  = document.getElementById('lead-description-history');
-  const appendMode = !!(leadData.id && leadData.status && leadData.status !== 'New');
+  const appendMode = leadIsAppendMode();   // only once the edit window has closed
   if (appendMode) {
     if (label) label.innerHTML = 'Add to description';
     if (ta) { ta.value = ''; ta.placeholder = 'Add an update — the original and earlier notes are kept below.'; }
@@ -8683,13 +8760,17 @@ function renderLeadNextActionChip() {
   const status = leadData.status || 'New';
   const act  = leadData.next_action;
   const date = leadData.next_action_date;
+  // Solid red block arrow (matches the agreed cue). `flip` points it left at the
+  // Interactions tab; un-flipped it points right at the next-action text. Nudge
+  // animation sits on an inner span so it doesn't override the flip transform.
+  const ARROW = '<svg width="34" height="24" viewBox="0 0 62 44" aria-hidden="true"><polygon points="4,16 33,16 33,5 59,22 33,39 33,28 4,28" fill="#FA0A11"/></svg>';
+  const arrow = flip => `<span class="lead-na-arrow${flip ? ' flip' : ''}"><span class="nudge">${ARROW}</span></span>`;
+  el.style.color = '';
   if (act && date) {
     const d = new Date(date).toLocaleDateString('en-ZA');
-    el.innerHTML = `<span style="color:var(--text3);">Next action:</span> <strong>${String(act).replace(/</g, '&lt;')}</strong> — ${d}`;
-    el.style.color = 'var(--text2)';
+    el.innerHTML = `${arrow(false)}<span style="color:var(--text2);"><span style="color:var(--text3);">Next action:</span> <strong>${String(act).replace(/</g, '&lt;')}</strong> — ${d}</span>`;
   } else if (status === 'New' && !leadReadOnly) {
-    el.textContent = 'An interaction with a follow-up date is required to promote the lead to Working status.';
-    el.style.color = 'var(--red)';
+    el.innerHTML = `${arrow(true)}<span style="color:var(--red);">An interaction with a follow-up date is required to promote the lead to Working status.</span>`;
   } else {
     el.innerHTML = '';
   }
@@ -10244,8 +10325,9 @@ function qualDimMeta(key) {
   const base  = QUAL_DIMENSIONS.find(d => d.key === key) || { key, label: key, help: '' };
   return {
     key,
-    label: (dbRow && dbRow.label)       || base.label,
-    help:  (dbRow && dbRow.description) || base.help || '',
+    label:   (dbRow && dbRow.label)              || base.label,
+    display: (dbRow && dbRow.display_description) || base.help || '',   // short, permanent subtitle
+    hover:   (dbRow && dbRow.description)         || '',                // formatted hover-popup text
   };
 }
 
@@ -10263,12 +10345,17 @@ function renderLeadQualification() {
     const val = +leadData[dim.key] || 0;
     const cKey = qualCommentKey(dim.key);
     const comment = leadData[cKey] || '';
-    const helpAttr = String(d.help).replace(/"/g, '&quot;');
+    const dispText  = String(d.display).replace(/</g, '&lt;');
+    // Custom popup (not native title): appears immediately on hover over the whole
+    // name+description block, and preserves the formatted tabs/bullets/line-breaks.
+    const hoverHtml = d.hover
+      ? `<div class="qual-hover-pop">${String(d.hover).replace(/</g, '&lt;')}</div>` : '';
     return `<div style="padding:14px;border-bottom:1px solid var(--border);">
       <div style="display:flex;align-items:center;gap:16px;">
-        <div style="flex:1;">
-          <div title="${helpAttr}" style="font-size:14px;font-weight:700;color:var(--text);border-bottom:1px dotted var(--text3);display:inline-block;cursor:help;">${d.label}</div>
-          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${d.help}</div>
+        <div class="qual-hover-wrap" style="flex:1;position:relative;">
+          <div style="font-size:14px;font-weight:700;color:var(--text);display:inline-block;${d.hover?'border-bottom:1px dotted var(--text3);cursor:help;':''}">${d.label}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px;">${dispText}</div>
+          ${hoverHtml}
         </div>
         <div style="display:flex;gap:6px;flex-shrink:0;">
           ${[0,1,2].map(level => {
@@ -10552,8 +10639,22 @@ function tickEditCountdowns() {
 // Open lead's grace hit zero → lock the qualifying fields in place.
 async function _onOpenLeadEditWindowClosed() {
   if (!leadData || !leadData.id) return;
+  // BAKE-IN (the single freeze point): the window has closed, so freeze the current
+  // description as the ORIGINAL before the box flips to append mode below. Persist the
+  // textarea straight to leads.description as a final overwrite (NOT an append) so any
+  // last-second edit the 1.5s autosave hadn't flushed isn't cleared and lost.
+  clearTimeout(_leadAutoSaveTimer);
+  const ta = document.getElementById('lead-description');
+  const finalDesc = ta ? ta.value.trim() : '';
+  if (!leadReadOnly && finalDesc && finalDesc !== (leadData.description || '')) {
+    try {
+      const res = await api('leads', 'PATCH', { description: finalDesc, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id + '&select=*');
+      if (res && res[0]) leadData = res[0];
+    } catch (e) { console.warn('Description bake-in failed:', e.message); }
+  }
+  leadFormDirty = false;
   await recomputeOpenLeadStatus();   // status stays Working; refreshes leadData
-  populateLeadForm();                // re-applies the now-expired lock + clears the chip
+  populateLeadForm();                // re-applies the now-expired lock + flips the description box to append mode
 }
 
 async function saveLead(opts) {
@@ -10571,9 +10672,10 @@ async function saveLead(opts) {
 
   const sourceId  = document.getElementById('lead-source-id').value;
   const descInput = document.getElementById('lead-description').value.trim();
-  // Past New, the description box is an append field; the New-phase text stays the
-  // original (in leads.description) and new entries go to lead_description_log.
-  const appendMode  = !!(leadData.id && leadData.status && leadData.status !== 'New');
+  // Only once the edit window has closed does the description box become append-only;
+  // through New + the grace window it's a single field whose text overwrites
+  // leads.description. New entries (append mode) go to lead_description_log instead.
+  const appendMode  = leadIsAppendMode();
   const description = appendMode ? (leadData.description || '') : descInput;
 
   if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return false; }
