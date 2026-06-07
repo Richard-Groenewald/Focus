@@ -762,6 +762,8 @@ tr:hover td{background:#F8FAFC;}
 
         <!-- Product/Service Opportunity (own card; applyLeadFormLayout places it above Details) -->
         <div class="opp-section" id="lead-service-section">
+          <!-- Criteria-to-Qualified note; hidden once the lead is Qualified (updateLeadQualifyNote) -->
+          <div id="lead-qualify-note" style="margin:-4px 0 14px;padding:9px 12px;border-left:3px solid #d97706;background:#FFFBEB;border-radius:6px;font-size:12px;color:var(--text2);line-height:1.5;">In order to categorise this Lead as Qualified, ensure that the primary service interest and the estimated deal values have been completed.</div>
           <div class="opp-section-title">Primary Service Interest</div>
           <div class="form-group" style="margin-bottom:0;">
             <!-- Single dropdown: an optgroup per major, with the major itself selectable
@@ -791,7 +793,7 @@ tr:hover td{background:#F8FAFC;}
         <div class="opp-section" id="lead-estvalue-section">
           <div class="opp-section-title">Estimated Deal Value</div>
           <div class="form-group" style="margin-bottom:0;">
-            <input type="number" id="lead-est-value" class="form-control" placeholder="Back-of-envelope estimate, optional" step="1000">
+            <input type="text" inputmode="numeric" id="lead-est-value" class="form-control" placeholder="R …  (back-of-envelope estimate, optional)" oninput="formatLeadEstValue(this)">
           </div>
         </div>
         </div>
@@ -7878,7 +7880,7 @@ function populateLeadForm() {
   document.getElementById('lead-service-major-id').value = leadData.service_major_id || '';
   document.getElementById('lead-service-sub-id').value   = leadData.service_sub_id   || '';
   setLeadServiceComboFromHidden();   // reflect the stored major/sub in the combined dropdown
-  if (leadData.est_value != null) document.getElementById('lead-est-value').value = leadData.est_value;
+  document.getElementById('lead-est-value').value = leadData.est_value != null ? ('R ' + Number(leadData.est_value).toLocaleString('en-US')) : '';
   // Workflow
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
   if (leadData.next_action) document.getElementById('lead-next-action').value = leadData.next_action;
@@ -8054,6 +8056,19 @@ function setLeadServiceComboFromHidden() {
   sel.value = subId ? ('s:' + subId) : (majorId ? ('m:' + majorId) : '');
 }
 
+// Estimated Deal Value is shown as "R 100,000" (text field). Reformat on input —
+// strip non-digits, regroup with thousands commas, prefix R. leadEstValueNumber()
+// parses it back to a plain integer for save.
+function formatLeadEstValue(el) {
+  if (!el) return;
+  const digits = (el.value || '').replace(/[^\d]/g, '');
+  el.value = digits ? 'R ' + Number(digits).toLocaleString('en-US') : '';
+}
+function leadEstValueNumber() {
+  const digits = (document.getElementById('lead-est-value')?.value || '').replace(/[^\d]/g, '');
+  return digits ? +digits : null;
+}
+
 function refreshLeadServiceSubDropdown() {
   const sel = document.getElementById('lead-service-sub-id');
   if (!sel) return;
@@ -8162,7 +8177,12 @@ function updateLeadAdditionalContactsAvailability() {
   if (!grp) return;
   const hasFk   = !!document.getElementById('lead-target-person-id')?.value;
   const hasName = !!(document.getElementById('lead-target-person-name')?.value || '').trim();
-  grp.style.display = (hasFk || hasName) ? '' : 'none';
+  // Once a lead is saved (has an id) and still editable — i.e. Working/Qualified/
+  // Dormant — additional contacts can always be added, even if the primary contact
+  // field is empty in the form. For a brand-new unsaved lead, keep it gated on a
+  // primary contact being identified first.
+  const savedEditable = !!(leadData && leadData.id) && !leadReadOnly;
+  grp.style.display = (hasFk || hasName || savedEditable) ? '' : 'none';
 }
 
 // Live similarity check on the free-text target org name. Surfaces an exact
@@ -8738,26 +8758,35 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (promoteBtn) {
-    // Promote is unlocked only once a Qualified lead's peer review is Approved (spec c).
-    const showWorkflow = (status === 'Qualified' && !leadReadOnly && leadData.peer_review_status === 'Approved');
-    if (!showWorkflow) {
+    // A Qualified lead is "ready for promotion". Owners can Request promotion as soon
+    // as it's Qualified (so a manager is flagged); the real Promote → stays gated on
+    // peer review being Approved (spec c). Managers/admin promote; everyone else requests.
+    const ready = (status === 'Qualified' && !leadReadOnly);
+    if (!ready) {
       promoteBtn.style.display = 'none';
     } else if (canPromote(leadData)) {
-      promoteBtn.style.display = '';
-      promoteBtn.disabled = false;
-      promoteBtn.textContent = 'Promote →';
-      promoteBtn.onclick = () => openPromoteWizard();
-      // Surface a pending request to the manager who can act on it.
+      // Manager/admin: real Promote, but only once peer review is Approved.
+      if (leadData.peer_review_status === 'Approved') {
+        promoteBtn.style.display = '';
+        promoteBtn.disabled = false;
+        promoteBtn.textContent = 'Promote →';
+        promoteBtn.onclick = () => openPromoteWizard();
+      } else {
+        promoteBtn.style.display = 'none';   // pending peer review — use the review panel
+      }
+      // Surface any standing promotion request to the manager who can act on it.
       if (promoteNote && leadData.promotion_requested_at) {
         promoteNote.textContent = '⏳ Promotion requested' + _promotionRequestSuffix();
         promoteNote.style.display = '';
       }
     } else if (leadData.promotion_requested_at) {
+      // Owner already flagged it — show the pending state.
       promoteBtn.style.display = '';
       promoteBtn.disabled = true;
       promoteBtn.textContent = '⏳ Promotion requested';
       promoteBtn.onclick = null;
     } else {
+      // Owner, lead is ready: let them flag it for a manager.
       promoteBtn.style.display = '';
       promoteBtn.disabled = false;
       promoteBtn.textContent = 'Request promotion';
@@ -8805,7 +8834,16 @@ function refreshLeadWorkflowChrome() {
   }
   renderLeadPeerReview(status);
   renderLeadNextActionChip();
+  updateLeadQualifyNote();
   applyLeadFormLayout();
+}
+
+// Criteria-to-Qualified note (above Primary Service Interest): shown until the lead
+// reaches Qualified, then removed.
+function updateLeadQualifyNote() {
+  const el = document.getElementById('lead-qualify-note');
+  if (!el) return;
+  el.style.display = (leadData.status === 'Qualified') ? 'none' : '';
 }
 
 // Tabs-row next-action text. Once a next action + date exist, show them as text to
@@ -10476,11 +10514,17 @@ function setLeadQualComment(cKey, val) {
 function updateLeadReadiness() {
   const el = document.getElementById('lead-qual-readiness');
   if (!el) return;
+  // "Ready to promote" appears only once the lead is actually Qualified (all-green +
+  // service category + estimate). Before that, reflect the qualification-dot state.
+  if (leadData.status === 'Qualified') {
+    el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider promoting this lead to an Opportunity</span>';
+    return;
+  }
   const scores = QUAL_DIMENSIONS.map(d => +leadData[d.key] || 0);
   const allStrong = scores.every(s => s === 2);
   const anyUnknown = scores.some(s => s === 0);
   if (allStrong) {
-    el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider promoting this lead to an Opportunity</span>';
+    el.innerHTML = '<span style="color:#d97706;">Dimensions all strong</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— add a Primary Service Interest and Estimated Deal Value to qualify</span>';
   } else if (anyUnknown) {
     const missing = QUAL_DIMENSIONS.filter((d,i) => scores[i] === 0).map(d => d.label).join(', ');
     el.innerHTML = `<span style="color:var(--text3);">Still assessing</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— unknown: ${missing}</span>`;
@@ -10594,8 +10638,10 @@ function computeLeadStatus(l, ctx) {
   if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
   if (l.wake_date) return 'Dormant';
   const hasEst = l.est_value != null && +l.est_value > 0;
-  // Qualified needs all-green + an estimate, and must not be under a peer-review demote hold.
-  if (LEAD_GREEN(l) && hasEst && !l.qualification_demoted) return 'Qualified';
+  const hasService = l.service_major_id != null && +l.service_major_id > 0;
+  // Qualified needs all-green + an estimate + a service category, and must not be under
+  // a peer-review demote hold.
+  if (LEAD_GREEN(l) && hasEst && hasService && !l.qualification_demoted) return 'Qualified';
   // Once the grace has elapsed, Working is locked in (sticky) and stays Working.
   if (l.working_at && leadEditGraceExpired(l, now)) return 'Working';
   // Meeting the mandatory fields promotes to Working immediately (editable grace runs).
@@ -10805,7 +10851,7 @@ async function saveLead(opts) {
     region_id:        +document.getElementById('lead-region-id').value || null,
     service_major_id: +document.getElementById('lead-service-major-id').value || null,
     service_sub_id:   +document.getElementById('lead-service-sub-id').value   || null,
-    est_value:        document.getElementById('lead-est-value').value !== '' ? +document.getElementById('lead-est-value').value : null,
+    est_value:        leadEstValueNumber(),
 
     fit:           +leadData.fit || 0,
     trigger_score: +leadData.trigger_score || 0,
