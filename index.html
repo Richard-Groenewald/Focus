@@ -614,10 +614,16 @@ tr:hover td{background:#F8FAFC;}
 <div class="opp-page" id="lead-page">
   <div class="opp-topbar">
     <button class="btn btn-ghost btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">← Back</button>
-    <div class="opp-topbar-title" id="lead-page-title">New Lead</div>
+    <div class="opp-topbar-title" id="lead-page-title" style="flex:0 0 auto;">New Lead</div>
+    <!-- Lead status badge sits right after the title; edit-window countdown + promotion note follow it. -->
+    <span id="lead-status-badge" style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;background:#f3f4f6;color:#4b5563;">—</span>
+    <span id="lead-edit-countdown"></span>
+    <span id="lead-promotion-note" style="display:none;font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;background:#FEF3C7;color:#92400E;"></span>
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
       <span id="lead-save-indicator" style="font-size:12px;font-weight:600;"></span>
+      <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary btn-sm" style="display:none;">Promote →</button>
+      <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Decline…</button>
       <button class="btn btn-secondary btn-sm" id="lead-revert-btn" onclick="revertLead()" title="Undo every change made since you opened this lead">↺ Revert changes</button>
     </div>
   </div>
@@ -626,11 +632,22 @@ tr:hover td{background:#F8FAFC;}
     <!-- Read-only banner (shown when lead is Promoted or Dead) -->
     <div id="lead-readonly-banner" style="display:none;margin-bottom:16px;padding:12px 16px;background:#FFF5E5;border:1px solid #E8A33D;border-radius:var(--radius);color:#7A4F0E;font-size:13px;font-weight:600;"></div>
 
-    <!-- Top Tabs -->
-    <div class="opp-tabs">
-      <button class="opp-tab active" onclick="switchLeadTab('overview', this)">Overview</button>
-      <button class="opp-tab" onclick="switchLeadTab('qualification', this)">Qualification</button>
-      <button class="opp-tab" onclick="switchLeadTab('interactions', this)">Interactions</button>
+    <!-- Top Tabs (with next-action text right of the tabs, and Owner far right) -->
+    <div style="display:flex;align-items:flex-end;gap:16px;">
+      <div class="opp-tabs">
+        <button class="opp-tab active" onclick="switchLeadTab('overview', this)">Overview</button>
+        <button class="opp-tab" onclick="switchLeadTab('qualification', this)">Qualification</button>
+        <button class="opp-tab" onclick="switchLeadTab('interactions', this)">Interactions</button>
+      </div>
+      <!-- Next action / "follow-up required" prompt — rendered by renderLeadNextActionChip() -->
+      <span id="lead-next-action-chip" style="font-size:12px;line-height:1.4;padding-bottom:10px;"></span>
+      <div style="flex:1;"></div>
+      <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;" id="lead-owner-chip">
+        <label class="form-label" style="margin:0;white-space:nowrap;">Owner</label>
+        <select id="lead-owner-id" class="form-control" style="width:auto;min-width:150px;">
+          <option value="">— shared pool —</option>
+        </select>
+      </div>
     </div>
 
     <!-- Overview Tab -->
@@ -823,37 +840,19 @@ tr:hover td{background:#F8FAFC;}
           </div>
         </div>
 
-        <!-- Workflow section -->
-        <div class="opp-section" id="lead-workflow-section">
-          <div class="opp-section-title">Workflow</div>
-
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Owner</label>
-              <select id="lead-owner-id" class="form-control">
-                <option value="">— shared pool —</option>
-              </select>
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Leave blank to put this lead in the shared pool.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Status</label>
-              <div style="display:flex;align-items:center;gap:10px;min-height:38px;flex-wrap:wrap;">
-                <span id="lead-status-badge" style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;background:#f3f4f6;color:#4b5563;">—</span>
-                <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary" style="display:none;padding:6px 12px;font-size:12px;">Promote →</button>
-                <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-secondary" style="display:none;padding:6px 12px;font-size:12px;">Decline…</button>
-                <span id="lead-promotion-note" style="display:none;font-size:11px;font-weight:600;padding:4px 8px;border-radius:6px;background:#FEF3C7;color:#92400E;"></span>
-                <span id="lead-edit-countdown"></span>
-              </div>
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Auto-derived from interactions, qualification, red flags and promotion.</div>
-            </div>
-          </div>
+        <!-- Status-specific blocks (peer review / wake date / dead summary). The old
+             "Workflow" card was dissolved: Owner → tabs row, Status badge + Promote +
+             Decline + countdown → topbar, Next action → tabs-row text. These blocks
+             only appear in their respective states, so this container is invisible
+             otherwise. id kept for applyLeadFormLayout(). -->
+        <div id="lead-workflow-section">
 
           <!-- Peer review panel (visible only when status = Qualified) -->
-          <div id="lead-peer-review" style="display:none;margin-top:8px;"></div>
+          <div id="lead-peer-review" style="display:none;"></div>
 
           <!-- Wake date (visible only when status = Dormant) -->
-          <div class="form-row" id="lead-wake-date-wrap" style="display:none;">
-            <div class="form-group" style="flex:1;">
+          <div class="opp-section" id="lead-wake-date-wrap" style="display:none;">
+            <div class="form-group" style="flex:1;margin-bottom:0;">
               <label class="form-label">Wake date</label>
               <input type="date" id="lead-wake-date" class="form-control" disabled style="background:#F1F5F9;color:var(--text2);cursor:not-allowed;">
               <div style="font-size:11px;color:var(--text3);margin-top:4px;">Set via the Promote wizard. Lead surfaces as Dormant until this date.</div>
@@ -861,7 +860,7 @@ tr:hover td{background:#F8FAFC;}
           </div>
 
           <!-- Dead reason summary (read-only, shown only when status = Dead) -->
-          <div id="lead-dead-block" style="display:none;margin-top:8px;padding:14px 16px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:var(--radius);">
+          <div id="lead-dead-block" style="display:none;margin-top:0;padding:14px 16px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:var(--radius);">
             <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#8B0F18;margin-bottom:8px;">This lead is closed</div>
             <div style="font-size:13px;color:var(--text);"><span style="font-weight:700;">Reason:</span> <span id="lead-dead-reason-display">—</span></div>
             <div style="font-size:13px;color:var(--text);margin-top:6px;"><span style="font-weight:700;">Notes:</span> <span id="lead-dead-notes-display" style="white-space:pre-wrap;">—</span></div>
@@ -872,16 +871,12 @@ tr:hover td{background:#F8FAFC;}
           <input type="hidden" id="lead-dead-reason-value" value="">
           <input type="hidden" id="lead-dead-notes-value"  value="">
 
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Next action <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-              <input type="text" id="lead-next-action" class="form-control" disabled style="background:#F1F5F9;color:var(--text2);cursor:not-allowed;" placeholder="—">
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Required for Working. Auto-set from the earliest pending interaction — log one in the Interactions tab.</div>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Next action date <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-              <input type="date" id="lead-next-action-date" class="form-control" disabled style="background:#F1F5F9;color:var(--text2);cursor:not-allowed;">
-            </div>
+          <!-- Next action is auto-derived from interactions and shown as text on the
+               tabs row (renderLeadNextActionChip). These inputs are kept hidden so the
+               existing populate/save/derivation paths that read them by id still work. -->
+          <div style="display:none;">
+            <input type="text" id="lead-next-action" disabled placeholder="—">
+            <input type="date" id="lead-next-action-date" disabled>
           </div>
         </div>
         </div>
@@ -6794,6 +6789,8 @@ async function openNewLead() {
   if (ownerSel && !canAssignOwner(leadData)) ownerSel.disabled = true;
   document.getElementById('lead-page').classList.add('active');
   switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
+  renderLeadStatusBadge('New');
+  refreshLeadWorkflowChrome();   // badge chrome + progressive reveal (only Source shows until a source is picked)
   renderLeadQualification();
   renderLeadInteractions();
   resetLeadDirty();
@@ -7828,6 +7825,9 @@ function onLeadSourceChange() {
   salesCampaignWrap.style.display = 'none';
   detailWrap.style.display = 'none';
 
+  // Progressive reveal: choosing a source opens Target Client + Details on a new lead.
+  applyLeadProgressiveReveal();
+
   // Once past New the whole Source block (the dropdown AND its selection — the
   // referrer/org/campaign) is frozen and shown via the compact summary. Don't
   // re-reveal the conditional field here.
@@ -8615,7 +8615,8 @@ function refreshLeadWorkflowChrome() {
       promoteBtn.onclick = () => requestPromotion();
     }
   }
-  if (declineBtn) declineBtn.style.display = (status !== 'Dead' && status !== 'Promoted' && !leadReadOnly) ? '' : 'none';
+  // Decline only applies to a lead that already exists — not a brand-new unsaved one.
+  if (declineBtn) declineBtn.style.display = (!!leadData.id && status !== 'Dead' && status !== 'Promoted' && !leadReadOnly) ? '' : 'none';
   if (wakeWrap)   wakeWrap.style.display   = (status === 'Dormant') ? '' : 'none';
 
   if (deadBlock) {
@@ -8654,7 +8655,29 @@ function refreshLeadWorkflowChrome() {
     }
   }
   renderLeadPeerReview(status);
+  renderLeadNextActionChip();
   applyLeadFormLayout();
+}
+
+// Tabs-row next-action text. Once a next action + date exist, show them as text to
+// the right of the Interactions tab. While the lead is New with no next action yet,
+// show the prompt that a dated interaction is required before it can promote.
+function renderLeadNextActionChip() {
+  const el = document.getElementById('lead-next-action-chip');
+  if (!el) return;
+  const status = leadData.status || 'New';
+  const act  = leadData.next_action;
+  const date = leadData.next_action_date;
+  if (act && date) {
+    const d = new Date(date).toLocaleDateString('en-ZA');
+    el.innerHTML = `<span style="color:var(--text3);">Next action:</span> <strong>${String(act).replace(/</g, '&lt;')}</strong> — ${d}`;
+    el.style.color = 'var(--text2)';
+  } else if (status === 'New' && !leadReadOnly) {
+    el.textContent = 'An interaction with a follow-up date is required to promote the lead to Working status.';
+    el.style.color = 'var(--red)';
+  } else {
+    el.innerHTML = '';
+  }
 }
 
 // Peer review (simulated): Qualified leads must be reviewed before Promote.
@@ -8716,10 +8739,12 @@ function canSetDeadReason(reason) {
   return true;
 }
 
-// ── Stateful Overview layout (New vs Working+) ────────────────────────────────
-// Target Client is always top-left, Details bottom-left.
-//   New     → Source top-right (editable), Workflow bottom-right.
-//   Working+→ Workflow top-right, Source locked & compact bottom-right.
+// ── Stateful Overview layout ──────────────────────────────────────────────────
+// Left column: Target Client (top) + Source (bottom). Right column: Details, with
+// the status-specific blocks (peer review / wake / dead) beneath it. Source stays a
+// full editable field while New or in the edit-grace window, and collapses to a
+// compact summary once the lead locks. Brand-new leads reveal progressively — only
+// the Source question shows until a source is chosen (applyLeadProgressiveReveal).
 function applyLeadFormLayout() {
   const leftCol  = document.getElementById('lead-left-col');
   const rightCol = document.getElementById('lead-right-col');
@@ -8727,28 +8752,38 @@ function applyLeadFormLayout() {
   const details  = document.getElementById('lead-details-section');
   const source   = document.getElementById('lead-source-section');
   const workflow = document.getElementById('lead-workflow-section');
-  if (!leftCol || !rightCol || !target || !details || !source || !workflow) return;
+  if (!leftCol || !rightCol || !target || !details || !source) return;
 
   const status = leadData.status || 'New';
   // Fields stay editable while New, and while Working during the edit-grace window;
   // they lock once the grace expires (or in any later stage).
   const editable = !leadData.id || status === 'New' || leadInEditGrace(leadData);
 
-  // Left column: Target Client above Details (always). insertBefore relocates the
-  // node, pulling Target out of whichever column it currently sits in.
-  leftCol.insertBefore(target, details);
+  // Left column: Target Client (top) then Source (bottom). appendChild relocates
+  // each node, pulling it out of whichever column it currently sits in.
+  leftCol.appendChild(target);
+  leftCol.appendChild(source);
+  // Right column: Details, then the status-specific blocks below it.
+  rightCol.appendChild(details);
+  if (workflow) rightCol.appendChild(workflow);
 
-  // Right column order: editable → Source top; locked → Workflow top, Source compact below.
-  if (editable) {
-    rightCol.insertBefore(source, workflow);   // Source top, Workflow bottom
-  } else {
-    rightCol.appendChild(workflow);            // Workflow top …
-    rightCol.appendChild(source);              // … Source bottom
-  }
-
+  applyLeadProgressiveReveal();
   applyLeadSourceLock(!editable);
   applyLeadTargetOrgLock(!editable);
   applyLeadGraceLock();
+}
+
+// Brand-new leads reveal progressively: only the Source question shows until a
+// source is chosen, then Target Client + Details appear. Any saved lead (has an id)
+// always shows everything.
+function applyLeadProgressiveReveal() {
+  const target  = document.getElementById('lead-target-section');
+  const details = document.getElementById('lead-details-section');
+  if (!target || !details) return;
+  const sourceChosen = !!(document.getElementById('lead-source-id') || {}).value;
+  const showAll = sourceChosen || !!leadData.id;
+  target.style.display  = showAll ? '' : 'none';
+  details.style.display = showAll ? '' : 'none';
 }
 
 // Once past New the target organisation is frozen (spec b2 — contact can still
@@ -10432,8 +10467,8 @@ function leadEditCountdownHtml(l) {
   if (!l) return '';
   if (l.status === 'Working' && l.working_at && !leadEditGraceExpired(l))
     return editCountdownChipHtml(new Date(l.working_at).getTime(), leadWaitingMinutes(), 'lead', { openForm: true, expiredLabel: '🔒 locked' });
-  if (l.status === 'New')
-    return `<span style="font-size:11px;color:var(--text3);">✎ Complete the <span style="color:var(--red);font-weight:700;">*</span> fields to promote this lead to Working.</span>`;
+  // New-state guidance now lives in the tabs-row next-action text (renderLeadNextActionChip),
+  // so the topbar countdown chip stays empty until the lead is Working.
   return '';
 }
 function updateLeadFormCountdown() {
