@@ -8916,6 +8916,8 @@ async function setLeadPeerReview(val) {
     if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
     populateLeadForm();
     showStatus('Peer review: ' + val);
+    // Approval auto-fires the Promote wizard for anyone who can actually promote.
+    if (val === 'Approved' && canPromote(leadData)) openPromoteWizard();
   } catch (e) { showStatus('Could not save review: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
@@ -10517,7 +10519,14 @@ function updateLeadReadiness() {
   // "Ready to promote" appears only once the lead is actually Qualified (all-green +
   // service category + estimate). Before that, reflect the qualification-dot state.
   if (leadData.status === 'Qualified') {
-    el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider promoting this lead to an Opportunity</span>';
+    if (leadData.promotion_requested_at) {
+      // Already flagged for promotion → show who flagged it instead of the nudge.
+      const p = (allData['people'] || []).find(x => +x.id === +leadData.promotion_requested_by);
+      const who = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '…';
+      el.innerHTML = `<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— The Lead has been flagged for promotion with ${who}</span>`;
+    } else {
+      el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider requesting that this lead be promoted to an opportunity</span>';
+    }
     return;
   }
   const scores = QUAL_DIMENSIONS.map(d => +leadData[d.key] || 0);
