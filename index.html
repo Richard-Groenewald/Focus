@@ -1293,6 +1293,8 @@ function _mockSeed() {
       { id: 2, key: 'fy_start_month',         value: 'July' },
       { id: 3, key: 'escalation_month',       value: 'July' },
       { id: 4, key: 'new_lead_waiting_minutes', value: '10' },
+      { id: 5, key: 'promotion_min_green',      value: '4' },
+      { id: 6, key: 'promotion_green_counts_weak', value: 'false' },
     ],
     decline_reasons: [
       { id: 1, name: 'Budget too low',          description: 'Deal size below our minimum.', sort_order: 1, active: true, created_at: now },
@@ -6566,8 +6568,16 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   }
 
   // Pending promotion request: surface a badge so managers can spot it in the list.
-  if (l.promotion_requested_at && l.status === 'Qualified') {
-    targetDisplay += ` <span title="Promotion requested" style="display:inline-block;padding:1px 6px;border-radius:8px;background:#FEF3C7;color:#92400E;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;">⏳ promo</span>`;
+  // Standard requests sit at Qualified; special (below-threshold) requests sit at
+  // Working, so allow either as long as a request is stamped and not yet actioned.
+  if (l.promotion_requested_at && (l.status === 'Qualified' || l.status === 'Working')) {
+    const special = l.promotion_request_type === 'special';
+    const lbl = special ? '⚠️ special promo' : '⏳ promo';
+    const tip = special
+      ? ('Special promotion request' + (l.promotion_request_note ? ' — ' + l.promotion_request_note : ''))
+      : 'Promotion requested';
+    const bg = special ? '#FED7AA' : '#FEF3C7';
+    targetDisplay += ` <span title="${String(tip).replace(/"/g,'&quot;')}" style="display:inline-block;padding:1px 6px;border-radius:8px;background:${bg};color:#92400E;font-size:10px;font-weight:700;margin-left:4px;vertical-align:middle;">${lbl}</span>`;
   }
 
   // Owner display
@@ -8758,13 +8768,18 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (promoteBtn) {
-    // A Qualified lead is "ready for promotion". Owners can Request promotion as soon
-    // as it's Qualified (so a manager is flagged); the real Promote → stays gated on
-    // peer review being Approved (spec c). Managers/admin promote; everyone else requests.
-    const ready = (status === 'Qualified' && !leadReadOnly);
-    if (!ready) {
+    // A Qualified lead is "ready for promotion": owners Request promotion (standard);
+    // the real Promote → stays gated on peer review Approved (spec c). A lead that is
+    // not yet Qualified but meets the configurable green threshold (+ service) can make
+    // a SPECIAL promotion request (with justification). Managers/admin promote;
+    // everyone else requests.
+    const qualified       = (status === 'Qualified' && !leadReadOnly);
+    const specialEligible = !qualified && !leadReadOnly && leadSpecialPromotionEligible(leadData);
+    const requested       = !!leadData.promotion_requested_at;
+    const isSpecialReq    = leadData.promotion_request_type === 'special';
+    if (!qualified && !specialEligible && !requested) {
       promoteBtn.style.display = 'none';
-    } else if (canPromote(leadData)) {
+    } else if (qualified && canPromote(leadData)) {
       // Manager/admin: real Promote, but only once peer review is Approved.
       if (leadData.peer_review_status === 'Approved') {
         promoteBtn.style.display = '';
@@ -8774,23 +8789,32 @@ function refreshLeadWorkflowChrome() {
       } else {
         promoteBtn.style.display = 'none';   // pending peer review — use the review panel
       }
-      // Surface any standing promotion request to the manager who can act on it.
-      if (promoteNote && leadData.promotion_requested_at) {
-        promoteNote.textContent = '⏳ Promotion requested' + _promotionRequestSuffix();
-        promoteNote.style.display = '';
-      }
-    } else if (leadData.promotion_requested_at) {
-      // Owner already flagged it — show the pending state.
+    } else if (requested) {
+      // Already flagged (standard or special) — show the pending state.
       promoteBtn.style.display = '';
       promoteBtn.disabled = true;
-      promoteBtn.textContent = '⏳ Promotion requested';
+      promoteBtn.textContent = isSpecialReq ? '⏳ Special promotion requested' : '⏳ Promotion requested';
       promoteBtn.onclick = null;
-    } else {
-      // Owner, lead is ready: let them flag it for a manager.
+    } else if (qualified) {
+      // Owner, fully qualified: standard request.
       promoteBtn.style.display = '';
       promoteBtn.disabled = false;
       promoteBtn.textContent = 'Request promotion';
       promoteBtn.onclick = () => requestPromotion();
+    } else {
+      // Owner, special path: not fully Qualified but meets the threshold.
+      promoteBtn.style.display = '';
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = 'Special promotion request';
+      promoteBtn.onclick = () => openSpecialPromotionRequest();
+    }
+    // Surface any standing promotion request (incl. a special-request justification)
+    // to a manager who can act on it.
+    if (promoteNote && requested && canPromote(leadData)) {
+      let txt = (isSpecialReq ? '⚠️ Special promotion request' : '⏳ Promotion requested') + _promotionRequestSuffix();
+      if (isSpecialReq && leadData.promotion_request_note) txt += ' — “' + leadData.promotion_request_note + '”';
+      promoteNote.textContent = txt;
+      promoteNote.style.display = '';
     }
   }
   // Decline only applies to a lead that already exists — not a brand-new unsaved one.
@@ -9173,11 +9197,69 @@ async function requestPromotion() {
     await api('leads', 'PATCH', {
       promotion_requested_at: new Date().toISOString(),
       promotion_requested_by: currentUser?.personId || null,
+      promotion_request_type: 'standard',
+      promotion_request_note: null,
     }, 'id=eq.' + leadData.id);
     showStatus('Promotion requested — a manager will review it.');
     await reloadLeadAfterServerChange(); // refetch + repaint chrome
   } catch(e) {
     showStatus('Could not request promotion: ' + e.message, 'error');
+  }
+}
+
+// Owner-side action for a lead that is NOT yet fully Qualified but meets the
+// configurable green-dimension threshold (+ a service category). Requires a written
+// justification, which is surfaced to the manager who considers it. Lightweight stub
+// like requestPromotion — stamps the request fields; no notification dispatch yet.
+function openSpecialPromotionRequest() {
+  if (!leadData?.id) return;
+  if (!leadSpecialPromotionEligible(leadData)) {
+    showStatus('This lead does not meet the special promotion-request criteria', 'error');
+    return;
+  }
+  const n = leadGreenCount(leadData), need = promotionMinGreen();
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Special promotion request</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">This lead is <strong>not yet fully qualified</strong> (${n}/${QUAL_DIMENSIONS.length} dimensions green, minimum ${need}), but a service category is set. You can ask a manager to consider it for promotion to an opportunity.</div>
+          <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Justification <span style="font-weight:400;color:var(--text3);">(required)</span></div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Why should this lead be considered despite not being fully qualified?</div>
+          <textarea id="special-promo-note" class="form-control" rows="4" placeholder="e.g. Strong incumbent relationship and an imminent renewal — worth pursuing now even though access is still weak."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary"   onclick="submitSpecialPromotionRequest()">Submit request</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function submitSpecialPromotionRequest() {
+  if (!leadData?.id) return;
+  const note = (document.getElementById('special-promo-note')?.value || '').trim();
+  if (!note) { showStatus('A justification is required for a special promotion request', 'error'); return; }
+  if (!leadSpecialPromotionEligible(leadData)) {
+    showStatus('This lead no longer meets the special promotion-request criteria', 'error');
+    return;
+  }
+  try {
+    await api('leads', 'PATCH', {
+      promotion_requested_at: new Date().toISOString(),
+      promotion_requested_by: currentUser?.personId || null,
+      promotion_request_type: 'special',
+      promotion_request_note: note,
+    }, 'id=eq.' + leadData.id);
+    closeModal();
+    showStatus('Special promotion request submitted — a manager will consider it.');
+    await reloadLeadAfterServerChange();
+  } catch(e) {
+    showStatus('Could not submit special promotion request: ' + e.message, 'error');
   }
 }
 
@@ -10525,7 +10607,17 @@ function updateLeadReadiness() {
       const who = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '…';
       el.innerHTML = `<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— The Lead has been flagged for promotion with ${who}</span>`;
     } else {
-      el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— consider requesting that this lead be promoted to an opportunity</span>';
+      el.innerHTML = '<span style="color:#16a34a;">✓ Ready to promote</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— this lead is fully qualified; please request its promotion to an opportunity</span>';
+    }
+    return;
+  }
+  // Not yet fully Qualified — but maybe eligible for a special (below-threshold) request.
+  if (leadSpecialPromotionEligible(leadData)) {
+    if (leadData.promotion_requested_at) {
+      el.innerHTML = '<span style="color:#d97706;">⚠️ Special promotion requested</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— awaiting a manager\'s consideration</span>';
+    } else {
+      const n = leadGreenCount(leadData), need = promotionMinGreen();
+      el.innerHTML = `<span style="color:#d97706;">Eligible for a special promotion request</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— ${n}/${QUAL_DIMENSIONS.length} dimensions green (min ${need}) + service set; a written justification is required</span>`;
     }
     return;
   }
@@ -10569,6 +10661,34 @@ function flagLeadField(fieldId, message) {
 // Status is derived here on every write path + a New→Working sweep on list load.
 // Priority: Promoted → Dead → Dormant → Qualified → Working → New.
 const LEAD_GREEN = (l) => +l.fit===2 && +l.trigger_score===2 && +l.access===2 && +l.capacity===2;
+
+// ── Promotion-eligibility tunables (Settings → Lead Lifecycle) ────────────────
+// promotion_min_green: how many dimensions must read as "green" for a SPECIAL
+//   (below-full-qualification) promotion request. Default 4 = special path off.
+// promotion_green_counts_weak: if true a Weak (1) dot counts toward the tally,
+//   else only Strong (2) counts. Full Qualified ALWAYS needs all-4-Strong.
+function promotionMinGreen() {
+  const v = +((typeof appSettings !== 'undefined' && appSettings['promotion_min_green']));
+  return isNaN(v) ? 4 : Math.min(4, Math.max(1, v));
+}
+function promotionGreenCountsWeak() {
+  return String((typeof appSettings !== 'undefined' && appSettings['promotion_green_counts_weak']) || '') === 'true';
+}
+// Count dimensions that read as "green" under the current setting.
+function leadGreenCount(l) {
+  const floor = promotionGreenCountsWeak() ? 1 : 2;
+  return QUAL_DIMENSIONS.reduce((n, d) => n + ((+l[d.key] || 0) >= floor ? 1 : 0), 0);
+}
+// Eligible for a SPECIAL promotion request: not (yet) fully Qualified, but the green
+// tally meets the configured minimum AND a service category is set. Estimate is NOT
+// required for the special path (it is for full Qualified). Excludes dead/promoted.
+function leadSpecialPromotionEligible(l) {
+  if (!l || !l.id) return false;
+  if (l.status === 'Qualified' || l.status === 'Promoted' || l.status === 'Dead') return false;
+  if (LEAD_GREEN(l)) return false;   // all-strong uses the standard path
+  const hasService = l.service_major_id != null && +l.service_major_id > 0;
+  return hasService && leadGreenCount(l) >= promotionMinGreen();
+}
 
 function leadWaitingMinutes() {
   const v = +((typeof appSettings !== 'undefined' && appSettings['new_lead_waiting_minutes']));
@@ -11713,6 +11833,21 @@ async function renderSettingsPage() {
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">A pending next action due within this many days shows "Due soon" (orange); once the due date passes it shows "Overdue" (red).</div>
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Promotion eligibility — min. green dimensions</label>
+            <input type="number" id="setting-promotion-min-green" class="form-control" min="1" max="4" step="1" value="${appSettings['promotion_min_green']||'4'}">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A fully qualified lead (all four dimensions Strong + estimate + service) is urged to request promotion normally. A lead with at least this many green dimensions + a service category can instead make a <em>special</em> promotion request (with a written justification). Set to 4 to disable the special path.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Count "Weak" dimensions as green?</label>
+            <select id="setting-promotion-weak" class="form-control">
+              <option value="false" ${(appSettings['promotion_green_counts_weak']||'false')!=='true'?'selected':''}>No — only Strong counts</option>
+              <option value="true"  ${(appSettings['promotion_green_counts_weak']||'false')==='true'?'selected':''}>Yes — Weak also counts</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether a Weak (amber) rating counts toward the special-request threshold above. Full qualification always requires all four Strong, regardless of this setting.</div>
+          </div>
+        </div>
       </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
@@ -11730,6 +11865,8 @@ async function saveSettings() {
     const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
     const newLeadWait = document.getElementById('setting-new-lead-wait').value || '0';
     const dueSoonDays = document.getElementById('setting-due-soon-days').value || '0';
+    const promoMinGreen = String(Math.min(4, Math.max(1, +document.getElementById('setting-promotion-min-green').value || 4)));
+    const promoWeak = document.getElementById('setting-promotion-weak').value === 'true' ? 'true' : 'false';
     await Promise.all([
       api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
       api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
@@ -11737,6 +11874,8 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
       api('settings', 'PATCH', { value: newLeadWait, updated_at: new Date().toISOString() }, 'key=eq.new_lead_waiting_minutes'),
       api('settings', 'PATCH', { value: dueSoonDays, updated_at: new Date().toISOString() }, 'key=eq.lead_due_soon_days'),
+      api('settings', 'PATCH', { value: promoMinGreen, updated_at: new Date().toISOString() }, 'key=eq.promotion_min_green'),
+      api('settings', 'PATCH', { value: promoWeak, updated_at: new Date().toISOString() }, 'key=eq.promotion_green_counts_weak'),
     ]);
 
     appSettings['fy_start_month'] = fyStart;
@@ -11745,6 +11884,8 @@ async function saveSettings() {
     appSettings['eligible_collaborator_roles'] = collabRoles;
     appSettings['new_lead_waiting_minutes'] = newLeadWait;
     appSettings['lead_due_soon_days'] = dueSoonDays;
+    appSettings['promotion_min_green'] = promoMinGreen;
+    appSettings['promotion_green_counts_weak'] = promoWeak;
     showStatus('Settings saved');
   } catch(e) {
     showStatus('Failed to save: ' + e.message, 'error');
