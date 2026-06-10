@@ -97,6 +97,16 @@ tr:hover td{background:#F8FAFC;}
 .badge-gray{background:var(--bg);color:var(--text3);}
 .badge-blue{background:#EFF6FF;color:#1D4ED8;}
 
+/* ── Deal lineage (master/child rows, ported from focus_lineage_prototype.html) ── */
+.tag-ext{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0.03em;text-transform:uppercase;color:#0a6e4f;background:#e7f5ef;}
+.tag-var{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0.03em;text-transform:uppercase;color:#9a5b00;background:#fbf0e0;}
+.lin-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;font-size:11px;color:#003057;background:#fff;margin-right:8px;cursor:pointer;transition:transform 0.15s;vertical-align:middle;}
+.lin-toggle.open{transform:rotate(90deg);}
+tr.lineage-master td:first-child{background:#f0f4f9;}
+tr.lineage-child td{background:#fff;}
+tr.lineage-child td.lin-name{padding-left:34px;position:relative;}
+tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:50%;width:9px;height:1px;background:var(--border);}
+
 /* ── Forms ─────────────────────────────────────────────── */
 .form-group{margin-bottom:16px;}
 .form-label{display:block;font-size:12px;font-weight:600;color:var(--text2);margin-bottom:6px;letter-spacing:0.02em;}
@@ -329,7 +339,7 @@ tr:hover td{background:#F8FAFC;}
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -351,7 +361,7 @@ tr:hover td{background:#F8FAFC;}
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -4493,6 +4503,9 @@ async function saveOpportunity() {
     ? (+document.getElementById('opp-owner-reassign').value || null)
     : (oppData.owner_id || currentUser?.personId || null);
 
+  // Stage before this save — drives the secure-contract handler below.
+  const prevStageId = oppData.id ? (+oppData.stage_id || null) : null;
+
   const payload = {
     name,
     org_id: +orgId || null,
@@ -4537,6 +4550,9 @@ async function saveOpportunity() {
       await syncDealOwnerCollaborator(deal.id, newOwnerId);
     }
 
+    // Secure-contract handler: on moving into Secured, offer the forward extension.
+    await maybeOfferExtensionProspect(deal, prevStageId);
+
     closeOppPage();
     await renderOpportunitiesPage();
   } catch(e) {
@@ -4575,6 +4591,97 @@ async function saveRevenueStream(dealId) {
   }
 }
 
+
+// ── Secure-contract handler (simple v1) ───────────────────
+// When a deal moves INTO Secured (stage 5), offer to create the forward
+// extension prospect (design: EXTENSIONS_VARIATIONS_HANDOFF.md). v1 is a plain
+// confirm; the proper workflow + authorisation role replaces it later.
+// Only recurring service types extend: service_sub.is_recurring when the sub
+// is set, otherwise eligible if the major has any active recurring sub.
+async function maybeOfferExtensionProspect(deal, prevStageId) {
+  const SECURED_STAGE_ID = 5, PROSPECT_STAGE_ID = 2;
+  try {
+    if (!deal || +deal.stage_id !== SECURED_STAGE_ID || +prevStageId === SECURED_STAGE_ID) return;
+
+    const subs = allData['service_sub'] || (allData['service_sub'] = await apiGet('service_sub', 'select=*'));
+    const eligible = deal.service_sub_id
+      ? !!(subs.find(s => +s.id === +deal.service_sub_id)?.is_recurring)
+      : subs.some(s => +s.major_id === +deal.service_major_id && s.is_recurring && s.active);
+    if (!eligible) return;
+
+    // Soft invariant: one open extension child per contract.
+    const existing = await apiGet('deals', `parent_deal_id=eq.${deal.id}&opportunity_type=eq.extension&select=id`);
+    if (existing.length) return;
+
+    // Term + final-month run-rate from the deal's own stream months.
+    const streams = await apiGet('revenue_streams', `deal_id=eq.${deal.id}&select=id`);
+    if (!streams.length) return;
+    const monthRows = await apiGet('revenue_stream_months',
+      `stream_id=in.(${streams.map(s => s.id).join(',')})&select=month,opportunity_revenue,opportunity_margin&order=month.asc`);
+    const byMonth = new Map();
+    monthRows.forEach(m => byMonth.set(m.month, m));
+    const sorted = [...byMonth.keys()].sort();
+    if (!sorted.length) return;
+
+    const termMonths = sorted.length;
+    const [ly, lm] = sorted[termMonths - 1].split('-').map(Number);
+    const runRate = byMonth.get(sorted[termMonths - 1]);
+    const iso = dt => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+    const endDate = new Date(ly, lm, 0);                 // last day of final month
+    const startDate = new Date(ly, lm, 1);               // first day of the next month
+    const extEnd = new Date(ly, lm + termMonths, 0);     // same term length forward
+
+    // The term end is factual regardless of whether an extension is created.
+    if (!deal.contract_end_date) {
+      await api('deals', 'PATCH', { contract_end_date: iso(endDate) }, 'id=eq.' + deal.id);
+    }
+
+    if (!+runRate.opportunity_revenue) return;           // nothing to seed from
+
+    const startLbl = startDate.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
+    if (!confirm(`Deal secured. Create an extension prospect for "${deal.name}"?\n\n` +
+                 `New ${termMonths}-month term from ${startLbl}, seeded at the final-month run-rate.`)) return;
+
+    const prob = +(appSettings['extension_initial_probability'] || 20);
+    const ext = (await api('deals', 'POST', {
+      name: `${deal.name} - Extension ${startLbl}`,
+      org_id: deal.org_id,
+      region_id: deal.region_id,
+      stage_id: PROSPECT_STAGE_ID,
+      service_major_id: deal.service_major_id,
+      service_sub_id: deal.service_sub_id,
+      margin_pct: deal.margin_pct,
+      probability: prob,
+      start_date: iso(startDate),
+      owner_id: deal.owner_id,
+      created_by: currentUser?.personId || null,
+      notes: 'Forward extension opportunity created on securing the parent contract.',
+      opportunity_type: 'extension',
+      master_deal_id: deal.master_deal_id || deal.id,
+      parent_deal_id: deal.id,
+      contract_end_date: iso(extEnd),
+    }, 'select=*'))[0];
+
+    const stream = (await api('revenue_streams', 'POST',
+      { deal_id: ext.id, stream_type: 'opportunity', locked: false }, 'select=*'))[0];
+
+    const seedMonths = [];
+    for (let i = 0; i < termMonths; i++) {
+      const d0 = new Date(ly, lm + i, 1);
+      seedMonths.push({
+        stream_id: stream.id,
+        month: `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, '0')}`,
+        opportunity_revenue: +runRate.opportunity_revenue || 0,
+        opportunity_margin: +runRate.opportunity_margin || 0,
+      });
+    }
+    await api('revenue_stream_months', 'POST', seedMonths, '');
+
+    showStatus(`Extension prospect created: ${ext.name}`);
+  } catch (e) {
+    showStatus('Extension prospect not created: ' + e.message, 'error');
+  }
+}
 
 // ── Fuzzy String Matching ─────────────────────────────────
 function normaliseStr(s) {
@@ -5906,6 +6013,13 @@ async function filterDealsByView(deals, view) {
   return deals.filter(d => d.owner_id != null && +d.owner_id === +pid); // 'own' (+ fallback)
 }
 
+// Expanded lineage masters on the Opportunities table (survives re-render/sort).
+const _lineageOpen = new Set();
+function toggleLineage(masterId) {
+  _lineageOpen.has(+masterId) ? _lineageOpen.delete(+masterId) : _lineageOpen.add(+masterId);
+  _renderTable('opportunities');
+}
+
 async function renderOpportunitiesPage() {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
@@ -5936,6 +6050,25 @@ async function renderOpportunitiesPage() {
       return;
     }
 
+    // Lineage grouping (port of focus_lineage_prototype.html): children
+    // (extensions/variations — master_deal_id set) collapse under their master
+    // row. Sort/filter operate on masters; children always travel with theirs.
+    // A child whose master fell outside the current view renders top-level so
+    // it never disappears.
+    const lineageKids = {};
+    const masters = [];
+    for (const d of deals) {
+      if (d.master_deal_id && +d.master_deal_id !== +d.id) {
+        (lineageKids[+d.master_deal_id] = lineageKids[+d.master_deal_id] || []).push(d);
+      } else {
+        masters.push(d);
+      }
+    }
+    const masterIds = new Set(masters.map(m => +m.id));
+    for (const mid of Object.keys(lineageKids)) {
+      if (!masterIds.has(+mid)) { masters.push(...lineageKids[mid]); delete lineageKids[mid]; }
+    }
+
     // Column metadata: each col.get(row) returns the raw value used for sort +
     // filter checkbox labels. Display in the row stays bespoke via rowRenderer.
     const columns = [
@@ -5947,12 +6080,23 @@ async function renderOpportunitiesPage() {
       { key: 'actions',    label: 'Actions',      get: () => '', sortable: false, filterable: false },
     ];
 
-    const rowRenderer = (d) => {
+    const typeTag = d =>
+      d.opportunity_type === 'extension' ? ' <span class="tag-ext">Extension</span>' :
+      d.opportunity_type === 'variation' ? ' <span class="tag-var">Variation</span>' : '';
+
+    const dealRow = (d, opts) => {
       const org   = orgs.find(o => +o.id === +d.org_id);
       const stage = stages.find(s => +s.id === +d.stage_id);
-      return `<tr onclick="openOpportunity(${d.id})" style="cursor:pointer;">
-        <td style="font-weight:600;">${org?.name || '—'}</td>
-        <td>${d.name}</td>
+      const kids  = opts.kids || [];
+      const open  = _lineageOpen.has(+d.id);
+      const toggle = kids.length
+        ? `<span class="lin-toggle ${open ? 'open' : ''}" title="${kids.length} linked deal${kids.length !== 1 ? 's' : ''}" onclick="event.stopPropagation();toggleLineage(${d.id})">›</span>`
+        : '';
+      const rowCls  = opts.child ? 'lineage-child' : (kids.length ? 'lineage-master' : '');
+      const nameCls = opts.child ? ' class="lin-name"' : '';
+      return `<tr class="${rowCls}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
+        <td style="font-weight:600;">${opts.child ? '' : toggle + (org?.name || '—')}</td>
+        <td${nameCls}>${d.name}${typeTag(d)}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
         <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
@@ -5963,12 +6107,19 @@ async function renderOpportunitiesPage() {
       </tr>`;
     };
 
+    const rowRenderer = (d) => {
+      const kids = lineageKids[+d.id] || [];
+      const open = _lineageOpen.has(+d.id);
+      return dealRow(d, { kids })
+        + kids.map(k => dealRow(k, { child: true, open })).join('');
+    };
+
     makeSortableFilterableTable({
       tableId: 'opportunities',
       headRoot: head,
       bodyRoot: body,
       columns,
-      rows: deals,
+      rows: masters,
       rowRenderer,
       emptyMessage: 'No deals match the current filters',
     });

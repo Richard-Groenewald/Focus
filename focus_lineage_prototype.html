@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Focus — Deal Lineage (prototype)</title>
+<style>
+  :root{
+    --navy:#003057; --navy-700:#012744; --red:#FA0A11;
+    --ink:#1a2230; --muted:#6b7785; --line:#e3e8ee;
+    --bg:#f4f6f9; --card:#ffffff;
+    --ext:#0a6e4f; --ext-bg:#e7f5ef;
+    --var:#9a5b00; --var-bg:#fbf0e0;
+    --master-bg:#f0f4f9;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;color:var(--ink);background:var(--bg);font-size:14px}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px}
+  h1{font-size:18px;margin:0 0 2px;color:var(--navy)}
+  .sub{color:var(--muted);margin:0 0 20px;font-size:13px}
+
+  .legend{display:flex;gap:16px;margin-bottom:14px;font-size:12px;color:var(--muted)}
+  .chip{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:2px;display:inline-block}
+  .dot.ext{background:var(--ext)} .dot.var{background:var(--var)} .dot.master{background:var(--navy)}
+
+  .tbl{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .row{display:grid;grid-template-columns:30px 1fr 130px 120px 110px 96px;align-items:center;
+       padding:0 14px;border-bottom:1px solid var(--line);min-height:46px}
+  .row:last-child{border-bottom:none}
+  .head{background:var(--navy);color:#fff;font-size:11px;letter-spacing:.04em;text-transform:uppercase;min-height:38px}
+  .head .num{text-align:right}
+
+  .master{background:var(--master-bg);cursor:pointer}
+  .master:hover{background:#e9eff6}
+  .master .name{font-weight:700;color:var(--navy)}
+
+  .child{background:#fff;display:none}
+  .child.open{display:grid}
+  .child .name{padding-left:18px;position:relative;color:var(--ink)}
+  .child .name::before{content:"";position:absolute;left:2px;top:50%;width:9px;height:1px;background:var(--line)}
+
+  .toggle{width:18px;height:18px;border:1px solid var(--line);border-radius:4px;display:flex;
+          align-items:center;justify-content:center;font-size:11px;color:var(--navy);background:#fff;transition:transform .15s}
+  .master.expanded .toggle{transform:rotate(90deg)}
+  .spacer{}
+
+  .tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:.03em;text-transform:uppercase}
+  .tag.ext{color:var(--ext);background:var(--ext-bg)}
+  .tag.var{color:var(--var);background:var(--var-bg)}
+  .tag.orig{color:var(--navy);background:#e2eaf3}
+
+  .nm-line{display:flex;align-items:center;gap:9px}
+  .stage{font-size:11px;color:var(--muted)}
+  .stage.live{color:var(--ext);font-weight:600}
+  .num{text-align:right;font-variant-numeric:tabular-nums}
+  .num.delta-pos{color:var(--ext)} .num.delta-neg{color:var(--red)}
+  .period{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  .master .num{font-weight:700;color:var(--navy)}
+
+  .note{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.6;background:#fff;border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .note b{color:var(--ink)}
+  .note .k{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:middle}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pipeline — Deal Lineage view</h1>
+  <p class="sub">Master contract rows roll up their extensions and variations. Click a master row to expand.</p>
+
+  <div class="legend">
+    <span class="chip"><span class="dot master"></span>Original / master</span>
+    <span class="chip"><span class="dot ext"></span>Extension — new term, starts after current ends</span>
+    <span class="chip"><span class="dot var"></span>Variation — changes value of the live contract</span>
+  </div>
+
+  <div class="tbl" id="tbl">
+    <div class="row head">
+      <div class="spacer"></div>
+      <div>Deal</div>
+      <div>Type / stage</div>
+      <div class="num">Lineage value</div>
+      <div class="num">This row</div>
+      <div class="num">Period</div>
+    </div>
+
+    <!-- ================= LINEAGE 1 ================= -->
+    <div class="row master expanded" data-master="m1">
+      <div class="spacer"><span class="toggle">›</span></div>
+      <div class="name"><div class="nm-line">Harmony Group — Doornkop Manpower</div></div>
+      <div><span class="tag orig">Original</span></div>
+      <div class="num">R 18.94m</div>
+      <div class="num">R 12.60m</div>
+      <div class="num period">total</div>
+    </div>
+    <div class="row child open" data-child="m1">
+      <div class="spacer"></div>
+      <div class="name">Original term</div>
+      <div><span class="stage live">● In Progress (stg 7)</span></div>
+      <div class="num"></div>
+      <div class="num">R 12.60m</div>
+      <div class="num period">Jul ’25–Jun ’27</div>
+    </div>
+    <div class="row child open" data-child="m1">
+      <div class="spacer"></div>
+      <div class="name">Variation — +2 night posts</div>
+      <div><span class="tag var">Variation</span> <span class="stage">Qualified</span></div>
+      <div class="num"></div>
+      <div class="num delta-pos">+R 1.34m</div>
+      <div class="num period">Mar ’26–Jun ’27</div>
+    </div>
+    <div class="row child open" data-child="m1">
+      <div class="spacer"></div>
+      <div class="name">Extension — renewal term</div>
+      <div><span class="tag ext">Extension</span> <span class="stage">Qualified</span></div>
+      <div class="num"></div>
+      <div class="num">R 5.00m</div>
+      <div class="num period">Jul ’27–Jun ’29</div>
+    </div>
+
+    <!-- ================= LINEAGE 2 ================= -->
+    <div class="row master" data-master="m2">
+      <div class="spacer"><span class="toggle">›</span></div>
+      <div class="name"><div class="nm-line">Spier Estate — Technology Works</div></div>
+      <div><span class="tag orig">Original</span></div>
+      <div class="num">R 7.42m</div>
+      <div class="num">R 6.10m</div>
+      <div class="num period">total</div>
+    </div>
+    <div class="row child" data-child="m2">
+      <div class="spacer"></div>
+      <div class="name">Original term</div>
+      <div><span class="stage live">● In Progress (stg 7)</span></div>
+      <div class="num"></div>
+      <div class="num">R 6.10m</div>
+      <div class="num period">Jul ’25–Jun ’27</div>
+    </div>
+    <div class="row child" data-child="m2">
+      <div class="spacer"></div>
+      <div class="name">Variation — descoped 1 post</div>
+      <div><span class="tag var">Variation</span> <span class="stage">Qualified</span></div>
+      <div class="num"></div>
+      <div class="num delta-neg">−R 0.68m</div>
+      <div class="num period">Apr ’26–Jun ’27</div>
+    </div>
+    <div class="row child" data-child="m2">
+      <div class="spacer"></div>
+      <div class="name">Extension — renewal term</div>
+      <div><span class="tag ext">Extension</span> <span class="stage">Qualified</span></div>
+      <div class="num"></div>
+      <div class="num">R 2.00m</div>
+      <div class="num period">Jul ’27–Jun ’28</div>
+    </div>
+
+    <!-- ================= LINEAGE 3 (clean, no variations) ================= -->
+    <div class="row master" data-master="m3">
+      <div class="spacer"><span class="toggle">›</span></div>
+      <div class="name"><div class="nm-line">Scania SA — Onsite Guarding</div></div>
+      <div><span class="tag orig">Original</span></div>
+      <div class="num">R 9.30m</div>
+      <div class="num">R 7.20m</div>
+      <div class="num period">total</div>
+    </div>
+    <div class="row child" data-child="m3">
+      <div class="spacer"></div>
+      <div class="name">Original term</div>
+      <div><span class="stage live">● In Progress (stg 7)</span></div>
+      <div class="num"></div>
+      <div class="num">R 7.20m</div>
+      <div class="num period">Jul ’25–Jun ’27</div>
+    </div>
+    <div class="row child" data-child="m3">
+      <div class="spacer"></div>
+      <div class="name">Extension — renewal term</div>
+      <div><span class="tag ext">Extension</span> <span class="stage">Qualified</span></div>
+      <div class="num"></div>
+      <div class="num">R 2.10m</div>
+      <div class="num period">Jul ’27–Jun ’28</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>How the value rolls up.</b> The master row’s <b>Lineage value</b> is the time-phased sum across the whole family, with no double-count:<br>
+    <span class="k" style="background:var(--navy)"></span><b>Original</b> holds the contracted months of the current term (fulfilment_revenue).<br>
+    <span class="k" style="background:var(--var)"></span><b>Variation</b> holds only the <b>delta</b> (+ uplift / − reduction) from its effective month — it overlaps the live term in time but never restates it.<br>
+    <span class="k" style="background:var(--ext)"></span><b>Extension</b> holds a <b>new term</b> phased to start the month after the current term ends — no month overlaps the original.<br>
+    Lineage 1: 12.60 + 1.34 + 5.00 = <b>R 18.94m</b>. Aggregate by <code>master_deal_id</code> instead of <code>deal_id</code> and this falls out of <code>revenue_stream_months</code> directly.
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.master').forEach(function(m){
+    m.addEventListener('click',function(){
+      var id=m.getAttribute('data-master');
+      var open=m.classList.toggle('expanded');
+      document.querySelectorAll('.child[data-child="'+id+'"]').forEach(function(c){
+        c.classList.toggle('open',open);
+      });
+    });
+  });
+</script>
+</body>
+</html>
