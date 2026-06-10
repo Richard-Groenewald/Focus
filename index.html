@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1540,12 +1540,14 @@ function _renderTable(tableId) {
     }).join('') + '</tr>';
   }
 
-  // Rows
+  // Rows. groupRenderer (optional) receives the whole filtered+sorted list and
+  // returns the body HTML — used by views that regroup rows (deal lineage)
+  // AFTER filter/sort has run on the individual rows.
   if (bodyRoot) {
     if (!filtered.length) {
       bodyRoot.innerHTML = `<tr class="empty-row"><td colspan="${columns.length}">${emptyMessage || 'No results'}</td></tr>`;
     } else {
-      bodyRoot.innerHTML = filtered.map(rowRenderer).join('');
+      bodyRoot.innerHTML = s.groupRenderer ? s.groupRenderer(filtered) : filtered.map(rowRenderer).join('');
     }
   }
 }
@@ -6058,25 +6060,6 @@ async function renderOpportunitiesPage() {
       return;
     }
 
-    // Lineage grouping (port of focus_lineage_prototype.html): children
-    // (extensions/variations — master_deal_id set) collapse under their master
-    // row. Sort/filter operate on masters; children always travel with theirs.
-    // A child whose master fell outside the current view renders top-level so
-    // it never disappears.
-    const lineageKids = {};
-    const masters = [];
-    for (const d of deals) {
-      if (d.master_deal_id && +d.master_deal_id !== +d.id) {
-        (lineageKids[+d.master_deal_id] = lineageKids[+d.master_deal_id] || []).push(d);
-      } else {
-        masters.push(d);
-      }
-    }
-    const masterIds = new Set(masters.map(m => +m.id));
-    for (const mid of Object.keys(lineageKids)) {
-      if (!masterIds.has(+mid)) { masters.push(...lineageKids[mid]); delete lineageKids[mid]; }
-    }
-
     // Column metadata: each col.get(row) returns the raw value used for sort +
     // filter checkbox labels. Display in the row stays bespoke via rowRenderer.
     const columns = [
@@ -6099,7 +6082,7 @@ async function renderOpportunitiesPage() {
       const org = opts.child ? null : orgs.find(o => +o.id === +d.org_id);
       return `<tr class="${opts.child ? 'lineage-child' : ''}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
         <td style="font-weight:600;">${opts.child ? '' : (org?.name || '—')}</td>
-        <td${nameCls}>${d.name}${opts.child ? typeTag(d) : ''}</td>
+        <td${nameCls}>${d.name}${(opts.child || opts.tag) ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
         <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
@@ -6113,10 +6096,10 @@ async function renderOpportunitiesPage() {
     // A family renders as a VIRTUAL master header (not a DB record — just the
     // group, click to expand/collapse) with the original and every extension/
     // variation as its children.
-    const masterRow = (d, kids, open) => {
+    const masterRow = (d, members, open, mid) => {
       const org = orgs.find(o => +o.id === +d.org_id);
-      const n = kids.length + 1;
-      return `<tr class="lineage-master" onclick="toggleLineage(${d.id})" style="cursor:pointer;">
+      const n = members.length;
+      return `<tr class="lineage-master" onclick="toggleLineage(${mid})" style="cursor:pointer;">
         <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${org?.name || '—'}</td>
         <td style="color:#003057;font-weight:700;">${d.name}</td>
         <td style="color:var(--text3);">${n} linked deals</td>
@@ -6126,13 +6109,32 @@ async function renderOpportunitiesPage() {
       </tr>`;
     };
 
-    const rowRenderer = (d) => {
-      const kids = lineageKids[+d.id] || [];
-      if (!kids.length) return dealRow(d, {});
-      const open = _lineageOpen.has(+d.id);
-      return masterRow(d, kids, open)
-        + dealRow(d, { child: true, open })
-        + kids.map(k => dealRow(k, { child: true, open })).join('');
+    // Lineage grouping AFTER filter/sort, like the pipeline: every deal —
+    // including extension/variation children — participates in sort and the
+    // filter value lists individually; families then form from the visible
+    // rows. A family with one visible member renders as a plain tagged row.
+    const groupRenderer = (filtered) => {
+      const famByMid = new Map(); const groups = [];
+      filtered.forEach(d => {
+        const mid = d.master_deal_id ? +d.master_deal_id : +d.id;
+        let g = famByMid.get(mid);
+        if (!g) { g = { mid, members: [] }; famByMid.set(mid, g); groups.push(g); }
+        g.members.push(d);
+      });
+      let html = '';
+      groups.forEach(g => {
+        if (g.members.length === 1) {
+          const d = g.members[0];
+          html += dealRow(d, { tag: d.opportunity_type && d.opportunity_type !== 'new_business' });
+          return;
+        }
+        g.members.sort((a, b) => (+a.id === g.mid ? -1 : 0) - (+b.id === g.mid ? -1 : 0));   // original first
+        const orig = g.members.find(m => +m.id === g.mid) || g.members[0];
+        const open = _lineageOpen.has(g.mid);
+        html += masterRow(orig, g.members, open, g.mid)
+              + g.members.map(m => dealRow(m, { child: true, open })).join('');
+      });
+      return html;
     };
 
     makeSortableFilterableTable({
@@ -6140,8 +6142,9 @@ async function renderOpportunitiesPage() {
       headRoot: head,
       bodyRoot: body,
       columns,
-      rows: masters,
-      rowRenderer,
+      rows: deals,
+      rowRenderer: d => dealRow(d, {}),
+      groupRenderer,
       emptyMessage: 'No deals match the current filters',
     });
   } catch(e) {
