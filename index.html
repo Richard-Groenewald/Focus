@@ -100,9 +100,11 @@ tr:hover td{background:#F8FAFC;}
 /* ── Deal lineage (master/child rows, ported from focus_lineage_prototype.html) ── */
 .tag-ext{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0.03em;text-transform:uppercase;color:#0a6e4f;background:#e7f5ef;}
 .tag-var{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0.03em;text-transform:uppercase;color:#9a5b00;background:#fbf0e0;}
+.tag-orig{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;letter-spacing:0.03em;text-transform:uppercase;color:#003057;background:#e2eaf3;}
 .lin-toggle{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border:1px solid var(--border);border-radius:4px;font-size:11px;color:#003057;background:#fff;margin-right:8px;cursor:pointer;transition:transform 0.15s;vertical-align:middle;}
 .lin-toggle.open{transform:rotate(90deg);}
-tr.lineage-master td:first-child{background:#f0f4f9;}
+tr.lineage-master td{background:#f0f4f9;font-weight:600;}
+tr.lineage-master:hover td{background:#e9eff6;}
 tr.lineage-child td{background:#fff;}
 tr.lineage-child td.lin-name{padding-left:34px;position:relative;}
 tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:50%;width:9px;height:1px;background:var(--border);}
@@ -339,7 +341,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -361,7 +363,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -6082,21 +6084,16 @@ async function renderOpportunitiesPage() {
 
     const typeTag = d =>
       d.opportunity_type === 'extension' ? ' <span class="tag-ext">Extension</span>' :
-      d.opportunity_type === 'variation' ? ' <span class="tag-var">Variation</span>' : '';
+      d.opportunity_type === 'variation' ? ' <span class="tag-var">Variation</span>' :
+      ' <span class="tag-orig">Original</span>';
 
     const dealRow = (d, opts) => {
-      const org   = orgs.find(o => +o.id === +d.org_id);
       const stage = stages.find(s => +s.id === +d.stage_id);
-      const kids  = opts.kids || [];
-      const open  = _lineageOpen.has(+d.id);
-      const toggle = kids.length
-        ? `<span class="lin-toggle ${open ? 'open' : ''}" title="${kids.length} linked deal${kids.length !== 1 ? 's' : ''}" onclick="event.stopPropagation();toggleLineage(${d.id})">›</span>`
-        : '';
-      const rowCls  = opts.child ? 'lineage-child' : (kids.length ? 'lineage-master' : '');
       const nameCls = opts.child ? ' class="lin-name"' : '';
-      return `<tr class="${rowCls}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
-        <td style="font-weight:600;">${opts.child ? '' : toggle + (org?.name || '—')}</td>
-        <td${nameCls}>${d.name}${typeTag(d)}</td>
+      const org = opts.child ? null : orgs.find(o => +o.id === +d.org_id);
+      return `<tr class="${opts.child ? 'lineage-child' : ''}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
+        <td style="font-weight:600;">${opts.child ? '' : (org?.name || '—')}</td>
+        <td${nameCls}>${d.name}${opts.child ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
         <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
@@ -6107,10 +6104,28 @@ async function renderOpportunitiesPage() {
       </tr>`;
     };
 
+    // A family renders as a VIRTUAL master header (not a DB record — just the
+    // group, click to expand/collapse) with the original and every extension/
+    // variation as its children.
+    const masterRow = (d, kids, open) => {
+      const org = orgs.find(o => +o.id === +d.org_id);
+      const n = kids.length + 1;
+      return `<tr class="lineage-master" onclick="toggleLineage(${d.id})" style="cursor:pointer;">
+        <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${org?.name || '—'}</td>
+        <td style="color:#003057;font-weight:700;">${d.name}</td>
+        <td style="color:var(--text3);">${n} linked deals</td>
+        <td>—</td>
+        <td style="text-align:right;">—</td>
+        <td></td>
+      </tr>`;
+    };
+
     const rowRenderer = (d) => {
       const kids = lineageKids[+d.id] || [];
+      if (!kids.length) return dealRow(d, {});
       const open = _lineageOpen.has(+d.id);
-      return dealRow(d, { kids })
+      return masterRow(d, kids, open)
+        + dealRow(d, { child: true, open })
         + kids.map(k => dealRow(k, { child: true, open })).join('');
     };
 
