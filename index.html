@@ -244,6 +244,11 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 #rpp-root tfoot td{position:sticky; bottom:0; z-index:1; background:var(--khaki); color:var(--navy); font-weight:800; border-top:2px solid var(--navy);}
 #rpp-root .rpp-note{margin-top:12px; font-size:12px; color:var(--text3);}
 #rpp-root td.actual{color:var(--green); font-weight:700;}
+#rpp-root tr.rpp-master td{background:#f0f4f9; font-weight:600;}
+#rpp-root tr.rpp-master:hover td{background:#e9eff6;}
+#rpp-root tr.rpp-master td.deal-total{background:#e6ebf2;}
+#rpp-root tr.rpp-child td.deal{padding-left:26px; position:relative;}
+#rpp-root tr.rpp-child td.deal::before{content:""; position:absolute; left:12px; top:50%; width:9px; height:1px; background:var(--border);}
 #rpp-root .vchip{display:inline-block; margin-top:1px; padding:0 4px; border-radius:8px; font-size:8px; font-weight:700;}
 #rpp-root .vchip.up{background:#DCFCE7; color:#166534;}
 #rpp-root .vchip.down{background:#FEE2E2; color:#991B1B;}
@@ -341,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -363,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -6164,6 +6169,9 @@ const RPP = (function () {
   let detailOn = true, openFY = null, fyStart = 0;
   let sortKey = null, sortDir = null;
   const filters = {};   // colKey -> Set<excluded display value>
+  const linOpen = new Set();   // expanded lineage families (master deal ids)
+
+  function toggleLin(mid){ linOpen.has(+mid) ? linOpen.delete(+mid) : linOpen.add(+mid); paint(); }
 
   // ── helpers ──
   const fmt = n => n ? 'R ' + (n/1000).toLocaleString('en-ZA',{maximumFractionDigits:0}) + ' k' : '–';
@@ -6356,9 +6364,29 @@ const RPP = (function () {
 
     const deals = visibleDeals();
     let body=''; let gDeal=0; const fyT={}; winFYs.forEach(f=>fyT[f.key]=0); const monT=Array.from({length:12},()=>0);
+
+    // Lineage grouping: a family (original + extensions/variations sharing a
+    // master) renders under a VIRTUAL master header row whose values are the
+    // sum of its visible members; click toggles the children. Singles render
+    // exactly as before. Grand/FY/month totals accumulate per real deal only —
+    // the header is presentational and never double-counts.
+    const famByMid = new Map(); const groups = [];
     deals.forEach(d=>{
+      let g = famByMid.get(d.masterId);
+      if (!g){ g = { mid:d.masterId, members:[] }; famByMid.set(d.masterId, g); groups.push(g); }
+      g.members.push(d);
+    });
+
+    const lineageTag = d =>
+      d.otype==='extension' ? ' <span class="tag-ext">Extension</span>' :
+      d.otype==='variation' ? ' <span class="tag-var">Variation</span>' :
+      ' <span class="tag-orig">Original</span>';
+
+    const dealRowHtml = (d, fam, open) => {
       const dt = dealValue(d); gDeal += dt;
-      let row = `<td>${d.client}</td><td class="deal">${d.deal}</td><td class="num deal-total">${fmt(dt)}</td>`;
+      let row = fam
+        ? `<td></td><td class="deal">${d.deal}${lineageTag(d)}</td><td class="num deal-total">${fmt(dt)}</td>`
+        : `<td>${d.client}</td><td class="deal">${d.deal}</td><td class="num deal-total">${fmt(dt)}</td>`;
       if (showDetail) ATTRS.forEach(a=>{
         if (a.k==='stage') row+=`<td>${stageBadge(d.stage)}</td>`;
         else if (a.k==='prob') row+=`<td class="num prob" style="color:${d.prob>=100?'var(--green)':d.prob>=50?'var(--navy)':'var(--text3)'}">${d.prob}%</td>`;
@@ -6369,7 +6397,29 @@ const RPP = (function () {
         if (f.key===effOpen){ f.months.forEach((mk,i)=>{ const L=layers(d,f.key,i); monT[i]+=effective(L); row+=monthCell(L, i===0); }); row+=`<td class="num col-total">${fmt(t)}</td>`; }
         else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
       });
-      body+=`<tr>${row}</tr>`;
+      return `<tr${fam?` class="rpp-child"${open?'':' style="display:none;"'}`:''}>${row}</tr>`;
+    };
+
+    groups.forEach(g=>{
+      if (g.members.length === 1){ body += dealRowHtml(g.members[0], false, true); return; }
+      g.members.sort((a,b)=> (a.id===g.mid?-1:0) - (b.id===g.mid?-1:0));   // original first
+      const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
+      const open = linOpen.has(+g.mid);
+      let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${orig.client}</td>` +
+                `<td class="deal" style="font-weight:700;color:var(--navy);">${orig.deal}</td>` +
+                `<td class="num deal-total">${fmt(g.members.reduce((s,m)=>s+dealValue(m),0))}</td>`;
+      if (showDetail) ATTRS.forEach(a=>{
+        row += a.k==='stage' ? `<td style="color:var(--text3);font-size:11px;">${g.members.length} linked deals</td>` : `<td></td>`;
+      });
+      winFYs.forEach(f=>{
+        const t = g.members.reduce((s,m)=>s+fyValue(m,f.key),0);
+        if (f.key===effOpen){
+          f.months.forEach((mk,i)=>{ const v=g.members.reduce((s,m)=>s+effective(layers(m,f.key,i)),0); row+=`<td class="num${i===0?' fy-edge':''}">${fmt(v)}</td>`; });
+          row+=`<td class="num col-total">${fmt(t)}</td>`;
+        } else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
+      });
+      body += `<tr class="rpp-master" onclick="RPP.toggleLin(${g.mid})" style="cursor:pointer;">${row}</tr>`;
+      g.members.forEach(m=> body += dealRowHtml(m, true, open));
     });
     if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">No deals match the current filters.</td></tr>`;
 
@@ -6515,6 +6565,8 @@ const RPP = (function () {
 
     DEALS = deals.map((d,i)=>({
       _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id,
+      masterId: d.master_deal_id ? +d.master_deal_id : +d.id,
+      otype: d.opportunity_type || 'new_business',
       client: (orgs.find(o=>+o.id===+d.org_id)||{}).name || '—',
       deal: d.name || '—',
       owner: personName(people, d.owner_id),
@@ -6584,7 +6636,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, setMetric, toggleVariance, toggleDetail, toggleFY, pageFY,
+  return { render, setBasis, setMetric, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, closeFilter, filterPopupList };
 })();
 
