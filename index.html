@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -7447,6 +7447,12 @@ else document.addEventListener('DOMContentLoaded', _fxPhoneInit);
 
 // ── Contact name rule: must have a first AND last name ──
 function leadNameHasTwoParts(s) { return String(s || '').trim().split(/\s+/).filter(Boolean).length >= 2; }
+
+// Light-red container for the similarity-match suggestion strips — same look
+// as the mandatory-fields explainer banner at the top of the lead form.
+function leadMatchBox(html) {
+  return html ? `<div style="background:#FFF5F5;border-left:3px solid var(--red);border-radius:6px;padding:10px 12px;">${html}</div>` : '';
+}
 function validateLeadName(el) {
   if (!el) return;
   const v = (el.value || '').trim();
@@ -7478,7 +7484,7 @@ function onLeadAddContactNameInput() {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0;">Possible matches</div>`;
     html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
   }
-  out.innerHTML = html;
+  out.innerHTML = leadMatchBox(html);
 }
 function useLeadAddContactMatch(personId) {
   const p = (allData['people'] || []).find(x => +x.id === +personId);
@@ -7848,7 +7854,9 @@ function resetLeadForm() {
     'lead-dead-reason-value','lead-dead-notes-value'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  // Clear similarity match hints
+  // Clear similarity match hints + the "confirmed as new" suppressions
+  window._leadTargetOrgNewConfirmed = null;
+  window._leadTargetPersonNewConfirmed = null;
   const orgMatchEl = document.getElementById('lead-target-org-matches');
   if (orgMatchEl) orgMatchEl.innerHTML = '';
   const personMatchEl = document.getElementById('lead-target-person-matches');
@@ -8491,7 +8499,7 @@ function onLeadTargetOrgNameInput() {
         <button type="button" class="btn btn-primary btn-sm" onclick="confirmLeadTargetOrgNew()">Use as new</button>
       </div>`;
   }
-  matchEl.innerHTML = html;
+  matchEl.innerHTML = leadMatchBox(html);
 }
 
 // User rejected every suggestion (or there were none) → commit the typed name as
@@ -8743,6 +8751,10 @@ async function onLeadTargetPersonNameInput() {
   // If an affiliated contact is already picked from the dropdown, free-text is irrelevant.
   if (document.getElementById('lead-target-person-id')?.value) { matchEl.innerHTML = ''; return; }
   if (name.length < 3) { matchEl.innerHTML = ''; return; }
+  // User already confirmed this exact name is a new contact — keep the strip
+  // closed until they edit the name again (same pattern as the org field).
+  if (window._leadTargetPersonNewConfirmed === name.toLowerCase()) { matchEl.innerHTML = ''; return; }
+  window._leadTargetPersonNewConfirmed = null;
 
   // Affiliations only feed a secondary "affiliated with…" label — load them in
   // the background and re-render when ready; never block the match strip on the
@@ -8779,7 +8791,33 @@ async function onLeadTargetPersonNameInput() {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
     html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
   }
-  matchEl.innerHTML = html;
+  // Always offer the typed name as a brand-new contact (mirrors the org field's
+  // "Use as new") — gated on the first + last name rule.
+  const escName = name.replace(/</g, '&lt;');
+  if (leadNameHasTwoParts(name)) {
+    html += `
+      <div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;${html ? 'margin-top:6px;' : ''}">
+        <div style="font-size:12px;color:var(--text2);">${html ? "None of these — it's a new contact." : 'No similar contacts found — looks new.'}</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmLeadTargetPersonNew()">Use "${escName}"</button>
+      </div>`;
+  } else {
+    html += `
+      <div style="font-size:12px;color:var(--red);${html ? 'margin-top:6px;' : ''}">Enter both a first and last name to use "${escName}" as a new contact.</div>`;
+  }
+  matchEl.innerHTML = leadMatchBox(html);
+}
+
+// User confirmed the typed name is a brand-new contact: dismiss the match strip
+// (it stays closed until the name is edited again) and move to contact capture.
+// The typed name itself is what gets saved — no FK is set.
+function confirmLeadTargetPersonNew() {
+  const name = (document.getElementById('lead-target-person-name')?.value || '').trim();
+  if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
+  window._leadTargetPersonNewConfirmed = name.toLowerCase();
+  const matchEl = document.getElementById('lead-target-person-matches');
+  if (matchEl) matchEl.innerHTML = '';
+  document.getElementById('lead-target-person-phone')?.focus();
+  updateLeadAdditionalContactsAvailability();
 }
 
 // Picking a suggested match: drop them into the dropdown FK, clear free text + matches.
@@ -8888,7 +8926,7 @@ async function onLeadSourcePersonNameInput() {
   // "No" — none of these are the referrer → capture them as a new contact.
   html += `
     <button type="button" class="btn btn-secondary btn-sm" onclick="declineLeadSourcePersonMatches()" style="margin-top:2px;">No — none of these, add new contact</button>`;
-  matchEl.innerHTML = html;
+  matchEl.innerHTML = leadMatchBox(html);
 }
 
 // "No" on the match prompt: dismiss the suggestions and open the contact-detail
@@ -11448,6 +11486,17 @@ async function saveLead(opts) {
 
   if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return false; }
   if (!description) { flagLeadField('lead-description', 'Description is required'); return false; }
+
+  // A typed contact name must always carry a first AND last name (an existing
+  // FK person is already a complete record; empty stays allowed pre-Working).
+  const tpName = (document.getElementById('lead-target-person-name')?.value || '').trim();
+  if (!(+document.getElementById('lead-target-person-id')?.value) && tpName && !leadNameHasTwoParts(tpName)) {
+    flagLeadField('lead-target-person-name', 'Enter both a first and last name'); return false;
+  }
+  const spName = (document.getElementById('lead-source-person-name')?.value || '').trim();
+  if (!(+document.getElementById('lead-source-person-id')?.value) && spName && !leadNameHasTwoParts(spName)) {
+    flagLeadField('lead-source-person-name', 'Enter both a first and last name'); return false;
+  }
 
   // Status is derived server-side. Red flag tags live in lead_red_flags (synced
   // by saveLeadQualificationSelections) — their existence drives Dead-by-red-flag.
