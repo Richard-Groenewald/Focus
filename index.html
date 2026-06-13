@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.61 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.61 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -3361,6 +3361,17 @@ function toggleSubgroup(id, btn) {
 let oppData = {}; // current opportunity being edited
 let oppMonths = {}; // {YYYY-MM: {revenue, margin}}
 let oppFYs = []; // financial years shown
+let oppRevLocked = false; // contracted-forecast lock: true once a deal is secured
+                          // (re-forecast is a future senior-approved action)
+
+// The revenue forecast is locked once a deal is secured: the stream's locked
+// flag (set by the secured process) is authoritative, with a stage fallback
+// (Secured / In Progress / Complete) so deals secured before the flag existed
+// — and the imported contracts — are protected too.
+function isRevLocked(deal, oppStream) {
+  if (oppStream && oppStream.locked) return true;
+  return [5, 7, 8].includes(+deal?.stage_id);
+}
 
 function getFYMonths(fy) {
   const startMonthName = appSettings['fy_start_month'] || 'April';
@@ -3389,6 +3400,7 @@ async function openNewOpportunity() {
   // Fully reset all state
   oppData = {};
   oppMonths = {};
+  oppRevLocked = false;
   oppCollaborators = [];
   oppContacts = [];
   if (window._engPeople) window._engPeople = [];
@@ -3446,13 +3458,15 @@ async function openOpportunity(id) {
     oppMonths = {};
 
     // Load revenue stream months
-    const streams = await apiGet('revenue_streams', 'deal_id=eq.' + id + '&stream_type=eq.opportunity&select=id');
+    const streams = await apiGet('revenue_streams', 'deal_id=eq.' + id + '&stream_type=eq.opportunity&select=id,locked');
     if (streams.length) {
       const months = await apiGet('revenue_stream_months', 'stream_id=eq.' + streams[0].id + '&select=*');
       months.forEach(m => {
         oppMonths[m.month] = { revenue: m.opportunity_revenue, margin: m.opportunity_margin };
       });
     }
+    // Contracted-forecast lock: secured deals are read-only until a senior-approved re-forecast.
+    oppRevLocked = isRevLocked(oppData, streams[0]);
 
     // Set probability userSet flag BEFORE initOppForm so stage change won't override it
     if (oppData.probability != null) {
@@ -3790,7 +3804,14 @@ function buildRevGrid() {
     `<button class="rev-fy-tab ${i===1?'active':''}" onclick="switchFYTab(${fy}, this)">${getFYLabel(fy)}</button>`
   ).join('');
 
-  contentsEl.innerHTML = oppFYs.map((fy, i) => {
+  // Secured deals: contracted forecast is read-only. Margin % follows the lock.
+  const mpEl = document.getElementById('opp-margin-pct');
+  if (mpEl) mpEl.disabled = oppRevLocked;
+  const lockBanner = oppRevLocked
+    ? `<div style="margin:0 0 10px;padding:8px 12px;background:#EEF2F7;border-left:3px solid var(--navy);border-radius:6px;font-size:12px;color:var(--text2);">🔒 This deal is secured — the contracted forecast is locked. Changing it requires a senior-approved re-forecast (coming soon).</div>`
+    : '';
+
+  contentsEl.innerHTML = lockBanner + oppFYs.map((fy, i) => {
     const months = getFYMonths(fy);
     const monthHeaders = months.map(m => {
       const d = new Date(m + '-01');
@@ -3800,7 +3821,8 @@ function buildRevGrid() {
     const revenueInputs = months.map(m => {
       const v = oppMonths[m]?.revenue;
       const display = v && +v > 0 ? Math.round(+v).toLocaleString('en-US') : '';
-      return `<td><input class="rev-input" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="0" oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
+      const dis = oppRevLocked ? ' disabled' : '';
+      return `<td><input class="rev-input" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="0"${dis} oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
     }).join('');
 
     const marginCalcs = months.map(m =>
@@ -3918,6 +3940,7 @@ function updateRevTotals() {
 }
 
 function autoPopulateGrid() {
+  if (oppRevLocked) { showStatus('Forecast is locked — secured deals need a senior-approved re-forecast.', 'error'); return; }
   const base = +document.getElementById('opp-base-amount').value || 0;
   const months = +document.getElementById('opp-num-months').value || 12;
   const esc = +document.getElementById('opp-escalation').value || 0;
@@ -4573,6 +4596,11 @@ async function saveOpportunity() {
 }
 
 async function saveRevenueStream(dealId) {
+  // Contracted forecast is locked once secured — never overwrite it from a save
+  // of other fields. Re-forecasting is a future senior-approved action. (At the
+  // moment a deal is being secured oppRevLocked is still false, so the final
+  // forecast is captured before runSecuredProcess locks it.)
+  if (oppRevLocked) return;
   // Get or create opportunity stream
   let streams = await apiGet('revenue_streams', 'deal_id=eq.' + dealId + '&stream_type=eq.opportunity&select=*');
   let streamId;
@@ -4641,6 +4669,11 @@ async function runSecuredProcess(deal, prevStageId) {
       pipeline,
       secured_by: currentUser?.personId || null,
     }, '');
+
+    // 3. Lock the contracted forecast. Re-forecasting becomes a senior-approved
+    //    action (future authorisation workflow); until then the grid is read-only.
+    await api('revenue_streams', 'PATCH', { locked: true }, `deal_id=eq.${deal.id}&stream_type=eq.opportunity`);
+    oppRevLocked = true;
   } catch (e) {
     showStatus('Secured process note: ' + e.message, 'error');
   }
