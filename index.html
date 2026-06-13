@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -4560,7 +4560,9 @@ async function saveOpportunity() {
       await syncDealOwnerCollaborator(deal.id, newOwnerId);
     }
 
-    // Secure-contract handler: on moving into Secured, offer the forward extension.
+    // Securing is an event: on moving into Secured, run the secured process
+    // (set 100% + freeze a historical snapshot), then offer the forward extension.
+    await runSecuredProcess(deal, prevStageId);
     await maybeOfferExtensionProspect(deal, prevStageId);
 
     closeOppPage();
@@ -4601,6 +4603,48 @@ async function saveRevenueStream(dealId) {
   }
 }
 
+
+// ── Secured process (placeholder v1) ──────────────────────
+// Selecting Secured is an EVENT. The full verification + authorisation workflow
+// is still to be defined; for now this runs for EVERY deal moving into Secured:
+//   1. set probability to 100%
+//   2. write a one-time historical snapshot of the pipeline-as-secured to
+//      secured_snapshots (audit only — NEVER read for reporting/projection).
+// Reporting continues against the live weighted value (now 100%) until actuals
+// replace months. The Secured *view* in the pipeline is the live 100% slice;
+// this snapshot is the frozen record of what was secured, and when, by whom.
+async function runSecuredProcess(deal, prevStageId) {
+  const SECURED_STAGE_ID = 5;
+  try {
+    if (!deal || +deal.stage_id !== SECURED_STAGE_ID || +prevStageId === SECURED_STAGE_ID) return;
+
+    // 1. Lock probability to 100%.
+    if (+deal.probability !== 100) {
+      await api('deals', 'PATCH', { probability: 100 }, 'id=eq.' + deal.id);
+      deal.probability = 100;
+    }
+
+    // 2. Freeze the current pipeline (per-month revenue + margin) as history.
+    const streams = await apiGet('revenue_streams', `deal_id=eq.${deal.id}&select=id`);
+    let pipeline = [];
+    if (streams.length) {
+      const monthRows = await apiGet('revenue_stream_months',
+        `stream_id=in.(${streams.map(s => s.id).join(',')})&select=month,opportunity_revenue,opportunity_margin&order=month.asc`);
+      pipeline = monthRows.map(m => ({
+        month: m.month,
+        revenue: +m.opportunity_revenue || 0,
+        margin: +m.opportunity_margin || 0,
+      }));
+    }
+    await api('secured_snapshots', 'POST', {
+      deal_id: deal.id,
+      pipeline,
+      secured_by: currentUser?.personId || null,
+    }, '');
+  } catch (e) {
+    showStatus('Secured process note: ' + e.message, 'error');
+  }
+}
 
 // ── Secure-contract handler (simple v1) ───────────────────
 // When a deal moves INTO Secured (stage 5), offer to create the forward
@@ -6209,8 +6253,12 @@ const RPP = (function () {
     const c = cellOf(d, fyKey, i);
     if (!c) return { total:0, weighted:0, secured:0, actual:null };
     const isM = metric === 'margin';
-    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // opportunity stream = Total/projection
-    const sec  = isM ? (c.fulMar||0) : (c.fulRev||0);   // fulfilment stream  = Secured (0 until populated)
+    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // projection (Total view)
+    // Three views of the SAME data: Total = projection, Weighted = projection ×
+    // probability, Secured = projection of deals at 100% (i.e. secured). There is
+    // no stored "secured" value — it's the live 100% slice. The frozen secured
+    // figure lives in secured_snapshots (audit only, never read here).
+    const sec  = (d.prob >= 100) ? base : 0;
     const act  = isM ? c.actMar : c.actRev;             // real actual column; null if absent
     return { total:base, weighted: base*(d.prob/100), secured:sec, actual: act!=null ? act : null };
   }
