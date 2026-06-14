@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.63 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.63 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -4526,18 +4526,62 @@ async function openViewEngagementModal(engId) {
   const saveBtn = modalRoot.querySelector('.btn-primary');
   if (saveBtn) saveBtn.style.display = 'none';
 
+  // Even with the edit window closed, an OPEN next-action task must stay completable
+  // by anyone authorised to work the deal (owner / region-manager / admin /
+  // collaborator). Re-enable only the completion note + a dedicated complete button;
+  // everything else remains locked so the engagement record itself can't be altered.
+  const taskOpen = !!eng.next_action && !eng.next_action_done;
+  const canComplete = taskOpen && (canEditRecord(oppData) || isCurrentUserOppCollaborator());
+  if (canComplete) {
+    const noteWrap = document.getElementById('eng-completion-note-wrap');
+    const noteInput = document.getElementById('eng-completion-note-input');
+    if (noteWrap) noteWrap.style.display = 'block';
+    if (noteInput) noteInput.disabled = false;
+    const footer = modalRoot.querySelector('.modal-footer');
+    if (footer) {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.textContent = 'Mark Task Complete';
+      btn.onclick = () => completeEngagementTask(eng.id);
+      footer.appendChild(btn);
+    }
+  }
+
   // Insert a banner at the top of the modal body
   const body = modalRoot.querySelector('.modal-body');
   if (body) {
     const banner = document.createElement('div');
-    banner.style.cssText = 'margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;';
-    banner.textContent = 'View only — edit window has closed.';
+    if (canComplete) {
+      banner.style.cssText = 'margin:-4px 0 14px;padding:10px 12px;background:#FFFBEB;border:1px solid #FCD34D;border-radius:var(--radius);color:#92400E;font-size:12px;font-weight:600;';
+      banner.textContent = 'Edit window closed — the engagement is locked, but this task is still open. You can mark it complete below.';
+    } else {
+      banner.style.cssText = 'margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;';
+      banner.textContent = 'View only — edit window has closed.';
+    }
     body.insertBefore(banner, body.firstChild);
   }
 
   // Promotion engagements get an extra "View source lead →" button so the user
   // can jump back to the lead that became this deal. Works in view-mode too.
   _maybeAddViewSourceLeadButton(eng);
+}
+
+// Complete an engagement's open next-action task after the edit window has closed.
+// Writes only the completion fields — the rest of the locked engagement is untouched.
+async function completeEngagementTask(engId) {
+  try {
+    const note = (document.getElementById('eng-completion-note-input')?.value || '').trim();
+    await api('engagements', 'PATCH', {
+      next_action_done: true,
+      next_action_completed_at: new Date().toISOString(),
+      next_action_completion_note: note || null,
+    }, 'id=eq.' + engId);
+    showStatus('Task marked complete');
+    closeModal();
+    if (oppData?.id) await loadEngagements(oppData.id);
+  } catch(e) {
+    showStatus('Failed to complete task: ' + e.message, 'error');
+  }
 }
 
 async function saveOpportunity() {
