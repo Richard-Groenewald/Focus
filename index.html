@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.61 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.62 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.61 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.62 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1768,6 +1768,14 @@ const PAGES = {
     fields: [],
   },
 
+  deal_administration: {
+    title: 'Deal Administration',
+    table: 'deals',
+    custom: true,
+    columns: [],
+    fields: [],
+  },
+
   leads: {
     title: 'Leads',
     table: 'leads',
@@ -2315,7 +2323,7 @@ function showPage(page) {
     addBtn.textContent = '+ New Campaign';
   } else if (page === 'revenue_pipeline') {
     addBtn.style.display = 'none';
-  } else if (page === 'role_permissions' || page === 'user_regions') {
+  } else if (page === 'role_permissions' || page === 'user_regions' || page === 'deal_administration') {
     addBtn.style.display = 'none';
   } else if (page === 'clients') {
     addBtn.onclick = () => openAddClientModal('clients');
@@ -2341,6 +2349,7 @@ async function loadTable(page) {
     if (page === 'role_permissions') { await renderRolePermissions(); return; }
     if (page === 'user_regions') { await renderUserRegions(); return; }
     if (page === 'opportunities') { await renderOpportunitiesPage(); return; }
+    if (page === 'deal_administration') { await renderDealAdminPage(); return; }
     if (page === 'revenue_pipeline') { await RPP.render(); return; }
     if (page === 'leads') { await renderLeadsPage(); return; }
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
@@ -3217,6 +3226,13 @@ const MENU = [
     section: 'Administration',
     subgroups: [
       {
+        label: 'Deals',
+        items: [
+          { page: 'deal_administration', label: 'Deal Administration', permission: 'administer_deals',
+            icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/><path d="M11 9l1.5 1.5L15 8" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
+        ]
+      },
+      {
         label: 'People & Orgs',
         items: [
           { page: 'people',           label: 'People',        permission: 'manage_people',
@@ -3363,6 +3379,9 @@ let oppMonths = {}; // {YYYY-MM: {revenue, margin}}
 let oppFYs = []; // financial years shown
 let oppRevLocked = false; // contracted-forecast lock: true once a deal is secured
                           // (re-forecast is a future senior-approved action)
+let dealAdminMode = false; // true when a deal is opened from the Deal Administration
+                           // page by an administer_deals holder: secured deals become
+                           // fully editable (forecast lock lifted) and deletion is allowed.
 
 // The revenue forecast is locked once a deal is secured: the stream's locked
 // flag (set by the secured process) is authoritative, with a stage fallback
@@ -3401,6 +3420,7 @@ async function openNewOpportunity() {
   oppData = {};
   oppMonths = {};
   oppRevLocked = false;
+  dealAdminMode = false;
   oppCollaborators = [];
   oppContacts = [];
   if (window._engPeople) window._engPeople = [];
@@ -3451,8 +3471,9 @@ async function openNewOpportunity() {
   applyOppReadOnly('full'); // creator becomes the owner — always editable
 }
 
-async function openOpportunity(id) {
+async function openOpportunity(id, adminMode = false) {
   try {
+    dealAdminMode = !!adminMode && can('administer_deals');
     const deals = await apiGet('deals', 'id=eq.' + id + '&select=*');
     oppData = deals[0] || { id };
     oppMonths = {};
@@ -3466,7 +3487,8 @@ async function openOpportunity(id) {
       });
     }
     // Contracted-forecast lock: secured deals are read-only until a senior-approved re-forecast.
-    oppRevLocked = isRevLocked(oppData, streams[0]);
+    // On the Deal Administration page (dealAdminMode) the lock is lifted so secured deals can be edited.
+    oppRevLocked = dealAdminMode ? false : isRevLocked(oppData, streams[0]);
 
     // Set probability userSet flag BEFORE initOppForm so stage change won't override it
     if (oppData.probability != null) {
@@ -3485,8 +3507,14 @@ async function openOpportunity(id) {
     await loadEngagements(id);
     // Decide edit level now that collaborators are loaded:
     //   full edit (owner/region-manager/admin) > engagement-only (collaborator) > view.
+    // Secured deals cannot be edited on the normal Opportunities page — they cap at
+    // 'engagement' (log activity only). Full editing of a secured deal happens only on
+    // the Deal Administration page (dealAdminMode), where the lock is lifted above.
+    const secured = isRevLocked(oppData, streams[0]);
     let level = 'view';
-    if (canEditRecord(oppData)) level = 'full';
+    if (dealAdminMode) level = 'full';
+    else if (secured) level = (canEditRecord(oppData) || isCurrentUserOppCollaborator()) ? 'engagement' : 'view';
+    else if (canEditRecord(oppData)) level = 'full';
     else if (isCurrentUserOppCollaborator()) level = 'engagement';
     document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
     setupOppOwnerReassign();
@@ -4588,8 +4616,10 @@ async function saveOpportunity() {
     await runSecuredProcess(deal, prevStageId);
     await maybeOfferExtensionProspect(deal, prevStageId);
 
+    const fromAdmin = dealAdminMode;
     closeOppPage();
-    await renderOpportunitiesPage();
+    if (fromAdmin) await renderDealAdminPage();
+    else await renderOpportunitiesPage();
   } catch(e) {
     showStatus('Save failed: ' + e.message, 'error');
   }
@@ -6164,8 +6194,7 @@ async function renderOpportunitiesPage() {
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
         <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
         <td onclick="event.stopPropagation()">
-          <button class="btn btn-ghost btn-sm" onclick="openOpportunity(${d.id})">Edit</button>
-          <button class="btn btn-danger btn-sm" onclick="confirmDeleteDeal(${d.id})">Delete</button>
+          <button class="btn btn-ghost btn-sm" onclick="openOpportunity(${d.id})">Open</button>
         </td>
       </tr>`;
     };
@@ -6438,7 +6467,7 @@ const RPP = (function () {
     const effOpen = winFYs.some(f=>f.key===openFY) ? openFY : null;
     const showDetail = detailOn && !effOpen;
 
-    let head = headCell('client') + headCell('deal') + headCell('value','num deal-total','width:96px');
+    let head = headCell('client') + (showDetail ? headCell('deal') : '') + headCell('value','num deal-total','width:96px');
     if (showDetail) ATTRS.forEach(a=> head += headCell(a.k, a.num?'num':''));
     winFYs.forEach(f=>{
       if (f.key===effOpen){
@@ -6470,8 +6499,8 @@ const RPP = (function () {
     const dealRowHtml = (d, fam, open) => {
       const dt = dealValue(d); gDeal += dt;
       let row = fam
-        ? `<td></td><td class="deal">${d.deal}${lineageTag(d)}</td><td class="num deal-total">${fmt(dt)}</td>`
-        : `<td>${d.client}</td><td class="deal">${d.deal}</td><td class="num deal-total">${fmt(dt)}</td>`;
+        ? `<td></td>${showDetail ? `<td class="deal">${d.deal}${lineageTag(d)}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`
+        : `<td>${d.client}</td>${showDetail ? `<td class="deal">${d.deal}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`;
       if (showDetail) ATTRS.forEach(a=>{
         if (a.k==='stage') row+=`<td>${stageBadge(d.stage)}</td>`;
         else if (a.k==='prob') row+=`<td class="num prob" style="color:${d.prob>=100?'var(--green)':d.prob>=50?'var(--navy)':'var(--text3)'}">${d.prob}%</td>`;
@@ -6491,7 +6520,7 @@ const RPP = (function () {
       const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
       const open = linOpen.has(+g.mid);
       let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${orig.client}</td>` +
-                `<td class="deal" style="font-weight:700;color:var(--navy);">${orig.deal}</td>` +
+                (showDetail ? `<td class="deal" style="font-weight:700;color:var(--navy);">${orig.deal}</td>` : '') +
                 `<td class="num deal-total">${fmt(g.members.reduce((s,m)=>s+dealValue(m),0))}</td>`;
       if (showDetail) ATTRS.forEach(a=>{
         row += a.k==='stage' ? `<td style="color:var(--text3);font-size:11px;">${g.members.length} linked deals</td>` : `<td></td>`;
@@ -6508,7 +6537,7 @@ const RPP = (function () {
     });
     if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">No deals match the current filters.</td></tr>`;
 
-    let foot = `<td>TOTAL</td><td></td><td class="num">${fmt(gDeal)}</td>`;
+    let foot = `<td>TOTAL</td>${showDetail ? '<td></td>' : ''}<td class="num">${fmt(gDeal)}</td>`;
     if (showDetail) ATTRS.forEach(()=>foot+=`<td></td>`);
     winFYs.forEach(f=>{
       if (f.key===effOpen){ f.months.forEach((mk,i)=>foot+=`<td class="num">${fmt(monT[i])}</td>`); foot+=`<td class="num">${fmt(fyT[f.key])}</td>`; }
@@ -6530,10 +6559,12 @@ const RPP = (function () {
     const w = el => el.offsetWidth;
     const ths = [...document.querySelectorAll('#rpp-thead th')];
     if (!ths.length) { tabsEl.innerHTML=''; return; }
-    const valueTh = document.querySelector('#rpp-thead .deal-total');
-    const attrThs = ths.filter(th=> th!==ths[0] && th!==ths[1] && th!==valueTh && !th.hasAttribute('data-fy'));
-    const spacerW = w(ths[0]) + w(ths[1]);
-    const detailW = w(valueTh) + (showDetail ? attrThs.reduce((s,th)=>s+w(th),0) : 0);
+    // Client is the only always-pinned column (the spacer). Everything else that
+    // isn't an FY column — the Deal name (shown only when open), Value, and the
+    // attribute columns — sits under the "Deal detail" tab.
+    const detailThs = ths.filter(th=> th!==ths[0] && !th.hasAttribute('data-fy'));
+    const spacerW = w(ths[0]);
+    const detailW = detailThs.reduce((s,th)=>s+w(th),0);
     tabsEl.style.marginLeft = card.clientLeft + 'px';
     let tabs = `<div style="width:${spacerW}px; flex:0 0 auto;"></div>` +
                `<div class="tab detail ${showDetail?'active':''}" style="width:${detailW}px; flex:0 0 auto;" onclick="RPP.toggleDetail()">Deal detail</div>`;
@@ -6725,12 +6756,123 @@ const RPP = (function () {
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, closeFilter, filterPopupList };
 })();
 
-async function confirmDeleteDeal(id) {
-  if (!confirm('Delete this deal? This cannot be undone.')) return;
+// ── Deal Administration ───────────────────────────────────
+// A privileged back-office page (gated by 'administer_deals'). The normal
+// Opportunities page can no longer delete deals or edit secured ones — those
+// actions live here only. Lists every deal flat (no ownership view, no lineage
+// grouping) so a master and its extensions can be deleted child-first.
+async function renderDealAdminPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+
+  if (!can('administer_deals')) {
+    head.innerHTML = '<tr><th>Deal Administration</th></tr>';
+    body.innerHTML = '<tr class="empty-row"><td>You do not have permission to administer deals.</td></tr>';
+    return;
+  }
+
+  body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
+
   try {
+    const [deals, orgs, stages, people, streams] = await Promise.all([
+      apiGet('deals', 'select=*&order=created_at.desc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      allData['stages'] || apiGet('stages', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+      apiGet('revenue_streams', 'stream_type=eq.opportunity&select=deal_id,locked'),
+    ]);
+    allData['organisations'] = orgs; allData['stages'] = stages; allData['people'] = people;
+
+    // Secured = the opportunity stream is locked OR the stage is Secured/In Progress/
+    // Complete (ids 5/7/8) — mirrors isRevLocked() without a per-deal stream fetch.
+    const lockedByDeal = new Map(streams.map(s => [+s.deal_id, !!s.locked]));
+    const securedOf = d => lockedByDeal.get(+d.id) || [5, 7, 8].includes(+d.stage_id);
+
+    document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
+
+    if (!deals.length) {
+      head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Stage</th><th style="text-align:right">Probability</th><th>Status</th><th>Actions</th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="6">No deals.</td></tr>';
+      return;
+    }
+
+    const columns = [
+      { key: 'org',        label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
+      { key: 'name',       label: 'Deal Name',    get: d => d.name || '' },
+      { key: 'stage',      label: 'Stage',        get: d => (stages.find(s => +s.id === +d.stage_id)?.name) || '' },
+      { key: 'probability',label: 'Probability',  get: d => d.probability != null ? +d.probability : null, align: 'right' },
+      { key: 'secured',    label: 'Status',       get: d => securedOf(d) ? 'Secured' : 'Open' },
+      { key: 'actions',    label: 'Actions',      get: () => '', sortable: false, filterable: false },
+    ];
+
+    const rowRenderer = d => {
+      const stage = stages.find(s => +s.id === +d.stage_id);
+      const org = orgs.find(o => +o.id === +d.org_id);
+      const sec = securedOf(d);
+      return `<tr>
+        <td style="font-weight:600;">${org?.name || '—'}</td>
+        <td>${d.name || '—'}</td>
+        <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
+        <td style="text-align:right;">${d.probability != null ? d.probability + '%' : '—'}</td>
+        <td>${sec ? '<span class="badge b-secured" style="background:#DCFCE7;color:#166534;">Secured</span>' : '<span class="badge" style="background:#F3F4F6;color:#374151;">Open</span>'}</td>
+        <td>
+          <button class="btn btn-ghost btn-sm" onclick="openOpportunity(${d.id}, true)">Edit</button>
+          <button class="btn btn-danger btn-sm" onclick="adminDeleteDeal(${d.id})">Delete</button>
+        </td>
+      </tr>`;
+    };
+
+    makeSortableFilterableTable({
+      tableId: 'deal_administration',
+      headRoot: head,
+      bodyRoot: body,
+      columns,
+      rows: deals,
+      rowRenderer,
+      emptyMessage: 'No deals match the current filters',
+    });
+  } catch(e) {
+    body.innerHTML = `<tr class="empty-row"><td colspan="6">Error: ${e.message}</td></tr>`;
+  }
+}
+
+// Permanently delete a deal and its dependent rows (FK leaf-first). Only available
+// from the Deal Administration page. A deal that still has child extensions/
+// variations is blocked — delete those first so a lineage is never orphaned.
+async function adminDeleteDeal(id) {
+  if (!can('administer_deals')) { showStatus('Not permitted', 'error'); return; }
+  try {
+    // Block if other deals point at this one as their lineage parent/master.
+    const children = await apiGet('deals',
+      `or=(parent_deal_id.eq.${id},master_deal_id.eq.${id})&id=neq.${id}&select=id&limit=1`);
+    if (children.length) {
+      showStatus('This deal has linked extensions/variations — delete those first.', 'error');
+      return;
+    }
+
+    if (!confirm('Permanently delete this deal and ALL its revenue streams, engagements, contacts, collaborators and secured-snapshots? This cannot be undone.')) return;
+
+    // Revenue stream months hang off the streams, not the deal — delete them first.
+    const streams = await apiGet('revenue_streams', `deal_id=eq.${id}&select=id`);
+    const streamIds = streams.map(s => +s.id);
+    if (streamIds.length) {
+      await api('revenue_stream_months', 'DELETE', null, `stream_id=in.(${streamIds.join(',')})`);
+    }
+    await api('revenue_streams',     'DELETE', null, `deal_id=eq.${id}`);
+    await api('engagements',         'DELETE', null, `deal_id=eq.${id}`);
+    await api('opportunity_contacts','DELETE', null, `deal_id=eq.${id}`);
+    await api('deal_collaborators',  'DELETE', null, `deal_id=eq.${id}`);
+    // Optional/loosely-coupled children — tolerate absence of table or column.
+    for (const t of ['secured_snapshots', 'interactions', 'risks']) {
+      try { await api(t, 'DELETE', null, `deal_id=eq.${id}`); } catch(_) {}
+    }
+    // A promoted lead points back at this deal — keep the lead, just clear the link.
+    try { await api('leads', 'PATCH', { promoted_deal_id: null }, `promoted_deal_id=eq.${id}`); } catch(_) {}
+
     await apiDelete('deals', id);
     showStatus('Deal deleted');
-    await renderOpportunitiesPage();
+    await renderDealAdminPage();
   } catch(e) {
     showStatus('Delete failed: ' + e.message, 'error');
   }
