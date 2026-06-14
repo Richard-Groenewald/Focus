@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -6117,6 +6117,7 @@ function doLogout() {
 // Persists within the session so switching pages keeps the chosen view.
 let leadsOwnerView = 'own'; // 'own' | 'all' | 'team'
 let oppsOwnerView  = 'own'; // 'own' | 'all' | 'collab' | 'team'
+let oppsStatusFilter = 'open'; // 'open' (stage category Opportunity-Open only) | 'all'
 
 // Team view is region-based and shown only to managers (literal edit_all_records
 // holders — admins carry 'all', not this string, so the button stays manager-only).
@@ -6133,9 +6134,19 @@ function renderViewFilterBar(kind) {
   const btns = [{ key: 'own', label: 'Show Own' }, { key: 'all', label: 'Show All' }];
   if (kind === 'opps' || kind === 'pipeline') btns.push({ key: 'collab', label: 'Collaborations' });
   if (isManagerViewer()) btns.push({ key: 'team', label: 'Team' });
-  bar.innerHTML = btns.map(b =>
+  let html = btns.map(b =>
     `<button class="btn btn-sm ${b.key === current ? 'btn-primary' : 'btn-secondary'}"
        onclick="setOwnerView('${kind}','${b.key}')">${b.label}</button>`).join('');
+  // Opportunities only: a status toggle that defaults to showing just OPEN
+  // opportunities (secured/contracted and lost deals are hidden until "All statuses").
+  if (kind === 'opps') {
+    const statusBtns = [{ key: 'open', label: 'Open' }, { key: 'all', label: 'All statuses' }];
+    html += `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` +
+      statusBtns.map(b =>
+        `<button class="btn btn-sm ${b.key === oppsStatusFilter ? 'btn-primary' : 'btn-secondary'}"
+           onclick="setOppsStatusFilter('${b.key}')">${b.label}</button>`).join('');
+  }
+  bar.innerHTML = html;
 }
 
 function setOwnerView(kind, view) {
@@ -6143,6 +6154,8 @@ function setOwnerView(kind, view) {
   else if (kind === 'pipeline') { oppsOwnerView = view; RPP.render(); }
   else { oppsOwnerView = view; renderOpportunitiesPage(); }
 }
+
+function setOppsStatusFilter(v) { oppsStatusFilter = v; renderOpportunitiesPage(); }
 
 // Leads: own / all / team (no collaborator concept on leads). Synchronous.
 function filterLeadsByView(leads, view) {
@@ -6190,24 +6203,40 @@ async function renderOpportunitiesPage() {
   renderViewFilterBar('opps');
 
   try {
-    let [deals, orgs, stages, people] = await Promise.all([
+    let [deals, orgs, stages, people, stageCats] = await Promise.all([
       apiGet('deals', 'select=*&order=created_at.desc'),
       allData['organisations'] || apiGet('organisations', 'select=*'),
       allData['stages'] || apiGet('stages', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
+      allData['stage_categories'] || apiGet('stage_categories', 'select=*'),
     ]);
     allData['organisations'] = orgs;
     allData['stages'] = stages;
     allData['people'] = people;
+    allData['stage_categories'] = stageCats;
 
     // Apply the ownership view (own / all / collab / team) before rendering.
     deals = await filterDealsByView(deals, oppsOwnerView);
+
+    // Status filter: by default show only OPEN opportunities (stage category
+    // 'Opportunity-Open'). Secured/contracted and lost deals are hidden until the
+    // user picks "All statuses" — those are administered on the Deal Admin page.
+    if (oppsStatusFilter === 'open') {
+      const openCat = (stageCats || []).find(c => c.name === 'Opportunity-Open');
+      if (openCat) {
+        const openStageIds = new Set(stages.filter(s => +s.category_id === +openCat.id).map(s => +s.id));
+        deals = deals.filter(d => openStageIds.has(+d.stage_id));
+      }
+    }
 
     document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
 
     if (!deals.length) {
       head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="5">No opportunities yet — click "+ New Opportunity" to create one</td></tr>';
+      const emptyMsg = oppsStatusFilter === 'open'
+        ? 'No open opportunities — switch to "All statuses" to see secured and closed deals'
+        : 'No opportunities yet — click "+ New Opportunity" to create one';
+      body.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}</td></tr>`;
       return;
     }
 
