@@ -346,7 +346,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.68 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.69 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -368,7 +368,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.68 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.69 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -3868,6 +3868,26 @@ function switchOppTab(tab, btn) {
 }
 
 // ── Proposal Builder (quote tool, runs as a tab on the Opportunity page) ──
+
+const PB_DAY_TYPES = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday','public_holiday'];
+const PB_SHIFT_DEFAULTS = {
+  1: [['06:00','18:00']],
+  2: [['06:00','18:00'], ['18:00','06:00']],
+  3: [['06:00','14:00'], ['14:00','22:00'], ['22:00','06:00']],
+  4: [['06:00','12:00'], ['12:00','18:00'], ['18:00','24:00'], ['00:00','06:00']]
+};
+function pbShiftLabel(idx, total) {
+  if (total === 1) return 'Shift';
+  if (total === 2) return idx === 1 ? 'Day' : 'Night';
+  return 'Shift ' + idx;
+}
+
+let pbViewMode = 'list';
+let pbCurrentQuote = null;
+let pbCurrentPosts = [];
+let pbExpandedPosts = new Set();
+let pbCachedNames = { post: [], heading: [] };
+
 async function loadProposalBuilder() {
   const root = document.getElementById('proposal-builder-root');
   if (!root) return;
@@ -3875,18 +3895,21 @@ async function loadProposalBuilder() {
     root.innerHTML = '<p style="color:var(--text3);">Save the opportunity first to create quotes.</p>';
     return;
   }
+  pbViewMode = 'list';
+  pbCurrentQuote = null;
+  pbCurrentPosts = [];
+  pbExpandedPosts = new Set();
   root.innerHTML = '<p style="color:var(--text3);">Loading proposals…</p>';
   try {
     const quotes = await apiGet('quote_quotes',
       'deal_id=eq.' + oppData.id + '&select=*&order=created_at.desc');
-    root.innerHTML = renderProposalBuilder(quotes);
+    root.innerHTML = renderProposalBuilderList(quotes);
   } catch (e) {
     root.innerHTML = `<p style="color:var(--red);">Error loading proposals: ${e.message}</p>`;
   }
 }
 
-function renderProposalBuilder(quotes) {
-  const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+function renderProposalBuilderList(quotes) {
   const header = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
       <h2 style="margin:0;color:var(--navy);font-size:18px;">Proposal Builder</h2>
@@ -3905,17 +3928,17 @@ function renderProposalBuilder(quotes) {
       rejected:'#FEE2E2/#7F1D1D', lost:'#FEE2E2/#7F1D1D', expired:'#F3F4F6/#6B7280'
     };
     const [bg, fg] = (colours[s] || '#F3F4F6/#374151').split('/');
-    return `<span class="badge" style="background:${bg};color:${fg};">${esc(s)}</span>`;
+    return `<span class="badge" style="background:${bg};color:${fg};">${pbEsc(s)}</span>`;
   };
   const rows = quotes.map(q => `
     <tr onclick="openQuote(${q.id})" style="cursor:pointer;">
-      <td style="font-weight:600;">${esc(q.contract_name)}</td>
-      <td>${esc(q.quote_date)}</td>
-      <td>${esc(q.contract_start_date)}</td>
-      <td>${esc(q.contract_duration_months)} mo</td>
-      <td>${esc(q.margin_pct)}%</td>
+      <td style="font-weight:600;">${pbEsc(q.contract_name)}</td>
+      <td>${pbEsc(q.quote_date)}</td>
+      <td>${pbEsc(q.contract_start_date)}</td>
+      <td>${pbEsc(q.contract_duration_months)} mo</td>
+      <td>${pbEsc(q.margin_pct)}%</td>
       <td>${statusBadge(q.status)}</td>
-      <td>v${esc(q.version)}</td>
+      <td>v${pbEsc(q.version)}</td>
     </tr>`).join('');
   return header + `
     <table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">
@@ -3927,34 +3950,349 @@ function renderProposalBuilder(quotes) {
 }
 
 async function createNewQuote() {
-  // Stub — full quote editor lands in the next iteration.
-  // Minimum-viable insert so we can verify the table write path works.
   if (!oppData || !oppData.id) return;
   const name = prompt('Contract name for the new quote?');
   if (!name) return;
   const payload = {
-    deal_id: oppData.id,
-    contract_name: name,
+    deal_id: oppData.id, contract_name: name,
     contract_start_date: new Date().toISOString().slice(0,10),
     contract_duration_months: 12,
     quote_date: new Date().toISOString().slice(0,10),
-    shifts_per_day: 2,
-    margin_pct: 20.00,
-    status: 'draft',
-    version: 1
+    shifts_per_day: 2, margin_pct: 20.00, status: 'draft', version: 1
   };
   try {
-    await apiPost('quote_quotes', payload);
-    showStatus('Quote created', 'success');
-    loadProposalBuilder();
-  } catch (e) {
-    showStatus('Could not create quote: ' + e.message, 'error');
-  }
+    const result = await apiPost('quote_quotes', payload);
+    if (result.length) await openQuote(result[0].id);
+  } catch (e) { showStatus('Could not create quote: ' + e.message, 'error'); }
 }
 
-function openQuote(id) {
-  // Stub — quote editor lands in the next iteration.
-  alert('Quote editor will open here. Quote id: ' + id);
+async function openQuote(id) {
+  try {
+    const quotes = await apiGet('quote_quotes', `id=eq.${id}&select=*`);
+    if (!quotes.length) return;
+    pbCurrentQuote = quotes[0];
+    pbCurrentPosts = await apiGet('quote_posts', `quote_id=eq.${id}&select=*&order=display_order,id`);
+    // Preload lookups
+    if (!allData['quote_grades']) allData['quote_grades'] = await apiGet('quote_grades', 'select=*&order=display_order');
+    if (!allData['quote_areas'])  allData['quote_areas']  = await apiGet('quote_areas',  'select=*&order=display_order');
+    if (!pbCachedNames.post.length) {
+      pbCachedNames.post = (await apiGet('quote_standard_post_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
+    }
+    if (!pbCachedNames.heading.length) {
+      pbCachedNames.heading = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
+    }
+    // Bulk-load shifts for all posts
+    if (pbCurrentPosts.length) {
+      const postIds = pbCurrentPosts.map(p => p.id).join(',');
+      const allShifts = await apiGet('quote_post_shifts', `post_id=in.(${postIds})&select=*`);
+      pbCurrentPosts.forEach(p => { p._shifts = allShifts.filter(s => s.post_id === p.id); });
+    }
+    pbViewMode = 'editor';
+    pbExpandedPosts = new Set();
+    renderQuoteEditor();
+  } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
+}
+
+function backToList() { loadProposalBuilder(); }
+
+function renderQuoteEditor() {
+  const root = document.getElementById('proposal-builder-root');
+  if (!root) return;
+  root.innerHTML = renderQuoteEditorHeader() + renderQuoteEditorPostsArea();
+}
+
+function renderQuoteEditorHeader() {
+  const q = pbCurrentQuote;
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn-ghost btn-sm" onclick="backToList()">← Back to quotes</button>
+        <h2 style="margin:0;color:var(--navy);font-size:18px;">${pbEsc(q.contract_name)} <span style="color:var(--text3);font-weight:normal;font-size:13px;">v${q.version}</span></h2>
+      </div>
+    </div>
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:12px;margin-bottom:14px;">
+      <div style="display:grid;grid-template-columns:repeat(6, minmax(0,1fr));gap:10px;">
+        <div class="form-group">
+          <label class="form-label">Contract name</label>
+          <input class="form-control" type="text" value="${pbEsc(q.contract_name)}" onchange="saveQuoteField('contract_name', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Quote date</label>
+          <input class="form-control" type="date" value="${pbEsc(q.quote_date || '')}" onchange="saveQuoteField('quote_date', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Start date</label>
+          <input class="form-control" type="date" value="${pbEsc(q.contract_start_date || '')}" onchange="saveQuoteField('contract_start_date', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Duration (mo)</label>
+          <input class="form-control" type="number" min="1" value="${pbEsc(q.contract_duration_months)}" onchange="saveQuoteField('contract_duration_months', +this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Shifts/day</label>
+          <select class="form-control" onchange="saveQuoteField('shifts_per_day', +this.value); renderQuoteEditor();">
+            ${[1,2,3,4].map(n => `<option value="${n}" ${n===q.shifts_per_day?'selected':''}>${n}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Margin %</label>
+          <input class="form-control" type="number" step="0.01" value="${pbEsc(q.margin_pct)}" onchange="saveQuoteField('margin_pct', +this.value)">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:10px;margin-top:10px;">
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select class="form-control" onchange="saveQuoteField('status', this.value)">
+            ${['draft','sent','accepted','rejected','lost','expired'].map(s => `<option value="${s}" ${s===q.status?'selected':''}>${s}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Valid until</label>
+          <input class="form-control" type="date" value="${pbEsc(q.valid_until || '')}" onchange="saveQuoteField('valid_until', this.value || null)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Notes</label>
+          <input class="form-control" type="text" value="${pbEsc(q.notes || '')}" onchange="saveQuoteField('notes', this.value)">
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderQuoteEditorPostsArea() {
+  // Group posts by heading_text (NULL → Ungrouped)
+  const groups = {}; const order = [];
+  pbCurrentPosts.forEach(p => {
+    const key = p.heading_text || '_ungrouped';
+    if (!groups[key]) { groups[key] = []; order.push(key); }
+    groups[key].push(p);
+  });
+  const groupsHtml = order.map(key => {
+    const isUn = key === '_ungrouped';
+    const label = isUn ? 'Ungrouped' : key;
+    const headBg = isUn ? 'background:#C3B091;color:#000;' : 'background:var(--navy);color:#fff;';
+    const btnBg  = isUn ? 'background:rgba(0,0,0,0.1);border:1px solid rgba(0,0,0,0.3);color:#000;' : 'background:rgba(255,255,255,0.18);border:1px solid rgba(255,255,255,0.4);color:#fff;';
+    return `
+      <div style="margin-bottom:14px;">
+        <div style="${headBg};padding:8px 12px;border-radius:6px 6px 0 0;display:flex;align-items:center;justify-content:space-between;">
+          <div style="font-weight:700;text-transform:uppercase;letter-spacing:0.05em;font-size:12px;">${pbEsc(label)}</div>
+          <button class="btn btn-sm" style="${btnBg}" onclick="addPost(${isUn ? "''" : `'${pbEsc(key).replace(/'/g, "&#39;")}'`})">+ Post</button>
+        </div>
+        <div style="border:1px solid var(--border);border-top:none;border-radius:0 0 6px 6px;background:#fff;">
+          ${groups[key].map(p => renderQuotePostRow(p)).join('')}
+        </div>
+      </div>`;
+  }).join('');
+  return `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <h3 style="margin:0;color:var(--navy);font-size:15px;">Posts <span style="color:var(--text3);font-weight:normal;">(${pbCurrentPosts.length})</span></h3>
+      <button class="btn btn-primary btn-sm" onclick="addPost('')">+ Add post</button>
+    </div>
+    ${groupsHtml || '<div style="padding:30px;text-align:center;background:var(--bg);color:var(--text3);border:1px dashed var(--border);border-radius:var(--radius);">No posts yet. Click + Add post.</div>'}`;
+}
+
+function renderQuotePostRow(p) {
+  const expanded = pbExpandedPosts.has(p.id);
+  const gradeName = (allData['quote_grades'] || []).find(g => g.id === p.grade_id)?.code || '—';
+  return `
+    <div style="border-bottom:1px solid var(--border);">
+      <div style="padding:8px 12px;display:grid;grid-template-columns:24px 2fr 80px 120px 1fr auto;gap:10px;align-items:center;cursor:pointer;" onclick="togglePost(${p.id})">
+        <span style="color:var(--navy);font-size:18px;line-height:1;">${expanded ? '▾' : '▸'}</span>
+        <span style="font-weight:600;">${pbEsc(p.name)}</span>
+        <span style="text-align:center;color:var(--text3);">Grade ${pbEsc(gradeName)}</span>
+        <span style="text-align:center;color:var(--text3);font-size:12px;">${pbCurrentQuote.shifts_per_day} shifts/day</span>
+        <span></span>
+        <span onclick="event.stopPropagation()" style="display:flex;gap:6px;">
+          <button class="btn btn-danger btn-sm" onclick="deletePost(${p.id})">Delete</button>
+        </span>
+      </div>
+      ${expanded ? renderQuotePostDetail(p) : ''}
+    </div>`;
+}
+
+function renderQuotePostDetail(p) {
+  const grades = allData['quote_grades'] || [];
+  const areas  = allData['quote_areas']  || [];
+  return `
+    <div style="padding:12px;background:#FAFBFD;border-top:1px dashed var(--border);" onclick="event.stopPropagation()">
+      <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:10px;margin-bottom:10px;">
+        <div class="form-group">
+          <label class="form-label">Heading</label>
+          <input class="form-control" type="text" value="${pbEsc(p.heading_text || '')}" list="pb-headings-${p.id}" onchange="updatePostHeading(${p.id}, this.value)">
+          <datalist id="pb-headings-${p.id}">${pbCachedNames.heading.map(n => `<option value="${pbEsc(n)}">`).join('')}</datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Name</label>
+          <input class="form-control" type="text" value="${pbEsc(p.name)}" list="pb-postnames-${p.id}" onchange="updatePostField(${p.id}, 'name', this.value); renderQuoteEditor();">
+          <datalist id="pb-postnames-${p.id}">${pbCachedNames.post.map(n => `<option value="${pbEsc(n)}">`).join('')}</datalist>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Grade</label>
+          <select class="form-control" onchange="updatePostField(${p.id}, 'grade_id', this.value ? +this.value : null); renderQuoteEditor();">
+            <option value="">—</option>
+            ${grades.map(g => `<option value="${g.id}" ${g.id===p.grade_id?'selected':''}>${pbEsc(g.code)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Area</label>
+          <select class="form-control" onchange="updatePostField(${p.id}, 'area_id', this.value ? +this.value : null)">
+            <option value="">—</option>
+            ${areas.map(a => `<option value="${a.id}" ${a.id===p.area_id?'selected':''}>${pbEsc(a.description)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Uniform</label>
+          <input class="form-control" type="text" value="${pbEsc(p.uniform || '')}" onchange="updatePostField(${p.id}, 'uniform', this.value)">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:14px;">
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <input class="form-control" type="text" value="${pbEsc(p.description || '')}" onchange="updatePostField(${p.id}, 'description', this.value)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Fixed salary (override)</label>
+          <input class="form-control" type="number" step="0.01" value="${pbEsc(p.fixed_salary || '')}" onchange="updatePostField(${p.id}, 'fixed_salary', this.value ? +this.value : null)">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Exclude replacement pool</label>
+          <select class="form-control" onchange="updatePostField(${p.id}, 'exclude_replacement_pool', this.value === 'true')">
+            <option value="false" ${!p.exclude_replacement_pool ? 'selected' : ''}>No</option>
+            <option value="true"  ${p.exclude_replacement_pool ? 'selected' : ''}>Yes</option>
+          </select>
+        </div>
+      </div>
+      <h4 style="margin:0 0 8px;color:var(--navy);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">Shift schedule</h4>
+      ${renderShiftTable(p)}
+      <div style="margin-top:10px;color:var(--text3);font-size:11px;">
+        Allowances, accessories, training: coming next iteration.
+      </div>
+    </div>`;
+}
+
+function renderShiftTable(p) {
+  const N = pbCurrentQuote.shifts_per_day || 2;
+  const groups = [
+    { label: 'Weekdays', dayTypes: ['monday','tuesday','wednesday','thursday','friday'] },
+    { label: 'Sat',      dayTypes: ['saturday'] },
+    { label: 'Sun',      dayTypes: ['sunday'] },
+    { label: 'PH',       dayTypes: ['public_holiday'] }
+  ];
+  let html = `<table style="border-collapse:collapse;font-size:12px;">
+    <thead>
+      <tr>
+        <th rowspan="2" style="background:var(--navy);color:#fff;padding:4px 8px;border:1px solid var(--border);">Shift</th>
+        ${groups.map(g => `<th colspan="3" style="background:var(--navy);color:#fff;padding:4px 8px;border:1px solid var(--border);">${g.label}</th>`).join('')}
+      </tr>
+      <tr>
+        ${groups.map(() => '<th style="background:var(--bg);font-size:10px;padding:2px 4px;border:1px solid var(--border);">No</th><th style="background:var(--bg);font-size:10px;padding:2px 4px;border:1px solid var(--border);">Start</th><th style="background:var(--bg);font-size:10px;padding:2px 4px;border:1px solid var(--border);">End</th>').join('')}
+      </tr>
+    </thead>
+    <tbody>`;
+  for (let s = 1; s <= N; s++) {
+    html += `<tr>
+      <td style="background:var(--bg);padding:2px 8px;border:1px solid var(--border);font-weight:600;">${pbShiftLabel(s, N)}</td>`;
+    groups.forEach(g => {
+      const ref = (p._shifts || []).find(x => x.shift_index === s && x.day_type === g.dayTypes[0]) || { num_officers: 0, start_time: '06:00:00', end_time: '18:00:00' };
+      const dt = g.dayTypes.join(',');
+      html += `
+        <td style="padding:0;border:1px solid var(--border);"><input type="number" min="0" max="99" value="${ref.num_officers}" style="width:40px;text-align:center;border:none;padding:3px;font-size:12px;" onchange="saveShiftCell(${p.id}, ${s}, '${dt}', 'num_officers', this.value)"></td>
+        <td style="padding:0;border:1px solid var(--border);"><input type="time" value="${pbEsc((ref.start_time||'').slice(0,5))}" style="width:64px;border:none;padding:3px;font-size:12px;" onchange="saveShiftCell(${p.id}, ${s}, '${dt}', 'start_time', this.value)"></td>
+        <td style="padding:0;border:1px solid var(--border);"><input type="time" value="${pbEsc((ref.end_time||'').slice(0,5))}" style="width:64px;border:none;padding:3px;font-size:12px;" onchange="saveShiftCell(${p.id}, ${s}, '${dt}', 'end_time', this.value)"></td>`;
+    });
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  return html;
+}
+
+function togglePost(postId) {
+  if (pbExpandedPosts.has(postId)) pbExpandedPosts.delete(postId);
+  else pbExpandedPosts.add(postId);
+  renderQuoteEditor();
+}
+
+async function saveQuoteField(field, value) {
+  try {
+    await apiPatch('quote_quotes', pbCurrentQuote.id, { [field]: value });
+    pbCurrentQuote[field] = value;
+    showStatus('Saved', 'success');
+  } catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+}
+
+async function addPost(headingText) {
+  const payload = {
+    quote_id: pbCurrentQuote.id,
+    heading_text: headingText || null,
+    name: 'New Post',
+    display_order: pbCurrentPosts.length
+  };
+  try {
+    const result = await apiPost('quote_posts', payload);
+    if (!result.length) return;
+    const post = result[0];
+    // Default shifts
+    const N = pbCurrentQuote.shifts_per_day || 2;
+    const defaults = PB_SHIFT_DEFAULTS[N];
+    const shiftRows = [];
+    for (let s = 1; s <= N; s++) {
+      const [start, end] = defaults[s-1];
+      PB_DAY_TYPES.forEach(dt => {
+        shiftRows.push({
+          post_id: post.id, shift_index: s, day_type: dt,
+          num_officers: 0, start_time: start + ':00', end_time: end + ':00'
+        });
+      });
+    }
+    await apiPost('quote_post_shifts', shiftRows);
+    post._shifts = shiftRows;
+    pbCurrentPosts.push(post);
+    pbExpandedPosts.add(post.id);
+    renderQuoteEditor();
+  } catch (e) { showStatus('Could not add post: ' + e.message, 'error'); }
+}
+
+async function updatePostField(postId, field, value) {
+  try {
+    await apiPatch('quote_posts', postId, { [field]: value });
+    const post = pbCurrentPosts.find(p => p.id === postId);
+    if (post) post[field] = value;
+  } catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+}
+
+async function updatePostHeading(postId, headingText) {
+  await updatePostField(postId, 'heading_text', headingText || null);
+  renderQuoteEditor();
+}
+
+async function deletePost(postId) {
+  if (!confirm('Delete this post?')) return;
+  try {
+    await apiDelete('quote_posts', postId);   // ON DELETE CASCADE clears shifts
+    pbCurrentPosts = pbCurrentPosts.filter(p => p.id !== postId);
+    pbExpandedPosts.delete(postId);
+    renderQuoteEditor();
+  } catch (e) { showStatus('Delete failed: ' + e.message, 'error'); }
+}
+
+async function saveShiftCell(postId, shiftIdx, dayTypes, field, value) {
+  const dts = String(dayTypes).split(',');
+  let payloadValue;
+  if (field === 'num_officers') payloadValue = Math.max(0, +value || 0);
+  else payloadValue = (typeof value === 'string' && value.length === 5) ? (value + ':00') : value;
+  const post = pbCurrentPosts.find(p => p.id === postId);
+  for (const dt of dts) {
+    try {
+      await api('quote_post_shifts', 'PATCH', { [field]: payloadValue },
+        `post_id=eq.${postId}&shift_index=eq.${shiftIdx}&day_type=eq.${dt}`);
+      if (post && post._shifts) {
+        const cell = post._shifts.find(s => s.shift_index === shiftIdx && s.day_type === dt);
+        if (cell) cell[field] = payloadValue;
+      }
+    } catch (e) {
+      showStatus('Shift save failed: ' + e.message, 'error');
+      return;
+    }
+  }
 }
 
 // ═════════════════════════════════════════════════════════════════
