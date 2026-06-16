@@ -327,7 +327,13 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 .eng-badge { background:var(--navy); color:white; font-size:10px; font-weight:700; padding:2px 8px; border-radius:999px; }
 
 /* ─── Proposal Builder full editor (prototype port) ──────────────────── */
-#proposal-builder-root.pb-fullscreen { position:fixed; inset:0; z-index:2000; background:var(--bg); overflow-y:auto; padding:20px 28px; }
+#proposal-builder-root.pb-fullscreen { position:fixed; inset:0; z-index:2000; background:var(--bg); overflow-y:auto; padding:0; }
+.pb-editor-topbar { background:var(--bg2); border-bottom:1px solid var(--border); padding:12px 28px; display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.pb-editor-topbar h2 { margin:0; color:var(--navy); font-size:18px; font-weight:700; }
+.pb-editor-topbar .meta { font-size:12px; color:var(--text3); font-weight:normal; margin-left:6px; }
+.pb-editor-tabs { background:var(--bg2); padding:0 28px; border-bottom:1px solid var(--border); display:flex; gap:0; align-items:flex-end; }
+.pb-editor-tabs .opp-tab { margin-bottom:-1px; }
+.pb-editor-tab-content { padding:20px 28px; }
 .pb-qheader { background:#fff; border:1px solid var(--border); border-radius:4px; padding:10px 14px; margin-bottom:14px; }
 .pb-section-bar { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
 .pb-section-title { font-size:16px; color:var(--navy); font-weight:bold; margin:0; cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; }
@@ -473,7 +479,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.72 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.73 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -495,7 +501,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.72 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.73 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -4137,6 +4143,17 @@ let pbCachedPostNames = [];
 let pbCachedHeadingNames = [];
 let pbLastPromptOpenedAt = 0;
 let pbHeadingCounter = 0;
+let pbActiveTab = 'basic';
+
+const PB_EDITOR_TABS = [
+  { id: 'basic',     label: 'Basic info' },
+  { id: 'posts',     label: 'Posts' },
+  { id: 'workforce', label: 'Workforce Support Items' },
+  { id: 'contract',  label: 'Contract Support Items' },
+  { id: 'service',   label: 'Service Support Items' },
+  { id: 'mobility',  label: 'Site Mobility' }
+];
+function pbSwitchTab(tabId) { pbActiveTab = tabId; renderQuoteEditor(); }
 
 function pbFindHeading(id) { return pbHeadings.find(h => h.id === id); }
 function pbFindPostLocation(postId) {
@@ -4243,14 +4260,46 @@ function renderQuoteEditor() {
   root.innerHTML = renderQuoteEditorHeader() + renderPeopleSection();
 }
 
-function renderQuoteEditorHeader() {
+function renderQuoteEditorTopBar() {
   const q = pbQ;
-  return '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">' +
-    '<div style="display:flex;align-items:center;gap:12px;">' +
+  return '<div class="pb-editor-topbar">' +
+    '<div style="display:flex;align-items:center;gap:14px;">' +
       '<button class="btn btn-ghost btn-sm" onclick="backToList()">← Back to quotes</button>' +
-      '<h2 style="margin:0;color:var(--navy);font-size:18px;">' + pbEsc(q.contract_name) + ' <span style="color:var(--text3);font-weight:normal;font-size:13px;">v' + q.version + '</span></h2>' +
-    '</div></div>' +
-    '<div class="pb-qheader"><div style="display:grid;grid-template-columns:repeat(6, minmax(0,1fr));gap:10px;">' +
+      '<h2>' + pbEsc(q.contract_name) + '<span class="meta">v' + q.version + '</span></h2>' +
+    '</div>' +
+    '<div><span class="badge" style="background:var(--bg);color:var(--text2);">' + pbEsc(q.status) + '</span></div>' +
+  '</div>';
+}
+
+function renderQuoteEditorTabBar() {
+  return '<div class="pb-editor-tabs">' + PB_EDITOR_TABS.map(t =>
+    '<button class="opp-tab ' + (t.id === pbActiveTab ? 'active' : '') + '" onclick="pbSwitchTab(\'' + t.id + '\')">' + pbEsc(t.label) + '</button>'
+  ).join('') + '</div>';
+}
+
+function renderQuoteEditorTabContent() {
+  switch (pbActiveTab) {
+    case 'basic': return renderBasicInfoTab();
+    case 'posts': return renderPeopleSection();
+    case 'workforce': return renderPbPlaceholderTab('Workforce Support Items', 'Uniforms, PPE, training certificates, equipment associated with the people deployed on this contract.');
+    case 'contract':  return renderPbPlaceholderTab('Contract Support Items',  'Once-off and recurring contract-level items: setup costs, recruitment, polygraphs, medicals, accommodation, flights, etc.');
+    case 'service':   return renderPbPlaceholderTab('Service Support Items',   'Service overhead and operational support items.');
+    case 'mobility':  return renderPbPlaceholderTab('Site Mobility',           'Vehicles, fuel, tracking, vehicle extras (lease + km + fuel surcharges).');
+    default: return '';
+  }
+}
+
+function renderPbPlaceholderTab(title, blurb) {
+  return '<div style="padding:60px 20px;text-align:center;color:var(--text3);background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);">' +
+    '<h3 style="margin:0 0 8px;color:var(--navy);">' + pbEsc(title) + '</h3>' +
+    '<p style="margin:0 0 0;font-size:13px;max-width:520px;display:inline-block;">' + pbEsc(blurb) + '</p>' +
+    '<p style="margin:18px 0 0;font-size:12px;font-style:italic;">Not built yet — coming next iteration.</p>' +
+  '</div>';
+}
+
+function renderBasicInfoTab() {
+  const q = pbQ;
+  return '<div class="pb-qheader"><div style="display:grid;grid-template-columns:repeat(6, minmax(0,1fr));gap:10px;">' +
       '<div class="form-group"><label class="form-label">Contract name</label><input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)"></div>' +
       '<div class="form-group"><label class="form-label">Quote date</label><input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)"></div>' +
       '<div class="form-group"><label class="form-label">Start date</label><input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)"></div>' +
@@ -4404,7 +4453,10 @@ renderQuoteEditor = function() {
   const root = document.getElementById('proposal-builder-root');
   if (!root) return;
   root.classList.add('pb-fullscreen');
-  root.innerHTML = pbRenderDatalists() + renderQuoteEditorHeader() + renderPeopleSection();
+  root.innerHTML = pbRenderDatalists() +
+    renderQuoteEditorTopBar() +
+    renderQuoteEditorTabBar() +
+    '<div class="pb-editor-tab-content">' + renderQuoteEditorTabContent() + '</div>';
 };
 
 // ─── Mutations ──────────────────────────────────────────────────
