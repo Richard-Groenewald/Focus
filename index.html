@@ -494,7 +494,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.90 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -516,7 +516,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.90 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -3255,7 +3255,7 @@ async function saveEditClientContact(affiliationId, personId) {
 }
 
 async function removeClientContact(affiliationId) {
-  if (!confirm('Remove this contact from the client? The person record is kept.')) return;
+  if (!await confirmDialog({title:'Remove contact', message:'Remove this contact from the client? The person record is kept.', confirmLabel:'Remove', danger:true})) return;
   try {
     await api('person_organisation_roles', 'DELETE', null, 'id=eq.' + affiliationId);
     showStatus('Contact removed');
@@ -3267,6 +3267,73 @@ async function removeClientContact(affiliationId) {
 
 function closeModal() {
   document.getElementById('modal-root').innerHTML = '';
+}
+
+// ── In-app dialogs — NEVER use native confirm()/prompt()/alert() ──────────
+// Promise-based modal confirm/prompt that stacks above any open modal (its own
+// body-level overlay, so it never disturbs modal-root). Call sites await the
+// result: confirmDialog → boolean; promptDialog → string | null (null = cancel).
+function confirmDialog(opts) {
+  opts = opts || {};
+  const danger = !!opts.danger;
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    const done = (v) => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    wrap.innerHTML =
+      `<div class="modal-overlay" style="z-index:100000;">
+         <div class="modal" style="width:440px;">
+           <div class="modal-header"><div class="modal-title">${cEsc(opts.title || 'Please confirm')}</div>
+             <button class="modal-close" data-act="cancel">×</button></div>
+           <div class="modal-body"><div style="font-size:13px;color:var(--text2);white-space:pre-wrap;line-height:1.5;">${cEsc(opts.message || '')}</div></div>
+           <div class="modal-footer">
+             <button class="btn btn-secondary" data-act="cancel">${cEsc(opts.cancelLabel || 'Cancel')}</button>
+             <button class="btn ${danger ? 'btn-danger' : 'btn-primary'}" data-act="ok">${cEsc(opts.confirmLabel || 'Confirm')}</button>
+           </div>
+         </div>
+       </div>`;
+    const ov = wrap.querySelector('.modal-overlay');
+    ov.addEventListener('mousedown', e => { if (e.target === ov) ov._md = Date.now(); });
+    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - (ov._md || 0) < 300) done(false); });
+    wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.onclick = () => done(false));
+    wrap.querySelector('[data-act="ok"]').onclick = () => done(true);
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    const ok = wrap.querySelector('[data-act="ok"]'); if (ok) ok.focus();
+  });
+}
+
+function promptDialog(opts) {
+  opts = opts || {};
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    const done = (v) => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    wrap.innerHTML =
+      `<div class="modal-overlay" style="z-index:100000;">
+         <div class="modal" style="width:440px;">
+           <div class="modal-header"><div class="modal-title">${cEsc(opts.title || 'Enter a value')}</div>
+             <button class="modal-close" data-act="cancel">×</button></div>
+           <div class="modal-body">
+             ${opts.message ? `<div style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.5;">${cEsc(opts.message)}</div>` : ''}
+             <input type="text" class="form-control" data-act="input" value="${cEsc(opts.value || '')}" placeholder="${cEsc(opts.placeholder || '')}">
+           </div>
+           <div class="modal-footer">
+             <button class="btn btn-secondary" data-act="cancel">Cancel</button>
+             <button class="btn btn-primary" data-act="ok">${cEsc(opts.confirmLabel || 'OK')}</button>
+           </div>
+         </div>
+       </div>`;
+    const ov = wrap.querySelector('.modal-overlay');
+    const inp = wrap.querySelector('[data-act="input"]');
+    ov.addEventListener('mousedown', e => { if (e.target === ov) ov._md = Date.now(); });
+    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - (ov._md || 0) < 300) done(null); });
+    wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.onclick = () => done(null));
+    wrap.querySelector('[data-act="ok"]').onclick = () => done(inp.value);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') done(inp.value); else if (e.key === 'Escape') done(null); });
+    document.body.appendChild(wrap);
+    inp.focus();
+  });
 }
 
 async function saveRecord(e) {
@@ -4334,7 +4401,7 @@ function renderProposalBuilderList(quotes) {
 
 async function createNewQuote() {
   if (!oppData || !oppData.id) return;
-  const name = prompt('Contract name for the new quote?');
+  const name = await promptDialog({title:'New quote', message:'Contract name for the new quote?', confirmLabel:'Create'});
   if (!name) return;
   const payload = { deal_id: oppData.id, contract_name: name, contract_start_date: new Date().toISOString().slice(0,10), contract_duration_months: 12, quote_date: new Date().toISOString().slice(0,10), shifts_per_day: 2, margin_pct: 20.00, status: 'draft', version: 1 };
   try { const r = await apiPost('quote_quotes', payload); if (r.length) await openQuote(r[0].id); }
@@ -4585,7 +4652,7 @@ async function pbSaveQuoteField(field, value) {
 async function pbUpdateShiftsPerDay(N) {
   N = Math.max(1, Math.min(4, +N || 2));
   if (N === pbQ.shifts_per_day) return;
-  if (!confirm('Changing shifts/day resets ALL post shifts to defaults. Continue?')) { renderQuoteEditor(); return; }
+  if (!await confirmDialog({title:'Reset shifts?', message:'Changing shifts/day resets ALL post shifts to defaults. Continue?', confirmLabel:'Continue', danger:true})) { renderQuoteEditor(); return; }
   pbQ.shifts_per_day = N;
   try {
     await apiPatch('quote_quotes', pbQ.id, { shifts_per_day: N });
@@ -4604,8 +4671,8 @@ async function pbUpdateShiftsPerDay(N) {
   } catch (e) { showStatus('Update failed: ' + e.message, 'error'); }
 }
 
-function pbAddHeading() {
-  const name = (prompt('Heading name? (existing suggestions appear when you click into a heading title)') || '').trim();
+async function pbAddHeading() {
+  const name = (await promptDialog({title:'Add heading', message:'Heading name? (existing suggestions appear when you click into a heading title)', confirmLabel:'Add'}) || '').trim();
   if (!name) return;
   const u = pbHeadings.findIndex(h => h.isUngrouped);
   pbHeadings.splice(u >= 0 ? u : pbHeadings.length, 0, { id: 'h_' + (++pbHeadingCounter), name, isUngrouped: false, collapsed: false, posts: [] });
@@ -4629,12 +4696,12 @@ async function pbDeleteHeading(headingId) {
   const h = pbFindHeading(headingId);
   if (!h || h.isUngrouped) return;
   if (h.posts.length > 0) {
-    if (!confirm('Delete "' + h.name + '"? Its ' + h.posts.length + ' post(s) will move to Ungrouped.')) return;
+    if (!await confirmDialog({title:'Delete heading', message:'Delete "' + h.name + '"? Its ' + h.posts.length + ' post(s) will move to Ungrouped.', confirmLabel:'Delete', danger:true})) return;
     const u = pbHeadings.find(x => x.isUngrouped);
     try {
       for (const p of h.posts) { await apiPatch('quote_posts', p.id, { heading_text: null }); p.heading_text = null; u.posts.push(p); }
     } catch (e) { showStatus('Move failed: ' + e.message, 'error'); return; }
-  } else if (!confirm('Delete empty heading "' + h.name + '"?')) return;
+  } else if (!await confirmDialog({title:'Delete heading', message:'Delete empty heading "' + h.name + '"?', confirmLabel:'Delete', danger:true})) return;
   pbHeadings = pbHeadings.filter(x => x.id !== headingId);
   renderQuoteEditor();
 }
@@ -4683,7 +4750,7 @@ async function pbAddPost(headingId) {
 async function pbDeletePost(postId) {
   const loc = pbFindPostLocation(postId);
   if (!loc) return;
-  if (!confirm('Delete post "' + loc.heading.posts[loc.index].name + '"?')) return;
+  if (!await confirmDialog({title:'Delete post', message:'Delete post "' + loc.heading.posts[loc.index].name + '"?', confirmLabel:'Delete', danger:true})) return;
   try {
     await apiDelete('quote_posts', postId);
     loc.heading.posts.splice(loc.index, 1);
@@ -4812,7 +4879,7 @@ async function pbToggleWeekdaysExpanded(postId) {
         return v.num !== ref.num || v.start !== ref.start || v.end !== ref.end;
       });
     }
-    if (differ && !confirm("Mon–Fri values differ. Collapsing will overwrite Tue–Fri with Monday's values. Continue?")) return;
+    if (differ && !await confirmDialog({title:'Collapse weekdays?', message:"Mon–Fri values differ. Collapsing will overwrite Tue–Fri with Monday's values. Continue?", confirmLabel:'Continue', danger:true})) return;
     if (differ) {
       try {
         for (let s = 1; s <= N; s++) {
@@ -5425,7 +5492,7 @@ async function pbSaveRow(rowId) {
 }
 
 async function pbDeleteRow(rowId) {
-  if (!confirm('Delete this row?')) return;
+  if (!await confirmDialog({title:'Delete row', message:'Delete this row?', confirmLabel:'Delete', danger:true})) return;
   const schema = PB_SCHEMAS[pbActiveSchema];
   try {
     await apiDelete(schema.table, rowId);
@@ -6419,8 +6486,8 @@ async function maybeOfferExtensionProspect(deal, prevStageId) {
     if (!+runRate.opportunity_revenue) return;           // nothing to seed from
 
     const startLbl = startDate.toLocaleDateString('en-ZA', { month: 'short', year: 'numeric' });
-    if (!confirm(`Deal secured. Create an extension prospect for "${deal.name}"?\n\n` +
-                 `New ${termMonths}-month term from ${startLbl}, seeded at the final-month run-rate.`)) return;
+    if (!await confirmDialog({title:'Create extension prospect?', confirmLabel:'Create extension', message:`Deal secured. Create an extension prospect for "${deal.name}"?\n\n` +
+                 `New ${termMonths}-month term from ${startLbl}, seeded at the final-month run-rate.`})) return;
 
     const prob = +(appSettings['extension_initial_probability'] || 20);
     const ext = (await api('deals', 'POST', {
@@ -6746,7 +6813,7 @@ async function saveNewClient() {
       const status = document.getElementById('nc-client-status')?.value || '';
       if (!status) { showStatus('Client status is required', 'error'); return; }
       const dup = _findOrgMatches(orgName, document.getElementById('nc-org-legal')?.value || '');
-      if (dup.exact && !confirm('“' + dup.exact.name + '” looks like an existing client. Create a new client anyway?')) {
+      if (dup.exact && !await confirmDialog({title:'Possible duplicate', message:'“' + dup.exact.name + '” looks like an existing client. Create a new client anyway?', confirmLabel:'Create anyway', danger:true})) {
         return;
       }
     }
@@ -7022,7 +7089,7 @@ async function saveOppContact(editIdx) {
 
 async function removeOppContact(idx) {
   const c = oppContacts[idx];
-  if (!confirm('Remove this contact from the opportunity?')) return;
+  if (!await confirmDialog({title:'Remove contact', message:'Remove this contact from the opportunity?', confirmLabel:'Remove', danger:true})) return;
   if (c.id) {
     try {
       await api('opportunity_contacts', 'DELETE', null, `id=eq.${c.id}`);
@@ -8595,7 +8662,7 @@ async function adminDeleteDeal(id) {
       return;
     }
 
-    if (!confirm('Permanently delete this deal and ALL its revenue streams, engagements, contacts, collaborators and secured-snapshots? This cannot be undone.')) return;
+    if (!await confirmDialog({title:'Delete deal', message:'Permanently delete this deal and ALL its revenue streams, engagements, contacts, collaborators and secured-snapshots? This cannot be undone.', confirmLabel:'Delete', danger:true})) return;
 
     // Revenue stream months hang off the streams, not the deal — delete them first.
     const streams = await apiGet('revenue_streams', `deal_id=eq.${id}&select=id`);
@@ -9487,7 +9554,7 @@ async function cockpitSetCampaignStatus(status) {
 }
 
 async function disqualifyTarget(id) {
-  const reason = prompt('Disqualify this target — reason (optional):', '');
+  const reason = await promptDialog({title:'Disqualify target', message:'Reason (optional):', confirmLabel:'Disqualify'});
   if (reason === null) return; // cancelled
   try {
     await api('campaign_targets', 'PATCH',
@@ -9505,7 +9572,7 @@ async function promoteTargetToLead(id) {
   const { targets, campaign, sources } = cockpitData;
   const t = targets.find(x => +x.id === +id);
   if (!t) return;
-  if (!confirm(`Promote "${t.company_name || t.contact_name || 'this target'}" into a New lead under this campaign?`)) return;
+  if (!await confirmDialog({title:'Promote to lead', confirmLabel:'Promote', message:`Promote "${t.company_name || t.contact_name || 'this target'}" into a New lead under this campaign?`})) return;
 
   // The lead's source must be the Research Campaign source so attribution holds.
   const src = sources.find(s => s.name === 'Research Campaign') || sources.find(s => s.name === 'Research');
@@ -9538,7 +9605,7 @@ async function promoteTargetToLead(id) {
       { status: 'Promoted', promoted_lead_id: lead.id, promoted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
       'id=eq.' + id);
     showStatus('Target promoted to lead');
-    if (confirm('Lead created. Open it now to start working it?')) {
+    if (await confirmDialog({title:'Lead created', message:'Open it now to start working it?', confirmLabel:'Open lead', cancelLabel:'Not now'})) {
       await openLeadForm(lead.id);
     } else {
       await renderResearchCampaignCockpit();
@@ -10219,7 +10286,7 @@ async function revertLead() {
   if (leadReadOnly) return;
   const snap = window._leadRevert;
   if (!snap) { closeLeadPage({ force: true }); return; }
-  if (!confirm('Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.')) return;
+  if (!await confirmDialog({title:'Revert changes', message:'Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.', confirmLabel:'Revert', danger:true})) return;
   startBusy('Reverting…');
   try {
     const id = snap.lead && snap.lead.id;
@@ -10300,7 +10367,7 @@ async function closeLeadPage(opts) {
   if (!opts.force && leadFormDirty && !leadReadOnly) {
     if (leadObligatoryFilled()) {
       await saveLead({ keepOpen: true });   // commits core + any pending description note
-    } else if (!confirm('This lead has unsaved changes but can’t be saved yet (Source and Description are required). Leave and discard them?')) {
+    } else if (!await confirmDialog({title:'Discard changes?', message:'This lead has unsaved changes but can’t be saved yet (Source and Description are required). Leave and discard them?', confirmLabel:'Discard', danger:true})) {
       return;
     }
   }
@@ -15698,7 +15765,7 @@ async function openEditHomeMemberModal(id) {
 }
 
 async function confirmDeleteHomeMember(id) {
-  if (!confirm('Remove this member?')) return;
+  if (!await confirmDialog({title:'Remove member', message:'Remove this member?', confirmLabel:'Remove', danger:true})) return;
   try {
     await api('home_organisation_members', 'DELETE', null, 'id=eq.' + id);
     showStatus('Member removed');
