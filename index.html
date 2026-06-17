@@ -494,7 +494,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -516,7 +516,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9079,6 +9079,11 @@ async function renderResearchCampaignCockpit() {
       return;
     }
 
+    // Apply the same New→Working classification the Leads page runs, so a promoted
+    // lead that has met its Working prerequisites shows as Working here too — even
+    // while its edit-grace countdown is still running.
+    await sweepNewToWorking(leads);
+
     // Cadence progress needs each worked lead's interaction history.
     let interactions = [];
     const leadIds = leads.map(l => +l.id);
@@ -9226,21 +9231,26 @@ function renderCockpitTabBody() {
 
 // ── Target List tab ───────────────────────────────────────
 function cockpitTargetListHtml() {
-  const { targets, people } = cockpitData;
+  const { targets, people, leads } = cockpitData;
   if (!targets.length) {
     return `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
       No targets yet. Click <strong>+ Add Target</strong> (top right) to start building the list, or research accounts that fit the segment.</div>`;
   }
+  const leadById = new Map((leads || []).map(l => [+l.id, l]));
   const rows = targets.map(t => {
     const pColour = PRIORITY_STYLE[t.priority] || 'background:#f3f4f6;color:#4b5563;';
-    const sColour = TARGET_STATUS_STYLE[t.status] || 'background:#f3f4f6;color:#4b5563;';
     const contact = [t.contact_name, t.contact_role].filter(Boolean).join(' · ');
     const canPromote = t.status === 'Researching' || t.status === 'Ready';
+    // Once promoted, the row reflects the linked lead's LIVE lifecycle status
+    // (New / Working / Qualified / …) rather than the static "Promoted".
+    const lead = (t.status === 'Promoted' && t.promoted_lead_id) ? leadById.get(+t.promoted_lead_id) : null;
+    const statusLabel = lead ? lead.status : t.status;
+    const sColour = (lead ? LEAD_STATUS_STYLES[lead.status] : TARGET_STATUS_STYLE[t.status]) || 'background:#f3f4f6;color:#4b5563;';
     return `<tr style="cursor:pointer;" onclick="openCampaignTargetModal(${t.id})">
       <td style="font-weight:600;">${cEsc(t.company_name || '—')}</td>
       <td>${contact ? cEsc(contact) : '<span style="color:var(--text3);">—</span>'}</td>
       <td><span style="${pColour}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(t.priority)}</span></td>
-      <td><span style="${sColour}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(t.status)}</span></td>
+      <td><span style="${sColour}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(statusLabel)}</span></td>
       <td>${cEsc(cockpitPersonName(people, t.owner_id) || '—')}</td>
       <td style="text-align:right;white-space:nowrap;" onclick="event.stopPropagation();">
         ${canPromote ? `<button class="btn btn-primary btn-sm" onclick="promoteTargetToLead(${t.id})">Promote → Lead</button>
