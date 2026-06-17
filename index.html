@@ -487,7 +487,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.82 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -509,7 +509,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.82 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -2431,12 +2431,25 @@ const PAGES = {
 };
 
 // ── Navigation ───────────────────────────────────────────
-// Toggle the sidebar (used on the Revenue Pipeline page, where it is hidden
-// by default to give the wide revenue matrix full width).
-function toggleSidebar() {
+// Sidebar starts collapsed on every app open; the ☰ toggle expands/collapses it.
+// (Not persisted — re-opening the app always starts collapsed.)
+let sidebarCollapsed = true;
+
+// Apply the current collapse state to the DOM. Wide pages (Revenue Pipeline
+// matrix, Opportunities lineage) always force the sidebar away regardless.
+function applySidebarState() {
   const sidebar = document.getElementById('app-sidebar');
-  if (!sidebar) return;
-  sidebar.style.display = (sidebar.style.display === 'none') ? '' : 'none';
+  const sidebarToggle = document.getElementById('sidebar-toggle');
+  const forceHidden = (currentPage === 'revenue_pipeline' || currentPage === 'opportunities');
+  const collapsed = forceHidden || sidebarCollapsed;
+  if (sidebar) sidebar.style.display = collapsed ? 'none' : '';
+  // The toggle is always available so the sidebar can be opened/closed anytime.
+  if (sidebarToggle) sidebarToggle.style.display = '';
+}
+
+function toggleSidebar() {
+  sidebarCollapsed = !sidebarCollapsed;
+  applySidebarState();
   // Nudge the pipeline to re-fit to the new content width (its resize
   // handler re-paints the revenue matrix when mounted).
   window.dispatchEvent(new Event('resize'));
@@ -2456,18 +2469,8 @@ function showPage(page) {
   document.getElementById('page-title').textContent = cfg.title;
   document.getElementById('page-sub').textContent = '';
 
-  // Hide the sidebar on the wide pages (Revenue Pipeline matrix, Opportunities
-  // lineage table) so they fit without horizontal scrolling; expose a toggle
-  // to bring it back.
-  const sidebar = document.getElementById('app-sidebar');
-  const sidebarToggle = document.getElementById('sidebar-toggle');
-  if (page === 'revenue_pipeline' || page === 'opportunities') {
-    if (sidebar) sidebar.style.display = 'none';
-    if (sidebarToggle) sidebarToggle.style.display = '';
-  } else {
-    if (sidebar) sidebar.style.display = '';
-    if (sidebarToggle) sidebarToggle.style.display = 'none';
-  }
+  // Apply the sidebar collapse state (starts collapsed; wide pages force-hide).
+  applySidebarState();
 
   // Show/hide and wire add button
   const addBtn = document.getElementById('add-btn');
