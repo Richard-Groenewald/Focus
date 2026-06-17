@@ -485,7 +485,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.78 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -507,7 +507,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.78 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1948,6 +1948,13 @@ const PAGES = {
     columns: [],
     fields: [],
   },
+  research_campaign_cockpit: {
+    title: 'Campaign Cockpit',
+    table: 'research_campaigns',
+    custom: true,
+    columns: [],
+    fields: [],
+  },
   sales_campaigns: {
     title: 'Sales Campaigns',
     table: 'sales_campaigns',
@@ -2475,6 +2482,9 @@ function showPage(page) {
   } else if (page === 'research_campaigns') {
     addBtn.onclick = () => openNewResearchCampaign();
     addBtn.textContent = '+ New Campaign';
+  } else if (page === 'research_campaign_cockpit') {
+    addBtn.onclick = () => openNewCampaignTarget();
+    addBtn.textContent = '+ Add Target';
   } else if (page === 'sales_campaigns') {
     addBtn.onclick = () => openNewSalesCampaign();
     addBtn.textContent = '+ New Campaign';
@@ -2510,6 +2520,7 @@ async function loadTable(page) {
     if (page === 'revenue_pipeline') { await RPP.render(); return; }
     if (page === 'leads') { await renderLeadsPage(); return; }
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
+    if (page === 'research_campaign_cockpit') { await renderResearchCampaignCockpit(); return; }
     if (page === 'sales_campaigns') { await renderSalesCampaignsPage(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
@@ -8772,7 +8783,7 @@ async function renderResearchCampaignsPage() {
   const body = document.getElementById('table-body');
 
   head.innerHTML = '';
-  body.innerHTML = '<tr class="empty-row"><td colspan="7">Loading…</td></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
     const [campaigns, regions, services, people] = await Promise.all([
@@ -8790,8 +8801,8 @@ async function renderResearchCampaignsPage() {
       campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="7">No research campaigns yet. Click "+ New Campaign" to create one. (Form lands in Increment 2.)</td></tr>';
+      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="8">No research campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
       return;
     }
 
@@ -8814,6 +8825,7 @@ async function renderResearchCampaignsPage() {
       { key: 'status',  label: 'Status',        get: c => c.status || '' },
       { key: 'owner',   label: 'Owner',         get: c => ownerName(c) },
       { key: 'created', label: 'Created',       get: c => c.created_at || '' },
+      { key: 'actions', label: '',              get: () => '', sortable: false, filterable: false },
     ];
 
     const rowRenderer = (c) => {
@@ -8822,7 +8834,8 @@ async function renderResearchCampaignsPage() {
       const owner   = people.find(p => +p.id === +c.owner_id);
       const ownerLabel = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
       const statusColour = STATUS_STYLE[c.status] || 'background:#f3f4f6;color:#4b5563;';
-      return `<tr onclick="openResearchCampaign(${c.id})" style="cursor:pointer;">
+      // Row opens the cockpit (drive & manage); the trailing Edit opens the mission modal.
+      return `<tr onclick="openResearchCampaignCockpit(${c.id})" style="cursor:pointer;">
         <td style="font-weight:600;">${c.name}</td>
         <td>${c.segment || '—'}</td>
         <td>${region?.name || '—'}</td>
@@ -8830,6 +8843,7 @@ async function renderResearchCampaignsPage() {
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
+        <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openResearchCampaign(${c.id})">Edit</button></td>
       </tr>`;
     };
 
@@ -8843,13 +8857,697 @@ async function renderResearchCampaignsPage() {
       emptyMessage: 'No campaigns match the current filters',
     });
   } catch(e) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="7">Error: ${e.message}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="8">Error: ${e.message}</td></tr>`;
   }
 }
 
-// Open an existing research campaign for editing
+// Open an existing research campaign for editing (the mission modal)
 function openResearchCampaign(id) {
   openResearchCampaignModal(id);
+}
+
+// Open the Campaign Cockpit — the page to drive & manage one campaign
+function openResearchCampaignCockpit(id) {
+  cockpitCampaignId = +id;
+  cockpitTab = 'targets';
+  showPage('research_campaign_cockpit');
+}
+
+
+// ══ Campaign Cockpit ══════════════════════════════════════════════════════
+// One page to drive & manage a single research campaign: mission header +
+// funnel rollup + Target List (pre-lead backlog) + Work Queue (cadence) +
+// Results. Built on the existing leads pipeline — a promoted target spawns a
+// real lead carrying research_campaign_id, and the lead machinery takes over.
+let cockpitCampaignId = null;
+let cockpitTab = 'targets';            // 'targets' | 'work' | 'cadence' | 'results'
+let cockpitData = {};                  // cache of the last cockpit load
+let campaignTargetData = {};           // state for the target add/edit modal
+
+const COCKPIT_STATUS_STYLE = {
+  'Active':    'background:#dcfce7;color:#166534;',
+  'Paused':    'background:#fef3c7;color:#92400e;',
+  'Completed': 'background:#e0e7ff;color:#3730a3;',
+  'Abandoned': 'background:#fee2e2;color:#991b1b;',
+};
+const TARGET_STATUS_STYLE = {
+  'Researching':  'background:#e0e7ff;color:#3730a3;',
+  'Ready':        'background:#dcfce7;color:#166534;',
+  'Promoted':     'background:#cffafe;color:#155e75;',
+  'Disqualified': 'background:#fee2e2;color:#991b1b;',
+};
+const PRIORITY_STYLE = {
+  'Hot':  'background:#fee2e2;color:#991b1b;',
+  'Warm': 'background:#fef3c7;color:#92400e;',
+  'Cold': 'background:#e0f2fe;color:#075985;',
+};
+
+// Small HTML-escape for free text rendered into the cockpit.
+function cEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function cockpitPersonName(people, id) {
+  const p = (people || []).find(x => +x.id === +id);
+  return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
+}
+function cockpitDays(dateStr) { // date → epoch days (local)
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (isNaN(d)) return null;
+  return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
+}
+function cockpitTodayDays() {
+  const n = new Date();
+  return Math.floor(new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime() / 86400000);
+}
+
+async function renderResearchCampaignCockpit() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+
+  if (!cockpitCampaignId) {
+    body.innerHTML = '<tr class="empty-row"><td>No campaign selected. <a href="#" onclick="showPage(\'research_campaigns\');return false;">Back to campaigns</a></td></tr>';
+    return;
+  }
+
+  body.innerHTML = '<tr><td style="padding:0;border:none;"><div style="padding:24px;color:var(--text3);">Loading campaign…</div></td></tr>';
+
+  try {
+    const cid = cockpitCampaignId;
+    const [campArr, regions, services, people, sources, targets, leads, steps] = await Promise.all([
+      apiGet('research_campaigns', 'id=eq.' + cid + '&select=*'),
+      allData['regions']       || apiGet('regions', 'select=*'),
+      allData['service_major'] || apiGet('service_major', 'select=*'),
+      allData['people']        || apiGet('people', 'select=*'),
+      allData['lead_sources']  || apiGet('lead_sources', 'select=*'),
+      apiGet('campaign_targets', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
+      apiGet('leads', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
+      apiGet('campaign_cadence_steps', 'research_campaign_id=eq.' + cid + '&select=*&order=step_no.asc'),
+    ]);
+    allData['regions'] = regions; allData['service_major'] = services;
+    allData['people'] = people;   allData['lead_sources'] = sources;
+
+    const campaign = campArr[0];
+    if (!campaign) {
+      body.innerHTML = '<tr class="empty-row"><td>Campaign not found. <a href="#" onclick="showPage(\'research_campaigns\');return false;">Back</a></td></tr>';
+      return;
+    }
+
+    // Cadence progress needs each worked lead's interaction history.
+    let interactions = [];
+    const leadIds = leads.map(l => +l.id);
+    if (leadIds.length) {
+      interactions = await apiGet('lead_interactions',
+        'lead_id=in.(' + leadIds.join(',') + ')&select=lead_id,engagement_date');
+    }
+
+    cockpitData = { campaign, regions, services, people, sources, targets, leads, steps, interactions };
+
+    document.getElementById('page-title').textContent = campaign.name || 'Campaign Cockpit';
+    document.getElementById('page-sub').textContent = campaign.segment || '';
+
+    body.innerHTML = `<tr><td style="padding:0;border:none;">
+      <div style="padding:0 0 32px 0;">
+        <div style="margin-bottom:16px;">
+          <button class="btn btn-ghost btn-sm" onclick="showPage('research_campaigns')">← All campaigns</button>
+        </div>
+        ${cockpitMissionHeader(campaign, regions, services, people)}
+        ${cockpitFunnelStrip(campaign, targets, leads)}
+        ${cockpitTabBar(targets, leads)}
+        <div id="cockpit-tab-body" style="margin-top:16px;"></div>
+      </div>
+    </td></tr>`;
+
+    renderCockpitTabBody();
+  } catch(e) {
+    body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:24px;color:var(--red);">Error loading cockpit: ${cEsc(e.message)}</div></td></tr>`;
+  }
+}
+
+function cockpitMissionHeader(c, regions, services, people) {
+  const region  = regions.find(r => +r.id === +c.region_id)?.name || '—';
+  const service = services.find(s => +s.id === +c.service_major_id)?.name || '—';
+  const owner   = cockpitPersonName(people, c.owner_id) || '—';
+  const statusColour = COCKPIT_STATUS_STYLE[c.status] || 'background:#f3f4f6;color:#4b5563;';
+  const fmt = d => d ? new Date(d).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', year:'numeric' }) : null;
+  const timeframe = (c.start_date || c.end_date)
+    ? `${fmt(c.start_date) || '—'} → ${fmt(c.end_date) || '—'}`
+    : 'No timeframe set';
+  const statusOptions = ['Active','Paused','Completed','Abandoned']
+    .map(s => `<option value="${s}" ${c.status===s?'selected':''}>${s}</option>`).join('');
+
+  const cell = (label, val) => `<div style="min-width:140px;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:var(--text3);text-transform:uppercase;margin-bottom:3px;">${label}</div>
+    <div style="font-size:13px;color:var(--text);font-weight:600;">${val}</div></div>`;
+
+  return `<div class="card" style="margin-bottom:16px;">
+    <div class="card-body" style="padding:18px 20px;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:260px;">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-size:18px;font-weight:800;color:var(--dark-blue,#003057);">${cEsc(c.name)}</span>
+            <span style="${statusColour}padding:3px 9px;border-radius:4px;font-size:11px;font-weight:700;">${cEsc(c.status)}</span>
+          </div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${c.segment ? cEsc(c.segment) : '<span style="color:var(--text3);">No target segment defined</span>'}</div>
+          <div style="display:flex;gap:24px;flex-wrap:wrap;">
+            ${cell('Region', cEsc(region))}
+            ${cell('Service focus', cEsc(service))}
+            ${cell('Owner', cEsc(owner))}
+            ${cell('Timeframe', cEsc(timeframe))}
+          </div>
+          ${c.notes ? `<div style="margin-top:14px;font-size:12px;color:var(--text2);background:var(--bg);padding:10px 12px;border-radius:6px;white-space:pre-wrap;">${cEsc(c.notes)}</div>` : ''}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end;">
+          <button class="btn btn-secondary btn-sm" onclick="openResearchCampaign(${c.id})">✎ Edit mission</button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:11px;color:var(--text3);">Status</span>
+            <select class="form-control" style="width:auto;padding:4px 8px;font-size:12px;" onchange="cockpitSetCampaignStatus(this.value)">${statusOptions}</select>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function cockpitFunnelStrip(c, targets, leads) {
+  const researched = targets.length;
+  const worked     = leads.length;
+  const qualified  = leads.filter(l => l.status === 'Qualified' || l.status === 'Promoted').length;
+  const promoted   = leads.filter(l => l.status === 'Promoted').length;
+  const estValue   = leads.filter(l => l.status === 'Promoted')
+                          .reduce((sum, l) => sum + (+l.est_value || 0), 0);
+
+  const pct = (n, d) => d > 0 ? Math.round((n / d) * 100) + '%' : '—';
+  const money = v => 'R' + (v || 0).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
+  const vsTarget = (val, tgt) => tgt != null
+    ? `<div style="font-size:10px;color:var(--text3);margin-top:2px;">of ${tgt} target · ${pct(val, tgt)}</div>`
+    : `<div style="font-size:10px;color:var(--text3);margin-top:2px;">&nbsp;</div>`;
+
+  const stage = (label, value, sub, accent) => `<div style="flex:1;min-width:120px;padding:14px 16px;">
+    <div style="font-size:11px;font-weight:700;letter-spacing:0.04em;color:var(--text3);text-transform:uppercase;">${label}</div>
+    <div style="font-size:26px;font-weight:800;color:${accent||'var(--dark-blue,#003057)'};line-height:1.2;margin-top:2px;">${value}</div>
+    ${sub}
+  </div>`;
+  const arrow = conv => `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);padding:0 2px;">
+    <div style="font-size:18px;line-height:1;">→</div>
+    <div style="font-size:10px;font-weight:600;margin-top:2px;">${conv}</div></div>`;
+
+  return `<div class="card" style="margin-bottom:16px;">
+    <div class="card-body" style="padding:6px 8px;display:flex;align-items:stretch;flex-wrap:wrap;">
+      ${stage('Targets', researched, vsTarget(researched, c.target_accounts))}
+      ${arrow(pct(worked, researched))}
+      ${stage('Worked (leads)', worked, `<div style="font-size:10px;color:var(--text3);margin-top:2px;">&nbsp;</div>`)}
+      ${arrow(pct(qualified, worked))}
+      ${stage('Qualified', qualified, vsTarget(qualified, c.target_qualified))}
+      ${arrow(pct(promoted, qualified))}
+      ${stage('Promoted', promoted, vsTarget(promoted, c.target_promoted), '#155e75')}
+      ${stage('Est. value', money(estValue), `<div style="font-size:10px;color:var(--text3);margin-top:2px;">from promoted leads</div>`, '#166534')}
+    </div>
+  </div>`;
+}
+
+function cockpitTabBar(targets, leads) {
+  const active = targets.filter(t => t.status === 'Researching' || t.status === 'Ready').length;
+  const inPlay = leads.filter(l => ['New','Working','Qualified'].includes(l.status)).length;
+  const tabs = [
+    { key: 'targets', label: 'Target List', badge: active },
+    { key: 'work',    label: 'Work Queue',  badge: inPlay },
+    { key: 'cadence', label: 'Cadence',     badge: null },
+    { key: 'results', label: 'Results',     badge: null },
+  ];
+  return `<div class="opp-tabs">${tabs.map(t =>
+    `<button class="opp-tab ${cockpitTab===t.key?'active':''}" onclick="cockpitSwitchTab('${t.key}')">${t.label}${
+      t.badge != null ? ` <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${t.badge})</span>` : ''}</button>`
+  ).join('')}</div>`;
+}
+
+function cockpitSwitchTab(key) {
+  cockpitTab = key;
+  // Refresh the tab bar active state without a full reload
+  const bar = document.querySelector('#cockpit-tab-body')?.previousElementSibling;
+  if (bar) bar.outerHTML = cockpitTabBar(cockpitData.targets || [], cockpitData.leads || []);
+  renderCockpitTabBody();
+}
+
+function renderCockpitTabBody() {
+  const el = document.getElementById('cockpit-tab-body');
+  if (!el) return;
+  if (cockpitTab === 'targets')      el.innerHTML = cockpitTargetListHtml();
+  else if (cockpitTab === 'work')    el.innerHTML = cockpitWorkQueueHtml();
+  else if (cockpitTab === 'cadence') el.innerHTML = cockpitCadenceHtml();
+  else if (cockpitTab === 'results') el.innerHTML = cockpitResultsHtml();
+}
+
+// ── Target List tab ───────────────────────────────────────
+function cockpitTargetListHtml() {
+  const { targets, people } = cockpitData;
+  if (!targets.length) {
+    return `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
+      No targets yet. Click <strong>+ Add Target</strong> (top right) to start building the list, or research accounts that fit the segment.</div>`;
+  }
+  const rows = targets.map(t => {
+    const pColour = PRIORITY_STYLE[t.priority] || 'background:#f3f4f6;color:#4b5563;';
+    const sColour = TARGET_STATUS_STYLE[t.status] || 'background:#f3f4f6;color:#4b5563;';
+    const contact = [t.contact_name, t.contact_role].filter(Boolean).join(' · ');
+    const canPromote = t.status === 'Researching' || t.status === 'Ready';
+    return `<tr style="cursor:pointer;" onclick="openCampaignTargetModal(${t.id})">
+      <td style="font-weight:600;">${cEsc(t.company_name || '—')}</td>
+      <td>${contact ? cEsc(contact) : '<span style="color:var(--text3);">—</span>'}</td>
+      <td><span style="${pColour}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(t.priority)}</span></td>
+      <td><span style="${sColour}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(t.status)}</span></td>
+      <td>${cEsc(cockpitPersonName(people, t.owner_id) || '—')}</td>
+      <td style="text-align:right;white-space:nowrap;" onclick="event.stopPropagation();">
+        ${canPromote ? `<button class="btn btn-primary btn-sm" onclick="promoteTargetToLead(${t.id})">Promote → Lead</button>
+          <button class="btn btn-ghost btn-sm" onclick="disqualifyTarget(${t.id})">Disqualify</button>` : ''}
+        ${t.status === 'Promoted' && t.promoted_lead_id ? `<button class="btn btn-ghost btn-sm" onclick="openLeadForm(${t.promoted_lead_id})">Open lead</button>` : ''}
+      </td>
+    </tr>`;
+  }).join('');
+  return `<div class="card"><div class="card-body" style="padding:0;"><div class="table-wrap">
+    <table style="width:100%;border-collapse:collapse;">
+      <thead style="background:var(--bg);"><tr>
+        <th style="text-align:left;padding:10px 12px;">Company</th>
+        <th style="text-align:left;padding:10px 12px;">Contact</th>
+        <th style="text-align:left;padding:10px 12px;">Priority</th>
+        <th style="text-align:left;padding:10px 12px;">Status</th>
+        <th style="text-align:left;padding:10px 12px;">Owner</th>
+        <th style="text-align:right;padding:10px 12px;">Actions</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div></div>`;
+}
+
+// ── Work Queue tab (cadence-derived) ──────────────────────
+function cockpitWorkQueueHtml() {
+  const { leads, steps, interactions, people } = cockpitData;
+  const inPlay = leads.filter(l => ['New','Working','Qualified'].includes(l.status));
+  if (!inPlay.length) {
+    return `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
+      No leads in play. Promote targets from the <a href="#" onclick="cockpitSwitchTab('targets');return false;">Target List</a> to start working them.</div>`;
+  }
+  const stepsSorted = [...steps].sort((a, b) => a.step_no - b.step_no);
+  const today = cockpitTodayDays();
+
+  // Interactions per lead
+  const byLead = {};
+  for (const i of interactions) (byLead[+i.lead_id] = byLead[+i.lead_id] || []).push(i);
+
+  const cadenceNote = stepsSorted.length ? '' :
+    `<div style="margin-bottom:12px;padding:10px 14px;background:#fef3c7;color:#92400e;border-radius:6px;font-size:12px;">
+      No cadence defined yet — set up an outreach sequence on the <a href="#" onclick="cockpitSwitchTab('cadence');return false;">Cadence</a> tab to drive due/overdue touches.</div>`;
+
+  const rows = inPlay.map(l => {
+    const ix = byLead[+l.id] || [];
+    const done = ix.length;
+    const startDays = ix.length
+      ? Math.min(...ix.map(i => cockpitDays(i.engagement_date)).filter(v => v != null))
+      : cockpitDays(l.created_at);
+    let cadenceCell, dueCell;
+    if (!stepsSorted.length) {
+      cadenceCell = '<span style="color:var(--text3);">—</span>';
+      dueCell = '<span style="color:var(--text3);">—</span>';
+    } else if (done >= stepsSorted.length) {
+      cadenceCell = `<span style="color:#166534;font-weight:600;">Complete (${done}/${stepsSorted.length})</span>`;
+      dueCell = '<span style="color:var(--text3);">—</span>';
+    } else {
+      const next = stepsSorted[done];
+      const due = (startDays != null) ? startDays + (+next.day_offset || 0) : null;
+      cadenceCell = `Step ${done + 1}/${stepsSorted.length} · <span style="font-weight:600;">${cEsc(next.channel)}</span>`;
+      if (due == null) {
+        dueCell = '<span style="color:var(--text3);">—</span>';
+      } else {
+        const diff = due - today;
+        if (diff < 0)       dueCell = `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">Overdue ${-diff}d</span>`;
+        else if (diff === 0) dueCell = `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">Due today</span>`;
+        else                dueCell = `<span style="color:var(--text2);">in ${diff}d</span>`;
+      }
+    }
+    const target = l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
+    return `<tr style="cursor:pointer;" onclick="openLeadForm(${l.id})">
+      <td style="font-weight:600;">${cEsc(target)}</td>
+      <td><span class="badge" style="${LEAD_STATUS_STYLES[l.status]||''}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(l.status)}</span></td>
+      <td>${cadenceCell}</td>
+      <td>${dueCell}</td>
+      <td>${l.next_action ? cEsc(l.next_action) : '<span style="color:var(--text3);">—</span>'}</td>
+      <td>${cEsc(cockpitPersonName(people, l.owner_id) || '—')}</td>
+      <td style="text-align:right;" onclick="event.stopPropagation();"><button class="btn btn-primary btn-sm" onclick="openLeadForm(${l.id})">Open / Log touch</button></td>
+    </tr>`;
+  }).join('');
+
+  return `${cadenceNote}<div class="card"><div class="card-body" style="padding:0;"><div class="table-wrap">
+    <table style="width:100%;border-collapse:collapse;">
+      <thead style="background:var(--bg);"><tr>
+        <th style="text-align:left;padding:10px 12px;">Lead</th>
+        <th style="text-align:left;padding:10px 12px;">Status</th>
+        <th style="text-align:left;padding:10px 12px;">Cadence</th>
+        <th style="text-align:left;padding:10px 12px;">Next touch</th>
+        <th style="text-align:left;padding:10px 12px;">Next action</th>
+        <th style="text-align:left;padding:10px 12px;">Owner</th>
+        <th style="text-align:right;padding:10px 12px;">&nbsp;</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div></div></div>`;
+}
+
+// ── Cadence tab (template editor) ─────────────────────────
+function cockpitCadenceHtml() {
+  const { steps } = cockpitData;
+  const stepsSorted = [...steps].sort((a, b) => a.step_no - b.step_no);
+  const channels = ['Email','Call','LinkedIn','Visit','Other'];
+
+  const rowHtml = (s, idx) => `<tr data-cad-row>
+    <td style="padding:6px 8px;text-align:center;color:var(--text3);font-weight:600;">${idx + 1}</td>
+    <td style="padding:6px 8px;"><input type="number" min="0" class="form-control cad-day" style="width:90px;" value="${s.day_offset ?? 0}"></td>
+    <td style="padding:6px 8px;"><select class="form-control cad-channel" style="width:130px;">${
+      channels.map(c => `<option value="${c}" ${s.channel===c?'selected':''}>${c}</option>`).join('')}</select></td>
+    <td style="padding:6px 8px;"><input type="text" class="form-control cad-instruction" value="${cEsc(s.instruction||'')}" placeholder="e.g. Intro email referencing trigger"></td>
+    <td style="padding:6px 8px;text-align:right;"><button class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()">✕</button></td>
+  </tr>`;
+
+  const bodyRows = stepsSorted.length ? stepsSorted.map((s, i) => rowHtml(s, i)).join('') : '';
+
+  return `<div class="card"><div class="card-body" style="padding:18px 20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <div style="font-size:13px;color:var(--text2);">Define the outreach sequence. Each worked lead's progress is measured against these steps (Day offset = days after first touch).</div>
+      <button class="btn btn-ghost btn-sm" onclick="cockpitLoadDefaultCadence()">Load default 5-touch</button>
+    </div>
+    <div class="table-wrap"><table style="width:100%;border-collapse:collapse;">
+      <thead style="background:var(--bg);"><tr>
+        <th style="padding:8px;width:50px;">Step</th>
+        <th style="padding:8px;text-align:left;width:110px;">Day offset</th>
+        <th style="padding:8px;text-align:left;width:150px;">Channel</th>
+        <th style="padding:8px;text-align:left;">Instruction</th>
+        <th style="padding:8px;width:50px;"></th>
+      </tr></thead>
+      <tbody id="cad-rows">${bodyRows}</tbody>
+    </table></div>
+    <div style="display:flex;justify-content:space-between;margin-top:14px;">
+      <button class="btn btn-secondary btn-sm" onclick="cockpitAddCadenceRow()">+ Add step</button>
+      <button class="btn btn-primary" onclick="cockpitSaveCadence()">Save cadence</button>
+    </div>
+  </div></div>`;
+}
+
+function cockpitAddCadenceRow(day, channel, instruction) {
+  const tbody = document.getElementById('cad-rows');
+  if (!tbody) return;
+  const idx = tbody.children.length;
+  const channels = ['Email','Call','LinkedIn','Visit','Other'];
+  const tr = document.createElement('tr');
+  tr.setAttribute('data-cad-row', '');
+  tr.innerHTML = `<td style="padding:6px 8px;text-align:center;color:var(--text3);font-weight:600;">${idx + 1}</td>
+    <td style="padding:6px 8px;"><input type="number" min="0" class="form-control cad-day" style="width:90px;" value="${day ?? 0}"></td>
+    <td style="padding:6px 8px;"><select class="form-control cad-channel" style="width:130px;">${
+      channels.map(c => `<option value="${c}" ${channel===c?'selected':''}>${c}</option>`).join('')}</select></td>
+    <td style="padding:6px 8px;"><input type="text" class="form-control cad-instruction" value="${cEsc(instruction||'')}" placeholder="e.g. Follow-up call"></td>
+    <td style="padding:6px 8px;text-align:right;"><button class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+function cockpitLoadDefaultCadence() {
+  const tbody = document.getElementById('cad-rows');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  const def = [
+    [0,  'Email',    'Intro email referencing the trigger / why-now'],
+    [2,  'Call',     'Follow-up call — confirm relevance, book a chat'],
+    [5,  'LinkedIn', 'Connect + short value note'],
+    [9,  'Email',    'Case study / proof point'],
+    [14, 'Call',     'Final attempt — break-up call'],
+  ];
+  def.forEach(([d, c, i]) => cockpitAddCadenceRow(d, c, i));
+}
+
+async function cockpitSaveCadence() {
+  const cid = cockpitCampaignId;
+  const rows = [...document.querySelectorAll('#cad-rows tr[data-cad-row]')];
+  const payload = rows.map((tr, i) => ({
+    research_campaign_id: cid,
+    step_no:    i + 1,
+    day_offset: +tr.querySelector('.cad-day').value || 0,
+    channel:    tr.querySelector('.cad-channel').value,
+    instruction: tr.querySelector('.cad-instruction').value.trim() || null,
+  }));
+  try {
+    // Replace the whole template for this campaign (delete-then-insert).
+    await api('campaign_cadence_steps', 'DELETE', null, 'research_campaign_id=eq.' + cid);
+    if (payload.length) await api('campaign_cadence_steps', 'POST', payload, '');
+    showStatus('Cadence saved');
+    await renderResearchCampaignCockpit();
+  } catch(e) {
+    showStatus('Save failed: ' + e.message, 'error');
+  }
+}
+
+// ── Results tab ───────────────────────────────────────────
+function cockpitResultsHtml() {
+  const { leads, people } = cockpitData;
+  const qualified = leads.filter(l => l.status === 'Qualified');
+  const promoted  = leads.filter(l => l.status === 'Promoted');
+  const dead      = leads.filter(l => l.status === 'Dead');
+  const money = v => 'R' + (+v || 0).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
+  const promotedValue = promoted.reduce((s, l) => s + (+l.est_value || 0), 0);
+
+  const list = (title, arr, accent, showValue) => {
+    if (!arr.length) return `<div style="margin-bottom:18px;"><div style="font-size:13px;font-weight:700;color:${accent};margin-bottom:6px;">${title} (0)</div>
+      <div style="font-size:12px;color:var(--text3);padding:8px 0;">None yet.</div></div>`;
+    const rows = arr.map(l => {
+      const target = l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
+      return `<tr style="cursor:pointer;" onclick="openLeadForm(${l.id})">
+        <td style="padding:8px 12px;font-weight:600;">${cEsc(target)}</td>
+        <td style="padding:8px 12px;">${cEsc(cockpitPersonName(people, l.owner_id) || '—')}</td>
+        ${showValue ? `<td style="padding:8px 12px;text-align:right;">${l.est_value ? money(l.est_value) : '—'}</td>` : ''}
+      </tr>`;
+    }).join('');
+    return `<div style="margin-bottom:22px;">
+      <div style="font-size:13px;font-weight:700;color:${accent};margin-bottom:6px;">${title} (${arr.length})${
+        showValue ? ` · ${money(promotedValue)} est.` : ''}</div>
+      <div class="table-wrap"><table style="width:100%;border-collapse:collapse;">
+        <thead style="background:var(--bg);"><tr>
+          <th style="text-align:left;padding:8px 12px;">Lead</th>
+          <th style="text-align:left;padding:8px 12px;">Owner</th>
+          ${showValue ? '<th style="text-align:right;padding:8px 12px;">Est. value</th>' : ''}
+        </tr></thead><tbody>${rows}</tbody></table></div>
+    </div>`;
+  };
+
+  return `<div class="card"><div class="card-body" style="padding:18px 20px;">
+    ${list('Promoted to opportunity', promoted, '#155e75', true)}
+    ${list('Qualified — ready to promote', qualified, '#166534', false)}
+    ${list('Dead / disqualified leads', dead, '#991b1b', false)}
+  </div></div>`;
+}
+
+// ── Cockpit actions ───────────────────────────────────────
+async function cockpitSetCampaignStatus(status) {
+  try {
+    await api('research_campaigns', 'PATCH', { status }, 'id=eq.' + cockpitCampaignId);
+    allData['research_campaigns'] = null;
+    showStatus('Campaign ' + status.toLowerCase());
+    await renderResearchCampaignCockpit();
+  } catch(e) {
+    showStatus('Update failed: ' + e.message, 'error');
+  }
+}
+
+async function disqualifyTarget(id) {
+  const reason = prompt('Disqualify this target — reason (optional):', '');
+  if (reason === null) return; // cancelled
+  try {
+    await api('campaign_targets', 'PATCH',
+      { status: 'Disqualified', disqualify_reason: reason.trim() || null, updated_at: new Date().toISOString() },
+      'id=eq.' + id);
+    showStatus('Target disqualified');
+    await renderResearchCampaignCockpit();
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+  }
+}
+
+// Promote a researched target into a real lead carrying research_campaign_id.
+async function promoteTargetToLead(id) {
+  const { targets, campaign, sources } = cockpitData;
+  const t = targets.find(x => +x.id === +id);
+  if (!t) return;
+  if (!confirm(`Promote "${t.company_name || t.contact_name || 'this target'}" into a New lead under this campaign?`)) return;
+
+  // The lead's source must be the Research Campaign source so attribution holds.
+  const src = sources.find(s => s.name === 'Research Campaign') || sources.find(s => s.name === 'Research');
+  if (!src) { showStatus('No "Research Campaign" lead source found — run the lead source migration.', 'error'); return; }
+
+  const description = (t.research_notes && t.research_notes.trim())
+    || `${t.company_name || 'Researched target'}${campaign.segment ? ' — ' + campaign.segment : ''}`;
+
+  const leadPayload = {
+    source_id: +src.id,
+    research_campaign_id: +campaign.id,
+    target_org_id: t.organisation_id || null,
+    target_org_name: t.company_name || null,
+    target_person_name: t.contact_name || null,
+    target_person_email: t.contact_email || null,
+    target_person_phone: t.contact_phone || null,
+    description,
+    region_id: campaign.region_id || null,
+    service_major_id: campaign.service_major_id || null,
+    owner_id: t.owner_id || campaign.owner_id || currentUser?.personId || null,
+    status: 'New',
+    created_by: currentUser?.personId || null,
+  };
+
+  try {
+    const made = await api('leads', 'POST', leadPayload, 'select=*');
+    const lead = made[0];
+    await api('campaign_targets', 'PATCH',
+      { status: 'Promoted', promoted_lead_id: lead.id, promoted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+      'id=eq.' + id);
+    showStatus('Target promoted to lead');
+    if (confirm('Lead created. Open it now to start working it?')) {
+      await openLeadForm(lead.id);
+    } else {
+      await renderResearchCampaignCockpit();
+    }
+  } catch(e) {
+    showStatus('Promote failed: ' + e.message, 'error');
+  }
+}
+
+// ── Target add/edit modal ─────────────────────────────────
+function openNewCampaignTarget() {
+  campaignTargetData = {};
+  renderCampaignTargetModal();
+}
+async function openCampaignTargetModal(id) {
+  try {
+    const rows = await apiGet('campaign_targets', 'id=eq.' + id + '&select=*');
+    campaignTargetData = rows[0] || { id };
+    renderCampaignTargetModal();
+  } catch(e) {
+    showStatus('Failed to load target: ' + e.message, 'error');
+  }
+}
+
+function renderCampaignTargetModal() {
+  const d = campaignTargetData;
+  const isEdit = !!d.id;
+  const people = allData['people'] || cockpitData.people || [];
+  const orgs   = allData['organisations'] || [];
+  const xonePeople = people.filter(p => p.is_xone);
+  const ownerPool = xonePeople.length ? xonePeople : people;
+  const v = s => cEsc(s).replace(/"/g, '&quot;');
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:560px;">
+        <div class="modal-header">
+          <div class="modal-title">${isEdit ? 'Edit Target' : 'New Target'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">Company name <span style="color:var(--red)">*</span></label>
+            <input type="text" id="ct-company" class="form-control" value="${v(d.company_name)}" placeholder="e.g. Acme Mining (Pty) Ltd">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Link to existing organisation <span style="font-weight:400;color:var(--text3);font-size:11px;">(optional)</span></label>
+            <select id="ct-org-id" class="form-control">
+              <option value="">— not linked —</option>
+              ${orgs.map(o => `<option value="${o.id}" ${d.organisation_id==o.id?'selected':''}>${cEsc(o.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Contact name</label>
+              <input type="text" id="ct-contact-name" class="form-control" value="${v(d.contact_name)}" placeholder="Decision-maker / champion">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Contact role</label>
+              <input type="text" id="ct-contact-role" class="form-control" value="${v(d.contact_role)}" placeholder="e.g. Head of Security">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Contact email</label>
+              <input type="text" id="ct-contact-email" class="form-control" value="${v(d.contact_email)}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Contact phone</label>
+              <input type="text" id="ct-contact-phone" class="form-control" value="${v(d.contact_phone)}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Priority</label>
+              <select id="ct-priority" class="form-control">
+                ${['Hot','Warm','Cold'].map(p => `<option value="${p}" ${(d.priority||'Warm')===p?'selected':''}>${p}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Status</label>
+              <select id="ct-status" class="form-control">
+                ${['Researching','Ready'].map(s => `<option value="${s}" ${(d.status||'Researching')===s?'selected':''}>${s}</option>`).join('')}
+                ${(d.status==='Promoted'||d.status==='Disqualified') ? `<option value="${d.status}" selected>${d.status}</option>` : ''}
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Owner</label>
+            <select id="ct-owner-id" class="form-control">
+              <option value="">— unassigned —</option>
+              ${ownerPool.map(p => {
+                const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+                const sel = (d.owner_id || currentUser?.personId) == p.id ? 'selected' : '';
+                return `<option value="${p.id}" ${sel}>${cEsc(name)}</option>`;
+              }).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Research notes <span style="font-weight:400;color:var(--text3);font-size:11px;">— the trigger / why they fit (becomes the lead description on promote)</span></label>
+            <textarea id="ct-notes" class="form-control" rows="3" placeholder="e.g. New mine opening Q4; current provider contract expiring; expanding headcount…">${cEsc(d.research_notes)}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveCampaignTarget()">${isEdit ? 'Update' : 'Add target'}</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function saveCampaignTarget() {
+  const company = document.getElementById('ct-company').value.trim();
+  const orgId   = +document.getElementById('ct-org-id').value || null;
+  if (!company && !orgId) { showStatus('Company name is required', 'error'); return; }
+  const payload = {
+    research_campaign_id: cockpitCampaignId,
+    organisation_id: orgId,
+    company_name: company || null,
+    contact_name:  document.getElementById('ct-contact-name').value.trim() || null,
+    contact_role:  document.getElementById('ct-contact-role').value.trim() || null,
+    contact_email: document.getElementById('ct-contact-email').value.trim() || null,
+    contact_phone: document.getElementById('ct-contact-phone').value.trim() || null,
+    priority: document.getElementById('ct-priority').value,
+    status:   document.getElementById('ct-status').value,
+    research_notes: document.getElementById('ct-notes').value.trim() || null,
+    owner_id: +document.getElementById('ct-owner-id').value || null,
+    updated_at: new Date().toISOString(),
+  };
+  try {
+    if (campaignTargetData.id) {
+      await api('campaign_targets', 'PATCH', payload, 'id=eq.' + campaignTargetData.id);
+      showStatus('Target updated');
+    } else {
+      payload.created_by = currentUser?.personId || null;
+      await api('campaign_targets', 'POST', payload, '');
+      showStatus('Target added');
+    }
+    closeModal();
+    await renderResearchCampaignCockpit();
+  } catch(e) {
+    showStatus('Save failed: ' + e.message, 'error');
+  }
 }
 
 
@@ -13914,6 +14612,33 @@ async function renderResearchCampaignModal() {
               </select>
             </div>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Start date</label>
+              <input type="date" id="rc-start-date" class="form-control" value="${d.start_date||''}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">End date</label>
+              <input type="date" id="rc-end-date" class="form-control" value="${d.end_date||''}">
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Targets <span style="font-weight:400;color:var(--text3);font-size:11px;">— pace the cockpit funnel against these</span></label>
+            <div class="form-row" style="margin-bottom:0;">
+              <div class="form-group">
+                <label class="form-label" style="font-size:11px;color:var(--text3);">Accounts</label>
+                <input type="number" min="0" id="rc-target-accounts" class="form-control" value="${d.target_accounts??''}" placeholder="e.g. 60">
+              </div>
+              <div class="form-group">
+                <label class="form-label" style="font-size:11px;color:var(--text3);">Qualified</label>
+                <input type="number" min="0" id="rc-target-qualified" class="form-control" value="${d.target_qualified??''}" placeholder="e.g. 15">
+              </div>
+              <div class="form-group">
+                <label class="form-label" style="font-size:11px;color:var(--text3);">Promoted</label>
+                <input type="number" min="0" id="rc-target-promoted" class="form-control" value="${d.target_promoted??''}" placeholder="e.g. 5">
+              </div>
+            </div>
+          </div>
           <div class="form-group">
             <label class="form-label">Notes</label>
             <textarea id="rc-notes" class="form-control" rows="3" placeholder="Approach, target list, talking points…">${d.notes||''}</textarea>
@@ -13939,6 +14664,11 @@ async function saveResearchCampaign() {
     status: document.getElementById('rc-status').value,
     notes: document.getElementById('rc-notes').value.trim() || null,
     owner_id: +document.getElementById('rc-owner-id').value || null,
+    start_date: document.getElementById('rc-start-date').value || null,
+    end_date:   document.getElementById('rc-end-date').value || null,
+    target_accounts:  document.getElementById('rc-target-accounts').value !== '' ? +document.getElementById('rc-target-accounts').value : null,
+    target_qualified: document.getElementById('rc-target-qualified').value !== '' ? +document.getElementById('rc-target-qualified').value : null,
+    target_promoted:  document.getElementById('rc-target-promoted').value !== '' ? +document.getElementById('rc-target-promoted').value : null,
   };
   try {
     let saved;
@@ -13968,6 +14698,8 @@ async function saveResearchCampaign() {
       }
     } else if (currentPage === 'research_campaigns') {
       await renderResearchCampaignsPage();
+    } else if (currentPage === 'research_campaign_cockpit') {
+      await renderResearchCampaignCockpit();
     }
   } catch(e) {
     showStatus('Save failed: ' + e.message, 'error');
