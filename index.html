@@ -494,7 +494,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -516,7 +516,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -628,7 +628,13 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
             </div>
             <div class="form-group" style="flex:0 0 120px;margin-bottom:0;">
               <label class="form-label">Region</label>
-              <select id="opp-region-id" class="form-control">
+              <select id="opp-region-id" class="form-control" onchange="syncBranchToRegion('opp-region-id','opp-branch-id')">
+                <option value="">— select —</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:0 0 120px;margin-bottom:0;">
+              <label class="form-label">Branch</label>
+              <select id="opp-branch-id" class="form-control">
                 <option value="">— select —</option>
               </select>
             </div>
@@ -998,7 +1004,14 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
           <!-- Region (moved here — below the client / Organisation name) -->
           <div class="form-group">
             <label class="form-label">Region</label>
-            <select id="lead-region-id" class="form-control">
+            <select id="lead-region-id" class="form-control" onchange="syncBranchToRegion('lead-region-id','lead-branch-id')">
+              <option value="">— select —</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Branch <span style="font-weight:400;color:var(--text3);font-size:11px;">— defaults from region, override if needed</span></label>
+            <select id="lead-branch-id" class="form-control">
               <option value="">— select —</option>
             </select>
           </div>
@@ -2181,6 +2194,21 @@ const PAGES = {
   regions: {
     title: 'Regions',
     table: 'regions',
+    columns: [
+      { key: 'name',      label: 'Name' },
+      { key: 'branch_id', label: 'Branch', lookup: 'branches', lookupLabel: r => r.name },
+      { key: 'active',    label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',      label: 'Name', required: true },
+      { key: 'branch_id', label: 'Branch', type: 'lookup', lookupTable: 'branches', lookupLabel: r => r.name },
+      { key: 'active',    label: 'Active', type: 'checkbox' },
+    ],
+  },
+
+  branches: {
+    title: 'Branches',
+    table: 'branches',
     columns: [
       { key: 'name',   label: 'Name' },
       { key: 'active', label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
@@ -3515,6 +3543,8 @@ const MENU = [
             icon: '<path d="M2 12h12M2 8h12M2 4h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'party_categories', label: 'Unaffiliated Collaborator Categories', permission: 'manage_lookups',
             icon: '<path d="M2 12h12M2 8h12M2 4h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'branches',         label: 'Branches',         permission: 'manage_lookups',
+            icon: '<rect x="3" y="6" width="10" height="8" rx="1"/><path d="M6 6V3h4v3M6 9h1M9 9h1M6 11h1M9 11h1" stroke="currentColor" stroke-width="1.2" fill="none"/>' },
           { page: 'regions',          label: 'Regions',          permission: 'manage_lookups',
             icon: '<circle cx="8" cy="7" r="5"/><path d="M8 12v3M5 15h6"/>' },
           { page: 'service_major',    label: 'Service Major',    permission: 'manage_lookups',
@@ -3870,16 +3900,18 @@ async function syncDealOwnerCollaborator(dealId, newOwnerId) {
 
 async function initOppForm() {
   // Load lookups in parallel
-  const [orgs, regions, stages, stageCats, majorCats, people] = await Promise.all([
+  const [orgs, regions, stages, stageCats, majorCats, people, branches] = await Promise.all([
     allData['organisations'] || apiGet('organisations', 'active=eq.true&select=*&order=name.asc'),
     allData['regions'] || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['stages'] || apiGet('stages', 'active=eq.true&select=*&order=sort_order.asc'),
     allData['stage_categories'] || apiGet('stage_categories', 'select=*&order=sort_order.asc'),
     allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people'] || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['branches'] || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
   ]);
 
   allData['organisations'] = orgs;
+  allData['branches'] = branches;
   allData['regions'] = regions;
   allData['stages'] = stages;
   allData['stage_categories'] = stageCats;
@@ -3911,6 +3943,10 @@ async function initOppForm() {
   const regSel = document.getElementById('opp-region-id');
   regSel.innerHTML = '<option value="">— select region —</option>' +
     regions.map(r => `<option value="${r.id}" ${oppData.region_id==r.id?'selected':''}>${r.name}</option>`).join('');
+
+  // Branch — auto-fills from region, overridable
+  const brSel = document.getElementById('opp-branch-id');
+  if (brSel) brSel.innerHTML = branchOptionsHtml(oppData.branch_id);
 
   // Populate stage dropdown - only opportunity stages
   const oppCats = stageCats.filter(c => c.name.startsWith('Opportunity'));
@@ -6189,6 +6225,7 @@ async function saveOpportunity() {
     name,
     org_id: +orgId || null,
     region_id: +document.getElementById('opp-region-id').value || null,
+    branch_id: +document.getElementById('opp-branch-id').value || null,
     stage_id: +stageId || null,
     service_major_id: +document.getElementById('opp-service-major-id').value || null,
     service_sub_id: +document.getElementById('opp-service-sub-id').value || null,
@@ -6382,6 +6419,7 @@ async function maybeOfferExtensionProspect(deal, prevStageId) {
       name: `${deal.name} - Extension ${startLbl}`,
       org_id: deal.org_id,
       region_id: deal.region_id,
+      branch_id: deal.branch_id,
       stage_id: PROSPECT_STAGE_ID,
       service_major_id: deal.service_major_id,
       service_sub_id: deal.service_sub_id,
@@ -6505,10 +6543,14 @@ async function openAddClientModal(mode) {
               </div>
               <div class="form-group">
                 <label class="form-label">Region</label>
-                <select id="nc-org-region" class="form-control">
+                <select id="nc-org-region" class="form-control" onchange="syncBranchToRegion('nc-org-region','nc-org-branch')">
                   <option value="">— select —</option>
                   ${(allData['regions']||[]).map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
                 </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Branch</label>
+                <select id="nc-org-branch" class="form-control">${branchOptionsHtml()}</select>
               </div>
             </div>
           </div>
@@ -6547,6 +6589,13 @@ async function openAddClientModal(mode) {
       allData['regions'] = d;
       const sel = document.getElementById('nc-org-region');
       if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(r=>`<option value="${r.id}">${r.name}</option>`).join('');
+    });
+  }
+  if (!allData['branches']) {
+    apiGet('branches', 'active=eq.true&select=*&order=name.asc').then(d => {
+      allData['branches'] = d;
+      const sel = document.getElementById('nc-org-branch');
+      if (sel) sel.innerHTML = branchOptionsHtml();
     });
   }
 
@@ -6709,6 +6758,9 @@ async function saveNewClient() {
     }
     const sectorId = document.getElementById('nc-org-sector')?.value;
     const regionId = document.getElementById('nc-org-region')?.value;
+    const branchId = document.getElementById('nc-org-branch')?.value;
+    if (regionId) orgPayload.region_id = +regionId;
+    if (branchId) orgPayload.branch_id = +branchId;
 
     const orgResult = await api('organisations', 'POST', orgPayload, 'select=*');
     const org = orgResult[0];
@@ -7601,6 +7653,14 @@ async function doLogin() {
     } catch(e) {
       currentUser.regions = [];
     }
+    // Branch-level scope (covers all the branch's regions). Assignment can be at
+    // either level; the effective scope is the union (see recordInUserScope).
+    try {
+      const userBranches = await apiGet('system_user_branches', 'system_user_id=eq.' + userId + '&select=branch_id');
+      currentUser.branches = userBranches.map(r => +r.branch_id);
+    } catch(e) {
+      currentUser.branches = [];
+    }
 
     // Show app
     document.getElementById('login-screen').style.display = 'none';
@@ -7626,6 +7686,41 @@ function can(permission) {
   return currentUser.permissions.includes(permission);
 }
 
+// True when a record falls within the current user's assigned scope — matched by
+// branch (a branch covers all its regions, incl. records whose branch was
+// overridden to it) OR by an explicitly-assigned region. The union of both
+// assignment levels. Used by the manager-override gates and the Team views.
+function recordInUserScope(record) {
+  if (!record) return false;
+  const branches = (currentUser?.branches || []).map(Number);
+  const regions  = (currentUser?.regions  || []).map(Number);
+  if (record.branch_id != null && branches.includes(+record.branch_id)) return true;
+  if (record.region_id != null && regions.includes(+record.region_id)) return true;
+  return false;
+}
+
+// ── Branch helpers (branches sit above regions) ────────────────────────────
+// Active-branch <option> list, pre-selecting `selectedId` when given.
+function branchOptionsHtml(selectedId) {
+  const branches = (allData['branches'] || []).filter(b => b.active !== false);
+  return '<option value="">— select —</option>' + branches.map(b =>
+    `<option value="${b.id}" ${(+selectedId === +b.id) ? 'selected' : ''}>${b.name}</option>`).join('');
+}
+// The parent branch id of a region (its default), or '' if none.
+function branchForRegion(regionId) {
+  const r = (allData['regions'] || []).find(x => +x.id === +regionId);
+  return r && r.branch_id != null ? +r.branch_id : '';
+}
+// onchange for a region <select>: auto-fill the paired branch <select> to the
+// region's branch. The user may then override the branch independently.
+function syncBranchToRegion(regionSelectId, branchSelectId) {
+  const rs = document.getElementById(regionSelectId);
+  const bs = document.getElementById(branchSelectId);
+  if (!rs || !bs) return;
+  const b = branchForRegion(rs.value);
+  bs.value = (b === '') ? '' : String(b);
+}
+
 // Row-level edit gate for leads & deals. Returns true when the current user may
 // edit the CORE record (not just log activity). Rules per the ownership model:
 //   • Admin (all) — always
@@ -7637,10 +7732,8 @@ function canEditRecord(record) {
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   // Owner can always edit their own record.
   if (record.owner_id != null && +record.owner_id === +currentUser.personId) return true;
-  // Region-scoped manager override.
-  if (currentUser.permissions.includes('edit_all_records')
-      && record.region_id != null
-      && (currentUser.regions || []).map(Number).includes(+record.region_id)) {
+  // Branch/region-scoped manager override.
+  if (currentUser.permissions.includes('edit_all_records') && recordInUserScope(record)) {
     return true;
   }
   return false;
@@ -7661,9 +7754,8 @@ function canAssignOwner(record) {
   if (!currentUser) return false;
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   if (!currentUser.permissions.includes('assign_owner')) return false;
-  if (!record || record.id == null) return true; // new record — region picked at save
-  return record.region_id != null
-    && (currentUser.regions || []).map(Number).includes(+record.region_id);
+  if (!record || record.id == null) return true; // new record — region/branch picked at save
+  return recordInUserScope(record);
 }
 
 // Promotion gate. Admins and promote_lead holders (managers) within the lead's
@@ -7674,8 +7766,7 @@ function canPromote(record) {
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   if (!currentUser.permissions.includes('promote_lead')) return false;
   if (!record || record.id == null) return false;
-  return record.region_id != null
-    && (currentUser.regions || []).map(Number).includes(+record.region_id);
+  return recordInUserScope(record);
 }
 
 function doLogout() {
@@ -7736,8 +7827,7 @@ function filterLeadsByView(leads, view) {
   const pid = currentUser?.personId;
   if (view === 'all') return leads;
   if (view === 'team' && isManagerViewer()) {
-    const regions = (currentUser?.regions || []).map(Number);
-    return leads.filter(l => l.region_id != null && regions.includes(+l.region_id));
+    return leads.filter(recordInUserScope);
   }
   return leads.filter(l => l.owner_id != null && +l.owner_id === +pid); // 'own' (+ fallback)
 }
@@ -7747,8 +7837,7 @@ async function filterDealsByView(deals, view) {
   const pid = currentUser?.personId;
   if (view === 'all') return deals;
   if (view === 'team' && isManagerViewer()) {
-    const regions = (currentUser?.regions || []).map(Number);
-    return deals.filter(d => d.region_id != null && regions.includes(+d.region_id));
+    return deals.filter(recordInUserScope);
   }
   if (view === 'collab') {
     let ids = new Set();
@@ -7912,7 +8001,7 @@ const RPP = (function () {
   const MABBR  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const ATTRS = [
     {h:'Owner',k:'owner'},{h:'Service',k:'service'},{h:'Stage',k:'stage'},
-    {h:'Region',k:'region'},{h:'Prob',k:'prob',num:true},{h:'Order Date',k:'order'},
+    {h:'Region',k:'region'},{h:'Branch',k:'branch'},{h:'Prob',k:'prob',num:true},{h:'Order Date',k:'order'},
   ];
 
   // ── state ──
@@ -7992,6 +8081,7 @@ const RPP = (function () {
     {key:'service', label:'Service',    get:d=>d.service},
     {key:'stage',   label:'Stage',      get:d=>d.stage},
     {key:'region',  label:'Region',     get:d=>d.region},
+    {key:'branch',  label:'Branch',     get:d=>d.branch},
     {key:'prob',    label:'Prob',       get:d=>d.prob},
     {key:'order',   label:'Order Date', get:d=>d.order},
   ];
@@ -8283,7 +8373,7 @@ const RPP = (function () {
 
   // ── data load (bulk fetch + client-side join) ──
   async function loadData(){
-    const [deals, orgs, people, regions, stages, smaj, ssub, streams] = await Promise.all([
+    const [deals, orgs, people, regions, stages, smaj, ssub, streams, branches] = await Promise.all([
       apiGet('deals','select=*'),
       allData['organisations'] || apiGet('organisations','select=*'),
       allData['people']        || apiGet('people','select=*'),
@@ -8292,9 +8382,11 @@ const RPP = (function () {
       allData['service_major'] || apiGet('service_major','select=*'),
       allData['service_sub']   || apiGet('service_sub','select=*'),
       apiGet('revenue_streams','select=id,deal_id,stream_type'),
+      allData['branches']      || apiGet('branches','select=*'),
     ]);
     allData['organisations']=orgs; allData['people']=people; allData['regions']=regions;
     allData['stages']=stages; allData['service_major']=smaj; allData['service_sub']=ssub;
+    allData['branches']=branches;
 
     const streamToDeal = new Map(streams.map(s=>[+s.id, +s.deal_id]));
     const streamIds = streams.map(s=>+s.id);
@@ -8331,6 +8423,7 @@ const RPP = (function () {
       service: serviceLabel(smaj, ssub, d.service_major_id, d.service_sub_id),
       stage: (stages.find(s=>+s.id===+d.stage_id)||{}).name || '—',
       region: (regions.find(r=>+r.id===+d.region_id)||{}).name || '—',
+      branch: (branches.find(b=>+b.id===+d.branch_id)||{}).name || '—',
       prob: d.probability!=null ? +d.probability : 0,
       order: d.order_date || '',
       cells: byDeal.get(+d.id) || new Map(),
@@ -8636,6 +8729,7 @@ async function renderLeadsPage() {
       { key: 'source', label: 'Source',      get: l => (sources.find(s => +s.id === +l.source_id)?.name) || '' },
       { key: 'target', label: 'Target',      get: l => targetName(l) },
       { key: 'region', label: 'Region',      get: l => (regions.find(r => +r.id === +l.region_id)?.name) || '' },
+      { key: 'branch', label: 'Branch',      get: l => ((allData['branches']||[]).find(b => +b.id === +l.branch_id)?.name) || '' },
       { key: 'qual',   label: 'Qual',        get: l => (+l.fit||0)+(+l.trigger_score||0)+(+l.access||0)+(+l.capacity||0), align: 'center' },
       { key: 'owner',  label: 'Owner',       get: l => ownerName(l) },
       { key: 'nxt',    label: 'Next Action', get: l => l.next_action || '' },
@@ -8662,6 +8756,7 @@ async function renderLeadsPage() {
 function renderLeadRow(l, sources, regions, people, orgs) {
   const source = sources.find(s => +s.id === +l.source_id);
   const region = regions.find(r => +r.id === +l.region_id);
+  const branch = (allData['branches'] || []).find(b => +b.id === +l.branch_id);
   const owner  = people.find(p => +p.id === +l.owner_id);
   const targetOrg = l.target_org_id ? orgs.find(o => +o.id === +l.target_org_id) : null;
 
@@ -8739,6 +8834,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
@@ -9409,6 +9505,7 @@ async function promoteTargetToLead(id) {
     target_person_phone: t.contact_phone || null,
     description,
     region_id: campaign.region_id || null,
+    branch_id: campaign.branch_id || null,
     service_major_id: campaign.service_major_id || null,
     owner_id: t.owner_id || campaign.owner_id || currentUser?.personId || null,
     status: 'New',
@@ -10400,7 +10497,7 @@ function resetLeadForm() {
     'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name','lead-target-person-id',
     'lead-target-person-name','lead-target-person-phone','lead-target-person-email',
-    'lead-description','lead-region-id','lead-service-combo','lead-service-major-id',
+    'lead-description','lead-region-id','lead-branch-id','lead-service-combo','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
     'lead-dead-reason-value','lead-dead-notes-value'
@@ -10464,7 +10561,7 @@ async function initLeadForm() {
   // Load all needed lookups in parallel
   // NB: loadLeadQualificationLookups returns void (side-effects allData) — kept
   // at the end of the array so destructuring lines up cleanly without `_` placeholders.
-  const [sources, regions, services, people, orgs, campaigns, salesCampaigns, serviceSubs] = await Promise.all([
+  const [sources, regions, services, people, orgs, campaigns, salesCampaigns, serviceSubs, branches] = await Promise.all([
     allData['lead_sources']       || apiGet('lead_sources', 'active=eq.true&select=*&order=id.asc'),
     allData['regions']            || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major']      || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
@@ -10473,9 +10570,11 @@ async function initLeadForm() {
     allData['research_campaigns'] || apiGet('research_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['sales_campaigns']    || apiGet('sales_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['service_sub_all']    || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc'),
+    allData['branches']           || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
     loadLeadQualificationLookups(),
   ]);
   allData['lead_sources']        = sources;
+  allData['branches']            = branches;
   allData['regions']             = regions;
   allData['service_major']       = services;
   allData['people']              = people;
@@ -10502,6 +10601,9 @@ async function initLeadForm() {
   const regionSel = document.getElementById('lead-region-id');
   regionSel.innerHTML = '<option value="">— select —</option>' +
     regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+
+  const branchSel = document.getElementById('lead-branch-id');
+  if (branchSel) branchSel.innerHTML = branchOptionsHtml();
 
   // Single combined Product/Service dropdown (optgroup per major + its subs).
   populateLeadServiceCombo();
@@ -10696,6 +10798,7 @@ function populateLeadForm() {
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
+  if (leadData.branch_id) document.getElementById('lead-branch-id').value = leadData.branch_id;
   document.getElementById('lead-service-major-id').value = leadData.service_major_id || '';
   document.getElementById('lead-service-sub-id').value   = leadData.service_sub_id   || '';
   setLeadServiceComboFromHidden();   // reflect the stored major/sub in the combined dropdown
@@ -13361,6 +13464,7 @@ async function commitPromotion(s) {
       name:             s.q4.dealName,
       org_id:           +orgId,
       region_id:        leadData.region_id || null,
+      branch_id:        leadData.branch_id || null,
       stage_id:         +firstStage.id,
       service_major_id: leadData.service_major_id || null,
       service_sub_id:   +subId,
@@ -14094,6 +14198,7 @@ async function saveLead(opts) {
 
     description,
     region_id:        +document.getElementById('lead-region-id').value || null,
+    branch_id:        +document.getElementById('lead-branch-id').value || null,
     service_major_id: +document.getElementById('lead-service-major-id').value || null,
     service_sub_id:   +document.getElementById('lead-service-sub-id').value   || null,
     est_value:        leadEstValueNumber(),
@@ -14564,14 +14669,16 @@ async function openResearchCampaignModal(id) {
 
 async function renderResearchCampaignModal() {
   // Load lookups if not cached
-  const [regions, services, people] = await Promise.all([
+  const [regions, services, people, branches] = await Promise.all([
     allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['branches']      || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
   ]);
   allData['regions']       = regions;
   allData['service_major'] = services;
   allData['people']        = people;
+  allData['branches']      = branches;
 
   const xonePeople = people.filter(p => p.is_xone);
   const ownerPool = xonePeople.length ? xonePeople : people;
@@ -14599,7 +14706,7 @@ async function renderResearchCampaignModal() {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Region</label>
-              <select id="rc-region-id" class="form-control">
+              <select id="rc-region-id" class="form-control" onchange="syncBranchToRegion('rc-region-id','rc-branch-id')">
                 <option value="">— select —</option>
                 ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${r.name}</option>`).join('')}
               </select>
@@ -14611,6 +14718,10 @@ async function renderResearchCampaignModal() {
                 ${services.map(s => `<option value="${s.id}" ${d.service_major_id==s.id?'selected':''}>${s.name}</option>`).join('')}
               </select>
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Branch <span style="font-weight:400;color:var(--text3);font-size:11px;">— defaults from region, override if needed</span></label>
+            <select id="rc-branch-id" class="form-control">${branchOptionsHtml(d.branch_id)}</select>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -14679,6 +14790,7 @@ async function saveResearchCampaign() {
     name,
     segment: document.getElementById('rc-segment').value.trim() || null,
     region_id: +document.getElementById('rc-region-id').value || null,
+    branch_id: +document.getElementById('rc-branch-id').value || null,
     service_major_id: +document.getElementById('rc-service-major-id').value || null,
     status: document.getElementById('rc-status').value,
     notes: document.getElementById('rc-notes').value.trim() || null,
@@ -14758,14 +14870,16 @@ async function openSalesCampaignModal(id) {
 
 async function renderSalesCampaignModal() {
   // Load lookups if not cached
-  const [regions, services, people] = await Promise.all([
+  const [regions, services, people, branches] = await Promise.all([
     allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['branches']      || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
   ]);
   allData['regions']       = regions;
   allData['service_major'] = services;
   allData['people']        = people;
+  allData['branches']      = branches;
 
   const xonePeople = people.filter(p => p.is_xone);
   const ownerPool = xonePeople.length ? xonePeople : people;
@@ -14793,7 +14907,7 @@ async function renderSalesCampaignModal() {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Region</label>
-              <select id="sc-region-id" class="form-control">
+              <select id="sc-region-id" class="form-control" onchange="syncBranchToRegion('sc-region-id','sc-branch-id')">
                 <option value="">— select —</option>
                 ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${r.name}</option>`).join('')}
               </select>
@@ -14805,6 +14919,10 @@ async function renderSalesCampaignModal() {
                 ${services.map(s => `<option value="${s.id}" ${d.service_major_id==s.id?'selected':''}>${s.name}</option>`).join('')}
               </select>
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Branch <span style="font-weight:400;color:var(--text3);font-size:11px;">— defaults from region, override if needed</span></label>
+            <select id="sc-branch-id" class="form-control">${branchOptionsHtml(d.branch_id)}</select>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -14846,6 +14964,7 @@ async function saveSalesCampaign() {
     name,
     segment: document.getElementById('sc-segment').value.trim() || null,
     region_id: +document.getElementById('sc-region-id').value || null,
+    branch_id: +document.getElementById('sc-branch-id').value || null,
     service_major_id: +document.getElementById('sc-service-major-id').value || null,
     status: document.getElementById('sc-status').value,
     notes: document.getElementById('sc-notes').value.trim() || null,
@@ -15140,15 +15259,18 @@ async function renderUserRegions() {
   body.innerHTML = '<tr class="empty-row"><td colspan="3">Loading...</td></tr>';
 
   try {
-    const [users, people, regions, assignments] = await Promise.all([
+    const [users, people, regions, branches, regionAssign, branchAssign] = await Promise.all([
       apiGet('system_users', 'active=eq.true&select=id,person_id'),
-      allData['people']  ? Promise.resolve(allData['people'])  : apiGet('people', 'select=*'),
-      allData['regions'] ? Promise.resolve(allData['regions']) : apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
-      apiGet('system_user_regions', 'select=system_user_id,region_id')
+      allData['people']   ? Promise.resolve(allData['people'])   : apiGet('people', 'select=*'),
+      allData['regions']  ? Promise.resolve(allData['regions'])  : apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+      allData['branches'] ? Promise.resolve(allData['branches']) : apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+      apiGet('system_user_regions', 'select=system_user_id,region_id'),
+      apiGet('system_user_branches', 'select=system_user_id,branch_id'),
     ]);
 
-    allData['people']  = people;
-    allData['regions'] = regions;
+    allData['people']   = people;
+    allData['regions']  = regions;
+    allData['branches'] = branches;
 
     const nameOf = (pid) => {
       const p = people.find(x => +x.id === +pid);
@@ -15159,23 +15281,41 @@ async function renderUserRegions() {
       .sort((a, b) => a._name.localeCompare(b._name));
 
     document.getElementById('page-sub').textContent =
-      rows.length + ' users, ' + regions.length + ' regions';
+      rows.length + ' users · ' + branches.length + ' branches, ' + regions.length + ' regions';
 
-    // assignment set for quick lookup
-    const assigned = new Set(assignments.map(a => a.system_user_id + '_' + a.region_id));
+    const regionAssigned = new Set(regionAssign.map(a => a.system_user_id + '_' + a.region_id));
+    const branchAssigned = new Set(branchAssign.map(a => a.system_user_id + '_' + a.branch_id));
+    const totalCols = 1 + branches.length + regions.length;
+    const divider = 'border-left:2px solid var(--border);';
 
-    head.innerHTML = '<tr><th style="width:240px;">User</th>' +
-      regions.map(r => `<th style="text-align:center;white-space:nowrap;">${r.name}</th>`).join('') + '</tr>';
+    // Two-tier header: a group row (Branches | Regions) above the columns.
+    head.innerHTML =
+      '<tr><th rowspan="2" style="width:240px;">User</th>' +
+        (branches.length ? `<th colspan="${branches.length}" style="text-align:center;${divider}">Branches <span style="font-weight:400;color:var(--text3);">(covers all the branch's regions)</span></th>` : '') +
+        (regions.length ? `<th colspan="${regions.length}" style="text-align:center;${divider}">Regions</th>` : '') +
+      '</tr><tr>' +
+        branches.map((b, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${b.name}</th>`).join('') +
+        regions.map((r, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${r.name}</th>`).join('') +
+      '</tr>';
 
     if (!rows.length) {
-      body.innerHTML = '<tr class="empty-row"><td colspan="' + (regions.length+1) + '">No active system users</td></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="' + totalCols + '">No active system users</td></tr>';
       return;
     }
 
     body.innerHTML = rows.map(u => {
-      const cells = regions.map(r => {
-        const checked = assigned.has(u.id + '_' + r.id);
-        return `<td style="text-align:center;">
+      const branchCells = branches.map((b, i) => {
+        const checked = branchAssigned.has(u.id + '_' + b.id);
+        return `<td style="text-align:center;${i === 0 ? divider : ''}">
+          <input type="checkbox" ${checked ? 'checked' : ''}
+            style="width:16px;height:16px;accent-color:var(--navy);cursor:pointer;"
+            onchange="toggleUserBranch(${u.id}, ${b.id}, this.checked)"
+            title="${checked ? 'Remove' : 'Assign'} ${b.name} ${checked ? 'from' : 'to'} ${u._name}">
+        </td>`;
+      }).join('');
+      const regionCells = regions.map((r, i) => {
+        const checked = regionAssigned.has(u.id + '_' + r.id);
+        return `<td style="text-align:center;${i === 0 ? divider : ''}">
           <input type="checkbox" ${checked ? 'checked' : ''}
             style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;"
             onchange="toggleUserRegion(${u.id}, ${r.id}, this.checked)"
@@ -15184,7 +15324,7 @@ async function renderUserRegions() {
       }).join('');
       return `<tr>
         <td><div style="font-weight:600;font-size:13px;">${u._name}</div></td>
-        ${cells}
+        ${branchCells}${regionCells}
       </tr>`;
     }).join('');
 
@@ -15206,6 +15346,25 @@ async function toggleUserRegion(userId, regionId, assign) {
         'system_user_id=eq.' + userId + '&region_id=eq.' + regionId);
     }
     showStatus(assign ? 'Region assigned' : 'Region removed');
+  } catch(e) {
+    showStatus('Failed: ' + e.message, 'error');
+    await renderUserRegions();
+  }
+}
+
+async function toggleUserBranch(userId, branchId, assign) {
+  try {
+    if (assign) {
+      await apiPost('system_user_branches', {
+        system_user_id: userId,
+        branch_id: branchId,
+        created_by: currentUser?.personId || null,
+      });
+    } else {
+      await api('system_user_branches', 'DELETE', null,
+        'system_user_id=eq.' + userId + '&branch_id=eq.' + branchId);
+    }
+    showStatus(assign ? 'Branch assigned' : 'Branch removed');
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
     await renderUserRegions();
