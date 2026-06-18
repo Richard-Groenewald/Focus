@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -831,6 +831,9 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
   <div class="opp-body">
     <!-- Read-only banner (shown when lead is Promoted or Dead) -->
     <div id="lead-readonly-banner" style="display:none;margin-bottom:16px;padding:12px 16px;background:#FFF5E5;border:1px solid #E8A33D;border-radius:var(--radius);color:#7A4F0E;font-size:13px;font-weight:600;"></div>
+
+    <!-- Campaign cadence ribbon (shown when the lead belongs to a research campaign with a cadence) — rendered by renderLeadCadenceRibbon() -->
+    <div id="lead-cadence-ribbon" style="display:none;"></div>
 
     <!-- Top Tabs (with next-action text right of the tabs, and Owner far right) -->
     <div style="display:flex;align-items:flex-end;gap:16px;">
@@ -9924,6 +9927,7 @@ let leadData = {};
 let leadInteractions = [];
 let leadDescriptionLog = [];   // append-only description thread for the open lead
 let leadContacts = [];         // additional (non-primary) lead_contacts for the open lead
+let _leadCadence = null;       // { name, steps } of the open lead's campaign cadence, or null (drives the cadence ribbon)
 // Read-only mode: true when the open lead has status Promoted or Dead.
 // Disables all inputs, hides Save and Log Interaction buttons, hides qual dots from clicking, shows a banner.
 let leadReadOnly = false;
@@ -9931,6 +9935,7 @@ let leadReadOnly = false;
 async function openNewLead() {
   leadData = {};
   leadInteractions = [];
+  _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
   resetLeadForm();
   await initLeadForm();
   // Default status = New (already in select)
@@ -9955,6 +9960,7 @@ async function openLeadForm(id) {
   try {
     const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
     leadData = rows[0] || { id };
+    _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     resetLeadForm();
     await initLeadForm();
     await loadLeadDescriptionLog(id);
@@ -9962,6 +9968,8 @@ async function openLeadForm(id) {
     // Populate fields from leadData
     populateLeadForm();
     await loadLeadInteractions(id);
+    await loadLeadCadence();         // campaign cadence for the ribbon (needs interactions for the step count)
+    renderLeadCadenceRibbon();
     await loadLeadQualificationSelections(id);
     _snapshotLeadForRevert();   // baseline for the Revert button (full undo of this session)
     // Decide editability. Promoted and Dead are terminal — view-only for everyone.
@@ -11979,6 +11987,7 @@ function refreshLeadWorkflowChrome() {
   }
   renderLeadPeerReview(status);
   renderLeadNextActionChip();
+  renderLeadCadenceRibbon();
   updateLeadQualifyNote();
   applyLeadFormLayout();
 }
@@ -12027,6 +12036,78 @@ function renderLeadNextActionChip() {
   } else {
     el.innerHTML = '';
   }
+}
+
+// ── Campaign cadence ribbon ───────────────────────────────
+// Load the open lead's campaign cadence into _leadCadence (campaign name + steps),
+// so the ribbon can render synchronously on every chrome refresh. No-op / clears
+// when the lead isn't on a research campaign or the campaign has no cadence.
+async function loadLeadCadence() {
+  _leadCadence = null;
+  if (!leadData || !leadData.research_campaign_id) return;
+  try {
+    const steps = await apiGet('campaign_cadence_steps',
+      'research_campaign_id=eq.' + leadData.research_campaign_id + '&select=*&order=step_no.asc');
+    if (!steps || !steps.length) return;
+    let name = '';
+    const cached = (allData['research_campaigns'] || []).find(c => +c.id === +leadData.research_campaign_id);
+    if (cached) name = cached.name || '';
+    else {
+      try {
+        const cs = await apiGet('research_campaigns', 'id=eq.' + leadData.research_campaign_id + '&select=name');
+        name = cs?.[0]?.name || '';
+      } catch (e) {}
+    }
+    _leadCadence = { name, steps };
+  } catch (e) { _leadCadence = null; }
+}
+
+// Render the "Campaign cadence" ribbon: which step the lead is on now
+// (stepsSorted[done], due = first touch + day_offset), with overdue / due-soon
+// colouring matching the next-action chip. Hidden when there's no cadence.
+function renderLeadCadenceRibbon() {
+  const el = document.getElementById('lead-cadence-ribbon');
+  if (!el) return;
+  if (!_leadCadence || !_leadCadence.steps?.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const steps = [..._leadCadence.steps].sort((a, b) => a.step_no - b.step_no);
+  const total = steps.length;
+  const logged = leadInteractions || [];
+  const done = logged.length;
+  const camp = _leadCadence.name ? cEsc(_leadCadence.name) : 'Campaign';
+  el.style.display = '';
+
+  if (done >= total) {
+    el.innerHTML = leadCadenceRibbonShell(camp, `<span style="color:#166534;font-weight:700;">Cadence complete · ${total}/${total} steps logged</span>`);
+    return;
+  }
+
+  const step = steps[done];   // the next step to perform = the lead's current obligation
+  // Due date anchored to "first touch = day 0": earliest logged engagement date,
+  // else the lead's created_at (pre-first-touch, e.g. just promoted).
+  const startStr = logged.length
+    ? (logged.map(i => i.engagement_date).filter(Boolean).sort()[0] || leadData.created_at)
+    : leadData.created_at;
+  const due = cadenceDateStr(startStr, step.day_offset);
+  // Classify at local midnight (no timezone drift) — same rules as the next-action chip.
+  const now = new Date();
+  const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const [yy, mm, dd] = String(due || '').slice(0, 10).split('-').map(Number);
+  const due0 = yy ? new Date(yy, (mm || 1) - 1, dd || 1) : null;
+  const diff = due0 ? Math.round((due0 - today0) / 86400000) : null;
+  const soonDays = +(appSettings['lead_due_soon_days'] || 3);
+  const overdue = diff != null && diff < 0;
+  const dueSoon = diff != null && !overdue && diff <= soonDays;
+  const dueCol = overdue ? 'var(--red)' : dueSoon ? '#d97706' : 'var(--text2)';
+  const flag = overdue ? ' (Overdue)' : dueSoon ? ' (Due soon)' : '';
+  const dueStr = due0 ? due0.toLocaleDateString('en-ZA') : '—';
+  const body = `<span style="font-weight:700;">Step ${done + 1}/${total}</span> · <strong>${cEsc(step.channel)}</strong>${step.instruction ? ' — ' + cEsc(step.instruction) : ''} · <span style="color:${dueCol};font-weight:700;">due ${dueStr}${flag}</span>`;
+  el.innerHTML = leadCadenceRibbonShell(camp, body);
+}
+
+function leadCadenceRibbonShell(camp, body) {
+  return `<div style="max-width:1160px;margin:0 0 14px;padding:9px 14px;border-left:3px solid var(--navy);background:#EFF6FF;border-radius:6px;font-size:12px;color:var(--text2);line-height:1.5;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+    <span style="font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:0.04em;font-size:11px;white-space:nowrap;">Campaign cadence</span>
+    <span style="color:var(--text3);">${camp}</span><span style="color:var(--border);">·</span>${body}</div>`;
 }
 
 // Peer review (simulated): Qualified leads must be reviewed before Promote.
