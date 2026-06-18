@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.92 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.92 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1435,14 +1435,17 @@ function _mockSeed() {
       { id: 2, person_id: 4, org_id: 5, role_type: 'Contact', is_primary: true },
     ],
     lead_sources: [
-      { id: 1, name: 'Inbound',          active: true, created_at: now },
-      { id: 2, name: 'Outbound',         active: true, created_at: now },
-      { id: 3, name: 'Referral',         active: true, created_at: now },
-      { id: 4, name: 'Research',         active: true, created_at: now },
-      { id: 5, name: 'Client Expansion', active: true, created_at: now },
-      { id: 6, name: 'Sales Campaign',   active: true, created_at: now },
-      { id: 7, name: 'Tender',           active: true, created_at: now },
-      { id: 8, name: 'Other',            active: true, created_at: now },
+      { id: 1,  name: 'Inbound',           active: true, is_system: false, created_at: now },
+      { id: 2,  name: 'Outbound',          active: true, is_system: false, created_at: now },
+      { id: 3,  name: 'Referral',          active: true, is_system: true,  created_at: now },
+      { id: 4,  name: 'Research Campaign',  active: true, is_system: true,  created_at: now },
+      { id: 5,  name: 'Client Expansion',  active: true, is_system: true,  created_at: now },
+      { id: 6,  name: 'Sales Campaign',    active: true, is_system: true,  created_at: now },
+      { id: 7,  name: 'Tender',            active: true, is_system: false, created_at: now },
+      { id: 8,  name: 'Other',             active: true, is_system: false, created_at: now },
+      { id: 9,  name: 'Networking Events',  active: true, is_system: false, created_at: now },
+      { id: 10, name: 'Cold Calling',      active: true, is_system: false, created_at: now },
+      { id: 11, name: 'Network Leverage',  active: true, is_system: false, created_at: now },
     ],
     service_major: [
       { id: 1, name: 'Manpower',         active: true, created_at: now },
@@ -2192,6 +2195,26 @@ const PAGES = {
     ],
   },
 
+  // Lead Sources are data-driven (the lead form's source dropdown reads this
+  // table). The four "system" sources — Referral, Client Expansion, Research
+  // Campaign, Sales Campaign — drive conditional UI keyed on their *name*, so
+  // their name is locked and they can't be deleted (only deactivated). All other
+  // sources are freely add/edit/delete. systemFlag wires that guard generically.
+  lead_sources: {
+    title: 'Lead Sources',
+    table: 'lead_sources',
+    systemFlag: 'is_system',
+    columns: [
+      { key: 'name',      label: 'Name' },
+      { key: 'is_system', label: 'Type',   render: v => v ? '<span class="badge badge-blue">System</span>' : '<span class="badge badge-gray">Custom</span>' },
+      { key: 'active',    label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',   label: 'Name', required: true, lockWhenSystem: true },
+      { key: 'active', label: 'Active', type: 'checkbox' },
+    ],
+  },
+
   regions: {
     title: 'Regions',
     table: 'regions',
@@ -2663,10 +2686,16 @@ async function loadTable(page) {
       const contactsBtn = currentPage === 'clients'
         ? `<button class="btn btn-ghost btn-sm" onclick="showClientContacts(${row.id})">Contacts</button>`
         : '';
+      // System rows (cfg.systemFlag) are required by app logic keyed on their name —
+      // editable (e.g. to deactivate) but not deletable.
+      const isSystemRow = cfg.systemFlag && row[cfg.systemFlag];
+      const delBtn = isSystemRow
+        ? '<span class="text-muted text-sm" title="System record — required by app workflows. Deactivate instead of deleting.">System</span>'
+        : `<button class="btn btn-danger btn-sm" onclick="confirmDelete(${row.id})">Delete</button>`;
       const actions = cfg.readOnly ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
         ${contactsBtn}
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${row.id})">Edit</button>
-        <button class="btn btn-danger btn-sm" onclick="confirmDelete(${row.id})">Delete</button>
+        ${delBtn}
       </td>`;
       return `<tr>${cells}${actions}</tr>`;
     };
@@ -2769,9 +2798,12 @@ async function renderModal(data) {
     try { allData['roles'] = await apiGet('roles', 'select=*&order=name.asc'); } catch(e) {}
   }
 
+  // When editing a system row, fields marked lockWhenSystem render read-only
+  // (e.g. a lead source's name is load-bearing for conditional UI).
+  const lockedSystem = cfg.systemFlag && data && data[cfg.systemFlag];
   const fields = cfg.fields.map(f => {
     const val = data ? (data[f.key] ?? '') : (f.type === 'checkbox' ? false : '');
-    return renderField(f, val);
+    return renderField(f, val, lockedSystem && f.lockWhenSystem);
   }).join('');
 
   const html = `
@@ -2823,7 +2855,7 @@ async function renderModal(data) {
   }, 50);
 }
 
-function renderField(f, val) {
+function renderField(f, val, locked) {
   if (f.type === 'section') {
     return `<div class="opp-section-title" style="margin:18px 0 10px;padding-top:12px;border-top:1px solid var(--border);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--navy);">${f.label}</div>`;
   }
@@ -2869,7 +2901,9 @@ function renderField(f, val) {
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select type first —</option></select></div>`;
   }
 
-  return `<div class="form-group">${label}<input type="${f.type||'text'}" id="f_${f.key}" name="${f.key}" class="form-control" value="${val}" ${f.required?'required':''} ${f.placeholder?`placeholder="${f.placeholder}"`:''} autocomplete="off"></div>`;
+  const lockAttrs = locked ? ' readonly style="background:var(--bg2);color:var(--text3);cursor:not-allowed;"' : '';
+  const lockHint = locked ? '<div style="font-size:11px;color:var(--text3);margin-top:4px;">System record — name is locked because app workflows depend on it.</div>' : '';
+  return `<div class="form-group">${label}<input type="${f.type||'text'}" id="f_${f.key}" name="${f.key}" class="form-control" value="${val}" ${f.required?'required':''} ${f.placeholder?`placeholder="${f.placeholder}"`:''} autocomplete="off"${lockAttrs}>${lockHint}</div>`;
 }
 
 // Keyboard support for `richtext` textareas (qualification hover descriptions):
@@ -3433,6 +3467,12 @@ async function syncSystemUserRole(userId, roleId) {
 async function confirmDelete(id) {
   const row = currentData.find(r => +r.id === +id);
   const cfg = PAGES[currentPage];
+  // Defense in depth: the row's Delete button is already hidden for system
+  // records, but never let one through even if this is called directly.
+  if (cfg.systemFlag && row && row[cfg.systemFlag]) {
+    showStatus('This is a system record required by app workflows — deactivate it instead of deleting.', 'error');
+    return;
+  }
   const label = cfg.columns[0] ? (row[cfg.columns[0].key] || `Record #${id}`) : `Record #${id}`;
 
   const html = `
@@ -3615,6 +3655,8 @@ const MENU = [
         items: [
           { page: 'industry_sectors', label: 'Industry Sectors', permission: 'manage_lookups',
             icon: '<path d="M2 12h12M2 8h12M2 4h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'lead_sources',     label: 'Lead Sources',     permission: 'manage_lookups',
+            icon: '<path d="M8 2v8M5 7l3 3 3-3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 13h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'party_categories', label: 'Unaffiliated Collaborator Categories', permission: 'manage_lookups',
             icon: '<path d="M2 12h12M2 8h12M2 4h12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'branches',         label: 'Branches',         permission: 'manage_lookups',
