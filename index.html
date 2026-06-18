@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9610,6 +9610,27 @@ async function disqualifyTarget(id) {
   }
 }
 
+// ── Cadence → lead obligation bridge ──────────────────────
+// Feeds a campaign's outreach cadence into the lead's enforced next-action
+// obligation, so the plan travels with the work (promote seeds step 1; logging a
+// touch pre-fills the onward step). Suggested + fully overridable everywhere.
+//
+// Map a cadence channel to the leads-applicable next_actions vocabulary. Email /
+// Call / Visit / Meeting map directly; LinkedIn / Other have no lead-side action,
+// so we surface the raw channel as free text on the lead and a hint in the modal.
+const CADENCE_CHANNEL_TO_NEXT_ACTION = { Email: 'Email', Call: 'Call', Visit: 'Site Visit', Meeting: 'Meeting' };
+function cadenceNextActionName(channel) {
+  return CADENCE_CHANNEL_TO_NEXT_ACTION[channel] || null;
+}
+// Add whole days to a date string, returning YYYY-MM-DD. day_offset is measured
+// from "first touch = day 0", matching the cockpit Work Queue's due maths.
+function cadenceDateStr(baseStr, days) {
+  const d = baseStr ? new Date(baseStr) : new Date();
+  if (isNaN(d.getTime())) return null;
+  d.setDate(d.getDate() + (+days || 0));
+  return d.toISOString().slice(0, 10);
+}
+
 // Promote a researched target into a real lead carrying research_campaign_id.
 async function promoteTargetToLead(id) {
   const { targets, campaign, sources } = cockpitData;
@@ -9640,6 +9661,19 @@ async function promoteTargetToLead(id) {
     status: 'New',
     created_by: currentUser?.personId || null,
   };
+
+  // Seed the lead's first obligation from cadence step 1 so a promoted campaign
+  // lead is born with a concrete next action (e.g. "Email — due today") instead of
+  // a blank. Safe to write directly here: with no interactions yet, the
+  // refresh_lead_next_action trigger never fires, so this persists. The first
+  // logged touch then hands the obligation over to the onward step (see
+  // maybeApplyCadencePrefill). This is what advances the lead New → Working.
+  const cadenceSteps = [...(cockpitData.steps || [])].sort((a, b) => a.step_no - b.step_no);
+  if (cadenceSteps.length) {
+    const step1 = cadenceSteps[0];
+    leadPayload.next_action = cadenceNextActionName(step1.channel) || step1.channel;
+    leadPayload.next_action_date = cadenceDateStr(new Date().toISOString(), step1.day_offset);
+  }
 
   try {
     const made = await api('leads', 'POST', leadPayload, 'select=*');
@@ -14576,6 +14610,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
         </div>
         <div class="modal-body">
           ${banner}
+          <div id="li-cadence-hint"></div>
           ${relatedNote}
           <div class="form-row">
             <div class="form-group">
@@ -14661,6 +14696,7 @@ async function openLeadInteractionModal() {
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
+  await maybeApplyCadencePrefill();
 }
 
 // Initiate a NEW interaction that references an existing one (the chain parent).
@@ -14671,6 +14707,7 @@ async function openLeadInteractionRelated(parentId) {
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
+  await maybeApplyCadencePrefill();
 }
 
 // Populate Type and Next Action dropdowns scoped to leads.
@@ -14679,6 +14716,78 @@ async function loadLiLookups() {
     loadFilteredLookup('activity_types', 'applies_to_leads=eq.true', 'li-type'),
     loadFilteredLookup('next_actions',   'applies_to_leads=eq.true', 'li-next-action'),
   ]);
+}
+
+// ── Cadence pre-fill for the engagement modal ─────────────
+// When logging a touch on a lead that belongs to a research campaign, suggest the
+// onward cadence step as the lead's next obligation. "Performing" = the step this
+// touch covers (stepsSorted[done]); "onward" = what gets queued after it
+// (stepsSorted[done+1]), which the refresh_lead_next_action trigger then promotes
+// into leads.next_action on save. done = touches already logged. All overridable.
+async function leadCadenceModalContext() {
+  if (!leadData || !leadData.research_campaign_id) return null;
+  let steps;
+  try {
+    steps = await apiGet('campaign_cadence_steps',
+      'research_campaign_id=eq.' + leadData.research_campaign_id + '&select=*&order=step_no.asc');
+  } catch (e) { return null; }
+  if (!steps || !steps.length) return null;
+  const logged = leadInteractions || [];
+  const done = logged.length;
+  const total = steps.length;
+  // Anchor due dates to "first touch = day 0": earliest logged engagement date,
+  // or the date being logged now when this is the very first touch.
+  let startStr;
+  if (logged.length) {
+    startStr = logged.map(i => i.engagement_date).filter(Boolean).sort()[0] || leadData.created_at;
+  } else {
+    startStr = document.getElementById('li-date')?.value || new Date().toISOString().slice(0, 10);
+  }
+  const onward = steps[done + 1] || null;
+  return {
+    steps, total, done,
+    performing: steps[done] || null,
+    onward,
+    onwardDue: onward ? cadenceDateStr(startStr, onward.day_offset) : null,
+    complete: done >= total,
+  };
+}
+
+async function maybeApplyCadencePrefill() {
+  const ctx = await leadCadenceModalContext();
+  const hint = document.getElementById('li-cadence-hint');
+  if (!ctx) return;
+  if (ctx.complete) {
+    if (hint) hint.innerHTML = `<div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">Cadence complete — all ${ctx.total} steps logged. Set any further next action manually.</div>`;
+    return;
+  }
+  const { performing, onward, onwardDue, done, total } = ctx;
+  const performingLabel = performing
+    ? `Step ${done + 1}/${total} · ${cEsc(performing.channel)}${performing.instruction ? ' — ' + cEsc(performing.instruction) : ''}`
+    : '';
+  const onwardLabel = onward
+    ? `Next: Step ${done + 2}/${total} · ${cEsc(onward.channel)}${onward.instruction ? ' — ' + cEsc(onward.instruction) : ''} · due ${onwardDue}`
+    : 'Final cadence step — no further step will be queued after this.';
+  if (hint) hint.innerHTML = `<div style="margin:-4px 0 14px;padding:10px 12px;background:#EFF6FF;border:1px solid #3b82f6;border-radius:var(--radius);color:#1e3a8a;font-size:12px;line-height:1.5;">
+      <div style="font-weight:700;">Campaign cadence</div>
+      <div>${performingLabel}</div>
+      <div style="opacity:0.85;">${onwardLabel}</div>
+      ${onward ? '<div style="margin-top:4px;font-weight:400;opacity:0.8;">Next Action pre-filled below — edit or clear as needed.</div>' : ''}
+    </div>`;
+  // Pre-fill the onward obligation into Next Action + Due + Action Details, never
+  // clobbering anything the user (or an earlier preselect) already set.
+  if (onward) {
+    const mapped = cadenceNextActionName(onward.channel);
+    const sel = document.getElementById('li-next-action');
+    if (sel && mapped && !sel.value) {
+      const opt = [...sel.options].find(o => o.textContent.trim() === mapped);
+      if (opt) sel.value = opt.value;
+    }
+    const dateEl = document.getElementById('li-next-date');
+    if (dateEl && !dateEl.value && onwardDue) dateEl.value = onwardDue;
+    const det = document.getElementById('li-action-details');
+    if (det && !det.value && onward.instruction) det.value = onward.instruction;
+  }
 }
 
 function populateLiCompletionSection(i) {
