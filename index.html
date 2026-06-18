@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9408,9 +9408,9 @@ function cockpitWorkQueueHtml() {
   const rows = inPlay.map(l => {
     const ix = byLead[+l.id] || [];
     const done = ix.length;
-    const startDays = ix.length
-      ? Math.min(...ix.map(i => cockpitDays(i.engagement_date)).filter(v => v != null))
-      : cockpitDays(l.created_at);
+    // Day 0 = explicit cadence-start (stamped at promote), falling back to
+    // created_at for older / form-created leads (#3) — deterministic, not inferred.
+    const startDays = cockpitDays(l.cadence_started_at || l.created_at);
     let cadenceCell, dueCell;
     if (!stepsSorted.length) {
       cadenceCell = '<span style="color:var(--text3);">—</span>';
@@ -9439,7 +9439,9 @@ function cockpitWorkQueueHtml() {
       <td>${dueCell}</td>
       <td>${l.next_action ? cEsc(l.next_action) : '<span style="color:var(--text3);">—</span>'}</td>
       <td>${cEsc(cockpitPersonName(people, l.owner_id) || '—')}</td>
-      <td style="text-align:right;" onclick="event.stopPropagation();"><button class="btn btn-primary btn-sm" onclick="openLeadForm(${l.id})">Open / Log touch</button></td>
+      <td style="text-align:right;white-space:nowrap;" onclick="event.stopPropagation();">
+        <button class="btn btn-primary btn-sm" onclick="cockpitQuickLogTouch(${l.id})">Log touch</button>
+        <button class="btn btn-ghost btn-sm" onclick="openLeadForm(${l.id})">Open</button></td>
     </tr>`;
   }).join('');
 
@@ -9626,12 +9628,18 @@ function cadenceNextActionName(channel) {
   return CADENCE_CHANNEL_TO_NEXT_ACTION[channel] || null;
 }
 // Add whole days to a date string, returning YYYY-MM-DD. day_offset is measured
-// from "first touch = day 0", matching the cockpit Work Queue's due maths.
+// from the cadence anchor (day 0), matching the cockpit Work Queue's due maths.
 function cadenceDateStr(baseStr, days) {
   const d = baseStr ? new Date(baseStr) : new Date();
   if (isNaN(d.getTime())) return null;
   d.setDate(d.getDate() + (+days || 0));
   return d.toISOString().slice(0, 10);
+}
+// The cadence "day 0" anchor for a lead: the explicit cadence_started_at (stamped
+// at promote), falling back to created_at for older / form-created campaign leads.
+function cadenceAnchorStr(lead) {
+  const v = lead?.cadence_started_at || lead?.created_at || null;
+  return v ? String(v).slice(0, 10) : null;
 }
 
 // Promote a researched target into a real lead carrying research_campaign_id.
@@ -9674,8 +9682,12 @@ async function promoteTargetToLead(id) {
   const cadenceSteps = [...(cockpitData.steps || [])].sort((a, b) => a.step_no - b.step_no);
   if (cadenceSteps.length) {
     const step1 = cadenceSteps[0];
+    // Explicit cadence-start anchor (day 0) — stamped at promote so due dates are
+    // deterministic rather than inferred from interaction dates (#3).
+    const startStr = new Date().toISOString().slice(0, 10);
+    leadPayload.cadence_started_at = startStr;
     leadPayload.next_action = cadenceNextActionName(step1.channel) || step1.channel;
-    leadPayload.next_action_date = cadenceDateStr(new Date().toISOString(), step1.day_offset);
+    leadPayload.next_action_date = cadenceDateStr(startStr, step1.day_offset);
   }
 
   try {
@@ -9692,6 +9704,29 @@ async function promoteTargetToLead(id) {
     }
   } catch(e) {
     showStatus('Promote failed: ' + e.message, 'error');
+  }
+}
+
+// Quick-log a touch on an in-play campaign lead straight from the cockpit Work
+// Queue — opens the cadence-aware engagement modal OVER the cockpit (no full-page
+// swap). Loads just that lead's context into the shared globals the modal reads;
+// _liQuickLogContext tells saveLeadInteraction to refresh the cockpit (not the
+// hidden lead form) on save. "Open" still opens the full lead form (#4).
+async function cockpitQuickLogTouch(leadId) {
+  try {
+    const rows = await apiGet('leads', 'id=eq.' + leadId + '&select=*');
+    if (!rows || !rows[0]) { showStatus('Lead not found', 'error'); return; }
+    leadData = rows[0];
+    leadReadOnly = false;                 // in-play leads only reach here; logging is allowed
+    await loadLeadInteractions(leadId);   // sets `done` for the cadence pre-fill
+    window._liQuickLogContext = true;
+    window._liRelatedTo = null;
+    window._liEditing = null;
+    document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
+    await loadLiLookups();
+    await maybeApplyCadencePrefill();
+  } catch (e) {
+    showStatus('Could not open quick log: ' + e.message, 'error');
   }
 }
 
@@ -12082,12 +12117,10 @@ function renderLeadCadenceRibbon() {
   }
 
   const step = steps[done];   // the next step to perform = the lead's current obligation
-  // Due date anchored to "first touch = day 0": earliest logged engagement date,
-  // else the lead's created_at (pre-first-touch, e.g. just promoted).
-  const startStr = logged.length
-    ? (logged.map(i => i.engagement_date).filter(Boolean).sort()[0] || leadData.created_at)
-    : leadData.created_at;
+  // Due date anchored to the explicit cadence-start (day 0), stamped at promote (#3).
+  const startStr = cadenceAnchorStr(leadData);
   const due = cadenceDateStr(startStr, step.day_offset);
+  const startedStr = startStr ? new Date(startStr).toLocaleDateString('en-ZA') : null;
   // Classify at local midnight (no timezone drift) — same rules as the next-action chip.
   const now = new Date();
   const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -12100,7 +12133,8 @@ function renderLeadCadenceRibbon() {
   const dueCol = overdue ? 'var(--red)' : dueSoon ? '#d97706' : 'var(--text2)';
   const flag = overdue ? ' (Overdue)' : dueSoon ? ' (Due soon)' : '';
   const dueStr = due0 ? due0.toLocaleDateString('en-ZA') : '—';
-  const body = `<span style="font-weight:700;">Step ${done + 1}/${total}</span> · <strong>${cEsc(step.channel)}</strong>${step.instruction ? ' — ' + cEsc(step.instruction) : ''} · <span style="color:${dueCol};font-weight:700;">due ${dueStr}${flag}</span>`;
+  const startedChip = startedStr ? ` · <span style="color:var(--text3);">started ${startedStr}</span>` : '';
+  const body = `<span style="font-weight:700;">Step ${done + 1}/${total}</span> · <strong>${cEsc(step.channel)}</strong>${step.instruction ? ' — ' + cEsc(step.instruction) : ''} · <span style="color:${dueCol};font-weight:700;">due ${dueStr}${flag}</span>${startedChip}`;
   el.innerHTML = leadCadenceRibbonShell(camp, body);
 }
 
@@ -14748,6 +14782,7 @@ async function openLeadInteractionView(interactionId, locked = false) {
   if (!i) return;
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('view', i, locked);
   window._liEditing = i;
+  window._liQuickLogContext = null;   // edited from the full form → reload the form on save
   await loadLiLookups();
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
@@ -14760,6 +14795,7 @@ async function openEditLeadInteractionModal(interactionId) {
   if (!i) return;
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('edit', i);
   window._liEditing = i;
+  window._liQuickLogContext = null;   // edited from the full form → reload the form on save
   await loadLiLookups();
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
@@ -14774,6 +14810,7 @@ async function openLeadInteractionModal() {
     if (!ok || !leadData.id) return;
   }
   window._liRelatedTo = null;   // a plain new interaction is not part of a chain
+  window._liQuickLogContext = null;   // logged from the full form → reload the form on save
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -14785,6 +14822,7 @@ async function openLeadInteractionModal() {
 async function openLeadInteractionRelated(parentId) {
   if (!leadData.id) return;
   window._liRelatedTo = +parentId || null;
+  window._liQuickLogContext = null;   // logged from the full form → reload the form on save
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -14816,14 +14854,9 @@ async function leadCadenceModalContext() {
   const logged = leadInteractions || [];
   const done = logged.length;
   const total = steps.length;
-  // Anchor due dates to "first touch = day 0": earliest logged engagement date,
-  // or the date being logged now when this is the very first touch.
-  let startStr;
-  if (logged.length) {
-    startStr = logged.map(i => i.engagement_date).filter(Boolean).sort()[0] || leadData.created_at;
-  } else {
-    startStr = document.getElementById('li-date')?.value || new Date().toISOString().slice(0, 10);
-  }
+  // Anchor due dates to the explicit cadence-start (day 0), stamped at promote (#3),
+  // falling back to the date being logged now if somehow unset.
+  const startStr = cadenceAnchorStr(leadData) || document.getElementById('li-date')?.value || new Date().toISOString().slice(0, 10);
   const onward = steps[done + 1] || null;
   return {
     steps, total, done,
@@ -14946,10 +14979,17 @@ async function saveLeadInteraction(editId) {
     // Bump last_touch_date on the lead (on both create and edit, since edit can change the date)
     await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id);
     closeModal();
-    await loadLeadInteractions(leadData.id);
-    renderLeadInteractions();
-    // Triggers may have updated next_action / status — refetch + repopulate the form.
-    await reloadLeadAfterServerChange();
+    // Quick-log from the cockpit: the full lead form isn't open, so skip its reload
+    // and refresh the cockpit instead (its sweep advances New→Working as needed).
+    if (window._liQuickLogContext) {
+      window._liQuickLogContext = null;
+      await renderResearchCampaignCockpit();
+    } else {
+      await loadLeadInteractions(leadData.id);
+      renderLeadInteractions();
+      // Triggers may have updated next_action / status — refetch + repopulate the form.
+      await reloadLeadAfterServerChange();
+    }
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
   } finally {
