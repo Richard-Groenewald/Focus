@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.7 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.8 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.7 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.8 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9436,7 +9436,7 @@ async function renderResearchCampaignCockpit() {
 
   try {
     const cid = cockpitCampaignId;
-    const [campArr, regions, services, people, sources, targets, leads, steps] = await Promise.all([
+    const [campArr, regions, services, people, sources, targets, leads, steps, orgs] = await Promise.all([
       apiGet('research_campaigns', 'id=eq.' + cid + '&select=*'),
       allData['regions']       || apiGet('regions', 'select=*'),
       allData['service_major'] || apiGet('service_major', 'select=*'),
@@ -9445,9 +9445,11 @@ async function renderResearchCampaignCockpit() {
       apiGet('campaign_targets', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
       apiGet('leads', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
       apiGet('campaign_cadence_steps', 'research_campaign_id=eq.' + cid + '&select=*&order=step_no.asc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
     ]);
     allData['regions'] = regions; allData['service_major'] = services;
     allData['people'] = people;   allData['lead_sources'] = sources;
+    allData['organisations'] = orgs;  // needed by the New Target company-name matcher
 
     const campaign = campArr[0];
     if (!campaign) {
@@ -10013,9 +10015,12 @@ function renderCampaignTargetModal() {
   const d = campaignTargetData;
   const isEdit = !!d.id;
   const people = allData['people'] || cockpitData.people || [];
-  const orgs   = allData['organisations'] || [];
   const ownerPool = homeOrgPeople(people, [campaignTargetData.owner_id, currentUser?.personId]);
   const v = s => cEsc(s).replace(/"/g, '&quot;');
+  // Split the stored single contact_name into first + surname for the two fields.
+  const _ctnParts = String(d.contact_name || '').trim().split(/\s+/).filter(Boolean);
+  const ctFirst = _ctnParts.length ? _ctnParts[0] : '';
+  const ctLast  = _ctnParts.length > 1 ? _ctnParts.slice(1).join(' ') : '';
 
   const html = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
@@ -10027,34 +10032,35 @@ function renderCampaignTargetModal() {
         <div class="modal-body">
           <div class="form-group">
             <label class="form-label">Company name <span style="color:var(--red)">*</span></label>
-            <input type="text" id="ct-company" class="form-control" value="${v(d.company_name)}" placeholder="e.g. Acme Mining (Pty) Ltd">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Link to existing organisation <span style="font-weight:400;color:var(--text3);font-size:11px;">(optional)</span></label>
-            <select id="ct-org-id" class="form-control">
-              <option value="">— not linked —</option>
-              ${orgs.map(o => `<option value="${o.id}" ${d.organisation_id==o.id?'selected':''}>${cEsc(o.name)}</option>`).join('')}
-            </select>
+            <input type="text" id="ct-company" class="form-control" value="${v(d.company_name)}" placeholder="e.g. Acme Mining (Pty) Ltd" oninput="onCtCompanyInput()" autocomplete="off">
+            <input type="hidden" id="ct-org-id" value="${d.organisation_id || ''}">
+            <div id="ct-company-linked" style="font-size:11px;color:#166534;margin-top:4px;${d.organisation_id ? '' : 'display:none;'}">🔗 Linked to an existing organisation. <a href="#" onclick="unlinkCtOrg();return false;" style="color:var(--red);">Unlink</a></div>
+            <div id="ct-company-matches" style="margin-top:8px;"></div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Contact name</label>
-              <input type="text" id="ct-contact-name" class="form-control" value="${v(d.contact_name)}" placeholder="Decision-maker / champion">
+              <label class="form-label">Contact first name</label>
+              <input type="text" id="ct-contact-first" class="form-control" value="${v(ctFirst)}" placeholder="First name" oninput="checkCtContactSimilarity()" autocomplete="off">
             </div>
+            <div class="form-group">
+              <label class="form-label">Contact surname</label>
+              <input type="text" id="ct-contact-last" class="form-control" value="${v(ctLast)}" placeholder="Surname" oninput="checkCtContactSimilarity()" autocomplete="off">
+            </div>
+          </div>
+          <div id="ct-contact-match" style="display:none;font-size:11px;color:var(--text2);margin:-4px 0 10px;"></div>
+          <div class="form-row">
             <div class="form-group">
               <label class="form-label">Contact role</label>
               <input type="text" id="ct-contact-role" class="form-control" value="${v(d.contact_role)}" placeholder="e.g. Head of Security">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Contact email</label>
-              <input type="text" id="ct-contact-email" class="form-control" value="${v(d.contact_email)}">
             </div>
             <div class="form-group">
               <label class="form-label">Contact phone</label>
               <input type="text" id="ct-contact-phone" class="form-control" value="${v(d.contact_phone)}">
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact email</label>
+            <input type="text" id="ct-contact-email" class="form-control" value="${v(d.contact_email)}">
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -10100,14 +10106,23 @@ async function saveCampaignTarget() {
   const company = document.getElementById('ct-company').value.trim();
   const orgId   = +document.getElementById('ct-org-id').value || null;
   if (!company && !orgId) { showStatus('Company name is required', 'error'); return; }
+  const cFirst = document.getElementById('ct-contact-first').value.trim();
+  const cLast  = document.getElementById('ct-contact-last').value.trim();
+  const cRole  = document.getElementById('ct-contact-role').value.trim();
+  const cEmail = document.getElementById('ct-contact-email').value.trim();
+  const cPhone = document.getElementById('ct-contact-phone').value.trim();
+  // Enforce first name + surname whenever any contact detail is captured.
+  if ((cFirst || cLast || cRole || cEmail || cPhone) && (!cFirst || !cLast)) {
+    showStatus('Enter both a first name and surname for the contact', 'error'); return;
+  }
   const payload = {
     research_campaign_id: cockpitCampaignId,
     organisation_id: orgId,
     company_name: company || null,
-    contact_name:  document.getElementById('ct-contact-name').value.trim() || null,
-    contact_role:  document.getElementById('ct-contact-role').value.trim() || null,
-    contact_email: document.getElementById('ct-contact-email').value.trim() || null,
-    contact_phone: document.getElementById('ct-contact-phone').value.trim() || null,
+    contact_name:  [cFirst, cLast].filter(Boolean).join(' ') || null,
+    contact_role:  cRole || null,
+    contact_email: cEmail || null,
+    contact_phone: cPhone || null,
     priority: document.getElementById('ct-priority').value,
     status:   document.getElementById('ct-status').value,
     research_notes: document.getElementById('ct-notes').value.trim() || null,
@@ -10128,6 +10143,105 @@ async function saveCampaignTarget() {
   } catch(e) {
     showStatus('Save failed: ' + e.message, 'error');
   }
+}
+
+// ── New Target: company-name matching (mirrors the lead target-org field) ──
+// As the user types a company name, surface existing organisations via the shared
+// _findOrgMatches engine so they link to an existing client rather than create a
+// duplicate. Picking a match sets the hidden organisation_id FK; "Use as new"
+// keeps the typed name with no FK.
+function onCtCompanyInput() {
+  const matchEl = document.getElementById('ct-company-matches');
+  if (!matchEl) return;
+  // Typing means they're (re)choosing — drop any existing link.
+  const hid = document.getElementById('ct-org-id');
+  if (hid && hid.value) { hid.value = ''; const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none'; }
+  const name = (document.getElementById('ct-company')?.value || '').trim();
+  if (window._ctOrgNewConfirmed === name.toLowerCase()) { matchEl.innerHTML = ''; return; }
+  window._ctOrgNewConfirmed = null;
+  if (name.length < 3) { matchEl.innerHTML = ''; return; }
+
+  const { exact, shortlist } = _findOrgMatches(name, '', 5);
+  const matches = [exact, ...shortlist].filter(Boolean).slice(0, 5);
+  let html = '';
+  if (matches.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
+    html += matches.map(o => `
+      <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+        <div style="font-size:12px;">${cEsc(o.name)}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${cEsc(o.legal_name)})</span>` : ''}</div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="useCtOrgMatch(${o.id})">Use</button>
+      </div>`).join('');
+    html += `
+      <div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+        <div style="font-size:12px;color:var(--text2);">None of these — it's a new organisation.</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmCtOrgNew()">Use as new</button>
+      </div>`;
+  } else {
+    html = `
+      <div style="padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="font-size:12px;color:var(--text2);">✨ Looks like a new organisation — not in our existing list.</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmCtOrgNew()">Use as new</button>
+      </div>`;
+  }
+  matchEl.innerHTML = html;
+}
+function useCtOrgMatch(orgId) {
+  const o = (allData['organisations'] || []).find(x => +x.id === +orgId);
+  if (!o) return;
+  document.getElementById('ct-org-id').value = o.id;
+  document.getElementById('ct-company').value = o.name;
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = '';
+  const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
+  window._ctOrgNewConfirmed = (o.name || '').toLowerCase();
+}
+function confirmCtOrgNew() {
+  const name = (document.getElementById('ct-company')?.value || '').trim();
+  if (!name) return;
+  document.getElementById('ct-org-id').value = '';
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
+  window._ctOrgNewConfirmed = name.toLowerCase();
+  const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
+}
+function unlinkCtOrg() {
+  document.getElementById('ct-org-id').value = '';
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
+  document.getElementById('ct-company')?.focus();
+}
+
+// New Target: contact name dup-check (warn-only — mirrors checkNewOppContactSimilarity).
+// Flags existing people with a similar name so the same person isn't re-keyed;
+// "use details" autofills the contact fields. No FK is stored on the target.
+let _ctContactTimer;
+function checkCtContactSimilarity() {
+  clearTimeout(_ctContactTimer);
+  _ctContactTimer = setTimeout(() => {
+    const first = document.getElementById('ct-contact-first')?.value || '';
+    const last  = document.getElementById('ct-contact-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const matchEl = document.getElementById('ct-contact-match');
+    if (!matchEl) return;
+    if (fullName.length < 3) { matchEl.style.display = 'none'; matchEl.innerHTML = ''; return; }
+    const matches = findSimilar(fullName, allData['people'] || [], p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      matchEl.style.display = 'block';
+      matchEl.innerHTML = '🔍 Similar people already on record: ' + matches.slice(0, 4).map(m => {
+        const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+        return `<strong>${cEsc(nm)}</strong> (${m.score}%) <a href="#" onclick="useCtContactDetails(${m.item.id});return false;" style="color:var(--red);">use details</a>`;
+      }).join(', ');
+    } else {
+      matchEl.style.display = 'none'; matchEl.innerHTML = '';
+    }
+  }, 400);
+}
+function useCtContactDetails(personId) {
+  const p = (allData['people'] || []).find(x => +x.id === +personId);
+  if (!p) return;
+  document.getElementById('ct-contact-first').value = p.first_name || '';
+  document.getElementById('ct-contact-last').value  = p.last_name || '';
+  if (p.title) document.getElementById('ct-contact-role').value  = p.title;
+  if (p.email) document.getElementById('ct-contact-email').value = p.email;
+  if (p.phone) document.getElementById('ct-contact-phone').value = p.phone;
+  const matchEl = document.getElementById('ct-contact-match'); if (matchEl) { matchEl.style.display = 'none'; matchEl.innerHTML = ''; }
 }
 
 
