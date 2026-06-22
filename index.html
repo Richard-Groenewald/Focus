@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.0 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.1 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.0 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.1 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1926,6 +1926,7 @@ const ORG_DETAIL_FIELDS = [
 
 // ── Page config ──────────────────────────────────────────
 const PAGES = {
+  dashboard: { title: 'Dashboard', custom: true, readOnly: true, columns: [], fields: [] },
   opportunities: {
     title: 'Opportunities',
     table: 'opportunities',
@@ -2587,6 +2588,7 @@ async function loadTable(page) {
 
   // Custom pages
   if (cfg.custom) {
+    if (page === 'dashboard') { await renderDashboard(); return; }
     if (page === 'role_permissions') { await renderRolePermissions(); return; }
     if (page === 'user_regions') { await renderUserRegions(); return; }
     if (page === 'opportunities') { await renderOpportunitiesPage(); return; }
@@ -3712,6 +3714,9 @@ function buildNav() {
       ${item.label}
     </button>`;
   };
+
+  // Dashboard — standalone top item; everyone's post-login landing page.
+  html += renderItem({ page: 'dashboard', label: 'Dashboard', icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' });
 
   let sectionCounter = 0;
   for (const section of MENU) {
@@ -8117,6 +8122,155 @@ async function renderOpportunitiesPage() {
 // bar (renderViewFilterBar/filterDealsByView/oppsOwnerView), FY utils
 // (getCurrentFY/getFYMonths/getFYLabel + appSettings.fy_start_month), and the
 // shared #table-filter-popup. Layers read the REAL schema columns.
+// ── Role-based Dashboard ───────────────────────────────────────────────────
+// Post-login landing page. One page; which widgets show depends on the user's
+// role(s); each widget scopes its data to the user (own) or their team/branch
+// (managers). Fixed per-role for now — user customisation is a later increment.
+// Renders into the shared #table-body cell, mirroring the cockpit pattern.
+const DASH_ROLE_WIDGETS = {
+  'Sales User':    ['leads', 'opportunities', 'pipeline'],
+  'Sales Manager': ['campaigns', 'leads', 'opportunities', 'pipeline'],
+  'Operations':    ['contracts'],
+  'EXCO':          ['company'],
+  'Admin':         [],
+  'Read Only':     [],
+};
+
+function _dashWidgetsForUser() {
+  const roles = (currentUser?.roles || []).map(r => r.name);
+  const out = [];
+  for (const rn of roles) for (const w of (DASH_ROLE_WIDGETS[rn] || [])) if (!out.includes(w)) out.push(w);
+  return out;
+}
+// Managers see their team/branch; everyone else sees only their own records.
+function _dashScope() {
+  return (currentUser?.roles || []).some(r => r.name === 'Sales Manager') ? 'team' : 'own';
+}
+function _dashInScope(rec, scope) {
+  if (!rec) return false;
+  if (currentUser?.isAdmin) return true;
+  const mine = rec.owner_id != null && +rec.owner_id === +currentUser.personId;
+  return scope === 'team' ? (mine || recordInUserScope(rec)) : mine;
+}
+function _dashStageIds(names) {
+  const stages = allData['stages'] || [];
+  return new Set(stages.filter(s => names.includes(s.name)).map(s => +s.id));
+}
+// Card shell: title, optional scope chip, KPI row, sub-line, deep-link button.
+function _dashCard(title, scope, kpis, sub, page, linkLabel) {
+  const chip = scope ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : 'Mine'}</span>` : '';
+  const kpiHtml = kpis.map(([label, val, color]) =>
+    `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div>
+       <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`).join('');
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">${title}${chip}</div>
+      ${page ? `<button class="btn btn-ghost btn-sm" onclick="showPage('${page}')">${linkLabel || 'View all'} →</button>` : ''}
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpiHtml}</div>
+      ${sub ? `<div style="margin-top:12px;color:var(--text3);font-size:12px;">${sub}</div>` : ''}
+    </div></div>`;
+}
+
+async function renderDashboard() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  const widgets = _dashWidgetsForUser();
+  const greeting = ('Welcome, ' + (currentUser?.name || '')).trim().replace(/,$/, '');
+  if (!widgets.length) {
+    body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:48px 24px;text-align:center;color:var(--text3);">
+      <div style="font-size:18px;font-weight:700;color:var(--text2);margin-bottom:6px;">${greeting}</div>
+      <div>No dashboard is configured for your role yet.</div></div></td></tr>`;
+    return;
+  }
+  // Make sure shared lookups the widgets read are present.
+  if (!allData['stages']) { try { allData['stages'] = await apiGet('stages', 'select=id,name'); } catch(e) { allData['stages'] = []; } }
+  const shell = widgets.map(w =>
+    `<div id="dash-${w}"><div class="card" style="padding:20px;color:var(--text3);">Loading…</div></div>`).join('');
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:2px 0 18px;">
+      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px;">${greeting}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
+    </div></td></tr>`;
+  const loaders = { leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
+                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany };
+  await Promise.all(widgets.map(async w => {
+    const el = document.getElementById('dash-' + w);
+    if (!el) return;
+    try { el.innerHTML = loaders[w] ? await loaders[w]() : ''; }
+    catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load ${w}: ${e.message}</div>`; }
+  }));
+}
+
+async function _dashLeads() {
+  const scope = _dashScope();
+  const rows = (await apiGet('leads', 'select=id,status,owner_id,branch_id,region_id,next_action_date'))
+    .filter(r => _dashInScope(r, scope));
+  const today = new Date().toISOString().slice(0, 10);
+  const open = rows.filter(r => ['New', 'Working', 'Qualified'].includes(r.status));
+  const overdue = open.filter(r => r.next_action_date && r.next_action_date < today).length;
+  const sub = ['New', 'Working', 'Qualified'].map(s => `${s}: ${rows.filter(r => r.status === s).length}`).join(' · ');
+  return _dashCard('Leads', scope, [
+    ['Open leads', open.length],
+    ['Overdue follow-up', overdue, overdue > 0 ? 'red' : null],
+  ], sub, 'leads');
+}
+
+async function _dashOpps() {
+  const scope = _dashScope();
+  const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
+  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+    .filter(d => _dashInScope(d, scope));
+  const openDeals = deals.filter(d => open.has(+d.stage_id));
+  const nameById = Object.fromEntries((allData['stages'] || []).map(s => [+s.id, s.name]));
+  const sub = [...open].map(id => `${nameById[id]}: ${openDeals.filter(d => +d.stage_id === id).length}`).join(' · ');
+  return _dashCard('Opportunities', scope, [
+    ['Open opportunities', openDeals.length],
+  ], sub, 'opportunities');
+}
+
+async function _dashPipeline() {
+  const scope = _dashScope();
+  const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
+  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+    .filter(d => _dashInScope(d, scope) && open.has(+d.stage_id));
+  if (!deals.length) return _dashCard('Pipeline', scope, [['Weighted', 'R 0'], ['Total', 'R 0']], 'No open opportunities', 'revenue_pipeline', 'Full pipeline');
+  const ids = deals.map(d => d.id);
+  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=id,deal_id`);
+  const streamDeal = Object.fromEntries(streams.map(s => [+s.id, +s.deal_id]));
+  let months = [];
+  if (streams.length) months = await apiGet('revenue_stream_months', `stream_id=in.(${streams.map(s => s.id).join(',')})&select=stream_id,opportunity_revenue`);
+  const dealTotal = {};
+  for (const m of months) { const did = streamDeal[+m.stream_id]; if (did != null) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  let total = 0, weighted = 0;
+  for (const d of deals) { const t = dealTotal[d.id] || 0; total += t; weighted += t * ((+d.probability || 0) / 100); }
+  return _dashCard('Pipeline', scope, [
+    ['Weighted', pbFmtRand(Math.round(weighted))],
+    ['Total', pbFmtRand(Math.round(total))],
+  ], `${deals.length} open · weighted = value × probability`, 'revenue_pipeline', 'Full pipeline');
+}
+
+async function _dashCampaigns() {
+  const camps = await apiGet('research_campaigns', 'select=id,name,status');
+  const active = camps.filter(c => c.status === 'Active');
+  const sub = active.slice(0, 4).map(c => c.name).join(' · ') || 'No active campaigns';
+  return _dashCard('Campaigns', null, [
+    ['Active campaigns', active.length],
+  ], sub, 'research_campaigns');
+}
+
+// Inc 1b widgets — placeholders until built out.
+async function _dashContracts() {
+  const secured = _dashStageIds(['Secured']);
+  const deals = (await apiGet('deals', 'select=id,stage_id')).filter(d => secured.has(+d.stage_id));
+  return _dashCard('Active Contracts', null, [['Secured contracts', deals.length]], 'Full contracts view coming soon', 'opportunities', 'Open');
+}
+async function _dashCompany() {
+  return _dashCard('Company Overview', null, [['', '—']], 'Company-wide overview coming soon', 'revenue_pipeline', 'Pipeline');
+}
+
 const RPP = (function () {
   const MIN_FY = 3;
   const MNAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
