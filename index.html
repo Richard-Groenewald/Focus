@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.6.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.6.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9217,7 +9217,7 @@ async function renderResearchCampaignCockpit() {
     let interactions = [];
     const leadIds = leads.map(l => +l.id);
     if (leadIds.length) {
-      interactions = await apiGet('lead_interactions',
+      interactions = await apiGet('engagements',
         'lead_id=in.(' + leadIds.join(',') + ')&select=lead_id,engagement_date');
     }
 
@@ -10413,7 +10413,7 @@ async function _revertChildAdditions(table, leadId, keepIds) {
   } catch (e) { /* best-effort */ }
 }
 async function _deleteLeadCascade(id) {
-  for (const t of ['lead_contacts', 'lead_interactions', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
+  for (const t of ['lead_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
     try { await api(t, 'DELETE', null, 'lead_id=eq.' + id); } catch (e) {}
   }
   try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
@@ -10434,7 +10434,7 @@ async function revertLead() {
       return;
     }
     await _revertChildAdditions('lead_contacts', id, snap.contacts);
-    await _revertChildAdditions('lead_interactions', id, snap.interactions);
+    await _revertChildAdditions('engagements', id, snap.interactions);
     await _revertChildAdditions('lead_description_log', id, snap.descLog);
     const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
     delete restore.id;
@@ -13810,32 +13810,40 @@ async function commitPromotion(s) {
       }, '');
     }
 
-    // === 7.5. Copy historical lead_interactions to deal engagements ====
-    // Preserves the lead's narrative on the new deal so context isn't lost.
-    // Done before the promotion engagement below so that promotion is the
-    // most recent row (top of the deal's engagement list).
+    // === 7.5. Carry forward UNCOMPLETED engagements to the opportunity =====
+    // Completed engagements stay on the lead as history (history is where it
+    // happened). Each still-OPEN engagement (next-action not done) is COPIED to
+    // the new opportunity so the follow-up continues there, and the lead's
+    // original is closed with a note pointing to the opportunity. Done before
+    // the promotion engagement below so promotion stays the most recent row.
     try {
-      const liRows = await apiGet('lead_interactions', `lead_id=eq.${leadData.id}&select=*&order=engagement_date.asc,id.asc`);
-      for (const li of liRows) {
+      const openRows = await apiGet('engagements',
+        `lead_id=eq.${leadData.id}&next_action_done=eq.false&select=*&order=engagement_date.asc,id.asc`);
+      for (const en of openRows) {
+        // Copy onto the opportunity, carrying the open next-action.
         await api('engagements', 'POST', {
-          deal_id:                     dealId,
-          engagement_date:             li.engagement_date,
-          engagement_type:             li.engagement_type || null,
-          activity_type_id:            li.activity_type_id || null,
-          notes:                       li.notes || null,
-          next_action:                 li.next_action || null,
-          next_action_id:              li.next_action_id || null,
-          action_details:              li.action_details || null,
-          next_action_date:            li.next_action_date || null,
-          next_action_done:            !!li.next_action_done,
-          next_action_completed_at:    li.next_action_completed_at || null,
-          next_action_completion_note: li.next_action_completion_note || null,
-          created_by:                  li.created_by || (currentUser?.personId || null),
+          deal_id:          dealId,
+          engagement_date:  en.engagement_date,
+          engagement_type:  en.engagement_type || null,
+          activity_type_id: en.activity_type_id || null,
+          notes:            en.notes || null,
+          next_action:      en.next_action || null,
+          next_action_id:   en.next_action_id || null,
+          action_details:   en.action_details || null,
+          next_action_date: en.next_action_date || null,
+          next_action_done: false,
+          created_by:       en.created_by || (currentUser?.personId || null),
         }, '');
+        // Close the lead's original with the explanatory note.
+        await api('engagements', 'PATCH', {
+          next_action_done:            true,
+          next_action_completed_at:    new Date().toISOString(),
+          next_action_completion_note: 'Engagement copied to opportunity for completion.',
+        }, `id=eq.${en.id}`);
       }
     } catch (e) {
       // Non-fatal: log and continue so a copy failure doesn't block the promote
-      console.warn('Could not copy lead interactions to engagements:', e.message);
+      console.warn('Could not carry forward open lead engagements:', e.message);
     }
 
     // === 8. Engagement: Q4 first-action obligation ===========
@@ -14508,7 +14516,7 @@ async function saveLead(opts) {
     access_comment:   (leadData.access_comment   || '').trim() || null,
     capacity_comment: (leadData.capacity_comment || '').trim() || null,
 
-    // status is derived server-side from this row + lead_interactions — don't write it.
+    // status is derived server-side from this row + engagements — don't write it.
 
     // Owner can only be (re)assigned by managers/admin. For everyone else, preserve
     // the existing owner (edit) or default to themselves (new) — ignore the field.
@@ -14516,7 +14524,7 @@ async function saveLead(opts) {
       ? (+document.getElementById('lead-owner-id').value || null)
       : (leadData.id ? (leadData.owner_id || null) : (currentUser?.personId || null)),
 
-    // next_action / next_action_date are derived from lead_interactions
+    // next_action / next_action_date are derived from engagements
     // and maintained by a Postgres trigger — do not write them from this form.
 
     dead_reason: deadReason,
@@ -14598,7 +14606,7 @@ async function saveLead(opts) {
 async function loadLeadInteractions(leadId) {
   if (!leadId) { leadInteractions = []; return; }
   try {
-    leadInteractions = await apiGet('lead_interactions',
+    leadInteractions = await apiGet('engagements',
       `lead_id=eq.${leadId}&select=*&order=engagement_date.desc,created_at.desc`);
   } catch(e) {
     leadInteractions = [];
@@ -14980,10 +14988,10 @@ async function saveLeadInteraction(editId) {
       next_action_completion_note: completionNote,
     };
     if (editId) {
-      await api('lead_interactions', 'PATCH', payload, 'id=eq.' + editId);
+      await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
     } else {
-      await api('lead_interactions', 'POST', {
+      await api('engagements', 'POST', {
         ...payload,
         lead_id: leadData.id,
         related_interaction_id: window._liRelatedTo || null,
