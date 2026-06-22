@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.5 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.6 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.5 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.6 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -3994,8 +3994,7 @@ function setupOppOwnerReassign() {
   wrap.style.display = allowed ? '' : 'none';
   if (!allowed) return;
   const people = allData['people'] || [];
-  const xone = people.filter(p => p.is_xone);
-  const pool = xone.length ? xone : people;
+  const pool = homeOrgPeople(people, [oppData.owner_id, currentUser?.personId]);
   const current = oppData.owner_id || currentUser?.personId || '';
   sel.innerHTML = '<option value="">— unassigned —</option>' +
     pool.map(p => {
@@ -4047,6 +4046,7 @@ async function initOppForm() {
   allData['stage_categories'] = stageCats;
   allData['service_major'] = majorCats;
   allData['people'] = people;
+  await ensureHomeOrgMembers();
 
   // Populate organisation dropdown
   const orgSel = document.getElementById('opp-org-id');
@@ -4111,9 +4111,8 @@ async function initOppForm() {
     if (sub) document.getElementById('opp-service-major-id').value = sub.major_id;
   }
 
-  // Populate owner - prefer Xone people but fall back to all people
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  // Owner must be a home-organisation member; keep the current owner regardless.
+  const ownerPool = homeOrgPeople(people, [oppData.owner_id, currentUser?.personId]);
   const ownerSel = document.getElementById('opp-owner-id');
   ownerSel.innerHTML = '<option value="">— select owner —</option>' +
     ownerPool.map(p => {
@@ -7803,6 +7802,7 @@ async function doLogin() {
     // Skip the extra checkConnection() ping (one fewer function invocation).
     setOnline(true);
     await loadAppSettings();
+    try { await ensureHomeOrgMembers(); } catch (e) {} // valid owners = home-org members
     setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
     buildNav();
   } catch(e) {
@@ -7815,6 +7815,30 @@ function can(permission) {
   if (!currentUser) return false;
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   return currentUser.permissions.includes(permission);
+}
+
+// ── Home-organisation membership ───────────────────────────────────────────
+// Leads, deals (opportunities & contracts) and campaigns may only be OWNED by
+// people who belong to the home organisation (Xone). Membership is defined by the
+// home_organisation_members table — the legacy people.is_xone flag does NOT exist
+// in the live schema, so any filter on it silently matched nobody and fell back to
+// every person. Cached in allData; preloaded at login via ensureHomeOrgMembers().
+async function ensureHomeOrgMembers() {
+  if (!allData['home_organisation_members']) {
+    try { allData['home_organisation_members'] = await apiGet('home_organisation_members', 'select=person_id'); }
+    catch (e) { allData['home_organisation_members'] = []; }
+  }
+  return allData['home_organisation_members'];
+}
+// Restrict a people array to home-org members. `keepIds` are person ids retained
+// even if they aren't members (e.g. a record's existing owner, so reassignment
+// never silently drops the current value). Falls back to the full list only when
+// no membership is configured at all, to avoid an unusable empty owner picker.
+function homeOrgPeople(people, keepIds) {
+  const ids = new Set((allData['home_organisation_members'] || []).map(m => +m.person_id));
+  if (!ids.size) return people || [];
+  const keep = new Set((keepIds || []).filter(v => v != null).map(Number));
+  return (people || []).filter(p => ids.has(+p.id) || keep.has(+p.id));
 }
 
 // True when a record falls within the current user's assigned scope — matched by
@@ -7932,11 +7956,15 @@ function renderViewFilterBar(kind) {
   // Without the relevant permission the user is locked to their own records, so
   // the button is hidden entirely (admins carry 'all' via can()).
   const canAll = kind === 'leads' ? can('view_all_leads') : can('view_all_opportunities');
-  if (!canAll && current === 'all') current = 'own'; // never highlight a scope they can't use
-  const btns = [{ key: 'own', label: 'Show Own' }];
-  if (canAll) btns.push({ key: 'all', label: 'Show All' });
-  if (kind === 'opps' || kind === 'pipeline') btns.push({ key: 'collab', label: 'Collaborations' });
-  if (isManagerViewer()) btns.push({ key: 'team', label: 'Team' });
+  // Alternative scopes the user can actually switch to, beyond their own records.
+  const extras = [];
+  if (canAll) extras.push({ key: 'all', label: 'Show All' });
+  if (kind === 'opps' || kind === 'pipeline') extras.push({ key: 'collab', label: 'Collaborations' });
+  if (isManagerViewer()) extras.push({ key: 'team', label: 'Team' });
+  // If there's no alternative, "Show Own" is a toggle with nothing to toggle to —
+  // drop the whole scope bar rather than show a lone, pointless button.
+  const btns = extras.length ? [{ key: 'own', label: 'Show Own' }, ...extras] : [];
+  if (!btns.some(b => b.key === current)) current = 'own'; // never highlight a scope they can't use
   let html = btns.map(b =>
     `<button class="btn btn-sm ${b.key === current ? 'btn-primary' : 'btn-secondary'}"
        onclick="setOwnerView('${kind}','${b.key}')">${b.label}</button>`).join('');
@@ -7944,7 +7972,8 @@ function renderViewFilterBar(kind) {
   // opportunities (secured/contracted and lost deals are hidden until "All statuses").
   if (kind === 'opps') {
     const statusBtns = [{ key: 'open', label: 'Open' }, { key: 'all', label: 'All statuses' }];
-    html += `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` +
+    // Only draw the divider when there are scope buttons to its left.
+    html += (html ? `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` : '') +
       statusBtns.map(b =>
         `<button class="btn btn-sm ${b.key === oppsStatusFilter ? 'btn-primary' : 'btn-secondary'}"
            onclick="setOppsStatusFilter('${b.key}')">${b.label}</button>`).join('');
@@ -9985,8 +10014,7 @@ function renderCampaignTargetModal() {
   const isEdit = !!d.id;
   const people = allData['people'] || cockpitData.people || [];
   const orgs   = allData['organisations'] || [];
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [campaignTargetData.owner_id, currentUser?.personId]);
   const v = s => cEsc(s).replace(/"/g, '&quot;');
 
   const html = `
@@ -11023,6 +11051,7 @@ async function initLeadForm() {
   allData['research_campaigns']  = campaigns;
   allData['sales_campaigns']     = salesCampaigns;
   allData['service_sub_all']     = serviceSubs;
+  await ensureHomeOrgMembers();
 
   // Populate dropdowns
   const sourceSel = document.getElementById('lead-source-id');
@@ -11049,9 +11078,8 @@ async function initLeadForm() {
   // Single combined Product/Service dropdown (optgroup per major + its subs).
   populateLeadServiceCombo();
 
-  // Owner: Xone people if available, else all
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  // Owner must be a home-organisation member; keep the current owner regardless.
+  const ownerPool = homeOrgPeople(people, [leadData.owner_id, currentUser?.personId]);
   const ownerSel = document.getElementById('lead-owner-id');
   ownerSel.innerHTML = '<option value="">— shared pool —</option>' +
     ownerPool.map(p => {
@@ -15366,9 +15394,9 @@ async function renderResearchCampaignModal() {
   allData['service_major'] = services;
   allData['people']        = people;
   allData['branches']      = branches;
+  await ensureHomeOrgMembers();
 
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [researchCampaignData.owner_id, currentUser?.personId]);
 
   const isEdit = !!researchCampaignData.id;
   const title = isEdit ? 'Edit Research Campaign' : 'New Research Campaign';
@@ -15567,9 +15595,9 @@ async function renderSalesCampaignModal() {
   allData['service_major'] = services;
   allData['people']        = people;
   allData['branches']      = branches;
+  await ensureHomeOrgMembers();
 
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [salesCampaignData.owner_id, currentUser?.personId]);
 
   const isEdit = !!salesCampaignData.id;
   const title = isEdit ? 'Edit Sales Campaign' : 'New Sales Campaign';
@@ -16196,6 +16224,7 @@ async function renderHomeOrgMembers() {
     allData['people'] = people;
     allData['organisations'] = orgs;
     allData['roles'] = roles;
+    allData['home_organisation_members'] = members; // keep owner-picker cache fresh after edits
 
     document.getElementById('page-sub').textContent = members.length + ' member' + (members.length !== 1 ? 's' : '');
 
