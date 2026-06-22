@@ -38,11 +38,11 @@ DO $$ BEGIN
     FOREIGN KEY (related_interaction_id) REFERENCES public.engagements(id) ON DELETE SET NULL;
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
--- Exactly one target. Widen to num_nonnull(lead_id, deal_id, project_id,
+-- Exactly one target. Widen to num_nonnulls(lead_id, deal_id, project_id,
 -- contract_id) = 1 when those columns are added.
 DO $$ BEGIN
   ALTER TABLE public.engagements
-    ADD CONSTRAINT engagements_one_target_chk CHECK (num_nonnull(lead_id, deal_id) = 1);
+    ADD CONSTRAINT engagements_one_target_chk CHECK (num_nonnulls(lead_id, deal_id) = 1);
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE INDEX IF NOT EXISTS idx_engagements_lead ON public.engagements (lead_id);
