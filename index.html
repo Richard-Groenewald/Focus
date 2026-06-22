@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.4 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.5 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.4 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.5 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1393,16 +1393,20 @@ function _mockSeed() {
     ],
     permissions: [
       { id: 1, name: 'create_leads' },
-      { id: 2, name: 'view_all_records' },
-      { id: 3, name: 'edit_all_records' },
-      { id: 4, name: 'manage_users' },
+      { id: 2, name: 'view_all_leads' },
+      { id: 3, name: 'view_all_opportunities' },
+      { id: 4, name: 'edit_all_records' },
+      { id: 5, name: 'manage_users' },
     ],
     role_permissions: [
+      // Sales: create + see all leads (own opportunities only)
       { role_id: 2, permission_id: 1 },
       { role_id: 2, permission_id: 2 },
+      // Manager: create + see all leads + see all opportunities + edit all
       { role_id: 3, permission_id: 1 },
       { role_id: 3, permission_id: 2 },
       { role_id: 3, permission_id: 3 },
+      { role_id: 3, permission_id: 4 },
     ],
     user_roles: [
       { user_id: 1, role_id: 1 },
@@ -7922,8 +7926,15 @@ function isManagerViewer() {
 function renderViewFilterBar(kind) {
   const bar = document.getElementById('view-filter-bar');
   if (!bar) return;
-  const current = kind === 'leads' ? leadsOwnerView : oppsOwnerView;
-  const btns = [{ key: 'own', label: 'Show Own' }, { key: 'all', label: 'Show All' }];
+  let current = kind === 'leads' ? leadsOwnerView : oppsOwnerView;
+  // "Show All" is permission-gated and independent per record type:
+  //   leads -> view_all_leads, opportunities/pipeline -> view_all_opportunities.
+  // Without the relevant permission the user is locked to their own records, so
+  // the button is hidden entirely (admins carry 'all' via can()).
+  const canAll = kind === 'leads' ? can('view_all_leads') : can('view_all_opportunities');
+  if (!canAll && current === 'all') current = 'own'; // never highlight a scope they can't use
+  const btns = [{ key: 'own', label: 'Show Own' }];
+  if (canAll) btns.push({ key: 'all', label: 'Show All' });
   if (kind === 'opps' || kind === 'pipeline') btns.push({ key: 'collab', label: 'Collaborations' });
   if (isManagerViewer()) btns.push({ key: 'team', label: 'Team' });
   let html = btns.map(b =>
@@ -7952,7 +7963,7 @@ function setOppsStatusFilter(v) { oppsStatusFilter = v; renderOpportunitiesPage(
 // Leads: own / all / team (no collaborator concept on leads). Synchronous.
 function filterLeadsByView(leads, view) {
   const pid = currentUser?.personId;
-  if (view === 'all') return leads;
+  if (view === 'all' && can('view_all_leads')) return leads; // gated; else falls back to 'own'
   if (view === 'team' && isManagerViewer()) {
     return leads.filter(recordInUserScope);
   }
@@ -7962,7 +7973,7 @@ function filterLeadsByView(leads, view) {
 // Deals: own / all / collab (own + collaborated) / team. Async — collab needs a fetch.
 async function filterDealsByView(deals, view) {
   const pid = currentUser?.personId;
-  if (view === 'all') return deals;
+  if (view === 'all' && can('view_all_opportunities')) return deals; // gated; else falls back to 'own'
   if (view === 'team' && isManagerViewer()) {
     return deals.filter(recordInUserScope);
   }
