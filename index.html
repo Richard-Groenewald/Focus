@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.3 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.4 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.3 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.4 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -8226,7 +8226,7 @@ async function _dashActions() {
     else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
     if (!parent || !_dashInScope(parent, scope)) continue;
     const label = kind === 'lead' ? (parent.target_org_name || parent.description || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
-    rows.push({ id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
+    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
   }
   rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
   const overdue = rows.filter(r => r.due < today).length;
@@ -8235,8 +8235,7 @@ async function _dashActions() {
   const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
   const list = rows.slice(0, 5).map(r => {
     const od = r.due < today;
-    const open = r.kind === 'lead' ? `openLead(${r.id})` : `openOpportunity(${r.id})`;
-    return `<div onclick="${open}" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+    return `<div onclick="openEngagement(${r.eng})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
       <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
         <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.action)}</div></div>
       <div style="white-space:nowrap;color:${od ? 'var(--red)' : 'var(--text2)'};font-weight:${od ? 700 : 400};">${r.due}</div>
@@ -9946,6 +9945,7 @@ async function cockpitQuickLogTouch(leadId) {
     window._liQuickLogContext = true;
     window._liRelatedTo = null;
     window._liEditing = null;
+    _setLeadEngParent();
     document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
     await loadLiLookups();
     await maybeApplyCadencePrefill();
@@ -14957,8 +14957,17 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
   const relatedNote = relatedParent
     ? `<div style="margin:-4px 0 12px;padding:8px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);">↳ Related to: <strong>${(relatedParent.engagement_date || '')}${relatedParent.engagement_type ? ' · ' + String(relatedParent.engagement_type).replace(/</g,'&lt;') : ''}</strong></div>`
     : '';
-  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked)
+  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked && !window._engStandalone)
     ? `<button class="btn btn-secondary" onclick="openLeadInteractionRelated(${i.id})" style="margin-right:auto;">+ Related engagement</button>`
+    : '';
+  // Clickable reference to the parent record (lead/opportunity; future project /
+  // contract). Identifies the engagement when opened standalone and lets you jump.
+  const _ep = window._engParent;
+  const relatedRecordLink = (_ep && _ep.id)
+    ? `<div style="margin:-4px 0 12px;padding:9px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+         <span>${_ep.kind === 'deal' ? 'Opportunity' : _ep.kind === 'lead' ? 'Lead' : 'Related'}: <strong>${String(_ep.label || '').replace(/</g, '&lt;')}</strong></span>
+         <button class="btn btn-secondary btn-sm" onclick="closeModal();${_ep.kind === 'deal' ? `openOpportunity(${_ep.id})` : `openLead(${_ep.id})`}">Open →</button>
+       </div>`
     : '';
   const footer = fullyLocked
     ? `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
@@ -14977,6 +14986,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
         </div>
         <div class="modal-body">
           ${banner}
+          ${relatedRecordLink}
           <div id="li-cadence-hint"></div>
           ${relatedNote}
           <div class="form-row">
@@ -15032,6 +15042,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
 async function openLeadInteractionView(interactionId, locked = false) {
   const i = leadInteractions.find(x => +x.id === +interactionId);
   if (!i) return;
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('view', i, locked);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
@@ -15045,6 +15056,7 @@ async function openLeadInteractionView(interactionId, locked = false) {
 async function openEditLeadInteractionModal(interactionId) {
   const i = leadInteractions.find(x => +x.id === +interactionId);
   if (!i) return;
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('edit', i);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
@@ -15052,6 +15064,44 @@ async function openEditLeadInteractionModal(interactionId) {
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
   populateLiCompletionSection(i);
+}
+
+// Sets the engagement modal's related-record context to the open lead (lead-form
+// callers). Cleared standalone flag so save reloads the lead form as before.
+function _setLeadEngParent() {
+  window._engStandalone = false;
+  window._engParent = (typeof leadData !== 'undefined' && leadData && leadData.id)
+    ? { kind: 'lead', id: +leadData.id, label: leadData.target_org_name || leadData.description || ('Lead #' + leadData.id) }
+    : null;
+}
+
+// Standalone engagement opener — works from anywhere (e.g. the dashboard) for a
+// lead- OR deal-attached engagement. Loads the engagement + its parent, shows the
+// clickable related-record link, and saves back to the right parent.
+async function openEngagement(engId) {
+  let eng;
+  try { eng = (await apiGet('engagements', `id=eq.${engId}&select=*`))[0]; }
+  catch (e) { showStatus('Could not load engagement: ' + e.message, 'error'); return; }
+  if (!eng) { showStatus('Engagement not found', 'error'); return; }
+  let parent = null;
+  if (eng.lead_id != null) {
+    const l = (await apiGet('leads', `id=eq.${eng.lead_id}&select=id,target_org_name,description`))[0];
+    parent = { kind: 'lead', id: +eng.lead_id, label: l ? (l.target_org_name || l.description || ('Lead #' + l.id)) : ('Lead #' + eng.lead_id) };
+  } else if (eng.deal_id != null) {
+    const d = (await apiGet('deals', `id=eq.${eng.deal_id}&select=id,name`))[0];
+    parent = { kind: 'deal', id: +eng.deal_id, label: d ? (d.name || ('Deal #' + d.id)) : ('Deal #' + eng.deal_id) };
+  }
+  window._engParent = parent;
+  window._engStandalone = true;
+  window._liEditing = eng;
+  window._liQuickLogContext = null;
+  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const editable = eng.created_at && (Date.now() - new Date(eng.created_at).getTime()) < graceMins * 60000;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
+  await loadLiLookups();
+  preselectLookup('li-type',        'activity_type_id', 'engagement_type', eng);
+  preselectLookup('li-next-action', 'next_action_id',   'next_action',     eng);
+  populateLiCompletionSection(eng);
 }
 
 async function openLeadInteractionModal() {
@@ -15063,6 +15113,7 @@ async function openLeadInteractionModal() {
   }
   window._liRelatedTo = null;   // a plain new interaction is not part of a chain
   window._liQuickLogContext = null;   // logged from the full form → reload the form on save
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -15075,6 +15126,7 @@ async function openLeadInteractionRelated(parentId) {
   if (!leadData.id) return;
   window._liRelatedTo = +parentId || null;
   window._liQuickLogContext = null;   // logged from the full form → reload the form on save
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -15227,6 +15279,19 @@ async function saveLeadInteraction(editId) {
       }, '');
       window._liRelatedTo = null;
       showStatus('Engagement logged');
+    }
+    // Standalone engagement edit (e.g. opened from the dashboard): no lead form to
+    // reload. Bump last_touch only when the parent is actually a lead, then refresh
+    // the dashboard. Never touches a lead for a deal-attached engagement.
+    if (window._engStandalone) {
+      const par = window._engParent || {};
+      if (par.kind === 'lead' && par.id) {
+        await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + par.id);
+      }
+      window._engStandalone = false;
+      closeModal();
+      if (currentPage === 'dashboard') await renderDashboard();
+      return;
     }
     // Bump last_touch_date on the lead (on both create and edit, since edit can change the date)
     await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id);
