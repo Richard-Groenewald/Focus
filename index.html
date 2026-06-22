@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.9 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.10 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.9 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.10 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1996,6 +1996,14 @@ const PAGES = {
     columns: [],
     fields: [],
   },
+  campaign_help: {
+    title: 'Campaign Setup Guide',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
 
   people: {
     title: 'People',
@@ -2602,6 +2610,7 @@ async function loadTable(page) {
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
     if (page === 'research_campaign_cockpit') { await renderResearchCampaignCockpit(); return; }
     if (page === 'sales_campaigns') { await renderSalesCampaignsPage(); return; }
+    if (page === 'campaign_help') { renderCampaignHelp(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
@@ -3550,6 +3559,8 @@ const MENU = [
         icon: '<circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5" fill="none"/><path d="M10.5 10.5L14 14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'sales_campaigns', label: 'Sales Campaigns', permission: 'manage_leads',
         icon: '<path d="M2 6h7l4-3v10l-4-3H2z" stroke="white" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5 9v3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      { page: 'campaign_help', label: 'Setup Guide', permission: 'manage_leads',
+        icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M6.2 6.4a1.8 1.8 0 113 1.3c-.6.4-1 .7-1 1.3" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.4" fill="white"/>' },
     ]
   },
   {
@@ -9430,6 +9441,140 @@ async function doDeleteCampaign(kind, id) {
   } catch (e) {
     showStatus('Delete failed: ' + e.message, 'error');
   }
+}
+
+// ── In-app help: Campaign Setup Guide ─────────────────────────────────────
+function renderCampaignHelp() {
+  document.getElementById('page-sub').textContent = 'How to set up, configure and run outreach campaigns';
+  document.getElementById('table-head').innerHTML = '';
+
+  // Small style helpers kept local to this page.
+  const H2 = (n, t) => `<h2 style="font-size:17px;font-weight:800;color:var(--navy,#003057);margin:30px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--red,#FA0A11);">${n}. ${t}</h2>`;
+  const H3 = t => `<h3 style="font-size:14px;font-weight:700;color:#1a1a1a;margin:18px 0 6px;">${t}</h3>`;
+  const P  = t => `<p style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 10px;">${t}</p>`;
+  const NOTE = (t, colour) => `<div style="font-size:12.5px;line-height:1.55;background:${colour || '#EEF2F6'};border-left:4px solid var(--navy,#003057);border-radius:4px;padding:10px 12px;margin:0 0 12px;">${t}</div>`;
+  const STEPS = arr => `<ol style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 12px;padding-left:22px;">${arr.map(s => `<li style="margin-bottom:6px;">${s}</li>`).join('')}</ol>`;
+  const BULLETS = arr => `<ul style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 12px;padding-left:20px;">${arr.map(s => `<li style="margin-bottom:5px;">${s}</li>`).join('')}</ul>`;
+  const chip = t => `<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:#e0e7ff;color:#3730a3;">${t}</span>`;
+  const table = (cols, rows) => `
+    <table style="width:100%;border-collapse:collapse;margin:0 0 14px;font-size:12.5px;">
+      <thead><tr>${cols.map(c => `<th style="text-align:left;background:var(--navy,#003057);color:#fff;padding:7px 10px;font-weight:700;border:1px solid #d9dee3;">${c}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r, i) => `<tr style="background:${i % 2 ? '#fff' : '#f6f8fa'};">${r.map(cell => `<td style="padding:7px 10px;border:1px solid #d9dee3;vertical-align:top;color:#222;">${cell}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+
+  const body = `
+    <div style="max-width:920px;padding:8px 4px 60px;font-family:inherit;">
+      <div style="background:linear-gradient(180deg,#003057 0%,#00253f 100%);color:#fff;border-radius:10px;padding:22px 24px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--khaki,#C3B091);">FOCUS · OUTREACH CAMPAIGNS</div>
+        <div style="font-size:24px;font-weight:800;margin-top:4px;">Campaign Setup &amp; Configuration Guide</div>
+        <div style="font-size:13px;opacity:.85;margin-top:8px;line-height:1.5;">From an empty campaign to a working outreach funnel: create a campaign, build a target list, define a touch cadence, then promote targets into leads and work them to opportunities.</div>
+      </div>
+
+      ${NOTE('<strong>Two campaign types.</strong> A <strong>Research Campaign</strong> is the full engine — it has a Cockpit, a target list, a touch cadence and a conversion funnel, and is used to research accounts and convert them into leads. A <strong>Sales Campaign</strong> is lighter: just a label you attach to leads for grouping/attribution (no cockpit, no targets, no cadence).')}
+
+      ${NOTE('<strong>Who can use this.</strong> The <em>Outreach Campaigns</em> menu needs the <code>view_section_marketing</code> permission; the campaign pages need <code>manage_leads</code>. Only <strong>Admins</strong> can delete a campaign.', '#FFF7E6')}
+
+      ${H2(1, 'Overview — the funnel')}
+      ${P('A research campaign moves accounts through five stages. Everything in the Cockpit is built around this flow:')}
+      ${P('<strong>Target</strong> → <strong>Worked (lead)</strong> → <strong>Qualified</strong> → <strong>Promoted (opportunity)</strong> → <strong>Est. value</strong>')}
+      ${BULLETS([
+        '<strong>Target</strong> — an account you are researching (lives only inside the campaign).',
+        '<strong>Worked</strong> — a target you <em>Promote</em> becomes a real <strong>Lead</strong> that carries the campaign link.',
+        '<strong>Qualified / Promoted</strong> — the lead progresses through the normal Leads workflow; the cockpit mirrors its live status.',
+        '<strong>Est. value</strong> — rolled up from promoted leads, measured against the targets you set on the campaign.',
+      ])}
+
+      ${H2(2, 'Create a Research Campaign')}
+      ${STEPS([
+        'Go to <strong>Outreach Campaigns → Research Campaigns</strong>.',
+        'Click <strong>+ New Campaign</strong> (top right).',
+        'Fill in the form (only <strong>Campaign name</strong> is required) and click <strong>Create</strong>.',
+      ])}
+      ${table(['Field', 'Required', 'Notes'], [
+        ['Campaign name', '<strong>Yes</strong>', 'e.g. “Q3 Limpopo mining outreach”.'],
+        ['Target segment', 'No', 'Who you are targeting, e.g. “Mid-tier mining houses in Limpopo”. Shown as the cockpit subtitle.'],
+        ['Region', 'No', 'Carried onto every lead promoted from this campaign.'],
+        ['Service focus', 'No', 'The service line; also carried onto promoted leads.'],
+        ['Branch', 'No', 'Defaults from the region — override if needed.'],
+        ['Status', 'Yes', `${chip('Active')} ${chip('Paused')} ${chip('Completed')} ${chip('Abandoned')} — defaults to Active.`],
+        ['Owner', 'No', 'Defaults to you. Only home-organisation staff can be selected.'],
+        ['Start / End date', 'No', 'Shown as the campaign timeframe in the cockpit.'],
+        ['Targets (Accounts / Qualified / Promoted)', 'No', 'Goal numbers — the cockpit funnel paces actual progress against these.'],
+        ['Notes', 'No', 'Approach, target list, talking points.'],
+      ])}
+
+      ${H2(3, 'The Campaign Cockpit')}
+      ${P('Click any campaign row to open its <strong>Cockpit</strong> — the workspace for one campaign. Use <strong>← All campaigns</strong> to go back, or <strong>Edit mission</strong> to change campaign details. Change the campaign status inline from the header dropdown.')}
+      ${P('Across the top is the <strong>funnel strip</strong> (Targets → Worked → Qualified → Promoted → Est. value, each with conversion % and progress against your goals). Below it are four tabs:')}
+      ${table(['Tab', 'What it’s for'], [
+        ['<strong>Target List</strong>', 'Build and manage the accounts you’re researching. Promote or disqualify them here.'],
+        ['<strong>Work Queue</strong>', 'Leads in play (New / Working / Qualified) with their cadence step and due/overdue date. Log touches here.'],
+        ['<strong>Cadence</strong>', 'Define the outreach touch sequence that drives due dates on every worked lead.'],
+        ['<strong>Results</strong>', 'Promoted-to-opportunity, Qualified-ready-to-promote, and Dead/disqualified lists.'],
+      ])}
+
+      ${H2(4, 'Build the target list')}
+      ${STEPS([
+        'In the Cockpit, open the <strong>Target List</strong> tab and click <strong>+ Add Target</strong>.',
+        'Start typing the <strong>Company name</strong> — Focus checks it against existing organisations as you type. Click <strong>Use</strong> on a match to link the real organisation, or <strong>Use as new</strong> if it’s genuinely new. A 🔗 indicator confirms when a target is linked.',
+        'Enter the contact as <strong>First name + Surname</strong>. If a similar person already exists, a warning appears with a <em>use details</em> link to auto-fill from that person (this avoids duplicates). If you enter any contact detail, both first name and surname are required.',
+        'Set <strong>Priority</strong> and <strong>Status</strong>, optionally an <strong>Owner</strong>, and write <strong>Research notes</strong> (the trigger / why they fit — this becomes the lead description when promoted).',
+        'Click <strong>Add target</strong>.',
+      ])}
+      ${NOTE('<strong>Tip:</strong> always try to link an existing organisation rather than “Use as new” — it keeps one clean record per client and carries the link through to the promoted lead.')}
+
+      ${H2(5, 'Configure the cadence')}
+      ${P('The <strong>cadence</strong> is the outreach touch sequence. Once set, every worked lead is measured against it — the Work Queue shows which step a lead is on and whether the next touch is due or overdue. <em>Day offset</em> = days after the first touch (day 0).')}
+      ${STEPS([
+        'Open the <strong>Cadence</strong> tab.',
+        'Click <strong>Load default 5-touch</strong> for a ready-made sequence, or <strong>+ Add step</strong> to build your own.',
+        'For each step set the <strong>Day offset</strong>, <strong>Channel</strong> and an <strong>Instruction</strong>. Remove a step with ×.',
+        'Click <strong>Save cadence</strong>.',
+      ])}
+      ${H3('The default 5-touch sequence')}
+      ${table(['Step', 'Day', 'Channel', 'Instruction'], [
+        ['1', '0', 'Email', 'Intro email referencing the trigger / why-now'],
+        ['2', '2', 'Call', 'Follow-up call — confirm relevance, book a chat'],
+        ['3', '5', 'LinkedIn', 'Connect + short value note'],
+        ['4', '9', 'Email', 'Case study / proof point'],
+        ['5', '14', 'Call', 'Final attempt — break-up call'],
+      ])}
+      ${P(`Available channels: ${chip('Email')} ${chip('Call')} ${chip('LinkedIn')} ${chip('Visit')} ${chip('Other')}.`)}
+
+      ${H2(6, 'Work the funnel')}
+      ${H3('Promote a target to a lead')}
+      ${P('On the <strong>Target List</strong>, a target that is <em>Researching</em> or <em>Ready</em> shows a <strong>Promote → Lead</strong> button. Promoting creates a real lead that carries across the company, contact, region, branch, service and research notes, links it to the campaign, and — if a cadence exists — seeds the first next-action and its due date. The target is marked <em>Promoted</em> and you’re offered to open the new lead straight away.')}
+      ${H3('Disqualify a target')}
+      ${P('Click <strong>Disqualify</strong> on a target to mark it not-a-fit. You can record an optional reason. It moves to the <em>Disqualified</em> state and drops out of the active list.')}
+      ${H3('Work leads in the Work Queue')}
+      ${P('The <strong>Work Queue</strong> lists promoted leads with their current cadence step and a due/overdue badge. Use <strong>Quick Log</strong> to record a touch without leaving the cockpit (this advances the cadence), or <strong>Open lead</strong> for the full lead. Promoted/qualified/dead outcomes appear under <strong>Results</strong>.')}
+
+      ${H2(7, 'Sales Campaigns')}
+      ${P('A <strong>Sales Campaign</strong> is a lightweight grouping label — no cockpit, no targets, no cadence. Create one under <strong>Outreach Campaigns → Sales Campaigns</strong> (same form as a research campaign, minus the targets/cadence). Clicking a row opens it for editing. Attach leads to it via the <strong>Sales Campaign</strong> picker on the lead form, for grouping and attribution.')}
+
+      ${H2(8, 'Status reference')}
+      ${table(['Set', 'Values'], [
+        ['Campaign status', `${chip('Active')} ${chip('Paused')} ${chip('Completed')} ${chip('Abandoned')}`],
+        ['Target status', `${chip('Researching')} ${chip('Ready')} ${chip('Promoted')} ${chip('Disqualified')}`],
+        ['Target priority', `${chip('Hot')} ${chip('Warm')} ${chip('Cold')}`],
+        ['Cadence channels', `${chip('Email')} ${chip('Call')} ${chip('LinkedIn')} ${chip('Visit')} ${chip('Other')}`],
+      ])}
+
+      ${H2(9, 'Admin — delete a campaign')}
+      ${NOTE('Only <strong>Admins</strong> see the red <strong>Delete</strong> button on a campaign row. Deleting a research campaign permanently removes its <strong>targets</strong> and <strong>cadence steps</strong>, but any leads already promoted from it are <strong>kept</strong> (they’re simply unlinked from the campaign). The confirmation dialog shows you the exact counts before you proceed. This cannot be undone.', '#FDECEC')}
+
+      ${H2(10, 'Quick-start checklist')}
+      ${BULLETS([
+        '☐ Create a research campaign (name + segment + region/service).',
+        '☐ Set goal numbers (Accounts / Qualified / Promoted).',
+        '☐ Open the Cockpit → <strong>Cadence</strong> tab → Load default 5-touch (or build your own) → Save.',
+        '☐ <strong>Target List</strong> → + Add Target → link the organisation, capture the contact, add the trigger.',
+        '☐ Promote ready targets → work them in the <strong>Work Queue</strong> against their due dates.',
+        '☐ Track conversion in the funnel strip and <strong>Results</strong> tab.',
+      ])}
+    </div>`;
+
+  document.getElementById('table-body').innerHTML = `<tr><td style="border:none;padding:0;">${body}</td></tr>`;
 }
 
 
