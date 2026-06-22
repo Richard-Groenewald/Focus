@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.2 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.3 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.2 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.3 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -8128,7 +8128,7 @@ async function renderOpportunitiesPage() {
 // (managers). Fixed per-role for now — user customisation is a later increment.
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
-  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline'],
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns'],
   'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline'],
   'Operations':    ['contracts'],
   'EXCO':          ['company'],
@@ -8158,7 +8158,8 @@ function _dashStageIds(names) {
 }
 // Card shell: title, optional scope chip, KPI row, sub-line, deep-link button.
 function _dashCard(title, scope, kpis, sub, page, linkLabel) {
-  const chip = scope ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : 'Mine'}</span>` : '';
+  const chipText = scope === 'team' ? 'Team' : scope === 'all' ? 'All' : scope ? 'Mine' : '';
+  const chip = chipText ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipText}</span>` : '';
   const kpiHtml = kpis.map(([label, val, color]) =>
     `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div>
        <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`).join('');
@@ -8301,10 +8302,15 @@ async function _dashPipeline() {
 }
 
 async function _dashCampaigns() {
-  const camps = await apiGet('research_campaigns', 'select=id,name,status');
-  const active = camps.filter(c => c.status === 'Active');
+  // Sales Management (and Admin) see ALL campaigns; a Sales User sees only their own.
+  const seeAll = currentUser?.isAdmin || (currentUser?.roles || []).some(r => r.name === 'Sales Manager');
+  const camps = await apiGet('research_campaigns', 'select=id,name,status,owner_id,created_by');
+  const mine = seeAll ? camps : camps.filter(c =>
+    (c.owner_id != null && +c.owner_id === +currentUser.personId) ||
+    (c.created_by != null && +c.created_by === +currentUser.personId));
+  const active = mine.filter(c => c.status === 'Active');
   const sub = active.slice(0, 4).map(c => c.name).join(' · ') || 'No active campaigns';
-  return _dashCard('Campaigns', null, [
+  return _dashCard('Campaigns', seeAll ? 'all' : 'own', [
     ['Active campaigns', active.length],
   ], sub, 'research_campaigns');
 }
