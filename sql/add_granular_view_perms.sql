@@ -4,12 +4,15 @@
 --   view_all_opportunities  -> may see every deal/opportunity (not just own)
 -- and RETIRES view_all_records.
 --
--- Default grants (per decision 2026-06-22):
---   Manager -> both     |  Sales -> leads only  |  others -> neither
+-- Default grants (per decision 2026-06-22, mapped to live role names):
+--   view_all_leads         -> Sales Manager, Executive
+--   view_all_opportunities -> Executive, Operations
+--   (Admin bypasses via app-layer 'all'; all other roles stay own-only.)
 --
 -- Name-based & idempotent. Run on Dev DB first, then prod per the sync recipe.
--- NB: assumes role names 'Manager' and 'Sales' in `roles`; adjust if your live
---     DB uses different names (verify with: SELECT id, name FROM roles;).
+-- NB: keyed off the live role names (verify with: SELECT id, name FROM roles;).
+--     view_all_records does not exist in these DBs; the cleanup below is a
+--     harmless no-op kept for any environment that still carries it.
 
 BEGIN;
 
@@ -19,29 +22,29 @@ SELECT v.name
 FROM (VALUES ('view_all_leads'), ('view_all_opportunities')) AS v(name)
 WHERE NOT EXISTS (SELECT 1 FROM permissions p WHERE p.name = v.name);
 
--- 2. Grant Manager BOTH new permissions
-INSERT INTO role_permissions (role_id, permission_id)
-SELECT r.id, p.id
-FROM roles r
-JOIN permissions p ON p.name IN ('view_all_leads', 'view_all_opportunities')
-WHERE r.name = 'Manager'
-  AND NOT EXISTS (
-    SELECT 1 FROM role_permissions rp
-    WHERE rp.role_id = r.id AND rp.permission_id = p.id
-  );
-
--- 3. Grant Sales view_all_leads ONLY (own opportunities only)
+-- 2. Grant view_all_leads -> Sales Manager, Executive
 INSERT INTO role_permissions (role_id, permission_id)
 SELECT r.id, p.id
 FROM roles r
 JOIN permissions p ON p.name = 'view_all_leads'
-WHERE r.name = 'Sales'
+WHERE r.name IN ('Sales Manager', 'Executive')
   AND NOT EXISTS (
     SELECT 1 FROM role_permissions rp
     WHERE rp.role_id = r.id AND rp.permission_id = p.id
   );
 
--- 4. Retire view_all_records (drop its grants, then the permission row)
+-- 3. Grant view_all_opportunities -> Executive, Operations
+INSERT INTO role_permissions (role_id, permission_id)
+SELECT r.id, p.id
+FROM roles r
+JOIN permissions p ON p.name = 'view_all_opportunities'
+WHERE r.name IN ('Executive', 'Operations')
+  AND NOT EXISTS (
+    SELECT 1 FROM role_permissions rp
+    WHERE rp.role_id = r.id AND rp.permission_id = p.id
+  );
+
+-- 4. Retire legacy view_all_records if present (no-op otherwise)
 DELETE FROM role_permissions
 WHERE permission_id = (SELECT id FROM permissions WHERE name = 'view_all_records');
 
