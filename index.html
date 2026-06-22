@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.8 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.9 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.8 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.9 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -9343,7 +9343,7 @@ async function renderResearchCampaignsPage() {
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
-        <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openResearchCampaign(${c.id})">Edit</button></td>
+        <td style="text-align:right;white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openResearchCampaign(${c.id})">Edit</button>${currentUser?.isAdmin ? `<button class="btn btn-danger btn-sm" style="margin-left:6px;" onclick="event.stopPropagation();confirmDeleteCampaign('research',${c.id})">Delete</button>` : ''}</td>
       </tr>`;
     };
 
@@ -9371,6 +9371,65 @@ function openResearchCampaignCockpit(id) {
   cockpitCampaignId = +id;
   cockpitTab = 'targets';
   showPage('research_campaign_cockpit');
+}
+
+// Admin-only campaign deletion (research or sales). DB FKs handle the dependents:
+// research campaign_targets + cadence_steps CASCADE-delete; promoted leads on both
+// campaign types are kept (research/sales_campaign_id SET NULL). The confirm spells
+// this out with live counts so the admin knows what's removed vs detached.
+async function confirmDeleteCampaign(kind, id) {
+  if (!currentUser?.isAdmin) { showStatus('Only admins can delete campaigns', 'error'); return; }
+  const table = kind === 'sales' ? 'sales_campaigns' : 'research_campaigns';
+  const c = (allData[table] || []).find(x => +x.id === +id);
+  const name = c?.name || ('Campaign #' + id);
+  let detail = 'Linked targets will be removed; promoted leads are kept but unlinked.';
+  try {
+    if (kind === 'sales') {
+      const leads = await apiGet('leads', 'sales_campaign_id=eq.' + id + '&select=id');
+      detail = `${leads.length} promoted lead${leads.length !== 1 ? 's' : ''} will be kept but unlinked from this campaign.`;
+    } else {
+      const [targets, leads] = await Promise.all([
+        apiGet('campaign_targets', 'research_campaign_id=eq.' + id + '&select=id'),
+        apiGet('leads', 'research_campaign_id=eq.' + id + '&select=id'),
+      ]);
+      detail = `${targets.length} research target${targets.length !== 1 ? 's' : ''} and the campaign's cadence steps will be permanently deleted. ${leads.length} promoted lead${leads.length !== 1 ? 's' : ''} will be kept but unlinked.`;
+    }
+  } catch (e) { /* fall back to the generic detail */ }
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:440px;">
+        <div class="modal-header">
+          <div class="modal-title">Delete campaign</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <p>Delete <strong>${cEsc(name)}</strong>?</p>
+          <p class="text-sm text-muted" style="margin-top:8px;">${detail}</p>
+          <p class="text-sm text-muted" style="margin-top:8px;">This cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="doDeleteCampaign('${kind}',${id})">Delete campaign</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function doDeleteCampaign(kind, id) {
+  if (!currentUser?.isAdmin) { showStatus('Only admins can delete campaigns', 'error'); return; }
+  const table = kind === 'sales' ? 'sales_campaigns' : 'research_campaigns';
+  try {
+    await apiDelete(table, id);
+    showStatus('Campaign deleted');
+    closeModal();
+    allData[table] = null;
+    if (kind === 'sales') await renderSalesCampaignsPage();
+    else await renderResearchCampaignsPage();
+  } catch (e) {
+    showStatus('Delete failed: ' + e.message, 'error');
+  }
 }
 
 
@@ -10252,7 +10311,7 @@ async function renderSalesCampaignsPage() {
   const body = document.getElementById('table-body');
 
   head.innerHTML = '';
-  body.innerHTML = '<tr class="empty-row"><td colspan="7">Loading…</td></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
     const [campaigns, regions, services, people] = await Promise.all([
@@ -10270,8 +10329,8 @@ async function renderSalesCampaignsPage() {
       campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="7">No sales campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
+      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="8">No sales campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
       return;
     }
 
@@ -10294,6 +10353,7 @@ async function renderSalesCampaignsPage() {
       { key: 'status',  label: 'Status',        get: c => c.status || '' },
       { key: 'owner',   label: 'Owner',         get: c => ownerName(c) },
       { key: 'created', label: 'Created',       get: c => c.created_at || '' },
+      { key: 'actions', label: '',              get: () => '', sortable: false, filterable: false },
     ];
 
     const rowRenderer = (c) => {
@@ -10310,6 +10370,7 @@ async function renderSalesCampaignsPage() {
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
+        <td style="text-align:right;white-space:nowrap;">${currentUser?.isAdmin ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();confirmDeleteCampaign('sales',${c.id})">Delete</button>` : ''}</td>
       </tr>`;
     };
 
