@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.1 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.2 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.1 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.2 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -8128,8 +8128,8 @@ async function renderOpportunitiesPage() {
 // (managers). Fixed per-role for now — user customisation is a later increment.
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
-  'Sales User':    ['leads', 'opportunities', 'pipeline'],
-  'Sales Manager': ['campaigns', 'leads', 'opportunities', 'pipeline'],
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline'],
+  'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline'],
   'Operations':    ['contracts'],
   'EXCO':          ['company'],
   'Admin':         [],
@@ -8194,7 +8194,7 @@ async function renderDashboard() {
       <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px;">${greeting}</div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
-  const loaders = { leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
+  const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
                     campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
@@ -8202,6 +8202,54 @@ async function renderDashboard() {
     try { el.innerHTML = loaders[w] ? await loaders[w]() : ''; }
     catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load ${w}: ${e.message}</div>`; }
   }));
+}
+
+// Outstanding actions across leads AND opportunities — one source now that
+// engagements is unified: rows whose next-action isn't done, scoped to records
+// the user owns (or their team's). Each row opens its parent.
+async function _dashActions() {
+  const scope = _dashScope();
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const acts = await apiGet('engagements',
+    'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
+  const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description');
+  const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
+  const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+  const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+  const rows = [];
+  for (const a of acts) {
+    let parent, kind;
+    if (a.lead_id != null) { parent = leadById[+a.lead_id]; kind = 'lead'; }
+    else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
+    if (!parent || !_dashInScope(parent, scope)) continue;
+    const label = kind === 'lead' ? (parent.target_org_name || parent.description || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
+    rows.push({ id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
+  }
+  rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
+  const overdue = rows.filter(r => r.due < today).length;
+  const dueSoon = rows.filter(r => r.due >= today && r.due <= soon).length;
+  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : 'Mine'}</span>`;
+  const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  const list = rows.slice(0, 5).map(r => {
+    const od = r.due < today;
+    const open = r.kind === 'lead' ? `openLead(${r.id})` : `openOpportunity(${r.id})`;
+    return `<div onclick="${open}" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+      <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
+        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.action)}</div></div>
+      <div style="white-space:nowrap;color:${od ? 'var(--red)' : 'var(--text2)'};font-weight:${od ? 700 : 400};">${r.due}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Outstanding Actions${chip}</div>
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('Overdue', overdue, overdue > 0 ? 'red' : null)}${kpi('Due ≤ 7 days', dueSoon)}${kpi('Total open', rows.length)}</div>
+      ${rows.length ? `<div style="margin-top:10px;">${list}</div>${rows.length > 5 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${rows.length - 5} more</div>` : ''}`
+                    : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">Nothing outstanding — you're clear.</div>`}
+    </div></div>`;
 }
 
 async function _dashLeads() {
