@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.0 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.10 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -517,7 +517,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       <div style="margin-top:8px;display:flex;align-items:center;justify-content:space-between;">
         <div style="display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
               <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.0 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
+              <div style="background:var(--red);color:white;font-size:12px;font-weight:800;padding:4px 10px;border-radius:6px;letter-spacing:0.05em;">FOCUS v7.7.10 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:4px;"></span></div>
             </div>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
@@ -1393,16 +1393,20 @@ function _mockSeed() {
     ],
     permissions: [
       { id: 1, name: 'create_leads' },
-      { id: 2, name: 'view_all_records' },
-      { id: 3, name: 'edit_all_records' },
-      { id: 4, name: 'manage_users' },
+      { id: 2, name: 'view_all_leads' },
+      { id: 3, name: 'view_all_opportunities' },
+      { id: 4, name: 'edit_all_records' },
+      { id: 5, name: 'manage_users' },
     ],
     role_permissions: [
+      // Sales: create + see all leads (own opportunities only)
       { role_id: 2, permission_id: 1 },
       { role_id: 2, permission_id: 2 },
+      // Manager: create + see all leads + see all opportunities + edit all
       { role_id: 3, permission_id: 1 },
       { role_id: 3, permission_id: 2 },
       { role_id: 3, permission_id: 3 },
+      { role_id: 3, permission_id: 4 },
     ],
     user_roles: [
       { user_id: 1, role_id: 1 },
@@ -1926,6 +1930,7 @@ const ORG_DETAIL_FIELDS = [
 
 // ── Page config ──────────────────────────────────────────
 const PAGES = {
+  dashboard: { title: 'Dashboard', custom: true, readOnly: true, columns: [], fields: [] },
   opportunities: {
     title: 'Opportunities',
     table: 'opportunities',
@@ -1988,6 +1993,14 @@ const PAGES = {
     title: 'Sales Campaigns',
     table: 'sales_campaigns',
     custom: true,
+    columns: [],
+    fields: [],
+  },
+  campaign_help: {
+    title: 'Campaign Setup Guide',
+    table: null,
+    custom: true,
+    readOnly: true,
     columns: [],
     fields: [],
   },
@@ -2587,6 +2600,7 @@ async function loadTable(page) {
 
   // Custom pages
   if (cfg.custom) {
+    if (page === 'dashboard') { await renderDashboard(); return; }
     if (page === 'role_permissions') { await renderRolePermissions(); return; }
     if (page === 'user_regions') { await renderUserRegions(); return; }
     if (page === 'opportunities') { await renderOpportunitiesPage(); return; }
@@ -2596,6 +2610,7 @@ async function loadTable(page) {
     if (page === 'research_campaigns') { await renderResearchCampaignsPage(); return; }
     if (page === 'research_campaign_cockpit') { await renderResearchCampaignCockpit(); return; }
     if (page === 'sales_campaigns') { await renderSalesCampaignsPage(); return; }
+    if (page === 'campaign_help') { renderCampaignHelp(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
@@ -3544,6 +3559,8 @@ const MENU = [
         icon: '<circle cx="7" cy="7" r="4.5" stroke="white" stroke-width="1.5" fill="none"/><path d="M10.5 10.5L14 14" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'sales_campaigns', label: 'Sales Campaigns', permission: 'manage_leads',
         icon: '<path d="M2 6h7l4-3v10l-4-3H2z" stroke="white" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M5 9v3" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      { page: 'campaign_help', label: 'Setup Guide', permission: 'manage_leads',
+        icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M6.2 6.4a1.8 1.8 0 113 1.3c-.6.4-1 .7-1 1.3" stroke="white" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="8" cy="11.4" r="0.4" fill="white"/>' },
     ]
   },
   {
@@ -3712,6 +3729,9 @@ function buildNav() {
       ${item.label}
     </button>`;
   };
+
+  // Dashboard — standalone top item; everyone's post-login landing page.
+  html += renderItem({ page: 'dashboard', label: 'Dashboard', icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' });
 
   let sectionCounter = 0;
   for (const section of MENU) {
@@ -3985,8 +4005,7 @@ function setupOppOwnerReassign() {
   wrap.style.display = allowed ? '' : 'none';
   if (!allowed) return;
   const people = allData['people'] || [];
-  const xone = people.filter(p => p.is_xone);
-  const pool = xone.length ? xone : people;
+  const pool = homeOrgPeople(people, [oppData.owner_id, currentUser?.personId]);
   const current = oppData.owner_id || currentUser?.personId || '';
   sel.innerHTML = '<option value="">— unassigned —</option>' +
     pool.map(p => {
@@ -4038,6 +4057,7 @@ async function initOppForm() {
   allData['stage_categories'] = stageCats;
   allData['service_major'] = majorCats;
   allData['people'] = people;
+  await ensureHomeOrgMembers();
 
   // Populate organisation dropdown
   const orgSel = document.getElementById('opp-org-id');
@@ -4102,9 +4122,8 @@ async function initOppForm() {
     if (sub) document.getElementById('opp-service-major-id').value = sub.major_id;
   }
 
-  // Populate owner - prefer Xone people but fall back to all people
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  // Owner must be a home-organisation member; keep the current owner regardless.
+  const ownerPool = homeOrgPeople(people, [oppData.owner_id, currentUser?.personId]);
   const ownerSel = document.getElementById('opp-owner-id');
   ownerSel.innerHTML = '<option value="">— select owner —</option>' +
     ownerPool.map(p => {
@@ -7794,6 +7813,7 @@ async function doLogin() {
     // Skip the extra checkConnection() ping (one fewer function invocation).
     setOnline(true);
     await loadAppSettings();
+    try { await ensureHomeOrgMembers(); } catch (e) {} // valid owners = home-org members
     setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
     buildNav();
   } catch(e) {
@@ -7806,6 +7826,30 @@ function can(permission) {
   if (!currentUser) return false;
   if (currentUser.isAdmin || currentUser.permissions.includes('all')) return true;
   return currentUser.permissions.includes(permission);
+}
+
+// ── Home-organisation membership ───────────────────────────────────────────
+// Leads, deals (opportunities & contracts) and campaigns may only be OWNED by
+// people who belong to the home organisation (Xone). Membership is defined by the
+// home_organisation_members table — the legacy people.is_xone flag does NOT exist
+// in the live schema, so any filter on it silently matched nobody and fell back to
+// every person. Cached in allData; preloaded at login via ensureHomeOrgMembers().
+async function ensureHomeOrgMembers() {
+  if (!allData['home_organisation_members']) {
+    try { allData['home_organisation_members'] = await apiGet('home_organisation_members', 'select=person_id'); }
+    catch (e) { allData['home_organisation_members'] = []; }
+  }
+  return allData['home_organisation_members'];
+}
+// Restrict a people array to home-org members. `keepIds` are person ids retained
+// even if they aren't members (e.g. a record's existing owner, so reassignment
+// never silently drops the current value). Falls back to the full list only when
+// no membership is configured at all, to avoid an unusable empty owner picker.
+function homeOrgPeople(people, keepIds) {
+  const ids = new Set((allData['home_organisation_members'] || []).map(m => +m.person_id));
+  if (!ids.size) return people || [];
+  const keep = new Set((keepIds || []).filter(v => v != null).map(Number));
+  return (people || []).filter(p => ids.has(+p.id) || keep.has(+p.id));
 }
 
 // True when a record falls within the current user's assigned scope — matched by
@@ -7917,10 +7961,21 @@ function isManagerViewer() {
 function renderViewFilterBar(kind) {
   const bar = document.getElementById('view-filter-bar');
   if (!bar) return;
-  const current = kind === 'leads' ? leadsOwnerView : oppsOwnerView;
-  const btns = [{ key: 'own', label: 'Show Own' }, { key: 'all', label: 'Show All' }];
-  if (kind === 'opps' || kind === 'pipeline') btns.push({ key: 'collab', label: 'Collaborations' });
-  if (isManagerViewer()) btns.push({ key: 'team', label: 'Team' });
+  let current = kind === 'leads' ? leadsOwnerView : oppsOwnerView;
+  // "Show All" is permission-gated and independent per record type:
+  //   leads -> view_all_leads, opportunities/pipeline -> view_all_opportunities.
+  // Without the relevant permission the user is locked to their own records, so
+  // the button is hidden entirely (admins carry 'all' via can()).
+  const canAll = kind === 'leads' ? can('view_all_leads') : can('view_all_opportunities');
+  // Alternative scopes the user can actually switch to, beyond their own records.
+  const extras = [];
+  if (canAll) extras.push({ key: 'all', label: 'Show All' });
+  if (kind === 'opps' || kind === 'pipeline') extras.push({ key: 'collab', label: 'Show Collaborations' });
+  if (isManagerViewer()) extras.push({ key: 'team', label: 'Team' });
+  // If there's no alternative, "Show Own" is a toggle with nothing to toggle to —
+  // drop the whole scope bar rather than show a lone, pointless button.
+  const btns = extras.length ? [{ key: 'own', label: 'Show Own' }, ...extras] : [];
+  if (!btns.some(b => b.key === current)) current = 'own'; // never highlight a scope they can't use
   let html = btns.map(b =>
     `<button class="btn btn-sm ${b.key === current ? 'btn-primary' : 'btn-secondary'}"
        onclick="setOwnerView('${kind}','${b.key}')">${b.label}</button>`).join('');
@@ -7928,7 +7983,8 @@ function renderViewFilterBar(kind) {
   // opportunities (secured/contracted and lost deals are hidden until "All statuses").
   if (kind === 'opps') {
     const statusBtns = [{ key: 'open', label: 'Open' }, { key: 'all', label: 'All statuses' }];
-    html += `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` +
+    // Only draw the divider when there are scope buttons to its left.
+    html += (html ? `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` : '') +
       statusBtns.map(b =>
         `<button class="btn btn-sm ${b.key === oppsStatusFilter ? 'btn-primary' : 'btn-secondary'}"
            onclick="setOppsStatusFilter('${b.key}')">${b.label}</button>`).join('');
@@ -7947,7 +8003,7 @@ function setOppsStatusFilter(v) { oppsStatusFilter = v; renderOpportunitiesPage(
 // Leads: own / all / team (no collaborator concept on leads). Synchronous.
 function filterLeadsByView(leads, view) {
   const pid = currentUser?.personId;
-  if (view === 'all') return leads;
+  if (view === 'all' && can('view_all_leads')) return leads; // gated; else falls back to 'own'
   if (view === 'team' && isManagerViewer()) {
     return leads.filter(recordInUserScope);
   }
@@ -7957,7 +8013,7 @@ function filterLeadsByView(leads, view) {
 // Deals: own / all / collab (own + collaborated) / team. Async — collab needs a fetch.
 async function filterDealsByView(deals, view) {
   const pid = currentUser?.personId;
-  if (view === 'all') return deals;
+  if (view === 'all' && can('view_all_opportunities')) return deals; // gated; else falls back to 'own'
   if (view === 'team' && isManagerViewer()) {
     return deals.filter(recordInUserScope);
   }
@@ -8117,6 +8173,208 @@ async function renderOpportunitiesPage() {
 // bar (renderViewFilterBar/filterDealsByView/oppsOwnerView), FY utils
 // (getCurrentFY/getFYMonths/getFYLabel + appSettings.fy_start_month), and the
 // shared #table-filter-popup. Layers read the REAL schema columns.
+// ── Role-based Dashboard ───────────────────────────────────────────────────
+// Post-login landing page. One page; which widgets show depends on the user's
+// role(s); each widget scopes its data to the user (own) or their team/branch
+// (managers). Fixed per-role for now — user customisation is a later increment.
+// Renders into the shared #table-body cell, mirroring the cockpit pattern.
+const DASH_ROLE_WIDGETS = {
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns'],
+  'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline'],
+  'Operations':    ['contracts'],
+  'EXCO':          ['company'],
+  'Admin':         [],
+  'Read Only':     [],
+};
+
+function _dashWidgetsForUser() {
+  const roles = (currentUser?.roles || []).map(r => r.name);
+  const out = [];
+  for (const rn of roles) for (const w of (DASH_ROLE_WIDGETS[rn] || [])) if (!out.includes(w)) out.push(w);
+  return out;
+}
+// Managers see their team/branch; everyone else sees only their own records.
+function _dashScope() {
+  return (currentUser?.roles || []).some(r => r.name === 'Sales Manager') ? 'team' : 'own';
+}
+function _dashInScope(rec, scope) {
+  if (!rec) return false;
+  if (currentUser?.isAdmin) return true;
+  const mine = rec.owner_id != null && +rec.owner_id === +currentUser.personId;
+  return scope === 'team' ? (mine || recordInUserScope(rec)) : mine;
+}
+function _dashStageIds(names) {
+  const stages = allData['stages'] || [];
+  return new Set(stages.filter(s => names.includes(s.name)).map(s => +s.id));
+}
+// Card shell: title, optional scope chip, KPI row, sub-line, deep-link button.
+function _dashCard(title, scope, kpis, sub, page, linkLabel) {
+  const chipText = scope === 'team' ? 'Team' : scope === 'all' ? 'All' : scope ? 'Mine' : '';
+  const chip = chipText ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipText}</span>` : '';
+  const kpiHtml = kpis.map(([label, val, color]) =>
+    `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div>
+       <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`).join('');
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">${title}${chip}</div>
+      ${page ? `<button class="btn btn-ghost btn-sm" onclick="showPage('${page}')">${linkLabel || 'View all'} →</button>` : ''}
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpiHtml}</div>
+      ${sub ? `<div style="margin-top:12px;color:var(--text3);font-size:12px;">${sub}</div>` : ''}
+    </div></div>`;
+}
+
+async function renderDashboard() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  const widgets = _dashWidgetsForUser();
+  const greeting = ('Welcome, ' + (currentUser?.name || '')).trim().replace(/,$/, '');
+  if (!widgets.length) {
+    body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:48px 24px;text-align:center;color:var(--text3);">
+      <div style="font-size:18px;font-weight:700;color:var(--text2);margin-bottom:6px;">${greeting}</div>
+      <div>No dashboard is configured for your role yet.</div></div></td></tr>`;
+    return;
+  }
+  // Make sure shared lookups the widgets read are present.
+  if (!allData['stages']) { try { allData['stages'] = await apiGet('stages', 'select=id,name'); } catch(e) { allData['stages'] = []; } }
+  const shell = widgets.map(w =>
+    `<div id="dash-${w}"><div class="card" style="padding:20px;color:var(--text3);">Loading…</div></div>`).join('');
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:2px 0 18px;">
+      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px;">${greeting}</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
+    </div></td></tr>`;
+  const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
+                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany };
+  await Promise.all(widgets.map(async w => {
+    const el = document.getElementById('dash-' + w);
+    if (!el) return;
+    try { el.innerHTML = loaders[w] ? await loaders[w]() : ''; }
+    catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load ${w}: ${e.message}</div>`; }
+  }));
+}
+
+// Outstanding actions across leads AND opportunities — one source now that
+// engagements is unified: rows whose next-action isn't done, scoped to records
+// the user owns (or their team's). Each row opens its parent.
+async function _dashActions() {
+  const scope = _dashScope();
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const acts = await apiGet('engagements',
+    'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
+  const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description');
+  const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
+  const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+  const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+  const rows = [];
+  for (const a of acts) {
+    let parent, kind;
+    if (a.lead_id != null) { parent = leadById[+a.lead_id]; kind = 'lead'; }
+    else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
+    if (!parent || !_dashInScope(parent, scope)) continue;
+    const label = kind === 'lead' ? (parent.target_org_name || parent.description || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
+    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
+  }
+  rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
+  const overdue = rows.filter(r => r.due < today).length;
+  const dueSoon = rows.filter(r => r.due >= today && r.due <= soon).length;
+  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : 'Mine'}</span>`;
+  const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  const list = rows.slice(0, 5).map(r => {
+    const od = r.due < today;
+    return `<div onclick="openEngagement(${r.eng})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+      <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
+        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.action)}</div></div>
+      <div style="white-space:nowrap;color:${od ? 'var(--red)' : 'var(--text2)'};font-weight:${od ? 700 : 400};">${r.due}</div>
+    </div>`;
+  }).join('');
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Outstanding Actions${chip}</div>
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('Overdue', overdue, overdue > 0 ? 'red' : null)}${kpi('Due ≤ 7 days', dueSoon)}${kpi('Total open', rows.length)}</div>
+      ${rows.length ? `<div style="margin-top:10px;">${list}</div>${rows.length > 5 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${rows.length - 5} more</div>` : ''}`
+                    : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">Nothing outstanding — you're clear.</div>`}
+    </div></div>`;
+}
+
+async function _dashLeads() {
+  const scope = _dashScope();
+  const rows = (await apiGet('leads', 'select=id,status,owner_id,branch_id,region_id,next_action_date'))
+    .filter(r => _dashInScope(r, scope));
+  const today = new Date().toISOString().slice(0, 10);
+  const open = rows.filter(r => ['New', 'Working', 'Qualified'].includes(r.status));
+  const overdue = open.filter(r => r.next_action_date && r.next_action_date < today).length;
+  const sub = ['New', 'Working', 'Qualified'].map(s => `${s}: ${rows.filter(r => r.status === s).length}`).join(' · ');
+  return _dashCard('Leads', scope, [
+    ['Open leads', open.length],
+    ['Overdue follow-up', overdue, overdue > 0 ? 'red' : null],
+  ], sub, 'leads');
+}
+
+async function _dashOpps() {
+  const scope = _dashScope();
+  const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
+  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+    .filter(d => _dashInScope(d, scope));
+  const openDeals = deals.filter(d => open.has(+d.stage_id));
+  const nameById = Object.fromEntries((allData['stages'] || []).map(s => [+s.id, s.name]));
+  const sub = [...open].map(id => `${nameById[id]}: ${openDeals.filter(d => +d.stage_id === id).length}`).join(' · ');
+  return _dashCard('Opportunities', scope, [
+    ['Open opportunities', openDeals.length],
+  ], sub, 'opportunities');
+}
+
+async function _dashPipeline() {
+  const scope = _dashScope();
+  const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
+  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+    .filter(d => _dashInScope(d, scope) && open.has(+d.stage_id));
+  if (!deals.length) return _dashCard('Pipeline', scope, [['Weighted', 'R 0'], ['Total', 'R 0']], 'No open opportunities', 'revenue_pipeline', 'Full pipeline');
+  const ids = deals.map(d => d.id);
+  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=id,deal_id`);
+  const streamDeal = Object.fromEntries(streams.map(s => [+s.id, +s.deal_id]));
+  let months = [];
+  if (streams.length) months = await apiGet('revenue_stream_months', `stream_id=in.(${streams.map(s => s.id).join(',')})&select=stream_id,opportunity_revenue`);
+  const dealTotal = {};
+  for (const m of months) { const did = streamDeal[+m.stream_id]; if (did != null) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  let total = 0, weighted = 0;
+  for (const d of deals) { const t = dealTotal[d.id] || 0; total += t; weighted += t * ((+d.probability || 0) / 100); }
+  return _dashCard('Pipeline', scope, [
+    ['Weighted', pbFmtRand(Math.round(weighted))],
+    ['Total', pbFmtRand(Math.round(total))],
+  ], `${deals.length} open · weighted = value × probability`, 'revenue_pipeline', 'Full pipeline');
+}
+
+async function _dashCampaigns() {
+  // Sales Management (and Admin) see ALL campaigns; a Sales User sees only their own.
+  const seeAll = currentUser?.isAdmin || (currentUser?.roles || []).some(r => r.name === 'Sales Manager');
+  const camps = await apiGet('research_campaigns', 'select=id,name,status,owner_id,created_by');
+  const mine = seeAll ? camps : camps.filter(c =>
+    (c.owner_id != null && +c.owner_id === +currentUser.personId) ||
+    (c.created_by != null && +c.created_by === +currentUser.personId));
+  const active = mine.filter(c => c.status === 'Active');
+  const sub = active.slice(0, 4).map(c => c.name).join(' · ') || 'No active campaigns';
+  return _dashCard('Campaigns', seeAll ? 'all' : 'own', [
+    ['Active campaigns', active.length],
+  ], sub, 'research_campaigns');
+}
+
+// Inc 1b widgets — placeholders until built out.
+async function _dashContracts() {
+  const secured = _dashStageIds(['Secured']);
+  const deals = (await apiGet('deals', 'select=id,stage_id')).filter(d => secured.has(+d.stage_id));
+  return _dashCard('Active Contracts', null, [['Secured contracts', deals.length]], 'Full contracts view coming soon', 'opportunities', 'Open');
+}
+async function _dashCompany() {
+  return _dashCard('Company Overview', null, [['', '—']], 'Company-wide overview coming soon', 'revenue_pipeline', 'Pipeline');
+}
+
 const RPP = (function () {
   const MIN_FY = 3;
   const MNAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -9096,7 +9354,7 @@ async function renderResearchCampaignsPage() {
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
-        <td style="text-align:right;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openResearchCampaign(${c.id})">Edit</button></td>
+        <td style="text-align:right;white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openResearchCampaign(${c.id})">Edit</button>${currentUser?.isAdmin ? `<button class="btn btn-danger btn-sm" style="margin-left:6px;" onclick="event.stopPropagation();confirmDeleteCampaign('research',${c.id})">Delete</button>` : ''}</td>
       </tr>`;
     };
 
@@ -9124,6 +9382,199 @@ function openResearchCampaignCockpit(id) {
   cockpitCampaignId = +id;
   cockpitTab = 'targets';
   showPage('research_campaign_cockpit');
+}
+
+// Admin-only campaign deletion (research or sales). DB FKs handle the dependents:
+// research campaign_targets + cadence_steps CASCADE-delete; promoted leads on both
+// campaign types are kept (research/sales_campaign_id SET NULL). The confirm spells
+// this out with live counts so the admin knows what's removed vs detached.
+async function confirmDeleteCampaign(kind, id) {
+  if (!currentUser?.isAdmin) { showStatus('Only admins can delete campaigns', 'error'); return; }
+  const table = kind === 'sales' ? 'sales_campaigns' : 'research_campaigns';
+  const c = (allData[table] || []).find(x => +x.id === +id);
+  const name = c?.name || ('Campaign #' + id);
+  let detail = 'Linked targets will be removed; promoted leads are kept but unlinked.';
+  try {
+    if (kind === 'sales') {
+      const leads = await apiGet('leads', 'sales_campaign_id=eq.' + id + '&select=id');
+      detail = `${leads.length} promoted lead${leads.length !== 1 ? 's' : ''} will be kept but unlinked from this campaign.`;
+    } else {
+      const [targets, leads] = await Promise.all([
+        apiGet('campaign_targets', 'research_campaign_id=eq.' + id + '&select=id'),
+        apiGet('leads', 'research_campaign_id=eq.' + id + '&select=id'),
+      ]);
+      detail = `${targets.length} research target${targets.length !== 1 ? 's' : ''} and the campaign's cadence steps will be permanently deleted. ${leads.length} promoted lead${leads.length !== 1 ? 's' : ''} will be kept but unlinked.`;
+    }
+  } catch (e) { /* fall back to the generic detail */ }
+
+  const html = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:440px;">
+        <div class="modal-header">
+          <div class="modal-title">Delete campaign</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <p>Delete <strong>${cEsc(name)}</strong>?</p>
+          <p class="text-sm text-muted" style="margin-top:8px;">${detail}</p>
+          <p class="text-sm text-muted" style="margin-top:8px;">This cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="doDeleteCampaign('${kind}',${id})">Delete campaign</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('modal-root').innerHTML = html;
+}
+
+async function doDeleteCampaign(kind, id) {
+  if (!currentUser?.isAdmin) { showStatus('Only admins can delete campaigns', 'error'); return; }
+  const table = kind === 'sales' ? 'sales_campaigns' : 'research_campaigns';
+  try {
+    await apiDelete(table, id);
+    showStatus('Campaign deleted');
+    closeModal();
+    allData[table] = null;
+    if (kind === 'sales') await renderSalesCampaignsPage();
+    else await renderResearchCampaignsPage();
+  } catch (e) {
+    showStatus('Delete failed: ' + e.message, 'error');
+  }
+}
+
+// ── In-app help: Campaign Setup Guide ─────────────────────────────────────
+function renderCampaignHelp() {
+  document.getElementById('page-sub').textContent = 'How to set up, configure and run outreach campaigns';
+  document.getElementById('table-head').innerHTML = '';
+
+  // Small style helpers kept local to this page.
+  const H2 = (n, t) => `<h2 style="font-size:17px;font-weight:800;color:var(--navy,#003057);margin:30px 0 10px;padding-bottom:6px;border-bottom:2px solid var(--red,#FA0A11);">${n}. ${t}</h2>`;
+  const H3 = t => `<h3 style="font-size:14px;font-weight:700;color:#1a1a1a;margin:18px 0 6px;">${t}</h3>`;
+  const P  = t => `<p style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 10px;">${t}</p>`;
+  const NOTE = (t, colour) => `<div style="font-size:12.5px;line-height:1.55;background:${colour || '#EEF2F6'};border-left:4px solid var(--navy,#003057);border-radius:4px;padding:10px 12px;margin:0 0 12px;">${t}</div>`;
+  const STEPS = arr => `<ol style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 12px;padding-left:22px;">${arr.map(s => `<li style="margin-bottom:6px;">${s}</li>`).join('')}</ol>`;
+  const BULLETS = arr => `<ul style="font-size:13px;line-height:1.6;color:var(--text2,#333);margin:0 0 12px;padding-left:20px;">${arr.map(s => `<li style="margin-bottom:5px;">${s}</li>`).join('')}</ul>`;
+  const chip = t => `<span style="display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:#e0e7ff;color:#3730a3;">${t}</span>`;
+  const table = (cols, rows) => `
+    <table style="width:100%;border-collapse:collapse;margin:0 0 14px;font-size:12.5px;">
+      <thead><tr>${cols.map(c => `<th style="text-align:left;background:var(--navy,#003057);color:#fff;padding:7px 10px;font-weight:700;border:1px solid #d9dee3;">${c}</th>`).join('')}</tr></thead>
+      <tbody>${rows.map((r, i) => `<tr style="background:${i % 2 ? '#fff' : '#f6f8fa'};">${r.map(cell => `<td style="padding:7px 10px;border:1px solid #d9dee3;vertical-align:top;color:#222;">${cell}</td>`).join('')}</tr>`).join('')}</tbody>
+    </table>`;
+
+  const body = `
+    <div style="max-width:920px;padding:8px 4px 60px;font-family:inherit;">
+      <div style="background:linear-gradient(180deg,#003057 0%,#00253f 100%);color:#fff;border-radius:10px;padding:22px 24px;margin-bottom:14px;">
+        <div style="font-size:12px;font-weight:700;letter-spacing:.08em;color:var(--khaki,#C3B091);">FOCUS · OUTREACH CAMPAIGNS</div>
+        <div style="font-size:24px;font-weight:800;margin-top:4px;">Campaign Setup &amp; Configuration Guide</div>
+        <div style="font-size:13px;opacity:.85;margin-top:8px;line-height:1.5;">From an empty campaign to a working outreach funnel: create a campaign, build a target list, define a touch cadence, then promote targets into leads and work them to opportunities.</div>
+      </div>
+
+      ${NOTE('<strong>Two campaign types.</strong> A <strong>Research Campaign</strong> is the full engine — it has a Cockpit, a target list, a touch cadence and a conversion funnel, and is used to research accounts and convert them into leads. A <strong>Sales Campaign</strong> is lighter: just a label you attach to leads for grouping/attribution (no cockpit, no targets, no cadence).')}
+
+      ${NOTE('<strong>Who can use this.</strong> The <em>Outreach Campaigns</em> menu needs the <code>view_section_marketing</code> permission; the campaign pages need <code>manage_leads</code>. Only <strong>Admins</strong> can delete a campaign.', '#FFF7E6')}
+
+      ${H2(1, 'Overview — the funnel')}
+      ${P('A research campaign moves accounts through five stages. Everything in the Cockpit is built around this flow:')}
+      ${P('<strong>Target</strong> → <strong>Worked (lead)</strong> → <strong>Qualified</strong> → <strong>Promoted (opportunity)</strong> → <strong>Est. value</strong>')}
+      ${BULLETS([
+        '<strong>Target</strong> — an account you are researching (lives only inside the campaign).',
+        '<strong>Worked</strong> — a target you <em>Promote</em> becomes a real <strong>Lead</strong> that carries the campaign link.',
+        '<strong>Qualified / Promoted</strong> — the lead progresses through the normal Leads workflow; the cockpit mirrors its live status.',
+        '<strong>Est. value</strong> — rolled up from promoted leads, measured against the targets you set on the campaign.',
+      ])}
+
+      ${H2(2, 'Create a Research Campaign')}
+      ${STEPS([
+        'Go to <strong>Outreach Campaigns → Research Campaigns</strong>.',
+        'Click <strong>+ New Campaign</strong> (top right).',
+        'Fill in the form (only <strong>Campaign name</strong> is required) and click <strong>Create</strong>.',
+      ])}
+      ${table(['Field', 'Required', 'Notes'], [
+        ['Campaign name', '<strong>Yes</strong>', 'e.g. “Q3 Limpopo mining outreach”.'],
+        ['Target segment', 'No', 'Who you are targeting, e.g. “Mid-tier mining houses in Limpopo”. Shown as the cockpit subtitle.'],
+        ['Region', 'No', 'Carried onto every lead promoted from this campaign.'],
+        ['Service focus', 'No', 'The service line; also carried onto promoted leads.'],
+        ['Branch', 'No', 'Defaults from the region — override if needed.'],
+        ['Status', 'Yes', `${chip('Active')} ${chip('Paused')} ${chip('Completed')} ${chip('Abandoned')} — defaults to Active.`],
+        ['Owner', 'No', 'Defaults to you. Only home-organisation staff can be selected.'],
+        ['Start / End date', 'No', 'Shown as the campaign timeframe in the cockpit.'],
+        ['Targets (Accounts / Qualified / Promoted)', 'No', 'Goal numbers — the cockpit funnel paces actual progress against these.'],
+        ['Notes', 'No', 'Approach, target list, talking points.'],
+      ])}
+
+      ${H2(3, 'The Campaign Cockpit')}
+      ${P('Click any campaign row to open its <strong>Cockpit</strong> — the workspace for one campaign. Use <strong>← All campaigns</strong> to go back, or <strong>Edit mission</strong> to change campaign details. Change the campaign status inline from the header dropdown.')}
+      ${P('Across the top is the <strong>funnel strip</strong> (Targets → Worked → Qualified → Promoted → Est. value, each with conversion % and progress against your goals). Below it are four tabs:')}
+      ${table(['Tab', 'What it’s for'], [
+        ['<strong>Target List</strong>', 'Build and manage the accounts you’re researching. Promote or disqualify them here.'],
+        ['<strong>Work Queue</strong>', 'Leads in play (New / Working / Qualified) with their cadence step and due/overdue date. Log touches here.'],
+        ['<strong>Cadence</strong>', 'Define the outreach touch sequence that drives due dates on every worked lead.'],
+        ['<strong>Results</strong>', 'Promoted-to-opportunity, Qualified-ready-to-promote, and Dead/disqualified lists.'],
+      ])}
+
+      ${H2(4, 'Build the target list')}
+      ${STEPS([
+        'In the Cockpit, open the <strong>Target List</strong> tab and click <strong>+ Add Target</strong>.',
+        'Start typing the <strong>Company name</strong> — Focus checks it against existing organisations as you type. Click <strong>Use</strong> on a match to link the real organisation, or <strong>Use as new</strong> if it’s genuinely new. A 🔗 indicator confirms when a target is linked.',
+        'Enter the contact as <strong>First name + Surname</strong>. If a similar person already exists, a warning appears with a <em>use details</em> link to auto-fill from that person (this avoids duplicates). If you enter any contact detail, both first name and surname are required.',
+        'Set <strong>Priority</strong> and <strong>Status</strong>, optionally an <strong>Owner</strong>, and write <strong>Research notes</strong> (the trigger / why they fit — this becomes the lead description when promoted).',
+        'Click <strong>Add target</strong>.',
+      ])}
+      ${NOTE('<strong>Tip:</strong> always try to link an existing organisation rather than “Use as new” — it keeps one clean record per client and carries the link through to the promoted lead.')}
+
+      ${H2(5, 'Configure the cadence')}
+      ${P('The <strong>cadence</strong> is the outreach touch sequence. Once set, every worked lead is measured against it — the Work Queue shows which step a lead is on and whether the next touch is due or overdue. <em>Day offset</em> = days after the first touch (day 0).')}
+      ${STEPS([
+        'Open the <strong>Cadence</strong> tab.',
+        'Click <strong>Load default 5-touch</strong> for a ready-made sequence, or <strong>+ Add step</strong> to build your own.',
+        'For each step set the <strong>Day offset</strong>, <strong>Channel</strong> and an <strong>Instruction</strong>. Remove a step with ×.',
+        'Click <strong>Save cadence</strong>.',
+      ])}
+      ${H3('The default 5-touch sequence')}
+      ${table(['Step', 'Day', 'Channel', 'Instruction'], [
+        ['1', '0', 'Email', 'Intro email referencing the trigger / why-now'],
+        ['2', '2', 'Call', 'Follow-up call — confirm relevance, book a chat'],
+        ['3', '5', 'LinkedIn', 'Connect + short value note'],
+        ['4', '9', 'Email', 'Case study / proof point'],
+        ['5', '14', 'Call', 'Final attempt — break-up call'],
+      ])}
+      ${P(`Available channels: ${chip('Email')} ${chip('Call')} ${chip('LinkedIn')} ${chip('Visit')} ${chip('Other')}.`)}
+
+      ${H2(6, 'Work the funnel')}
+      ${H3('Promote a target to a lead')}
+      ${P('On the <strong>Target List</strong>, a target that is <em>Researching</em> or <em>Ready</em> shows a <strong>Promote → Lead</strong> button. Promoting creates a real lead that carries across the company, contact, region, branch, service and research notes, links it to the campaign, and — if a cadence exists — seeds the first next-action and its due date. The target is marked <em>Promoted</em> and you’re offered to open the new lead straight away.')}
+      ${H3('Disqualify a target')}
+      ${P('Click <strong>Disqualify</strong> on a target to mark it not-a-fit. You can record an optional reason. It moves to the <em>Disqualified</em> state and drops out of the active list.')}
+      ${H3('Work leads in the Work Queue')}
+      ${P('The <strong>Work Queue</strong> lists promoted leads with their current cadence step and a due/overdue badge. Use <strong>Quick Log</strong> to record a touch without leaving the cockpit (this advances the cadence), or <strong>Open lead</strong> for the full lead. Promoted/qualified/dead outcomes appear under <strong>Results</strong>.')}
+
+      ${H2(7, 'Sales Campaigns')}
+      ${P('A <strong>Sales Campaign</strong> is a lightweight grouping label — no cockpit, no targets, no cadence. Create one under <strong>Outreach Campaigns → Sales Campaigns</strong> (same form as a research campaign, minus the targets/cadence). Clicking a row opens it for editing. Attach leads to it via the <strong>Sales Campaign</strong> picker on the lead form, for grouping and attribution.')}
+
+      ${H2(8, 'Status reference')}
+      ${table(['Set', 'Values'], [
+        ['Campaign status', `${chip('Active')} ${chip('Paused')} ${chip('Completed')} ${chip('Abandoned')}`],
+        ['Target status', `${chip('Researching')} ${chip('Ready')} ${chip('Promoted')} ${chip('Disqualified')}`],
+        ['Target priority', `${chip('Hot')} ${chip('Warm')} ${chip('Cold')}`],
+        ['Cadence channels', `${chip('Email')} ${chip('Call')} ${chip('LinkedIn')} ${chip('Visit')} ${chip('Other')}`],
+      ])}
+
+      ${H2(9, 'Admin — delete a campaign')}
+      ${NOTE('Only <strong>Admins</strong> see the red <strong>Delete</strong> button on a campaign row. Deleting a research campaign permanently removes its <strong>targets</strong> and <strong>cadence steps</strong>, but any leads already promoted from it are <strong>kept</strong> (they’re simply unlinked from the campaign). The confirmation dialog shows you the exact counts before you proceed. This cannot be undone.', '#FDECEC')}
+
+      ${H2(10, 'Quick-start checklist')}
+      ${BULLETS([
+        '☐ Create a research campaign (name + segment + region/service).',
+        '☐ Set goal numbers (Accounts / Qualified / Promoted).',
+        '☐ Open the Cockpit → <strong>Cadence</strong> tab → Load default 5-touch (or build your own) → Save.',
+        '☐ <strong>Target List</strong> → + Add Target → link the organisation, capture the contact, add the trigger.',
+        '☐ Promote ready targets → work them in the <strong>Work Queue</strong> against their due dates.',
+        '☐ Track conversion in the funnel strip and <strong>Results</strong> tab.',
+      ])}
+    </div>`;
+
+  document.getElementById('table-body').innerHTML = `<tr><td style="border:none;padding:0;">${body}</td></tr>`;
 }
 
 
@@ -9189,7 +9640,7 @@ async function renderResearchCampaignCockpit() {
 
   try {
     const cid = cockpitCampaignId;
-    const [campArr, regions, services, people, sources, targets, leads, steps] = await Promise.all([
+    const [campArr, regions, services, people, sources, targets, leads, steps, orgs] = await Promise.all([
       apiGet('research_campaigns', 'id=eq.' + cid + '&select=*'),
       allData['regions']       || apiGet('regions', 'select=*'),
       allData['service_major'] || apiGet('service_major', 'select=*'),
@@ -9198,9 +9649,11 @@ async function renderResearchCampaignCockpit() {
       apiGet('campaign_targets', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
       apiGet('leads', 'research_campaign_id=eq.' + cid + '&select=*&order=created_at.desc'),
       apiGet('campaign_cadence_steps', 'research_campaign_id=eq.' + cid + '&select=*&order=step_no.asc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
     ]);
     allData['regions'] = regions; allData['service_major'] = services;
     allData['people'] = people;   allData['lead_sources'] = sources;
+    allData['organisations'] = orgs;  // needed by the New Target company-name matcher
 
     const campaign = campArr[0];
     if (!campaign) {
@@ -9738,6 +10191,7 @@ async function cockpitQuickLogTouch(leadId) {
     window._liQuickLogContext = true;
     window._liRelatedTo = null;
     window._liEditing = null;
+    _setLeadEngParent();
     document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
     await loadLiLookups();
     await maybeApplyCadencePrefill();
@@ -9765,10 +10219,12 @@ function renderCampaignTargetModal() {
   const d = campaignTargetData;
   const isEdit = !!d.id;
   const people = allData['people'] || cockpitData.people || [];
-  const orgs   = allData['organisations'] || [];
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [campaignTargetData.owner_id, currentUser?.personId]);
   const v = s => cEsc(s).replace(/"/g, '&quot;');
+  // Split the stored single contact_name into first + surname for the two fields.
+  const _ctnParts = String(d.contact_name || '').trim().split(/\s+/).filter(Boolean);
+  const ctFirst = _ctnParts.length ? _ctnParts[0] : '';
+  const ctLast  = _ctnParts.length > 1 ? _ctnParts.slice(1).join(' ') : '';
 
   const html = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
@@ -9780,34 +10236,35 @@ function renderCampaignTargetModal() {
         <div class="modal-body">
           <div class="form-group">
             <label class="form-label">Company name <span style="color:var(--red)">*</span></label>
-            <input type="text" id="ct-company" class="form-control" value="${v(d.company_name)}" placeholder="e.g. Acme Mining (Pty) Ltd">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Link to existing organisation <span style="font-weight:400;color:var(--text3);font-size:11px;">(optional)</span></label>
-            <select id="ct-org-id" class="form-control">
-              <option value="">— not linked —</option>
-              ${orgs.map(o => `<option value="${o.id}" ${d.organisation_id==o.id?'selected':''}>${cEsc(o.name)}</option>`).join('')}
-            </select>
+            <input type="text" id="ct-company" class="form-control" value="${v(d.company_name)}" placeholder="e.g. Acme Mining (Pty) Ltd" oninput="onCtCompanyInput()" autocomplete="off">
+            <input type="hidden" id="ct-org-id" value="${d.organisation_id || ''}">
+            <div id="ct-company-linked" style="font-size:11px;color:#166534;margin-top:4px;${d.organisation_id ? '' : 'display:none;'}">🔗 Linked to an existing organisation. <a href="#" onclick="unlinkCtOrg();return false;" style="color:var(--red);">Unlink</a></div>
+            <div id="ct-company-matches" style="margin-top:8px;"></div>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Contact name</label>
-              <input type="text" id="ct-contact-name" class="form-control" value="${v(d.contact_name)}" placeholder="Decision-maker / champion">
+              <label class="form-label">Contact first name</label>
+              <input type="text" id="ct-contact-first" class="form-control" value="${v(ctFirst)}" placeholder="First name" oninput="checkCtContactSimilarity()" autocomplete="off">
             </div>
+            <div class="form-group">
+              <label class="form-label">Contact surname</label>
+              <input type="text" id="ct-contact-last" class="form-control" value="${v(ctLast)}" placeholder="Surname" oninput="checkCtContactSimilarity()" autocomplete="off">
+            </div>
+          </div>
+          <div id="ct-contact-match" style="display:none;font-size:11px;color:var(--text2);margin:-4px 0 10px;"></div>
+          <div class="form-row">
             <div class="form-group">
               <label class="form-label">Contact role</label>
               <input type="text" id="ct-contact-role" class="form-control" value="${v(d.contact_role)}" placeholder="e.g. Head of Security">
-            </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Contact email</label>
-              <input type="text" id="ct-contact-email" class="form-control" value="${v(d.contact_email)}">
             </div>
             <div class="form-group">
               <label class="form-label">Contact phone</label>
               <input type="text" id="ct-contact-phone" class="form-control" value="${v(d.contact_phone)}">
             </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Contact email</label>
+            <input type="text" id="ct-contact-email" class="form-control" value="${v(d.contact_email)}">
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -9853,14 +10310,23 @@ async function saveCampaignTarget() {
   const company = document.getElementById('ct-company').value.trim();
   const orgId   = +document.getElementById('ct-org-id').value || null;
   if (!company && !orgId) { showStatus('Company name is required', 'error'); return; }
+  const cFirst = document.getElementById('ct-contact-first').value.trim();
+  const cLast  = document.getElementById('ct-contact-last').value.trim();
+  const cRole  = document.getElementById('ct-contact-role').value.trim();
+  const cEmail = document.getElementById('ct-contact-email').value.trim();
+  const cPhone = document.getElementById('ct-contact-phone').value.trim();
+  // Enforce first name + surname whenever any contact detail is captured.
+  if ((cFirst || cLast || cRole || cEmail || cPhone) && (!cFirst || !cLast)) {
+    showStatus('Enter both a first name and surname for the contact', 'error'); return;
+  }
   const payload = {
     research_campaign_id: cockpitCampaignId,
     organisation_id: orgId,
     company_name: company || null,
-    contact_name:  document.getElementById('ct-contact-name').value.trim() || null,
-    contact_role:  document.getElementById('ct-contact-role').value.trim() || null,
-    contact_email: document.getElementById('ct-contact-email').value.trim() || null,
-    contact_phone: document.getElementById('ct-contact-phone').value.trim() || null,
+    contact_name:  [cFirst, cLast].filter(Boolean).join(' ') || null,
+    contact_role:  cRole || null,
+    contact_email: cEmail || null,
+    contact_phone: cPhone || null,
     priority: document.getElementById('ct-priority').value,
     status:   document.getElementById('ct-status').value,
     research_notes: document.getElementById('ct-notes').value.trim() || null,
@@ -9883,6 +10349,105 @@ async function saveCampaignTarget() {
   }
 }
 
+// ── New Target: company-name matching (mirrors the lead target-org field) ──
+// As the user types a company name, surface existing organisations via the shared
+// _findOrgMatches engine so they link to an existing client rather than create a
+// duplicate. Picking a match sets the hidden organisation_id FK; "Use as new"
+// keeps the typed name with no FK.
+function onCtCompanyInput() {
+  const matchEl = document.getElementById('ct-company-matches');
+  if (!matchEl) return;
+  // Typing means they're (re)choosing — drop any existing link.
+  const hid = document.getElementById('ct-org-id');
+  if (hid && hid.value) { hid.value = ''; const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none'; }
+  const name = (document.getElementById('ct-company')?.value || '').trim();
+  if (window._ctOrgNewConfirmed === name.toLowerCase()) { matchEl.innerHTML = ''; return; }
+  window._ctOrgNewConfirmed = null;
+  if (name.length < 3) { matchEl.innerHTML = ''; return; }
+
+  const { exact, shortlist } = _findOrgMatches(name, '', 5);
+  const matches = [exact, ...shortlist].filter(Boolean).slice(0, 5);
+  let html = '';
+  if (matches.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
+    html += matches.map(o => `
+      <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+        <div style="font-size:12px;">${cEsc(o.name)}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${cEsc(o.legal_name)})</span>` : ''}</div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="useCtOrgMatch(${o.id})">Use</button>
+      </div>`).join('');
+    html += `
+      <div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:6px;">
+        <div style="font-size:12px;color:var(--text2);">None of these — it's a new organisation.</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmCtOrgNew()">Use as new</button>
+      </div>`;
+  } else {
+    html = `
+      <div style="padding:8px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div style="font-size:12px;color:var(--text2);">✨ Looks like a new organisation — not in our existing list.</div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="confirmCtOrgNew()">Use as new</button>
+      </div>`;
+  }
+  matchEl.innerHTML = html;
+}
+function useCtOrgMatch(orgId) {
+  const o = (allData['organisations'] || []).find(x => +x.id === +orgId);
+  if (!o) return;
+  document.getElementById('ct-org-id').value = o.id;
+  document.getElementById('ct-company').value = o.name;
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = '';
+  const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
+  window._ctOrgNewConfirmed = (o.name || '').toLowerCase();
+}
+function confirmCtOrgNew() {
+  const name = (document.getElementById('ct-company')?.value || '').trim();
+  if (!name) return;
+  document.getElementById('ct-org-id').value = '';
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
+  window._ctOrgNewConfirmed = name.toLowerCase();
+  const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
+}
+function unlinkCtOrg() {
+  document.getElementById('ct-org-id').value = '';
+  const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
+  document.getElementById('ct-company')?.focus();
+}
+
+// New Target: contact name dup-check (warn-only — mirrors checkNewOppContactSimilarity).
+// Flags existing people with a similar name so the same person isn't re-keyed;
+// "use details" autofills the contact fields. No FK is stored on the target.
+let _ctContactTimer;
+function checkCtContactSimilarity() {
+  clearTimeout(_ctContactTimer);
+  _ctContactTimer = setTimeout(() => {
+    const first = document.getElementById('ct-contact-first')?.value || '';
+    const last  = document.getElementById('ct-contact-last')?.value || '';
+    const fullName = (first + ' ' + last).trim();
+    const matchEl = document.getElementById('ct-contact-match');
+    if (!matchEl) return;
+    if (fullName.length < 3) { matchEl.style.display = 'none'; matchEl.innerHTML = ''; return; }
+    const matches = findSimilar(fullName, allData['people'] || [], p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (matches.length) {
+      matchEl.style.display = 'block';
+      matchEl.innerHTML = '🔍 Similar people already on record: ' + matches.slice(0, 4).map(m => {
+        const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+        return `<strong>${cEsc(nm)}</strong> (${m.score}%) <a href="#" onclick="useCtContactDetails(${m.item.id});return false;" style="color:var(--red);">use details</a>`;
+      }).join(', ');
+    } else {
+      matchEl.style.display = 'none'; matchEl.innerHTML = '';
+    }
+  }, 400);
+}
+function useCtContactDetails(personId) {
+  const p = (allData['people'] || []).find(x => +x.id === +personId);
+  if (!p) return;
+  document.getElementById('ct-contact-first').value = p.first_name || '';
+  document.getElementById('ct-contact-last').value  = p.last_name || '';
+  if (p.title) document.getElementById('ct-contact-role').value  = p.title;
+  if (p.email) document.getElementById('ct-contact-email').value = p.email;
+  if (p.phone) document.getElementById('ct-contact-phone').value = p.phone;
+  const matchEl = document.getElementById('ct-contact-match'); if (matchEl) { matchEl.style.display = 'none'; matchEl.innerHTML = ''; }
+}
+
 
 // ── Sales Campaigns Page ──────────────────────────────────
 // Identical in structure to the Research Campaigns page; separate sales_campaigns table.
@@ -9891,7 +10456,7 @@ async function renderSalesCampaignsPage() {
   const body = document.getElementById('table-body');
 
   head.innerHTML = '';
-  body.innerHTML = '<tr class="empty-row"><td colspan="7">Loading…</td></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
     const [campaigns, regions, services, people] = await Promise.all([
@@ -9909,8 +10474,8 @@ async function renderSalesCampaignsPage() {
       campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="7">No sales campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
+      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="8">No sales campaigns yet. Click "+ New Campaign" to create one.</td></tr>';
       return;
     }
 
@@ -9933,6 +10498,7 @@ async function renderSalesCampaignsPage() {
       { key: 'status',  label: 'Status',        get: c => c.status || '' },
       { key: 'owner',   label: 'Owner',         get: c => ownerName(c) },
       { key: 'created', label: 'Created',       get: c => c.created_at || '' },
+      { key: 'actions', label: '',              get: () => '', sortable: false, filterable: false },
     ];
 
     const rowRenderer = (c) => {
@@ -9949,6 +10515,7 @@ async function renderSalesCampaignsPage() {
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
+        <td style="text-align:right;white-space:nowrap;">${currentUser?.isAdmin ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();confirmDeleteCampaign('sales',${c.id})">Delete</button>` : ''}</td>
       </tr>`;
     };
 
@@ -10804,6 +11371,7 @@ async function initLeadForm() {
   allData['research_campaigns']  = campaigns;
   allData['sales_campaigns']     = salesCampaigns;
   allData['service_sub_all']     = serviceSubs;
+  await ensureHomeOrgMembers();
 
   // Populate dropdowns
   const sourceSel = document.getElementById('lead-source-id');
@@ -10830,9 +11398,8 @@ async function initLeadForm() {
   // Single combined Product/Service dropdown (optgroup per major + its subs).
   populateLeadServiceCombo();
 
-  // Owner: Xone people if available, else all
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  // Owner must be a home-organisation member; keep the current owner regardless.
+  const ownerPool = homeOrgPeople(people, [leadData.owner_id, currentUser?.personId]);
   const ownerSel = document.getElementById('lead-owner-id');
   ownerSel.innerHTML = '<option value="">— shared pool —</option>' +
     ownerPool.map(p => {
@@ -14749,8 +15316,17 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
   const relatedNote = relatedParent
     ? `<div style="margin:-4px 0 12px;padding:8px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);">↳ Related to: <strong>${(relatedParent.engagement_date || '')}${relatedParent.engagement_type ? ' · ' + String(relatedParent.engagement_type).replace(/</g,'&lt;') : ''}</strong></div>`
     : '';
-  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked)
+  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked && !window._engStandalone)
     ? `<button class="btn btn-secondary" onclick="openLeadInteractionRelated(${i.id})" style="margin-right:auto;">+ Related engagement</button>`
+    : '';
+  // Clickable reference to the parent record (lead/opportunity; future project /
+  // contract). Identifies the engagement when opened standalone and lets you jump.
+  const _ep = window._engParent;
+  const relatedRecordLink = (_ep && _ep.id)
+    ? `<div style="margin:-4px 0 12px;padding:9px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);display:flex;justify-content:space-between;align-items:center;gap:10px;">
+         <span>${_ep.kind === 'deal' ? 'Opportunity' : _ep.kind === 'lead' ? 'Lead' : 'Related'}: <strong>${String(_ep.label || '').replace(/</g, '&lt;')}</strong></span>
+         <button class="btn btn-secondary btn-sm" onclick="closeModal();${_ep.kind === 'deal' ? `openOpportunity(${_ep.id})` : `openLead(${_ep.id})`}">Open →</button>
+       </div>`
     : '';
   const footer = fullyLocked
     ? `<button class="btn btn-secondary" onclick="closeModal()">Close</button>`
@@ -14769,6 +15345,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
         </div>
         <div class="modal-body">
           ${banner}
+          ${relatedRecordLink}
           <div id="li-cadence-hint"></div>
           ${relatedNote}
           <div class="form-row">
@@ -14824,6 +15401,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
 async function openLeadInteractionView(interactionId, locked = false) {
   const i = leadInteractions.find(x => +x.id === +interactionId);
   if (!i) return;
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('view', i, locked);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
@@ -14837,6 +15415,7 @@ async function openLeadInteractionView(interactionId, locked = false) {
 async function openEditLeadInteractionModal(interactionId) {
   const i = leadInteractions.find(x => +x.id === +interactionId);
   if (!i) return;
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('edit', i);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
@@ -14844,6 +15423,44 @@ async function openEditLeadInteractionModal(interactionId) {
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
   populateLiCompletionSection(i);
+}
+
+// Sets the engagement modal's related-record context to the open lead (lead-form
+// callers). Cleared standalone flag so save reloads the lead form as before.
+function _setLeadEngParent() {
+  window._engStandalone = false;
+  window._engParent = (typeof leadData !== 'undefined' && leadData && leadData.id)
+    ? { kind: 'lead', id: +leadData.id, label: leadData.target_org_name || leadData.description || ('Lead #' + leadData.id) }
+    : null;
+}
+
+// Standalone engagement opener — works from anywhere (e.g. the dashboard) for a
+// lead- OR deal-attached engagement. Loads the engagement + its parent, shows the
+// clickable related-record link, and saves back to the right parent.
+async function openEngagement(engId) {
+  let eng;
+  try { eng = (await apiGet('engagements', `id=eq.${engId}&select=*`))[0]; }
+  catch (e) { showStatus('Could not load engagement: ' + e.message, 'error'); return; }
+  if (!eng) { showStatus('Engagement not found', 'error'); return; }
+  let parent = null;
+  if (eng.lead_id != null) {
+    const l = (await apiGet('leads', `id=eq.${eng.lead_id}&select=id,target_org_name,description`))[0];
+    parent = { kind: 'lead', id: +eng.lead_id, label: l ? (l.target_org_name || l.description || ('Lead #' + l.id)) : ('Lead #' + eng.lead_id) };
+  } else if (eng.deal_id != null) {
+    const d = (await apiGet('deals', `id=eq.${eng.deal_id}&select=id,name`))[0];
+    parent = { kind: 'deal', id: +eng.deal_id, label: d ? (d.name || ('Deal #' + d.id)) : ('Deal #' + eng.deal_id) };
+  }
+  window._engParent = parent;
+  window._engStandalone = true;
+  window._liEditing = eng;
+  window._liQuickLogContext = null;
+  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const editable = eng.created_at && (Date.now() - new Date(eng.created_at).getTime()) < graceMins * 60000;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
+  await loadLiLookups();
+  preselectLookup('li-type',        'activity_type_id', 'engagement_type', eng);
+  preselectLookup('li-next-action', 'next_action_id',   'next_action',     eng);
+  populateLiCompletionSection(eng);
 }
 
 async function openLeadInteractionModal() {
@@ -14855,6 +15472,7 @@ async function openLeadInteractionModal() {
   }
   window._liRelatedTo = null;   // a plain new interaction is not part of a chain
   window._liQuickLogContext = null;   // logged from the full form → reload the form on save
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -14867,6 +15485,7 @@ async function openLeadInteractionRelated(parentId) {
   if (!leadData.id) return;
   window._liRelatedTo = +parentId || null;
   window._liQuickLogContext = null;   // logged from the full form → reload the form on save
+  _setLeadEngParent();
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   window._liEditing = null;
   await loadLiLookups();
@@ -15020,6 +15639,19 @@ async function saveLeadInteraction(editId) {
       window._liRelatedTo = null;
       showStatus('Engagement logged');
     }
+    // Standalone engagement edit (e.g. opened from the dashboard): no lead form to
+    // reload. Bump last_touch only when the parent is actually a lead, then refresh
+    // the dashboard. Never touches a lead for a deal-attached engagement.
+    if (window._engStandalone) {
+      const par = window._engParent || {};
+      if (par.kind === 'lead' && par.id) {
+        await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + par.id);
+      }
+      window._engStandalone = false;
+      closeModal();
+      if (currentPage === 'dashboard') await renderDashboard();
+      return;
+    }
     // Bump last_touch_date on the lead (on both create and edit, since edit can change the date)
     await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id);
     closeModal();
@@ -15082,9 +15714,9 @@ async function renderResearchCampaignModal() {
   allData['service_major'] = services;
   allData['people']        = people;
   allData['branches']      = branches;
+  await ensureHomeOrgMembers();
 
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [researchCampaignData.owner_id, currentUser?.personId]);
 
   const isEdit = !!researchCampaignData.id;
   const title = isEdit ? 'Edit Research Campaign' : 'New Research Campaign';
@@ -15283,9 +15915,9 @@ async function renderSalesCampaignModal() {
   allData['service_major'] = services;
   allData['people']        = people;
   allData['branches']      = branches;
+  await ensureHomeOrgMembers();
 
-  const xonePeople = people.filter(p => p.is_xone);
-  const ownerPool = xonePeople.length ? xonePeople : people;
+  const ownerPool = homeOrgPeople(people, [salesCampaignData.owner_id, currentUser?.personId]);
 
   const isEdit = !!salesCampaignData.id;
   const title = isEdit ? 'Edit Sales Campaign' : 'New Sales Campaign';
@@ -15912,6 +16544,7 @@ async function renderHomeOrgMembers() {
     allData['people'] = people;
     allData['organisations'] = orgs;
     allData['roles'] = roles;
+    allData['home_organisation_members'] = members; // keep owner-picker cache fresh after edits
 
     document.getElementById('page-sub').textContent = members.length + ' member' + (members.length !== 1 ? 's' : '');
 
