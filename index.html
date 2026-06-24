@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.28 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.28 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10645,7 +10645,7 @@ async function renderSalesCampaignsPage() {
       campaigns.length + (campaigns.length === 1 ? ' study' : ' studies');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Title</th><th>Sector</th><th>Region</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      head.innerHTML = '<tr><th>Title</th><th>Market Segment</th><th>Region</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
       body.innerHTML = '<tr class="empty-row"><td colspan="7">No research studies yet. Click "+ New Research Study" to create one.</td></tr>';
       return;
     }
@@ -10654,7 +10654,10 @@ async function renderSalesCampaignsPage() {
       const p = people.find(x => +x.id === +c.owner_id);
       return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
     };
-    const sectorName = (c) => (sectors.find(s => +s.id === +c.industry_sector_id)?.name) || '';
+    const sectorName = (c) => {
+      const ids = (Array.isArray(c.industry_sector_ids) && c.industry_sector_ids.length) ? c.industry_sector_ids : (c.industry_sector_id ? [c.industry_sector_id] : []);
+      return ids.map(id => sectors.find(s => +s.id === +id)?.name).filter(Boolean).join(' + ');
+    };
     const STATUS_STYLE = {
       'Active':    'background:#dcfce7;color:#166534;',
       'Paused':    'background:#fef3c7;color:#92400e;',
@@ -10664,7 +10667,7 @@ async function renderSalesCampaignsPage() {
 
     const cols = [
       { key: 'name',    label: 'Title',   get: c => c.name || '' },
-      { key: 'sector',  label: 'Sector',  get: c => sectorName(c) },
+      { key: 'sector',  label: 'Market Segment', get: c => sectorName(c) },
       { key: 'region',  label: 'Region',  get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
       { key: 'status',  label: 'Status',  get: c => c.status || '' },
       { key: 'owner',   label: 'Owner',   get: c => ownerName(c) },
@@ -16141,6 +16144,51 @@ async function _scSyncParticipants(cid) {
   if (_scPersonIds.length) await api('sales_campaign_people', 'POST', _scPersonIds.map(id => ({ sales_campaign_id: cid, person_id: id })), '');
 }
 
+// Market Segments — a study can span multiple industry sectors (chip picker).
+let _scSectorIds = [];
+function _scRenderSectorChips() {
+  const wrap = document.getElementById('sc-sector-chips'); if (!wrap) return;
+  const sectors = allData['industry_sectors'] || [];
+  wrap.innerHTML = _scSectorIds.length
+    ? _scSectorIds.map(id => _scChip((sectors.find(s => +s.id === +id)?.name) || ('#'+id), `scRemoveSector(${id})`)).join('')
+    : '<span style="font-size:12px;color:var(--text3);">None added</span>';
+}
+function scAddSector() { const s = document.getElementById('sc-sector-add'); const id = +s.value; if (id && !_scSectorIds.includes(id)) _scSectorIds.push(id); s.value=''; _scRenderSectorChips(); }
+function scRemoveSector(id) { _scSectorIds = _scSectorIds.filter(x => x !== +id); _scRenderSectorChips(); }
+
+// Inline create of a participant Organisation / Person (name only, persisted
+// immediately so it can be linked) — lets you add a new org/person without
+// leaving the form, like the lead flow.
+function scToggleNewOrg(show) { const el = document.getElementById('sc-org-new'); if (el) el.style.display = show ? 'flex' : 'none'; if (show) { const i = document.getElementById('sc-new-org-name'); if (i) { i.value=''; i.focus(); } } }
+async function scCreateOrg() {
+  const name = (document.getElementById('sc-new-org-name').value || '').trim();
+  if (!name) { showStatus('Organisation name is required', 'error'); return; }
+  try {
+    const res = await api('organisations', 'POST', { name }, 'select=*');
+    const org = res[0]; if (!org) throw new Error('No record returned');
+    (allData['organisations'] = allData['organisations'] || []).push(org);
+    if (!_scOrgIds.includes(+org.id)) _scOrgIds.push(+org.id);
+    const sel = document.getElementById('sc-org-add');
+    if (sel) { const o = document.createElement('option'); o.value = org.id; o.textContent = org.name; sel.appendChild(o); }
+    scToggleNewOrg(false); _scRenderOrgChips(); showStatus('Organisation created');
+  } catch (e) { showStatus('Create failed: ' + e.message, 'error'); }
+}
+function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); if (i) i.value=''; if (l) l.value=''; if (i) i.focus(); } }
+async function scCreatePerson() {
+  const first = (document.getElementById('sc-new-person-first').value || '').trim();
+  const last  = (document.getElementById('sc-new-person-last').value || '').trim();
+  if (!first) { showStatus('First name is required', 'error'); return; }
+  try {
+    const res = await api('people', 'POST', { first_name: first, last_name: last || null }, 'select=*');
+    const person = res[0]; if (!person) throw new Error('No record returned');
+    (allData['people'] = allData['people'] || []).push(person);
+    if (!_scPersonIds.includes(+person.id)) _scPersonIds.push(+person.id);
+    const sel = document.getElementById('sc-person-add');
+    if (sel) { const o = document.createElement('option'); o.value = person.id; o.textContent = [person.first_name, person.last_name].filter(Boolean).join(' '); sel.appendChild(o); }
+    scToggleNewPerson(false); _scRenderPersonChips(); showStatus('Person created');
+  } catch (e) { showStatus('Create failed: ' + e.message, 'error'); }
+}
+
 async function openNewSalesCampaign() {
   salesCampaignData = {};
   salesCampaignReturnContext = 'page';
@@ -16182,8 +16230,11 @@ async function renderSalesCampaignModal() {
   const d = salesCampaignData;
   const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
 
-  // Load existing participants for an edit.
+  // Load existing participants + market segments for an edit.
   _scOrgIds = []; _scPersonIds = [];
+  _scSectorIds = Array.isArray(d.industry_sector_ids) && d.industry_sector_ids.length
+    ? d.industry_sector_ids.map(Number)
+    : (d.industry_sector_id ? [+d.industry_sector_id] : []);
   if (isEdit) {
     try {
       const [orgLinks, personLinks] = await Promise.all([
@@ -16197,7 +16248,7 @@ async function renderSalesCampaignModal() {
 
   const html = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:560px;">
+      <div class="modal" style="width:720px;max-width:94vw;">
         <div class="modal-header">
           <div class="modal-title">${title}</div>
           <button class="modal-close" onclick="closeModal()">×</button>
@@ -16211,21 +16262,25 @@ async function renderSalesCampaignModal() {
             <label class="form-label">Purpose</label>
             <textarea id="sc-purpose" class="form-control" rows="2" placeholder="What is this study for? What are we trying to learn?">${esc(d.purpose)}</textarea>
           </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Industry Sector</label>
-              <select id="sc-industry-sector-id" class="form-control">
-                <option value="">— select —</option>
-                ${sectors.map(s => `<option value="${s.id}" ${d.industry_sector_id==s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
+
+          <div class="form-group">
+            <label class="form-label">Market Segment <span style="font-weight:400;color:var(--text3);font-size:11px;">— pick one or more sectors</span></label>
+            <div style="display:flex;gap:8px;">
+              <select id="sc-sector-add" class="form-control" style="flex:1;">
+                <option value="">— pick a sector —</option>
+                ${sectors.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}
               </select>
+              <button type="button" class="btn btn-secondary" onclick="scAddSector()">Add</button>
             </div>
-            <div class="form-group">
-              <label class="form-label">Region</label>
-              <select id="sc-region-id" class="form-control">
-                <option value="">— select —</option>
-                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${esc(r.name)}</option>`).join('')}
-              </select>
-            </div>
+            <div id="sc-sector-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Region</label>
+            <select id="sc-region-id" class="form-control">
+              <option value="">— select —</option>
+              ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${esc(r.name)}</option>`).join('')}
+            </select>
           </div>
 
           <div class="form-group">
@@ -16236,6 +16291,12 @@ async function renderSalesCampaignModal() {
                 ${orgs.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}
               </select>
               <button type="button" class="btn btn-secondary" onclick="scAddOrg()">Add</button>
+              <button type="button" class="btn btn-ghost" onclick="scToggleNewOrg(true)">+ New</button>
+            </div>
+            <div id="sc-org-new" style="display:none;gap:8px;margin-top:8px;">
+              <input type="text" id="sc-new-org-name" class="form-control" placeholder="New organisation name" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreateOrg();}">
+              <button type="button" class="btn btn-primary" onclick="scCreateOrg()">Create &amp; add</button>
+              <button type="button" class="btn btn-secondary" onclick="scToggleNewOrg(false)">Cancel</button>
             </div>
             <div id="sc-org-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
           </div>
@@ -16248,6 +16309,13 @@ async function renderSalesCampaignModal() {
                 ${people.map(p => `<option value="${p.id}">${esc([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
               </select>
               <button type="button" class="btn btn-secondary" onclick="scAddPerson()">Add</button>
+              <button type="button" class="btn btn-ghost" onclick="scToggleNewPerson(true)">+ New</button>
+            </div>
+            <div id="sc-person-new" style="display:none;gap:8px;margin-top:8px;">
+              <input type="text" id="sc-new-person-first" class="form-control" placeholder="First name" style="flex:1;">
+              <input type="text" id="sc-new-person-last" class="form-control" placeholder="Last name" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreatePerson();}">
+              <button type="button" class="btn btn-primary" onclick="scCreatePerson()">Create &amp; add</button>
+              <button type="button" class="btn btn-secondary" onclick="scToggleNewPerson(false)">Cancel</button>
             </div>
             <div id="sc-person-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
           </div>
@@ -16279,6 +16347,7 @@ async function renderSalesCampaignModal() {
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
+  _scRenderSectorChips();
   _scRenderOrgChips();
   _scRenderPersonChips();
 }
@@ -16289,7 +16358,8 @@ async function saveSalesCampaign() {
   const payload = {
     name,
     purpose: document.getElementById('sc-purpose').value.trim() || null,
-    industry_sector_id: +document.getElementById('sc-industry-sector-id').value || null,
+    industry_sector_ids: _scSectorIds.length ? _scSectorIds : null,
+    industry_sector_id:  _scSectorIds[0] || null,   // primary, for legacy single-value reads
     region_id: +document.getElementById('sc-region-id').value || null,
     status: document.getElementById('sc-status').value,
     owner_id: +document.getElementById('sc-owner-id').value || null,
