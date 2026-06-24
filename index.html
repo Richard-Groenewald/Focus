@@ -179,6 +179,16 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 .busy-overlay-label{font-size:13px;font-weight:600;color:var(--text);}
 @keyframes slideIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 
+/* ── Global network activity bar ──────────────────────────
+   Slim indeterminate progress bar pinned to the top edge, shown whenever a
+   request is in flight (wired into api()). Plus a progress cursor so a click is
+   acknowledged the instant work starts. Clean, non-blocking, brand-red. */
+#net-bar{position:fixed;top:0;left:0;right:0;height:3px;z-index:100000;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .25s ease;}
+#net-bar.on{opacity:1;}
+#net-bar::before{content:'';position:absolute;top:0;height:100%;width:35%;border-radius:3px;background:linear-gradient(90deg,rgba(250,10,17,0),var(--red,#FA0A11),rgba(250,10,17,0));box-shadow:0 0 10px rgba(250,10,17,.55);animation:net-bar-slide 1.05s ease-in-out infinite;}
+@keyframes net-bar-slide{0%{left:-35%;}100%{left:100%;}}
+body.net-busy{cursor:progress;}
+
 /* ── Connection ────────────────────────────────────────── */
 .conn-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;}
 .conn-badge.online{background:#ECFDF5;color:var(--green);}
@@ -477,6 +487,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 </style>
 </head>
 <body>
+<div id="net-bar"></div>
 
 <!-- Login Screen -->
 <div id="login-screen" style="display:flex;position:fixed;inset:0;z-index:99999;background:var(--navy);align-items:center;justify-content:center;">
@@ -495,7 +506,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -524,7 +535,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1556,8 +1567,24 @@ function _apiTransient(e, status) {
   return false;
 }
 
+// ── Global activity indicator ──────────────────────────────
+// Slim top progress bar (#net-bar) + progress cursor while any request is in
+// flight. Wired into api() so every click→action is acknowledged instantly.
+// Reference-counted so it stays until ALL concurrent requests finish.
+let _netCount = 0;
+function _netBusy(on) {
+  const bar = document.getElementById('net-bar');
+  if (on) {
+    if (++_netCount === 1) { if (bar) bar.classList.add('on'); document.body.classList.add('net-busy'); }
+  } else if (--_netCount <= 0) {
+    _netCount = 0; if (bar) bar.classList.remove('on'); document.body.classList.remove('net-busy');
+  }
+}
+
 async function api(table, method='GET', body=null, params='') {
   if (MOCK) return mockApi(table, method, body, params);
+  _netBusy(true);
+  try {
   const url = `${FN_URL}/${table}${params ? '?' + params : ''}`;
   const opts = {
     method,
@@ -1600,6 +1627,7 @@ async function api(table, method='GET', body=null, params='') {
     }
   }
   throw lastErr;
+  } finally { _netBusy(false); }
 }
 
 async function apiGet(table, params='') { return api(table, 'GET', null, params); }
