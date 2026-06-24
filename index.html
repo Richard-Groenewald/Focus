@@ -179,6 +179,22 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 .busy-overlay-label{font-size:13px;font-weight:600;color:var(--text);}
 @keyframes slideIn{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 
+/* ── Global network activity bar ──────────────────────────
+   Slim indeterminate progress bar pinned to the top edge, shown whenever a
+   request is in flight (wired into api()). Plus a progress cursor so a click is
+   acknowledged the instant work starts. Clean, non-blocking, brand-red. */
+#net-bar{position:fixed;top:0;left:0;right:0;height:3px;z-index:100000;pointer-events:none;overflow:hidden;opacity:0;transition:opacity .25s ease;}
+#net-bar.on{opacity:1;}
+#net-bar::before{content:'';position:absolute;top:0;height:100%;width:35%;border-radius:3px;background:linear-gradient(90deg,rgba(250,10,17,0),var(--red,#FA0A11),rgba(250,10,17,0));box-shadow:0 0 10px rgba(250,10,17,.55);animation:net-bar-slide 1.05s ease-in-out infinite;}
+@keyframes net-bar-slide{0%{left:-35%;}100%{left:100%;}}
+/* A crisp, CSS-drawn spinner follows the pointer while a request is in flight
+   (.net-busy) or the instant an action is pressed (.click-busy). Replaces the OS
+   busy cursor, which renders pixelated on Windows. Positioned at the pointer (JS
+   sets left/top) with a small offset so it sits just below-right of it. */
+#busy-cursor{position:fixed;left:-100px;top:0;width:25px;height:25px;margin:-2px 0 0 24px;z-index:100001;pointer-events:none;opacity:0;transition:opacity .1s ease;border-radius:50%;border:4px solid rgba(250,10,17,.25);border-top-color:var(--red,#FA0A11);}
+body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy-cursor-spin .55s linear infinite;}
+@keyframes busy-cursor-spin{to{transform:rotate(360deg);}}
+
 /* ── Connection ────────────────────────────────────────── */
 .conn-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;}
 .conn-badge.online{background:#ECFDF5;color:var(--green);}
@@ -477,6 +493,8 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 </style>
 </head>
 <body>
+<div id="net-bar"></div>
+<div id="busy-cursor"></div>
 
 <!-- Login Screen -->
 <div id="login-screen" style="display:flex;position:fixed;inset:0;z-index:99999;background:var(--navy);align-items:center;justify-content:center;">
@@ -495,7 +513,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -524,7 +542,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1556,8 +1574,42 @@ function _apiTransient(e, status) {
   return false;
 }
 
+// ── Global activity indicator ──────────────────────────────
+// Slim top progress bar (#net-bar) + progress cursor while any request is in
+// flight. Wired into api() so every click→action is acknowledged instantly.
+// Reference-counted so it stays until ALL concurrent requests finish.
+let _netCount = 0;
+function _netBusy(on) {
+  const bar = document.getElementById('net-bar');
+  if (on) {
+    if (++_netCount === 1) { if (bar) bar.classList.add('on'); document.body.classList.add('net-busy'); }
+  } else if (--_netCount <= 0) {
+    _netCount = 0; if (bar) bar.classList.remove('on'); document.body.classList.remove('net-busy');
+  }
+}
+
+// Immediate cursor feedback: flip to the progress cursor the moment an actionable
+// element is pressed — before any request fires. Auto-clears after a short flash;
+// if the click starts a request, _netBusy() keeps the cursor up until it finishes.
+let _clickCursorTimer = null;
+function _positionBusyCursor(x, y) {
+  const el = document.getElementById('busy-cursor');
+  if (el) { el.style.left = x + 'px'; el.style.top = y + 'px'; }
+}
+document.addEventListener('mousemove', (e) => _positionBusyCursor(e.clientX, e.clientY), { passive: true });
+document.addEventListener('mousedown', (e) => {
+  _positionBusyCursor(e.clientX, e.clientY);   // spinner appears exactly at the click point
+  const t = e.target && e.target.closest && e.target.closest('button, a, [onclick], [role="button"], .btn, .tab, .opp-tab, label, select');
+  if (!t || t.disabled) return;
+  document.body.classList.add('click-busy');
+  if (_clickCursorTimer) clearTimeout(_clickCursorTimer);
+  _clickCursorTimer = setTimeout(() => { document.body.classList.remove('click-busy'); _clickCursorTimer = null; }, 500);
+}, true);
+
 async function api(table, method='GET', body=null, params='') {
   if (MOCK) return mockApi(table, method, body, params);
+  _netBusy(true);
+  try {
   const url = `${FN_URL}/${table}${params ? '?' + params : ''}`;
   const opts = {
     method,
@@ -1600,6 +1652,7 @@ async function api(table, method='GET', body=null, params='') {
     }
   }
   throw lastErr;
+  } finally { _netBusy(false); }
 }
 
 async function apiGet(table, params='') { return api(table, 'GET', null, params); }
@@ -1622,6 +1675,7 @@ const LOOKUP_CONFIG = [
   { key: 'regions',       params: 'select=*', persist: true  },
   { key: 'branches',      params: 'select=*', persist: true  },
   { key: 'service_major', params: 'select=*', persist: true  },
+  { key: 'service_sub',   params: 'select=*', persist: true  },
   { key: 'lead_sources',  params: 'select=*', persist: true  },
   { key: 'stages',        params: 'select=*', persist: true  },
   { key: 'people',        params: 'select=*', persist: false },
@@ -8450,12 +8504,11 @@ async function _dashPipeline() {
     .filter(d => _dashInScope(d, scope) && open.has(+d.stage_id));
   if (!deals.length) return _dashCard('Pipeline', scope, [['Weighted', 'R 0'], ['Total', 'R 0']], 'No open opportunities', 'revenue_pipeline', 'Full pipeline');
   const ids = deals.map(d => d.id);
-  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=id,deal_id`);
-  const streamDeal = Object.fromEntries(streams.map(s => [+s.id, +s.deal_id]));
-  let months = [];
-  if (streams.length) months = await apiGet('revenue_stream_months', `stream_id=in.(${streams.map(s => s.id).join(',')})&select=stream_id,opportunity_revenue`);
+  // One embedded call: opportunity streams with their months nested (FK-backed;
+  // nested rows aren't subject to the 1000-row cap — verified against the DB).
+  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=deal_id,revenue_stream_months(opportunity_revenue)`);
   const dealTotal = {};
-  for (const m of months) { const did = streamDeal[+m.stream_id]; if (did != null) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  for (const s of streams) { const did = +s.deal_id; for (const m of (s.revenue_stream_months || [])) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
   let total = 0, weighted = 0;
   for (const d of deals) { const t = dealTotal[d.id] || 0; total += t; weighted += t * ((+d.probability || 0) / 100); }
   return _dashCard('Pipeline', scope, [
@@ -8882,7 +8935,7 @@ const RPP = (function () {
 
   // ── data load (bulk fetch + client-side join) ──
   async function loadData(){
-    const [deals, orgs, people, regions, stages, smaj, ssub, streams, branches] = await Promise.all([
+    const [deals, orgs, people, regions, stages, smaj, ssub, streamsEmb, branches] = await Promise.all([
       apiGet('deals','select=*'),
       allData['organisations'] || apiGet('organisations','select=*'),
       allData['people']        || apiGet('people','select=*'),
@@ -8890,17 +8943,22 @@ const RPP = (function () {
       allData['stages']        || apiGet('stages','select=*'),
       allData['service_major'] || apiGet('service_major','select=*'),
       allData['service_sub']   || apiGet('service_sub','select=*'),
-      apiGet('revenue_streams','select=id,deal_id,stream_type'),
+      // Streams WITH their months nested — one embedded call replaces the old
+      // streams fetch + the paginated months fetch (apiGetIn). Nested rows aren't
+      // subject to the 1000-row cap (verified: returns all months), so this also
+      // retires the pagination that previously dropped overflow months.
+      apiGet('revenue_streams','select=id,deal_id,stream_type,revenue_stream_months(stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin)'),
       allData['branches']      || apiGet('branches','select=*'),
     ]);
     allData['organisations']=orgs; allData['people']=people; allData['regions']=regions;
     allData['stages']=stages; allData['service_major']=smaj; allData['service_sub']=ssub;
     allData['branches']=branches;
 
+    // Flatten the embedded result back to the flat shapes the aggregation expects.
+    const streams = streamsEmb.map(s => ({ id: s.id, deal_id: s.deal_id, stream_type: s.stream_type }));
     const streamToDeal = new Map(streams.map(s=>[+s.id, +s.deal_id]));
-    const streamIds = streams.map(s=>+s.id);
-    const months = streamIds.length ? await apiGetIn('revenue_stream_months','stream_id', streamIds,
-      'select=stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin') : [];
+    const months = [];
+    streamsEmb.forEach(s => (s.revenue_stream_months || []).forEach(m => months.push({ ...m, stream_id: s.id })));
 
     const pick = (a,v)=> a!=null ? a : (v!=null ? +v : a);
     const byDeal = new Map();
@@ -9410,22 +9468,24 @@ async function renderResearchCampaignsPage() {
   body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
-    const [campaigns, regions, services, people] = await Promise.all([
+    const [campaigns, regions, services, people, sectors] = await Promise.all([
       apiGet('research_campaigns', 'select=*&order=created_at.desc'),
-      allData['regions']       || apiGet('regions', 'select=*'),
-      allData['service_major'] || apiGet('service_major', 'select=*'),
-      allData['people']        || apiGet('people', 'select=*'),
+      allData['regions']          || apiGet('regions', 'select=*'),
+      allData['service_major']    || apiGet('service_major', 'select=*'),
+      allData['people']           || apiGet('people', 'select=*'),
+      allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
     ]);
-    allData['regions']       = regions;
-    allData['service_major'] = services;
-    allData['people']        = people;
+    allData['regions']          = regions;
+    allData['service_major']    = services;
+    allData['people']           = people;
+    allData['industry_sectors'] = sectors;
     allData['research_campaigns'] = campaigns;
 
     document.getElementById('page-sub').textContent =
       campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      head.innerHTML = '<tr><th>Name</th><th>Sector</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
       body.innerHTML = '<tr class="empty-row"><td colspan="8">No marketing campaigns yet. Click "+ New Marketing Campaign" to create one.</td></tr>';
       return;
     }
@@ -9443,7 +9503,7 @@ async function renderResearchCampaignsPage() {
 
     const cols = [
       { key: 'name',    label: 'Name',          get: c => c.name || '' },
-      { key: 'segment', label: 'Segment',       get: c => c.segment || '' },
+      { key: 'sector',  label: 'Sector',        get: c => (sectors.find(s => +s.id === +c.industry_sector_id)?.name) || c.segment || '' },
       { key: 'region',  label: 'Region',        get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
       { key: 'service', label: 'Service Focus', get: c => focusMajorNames(c, ' + ', services) },
       { key: 'status',  label: 'Status',        get: c => c.status || '' },
@@ -9461,7 +9521,7 @@ async function renderResearchCampaignsPage() {
       // Row opens the cockpit (drive & manage); the trailing Edit opens the mission modal.
       return `<tr onclick="openResearchCampaignCockpit(${c.id})" style="cursor:pointer;">
         <td style="font-weight:600;">${c.name}</td>
-        <td>${c.segment || '—'}</td>
+        <td>${(sectors.find(s => +s.id === +c.industry_sector_id)?.name) || c.segment || '—'}</td>
         <td>${region?.name || '—'}</td>
         <td>${focusMajorNames(c, ' + ', services) || '—'}</td>
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
@@ -9787,7 +9847,7 @@ async function renderResearchCampaignCockpit() {
     cockpitData = { campaign, regions, services, people, sources, targets, leads, steps, interactions };
 
     document.getElementById('page-title').textContent = campaign.name || 'Campaign Cockpit';
-    document.getElementById('page-sub').textContent = campaign.segment || '';
+    document.getElementById('page-sub').textContent = (allData['industry_sectors']||[]).find(s => +s.id === +campaign.industry_sector_id)?.name || campaign.segment || '';
 
     body.innerHTML = `<tr><td style="padding:0;border:none;">
       <div style="padding:0 0 32px 0;">
@@ -9831,7 +9891,7 @@ function cockpitMissionHeader(c, regions, services, people) {
             <span style="font-size:18px;font-weight:800;color:var(--dark-blue,#003057);">${cEsc(c.name)}</span>
             <span style="${statusColour}padding:3px 9px;border-radius:4px;font-size:11px;font-weight:700;">${cEsc(c.status)}</span>
           </div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${c.segment ? cEsc(c.segment) : '<span style="color:var(--text3);">No target segment defined</span>'}</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${(() => { const sn = (allData['industry_sectors']||[]).find(s => +s.id === +c.industry_sector_id)?.name || c.segment; return sn ? cEsc(sn) : '<span style="color:var(--text3);">No sector defined</span>'; })()}</div>
           <div style="display:flex;gap:24px;flex-wrap:wrap;">
             ${cell('Region', cEsc(region))}
             ${cell('Service focus', cEsc(service))}
@@ -10570,23 +10630,23 @@ async function renderSalesCampaignsPage() {
   body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
-    const [campaigns, regions, services, people] = await Promise.all([
+    const [campaigns, regions, sectors, people] = await Promise.all([
       apiGet('sales_campaigns', 'select=*&order=created_at.desc'),
-      allData['regions']       || apiGet('regions', 'select=*'),
-      allData['service_major'] || apiGet('service_major', 'select=*'),
-      allData['people']        || apiGet('people', 'select=*'),
+      allData['regions']          || apiGet('regions', 'select=*'),
+      allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
+      allData['people']           || apiGet('people', 'select=*'),
     ]);
-    allData['regions']       = regions;
-    allData['service_major'] = services;
-    allData['people']        = people;
-    allData['sales_campaigns'] = campaigns;
+    allData['regions']          = regions;
+    allData['industry_sectors'] = sectors;
+    allData['people']           = people;
+    allData['sales_campaigns']  = campaigns;
 
     document.getElementById('page-sub').textContent =
-      campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
+      campaigns.length + (campaigns.length === 1 ? ' study' : ' studies');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="8">No research studies yet. Click "+ New Research Study" to create one.</td></tr>';
+      head.innerHTML = '<tr><th>Title</th><th>Sector</th><th>Region</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">No research studies yet. Click "+ New Research Study" to create one.</td></tr>';
       return;
     }
 
@@ -10594,6 +10654,7 @@ async function renderSalesCampaignsPage() {
       const p = people.find(x => +x.id === +c.owner_id);
       return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
     };
+    const sectorName = (c) => (sectors.find(s => +s.id === +c.industry_sector_id)?.name) || '';
     const STATUS_STYLE = {
       'Active':    'background:#dcfce7;color:#166534;',
       'Paused':    'background:#fef3c7;color:#92400e;',
@@ -10602,27 +10663,23 @@ async function renderSalesCampaignsPage() {
     };
 
     const cols = [
-      { key: 'name',    label: 'Name',          get: c => c.name || '' },
-      { key: 'segment', label: 'Segment',       get: c => c.segment || '' },
-      { key: 'region',  label: 'Region',        get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
-      { key: 'service', label: 'Service Focus', get: c => focusMajorNames(c, ' + ', services) },
-      { key: 'status',  label: 'Status',        get: c => c.status || '' },
-      { key: 'owner',   label: 'Owner',         get: c => ownerName(c) },
-      { key: 'created', label: 'Created',       get: c => c.created_at || '' },
-      { key: 'actions', label: '',              get: () => '', sortable: false, filterable: false },
+      { key: 'name',    label: 'Title',   get: c => c.name || '' },
+      { key: 'sector',  label: 'Sector',  get: c => sectorName(c) },
+      { key: 'region',  label: 'Region',  get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
+      { key: 'status',  label: 'Status',  get: c => c.status || '' },
+      { key: 'owner',   label: 'Owner',   get: c => ownerName(c) },
+      { key: 'created', label: 'Created', get: c => c.created_at || '' },
+      { key: 'actions', label: '',        get: () => '', sortable: false, filterable: false },
     ];
 
     const rowRenderer = (c) => {
       const region  = regions.find(r => +r.id === +c.region_id);
-      const service = services.find(s => +s.id === +c.service_major_id);
-      const owner   = people.find(p => +p.id === +c.owner_id);
-      const ownerLabel = owner ? [owner.first_name, owner.last_name].filter(Boolean).join(' ') : '—';
+      const ownerLabel = ownerName(c) || '—';
       const statusColour = STATUS_STYLE[c.status] || 'background:#f3f4f6;color:#4b5563;';
       return `<tr onclick="openSalesCampaign(${c.id})" style="cursor:pointer;">
         <td style="font-weight:600;">${c.name}</td>
-        <td>${c.segment || '—'}</td>
+        <td>${sectorName(c) || '—'}</td>
         <td>${region?.name || '—'}</td>
-        <td>${focusMajorNames(c, ' + ', services) || '—'}</td>
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
         <td>${ownerLabel}</td>
         <td>${c.created_at ? new Date(c.created_at).toLocaleDateString('en-ZA') : '—'}</td>
@@ -15869,16 +15926,18 @@ async function openResearchCampaignModal(id) {
 
 async function renderResearchCampaignModal() {
   // Load lookups if not cached
-  const [regions, services, people, branches] = await Promise.all([
-    allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
-    allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
-    allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
-    allData['branches']      || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+  const [regions, services, people, branches, sectors] = await Promise.all([
+    allData['regions']          || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+    allData['service_major']    || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
+    allData['people']           || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['branches']         || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+    allData['industry_sectors'] || apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc'),
   ]);
-  allData['regions']       = regions;
-  allData['service_major'] = services;
-  allData['people']        = people;
-  allData['branches']      = branches;
+  allData['regions']          = regions;
+  allData['service_major']    = services;
+  allData['people']           = people;
+  allData['branches']         = branches;
+  allData['industry_sectors'] = sectors;
   await ensureHomeOrgMembers();
 
   const ownerPool = homeOrgPeople(people, [researchCampaignData.owner_id, currentUser?.personId]);
@@ -15900,8 +15959,11 @@ async function renderResearchCampaignModal() {
             <input type="text" id="rc-name" class="form-control" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Q3 Limpopo mining outreach">
           </div>
           <div class="form-group">
-            <label class="form-label">Target segment</label>
-            <input type="text" id="rc-segment" class="form-control" value="${(d.segment||'').replace(/"/g,'&quot;')}" placeholder="Who are you targeting? e.g. Mid-tier mining houses in Limpopo">
+            <label class="form-label">Sector</label>
+            <select id="rc-industry-sector-id" class="form-control">
+              <option value="">— select —</option>
+              ${sectors.map(s => `<option value="${s.id}" ${d.industry_sector_id==s.id?'selected':''}>${String(s.name).replace(/</g,'&lt;')}</option>`).join('')}
+            </select>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -15988,7 +16050,7 @@ async function saveResearchCampaign() {
   const rcSvc = readServiceFocusBoxes('rc-svc-major');
   const payload = {
     name,
-    segment: document.getElementById('rc-segment').value.trim() || null,
+    industry_sector_id: +document.getElementById('rc-industry-sector-id').value || null,
     region_id: +document.getElementById('rc-region-id').value || null,
     branch_id: +document.getElementById('rc-branch-id').value || null,
     service_major_ids: rcSvc.length ? rcSvc : null,
@@ -16046,6 +16108,39 @@ let salesCampaignData = {};
 // Tracks where the modal was opened from, so we can refresh that view on save
 let salesCampaignReturnContext = 'page'; // 'page' or 'lead'
 
+// Research Study participants — selected organisation + person ids for the open
+// study, synced to sales_campaign_organisations / sales_campaign_people on save.
+let _scOrgIds = [];
+let _scPersonIds = [];
+function _scChip(label, onRemove) {
+  return `<span style="display:inline-flex;align-items:center;gap:6px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:14px;padding:3px 10px;margin:0 6px 6px 0;font-size:12px;">${String(label).replace(/</g,'&lt;')}<span style="cursor:pointer;color:var(--red);font-weight:800;line-height:1;" onclick="${onRemove}">×</span></span>`;
+}
+function _scRenderOrgChips() {
+  const wrap = document.getElementById('sc-org-chips'); if (!wrap) return;
+  const orgs = allData['organisations'] || [];
+  wrap.innerHTML = _scOrgIds.length
+    ? _scOrgIds.map(id => _scChip((orgs.find(o => +o.id === +id)?.name) || ('#'+id), `scRemoveOrg(${id})`)).join('')
+    : '<span style="font-size:12px;color:var(--text3);">None added</span>';
+}
+function _scRenderPersonChips() {
+  const wrap = document.getElementById('sc-person-chips'); if (!wrap) return;
+  const ppl = allData['people'] || [];
+  wrap.innerHTML = _scPersonIds.length
+    ? _scPersonIds.map(id => { const p = ppl.find(x => +x.id === +id); return _scChip(p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : ('#'+id), `scRemovePerson(${id})`); }).join('')
+    : '<span style="font-size:12px;color:var(--text3);">None added</span>';
+}
+function scAddOrg() { const s = document.getElementById('sc-org-add'); const id = +s.value; if (id && !_scOrgIds.includes(id)) _scOrgIds.push(id); s.value=''; _scRenderOrgChips(); }
+function scRemoveOrg(id) { _scOrgIds = _scOrgIds.filter(x => x !== +id); _scRenderOrgChips(); }
+function scAddPerson() { const s = document.getElementById('sc-person-add'); const id = +s.value; if (id && !_scPersonIds.includes(id)) _scPersonIds.push(id); s.value=''; _scRenderPersonChips(); }
+function scRemovePerson(id) { _scPersonIds = _scPersonIds.filter(x => x !== +id); _scRenderPersonChips(); }
+// Replace-all sync: clear this study's participant links, then insert current picks.
+async function _scSyncParticipants(cid) {
+  await api('sales_campaign_organisations', 'DELETE', null, 'sales_campaign_id=eq.' + cid);
+  await api('sales_campaign_people', 'DELETE', null, 'sales_campaign_id=eq.' + cid);
+  if (_scOrgIds.length)    await api('sales_campaign_organisations', 'POST', _scOrgIds.map(id => ({ sales_campaign_id: cid, organisation_id: id })), '');
+  if (_scPersonIds.length) await api('sales_campaign_people', 'POST', _scPersonIds.map(id => ({ sales_campaign_id: cid, person_id: id })), '');
+}
+
 async function openNewSalesCampaign() {
   salesCampaignData = {};
   salesCampaignReturnContext = 'page';
@@ -16070,24 +16165,35 @@ async function openSalesCampaignModal(id) {
 }
 
 async function renderSalesCampaignModal() {
-  // Load lookups if not cached
-  const [regions, services, people, branches] = await Promise.all([
-    allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
-    allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
-    allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
-    allData['branches']      || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+  // Load lookups (cached where possible)
+  const [regions, sectors, people, orgs] = await Promise.all([
+    allData['regions']          || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+    allData['industry_sectors'] || apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc'),
+    allData['people']           || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['organisations']    || apiGet('organisations', 'select=*&order=name.asc'),
   ]);
-  allData['regions']       = regions;
-  allData['service_major'] = services;
-  allData['people']        = people;
-  allData['branches']      = branches;
+  allData['regions'] = regions; allData['industry_sectors'] = sectors;
+  allData['people'] = people;   allData['organisations'] = orgs;
   await ensureHomeOrgMembers();
 
   const ownerPool = homeOrgPeople(people, [salesCampaignData.owner_id, currentUser?.personId]);
-
   const isEdit = !!salesCampaignData.id;
   const title = isEdit ? 'Edit Research Study' : 'New Research Study';
   const d = salesCampaignData;
+  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+
+  // Load existing participants for an edit.
+  _scOrgIds = []; _scPersonIds = [];
+  if (isEdit) {
+    try {
+      const [orgLinks, personLinks] = await Promise.all([
+        apiGet('sales_campaign_organisations', 'sales_campaign_id=eq.' + d.id + '&select=organisation_id'),
+        apiGet('sales_campaign_people', 'sales_campaign_id=eq.' + d.id + '&select=person_id'),
+      ]);
+      _scOrgIds = orgLinks.map(r => +r.organisation_id);
+      _scPersonIds = personLinks.map(r => +r.person_id);
+    } catch (e) { /* leave empty */ }
+  }
 
   const html = `
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
@@ -16098,32 +16204,54 @@ async function renderSalesCampaignModal() {
         </div>
         <div class="modal-body">
           <div class="form-group">
-            <label class="form-label">Campaign name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-            <input type="text" id="sc-name" class="form-control" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Q3 Western Cape estates push">
+            <label class="form-label">Title <span style="color:var(--red)">*</span></label>
+            <input type="text" id="sc-name" class="form-control" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Winelands estate security study">
           </div>
           <div class="form-group">
-            <label class="form-label">Target segment</label>
-            <input type="text" id="sc-segment" class="form-control" value="${(d.segment||'').replace(/"/g,'&quot;')}" placeholder="Who are you targeting? e.g. Residential estates in the Winelands">
+            <label class="form-label">Purpose</label>
+            <textarea id="sc-purpose" class="form-control" rows="2" placeholder="What is this study for? What are we trying to learn?">${esc(d.purpose)}</textarea>
           </div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Region</label>
-              <select id="sc-region-id" class="form-control" onchange="syncBranchToRegion('sc-region-id','sc-branch-id')">
+              <label class="form-label">Industry Sector</label>
+              <select id="sc-industry-sector-id" class="form-control">
                 <option value="">— select —</option>
-                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+                ${sectors.map(s => `<option value="${s.id}" ${d.industry_sector_id==s.id?'selected':''}>${esc(s.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
-              <label class="form-label">Service focus <span style="font-weight:400;color:var(--text3);font-size:11px;">— tick all that apply</span></label>
-              <div style="display:flex;flex-wrap:wrap;padding-top:6px;">
-                ${serviceFocusBoxesHtml(services, 'sc-svc-major', focusMajorIds(d))}
-              </div>
+              <label class="form-label">Region</label>
+              <select id="sc-region-id" class="form-control">
+                <option value="">— select —</option>
+                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${esc(r.name)}</option>`).join('')}
+              </select>
             </div>
           </div>
+
           <div class="form-group">
-            <label class="form-label">Branch <span style="font-weight:400;color:var(--text3);font-size:11px;">— defaults from region, override if needed</span></label>
-            <select id="sc-branch-id" class="form-control">${branchOptionsHtml(d.branch_id)}</select>
+            <label class="form-label">Participants — Organisations</label>
+            <div style="display:flex;gap:8px;">
+              <select id="sc-org-add" class="form-control" style="flex:1;">
+                <option value="">— pick an organisation —</option>
+                ${orgs.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}
+              </select>
+              <button type="button" class="btn btn-secondary" onclick="scAddOrg()">Add</button>
+            </div>
+            <div id="sc-org-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
           </div>
+
+          <div class="form-group">
+            <label class="form-label">Participants — People</label>
+            <div style="display:flex;gap:8px;">
+              <select id="sc-person-add" class="form-control" style="flex:1;">
+                <option value="">— pick a person —</option>
+                ${people.map(p => `<option value="${p.id}">${esc([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+              </select>
+              <button type="button" class="btn btn-secondary" onclick="scAddPerson()">Add</button>
+            </div>
+            <div id="sc-person-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Status</label>
@@ -16135,17 +16263,13 @@ async function renderSalesCampaignModal() {
               <label class="form-label">Owner</label>
               <select id="sc-owner-id" class="form-control">
                 <option value="">— unassigned —</option>
-                ${ownerPool.map(p => {
-                  const name = [p.first_name,p.last_name].filter(Boolean).join(' ');
-                  const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':'';
-                  return `<option value="${p.id}" ${sel}>${name}</option>`;
-                }).join('')}
+                ${ownerPool.map(p => { const name = [p.first_name,p.last_name].filter(Boolean).join(' '); const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':''; return `<option value="${p.id}" ${sel}>${esc(name)}</option>`; }).join('')}
               </select>
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Notes</label>
-            <textarea id="sc-notes" class="form-control" rows="3" placeholder="Approach, target list, talking points…">${d.notes||''}</textarea>
+
+          <div style="margin-top:6px;padding:10px 12px;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:8px;font-size:12px;color:var(--text2);">
+            ✨ More fields to come as Les dreams them up 😄
           </div>
         </div>
         <div class="modal-footer">
@@ -16155,21 +16279,19 @@ async function renderSalesCampaignModal() {
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
+  _scRenderOrgChips();
+  _scRenderPersonChips();
 }
 
 async function saveSalesCampaign() {
   const name = document.getElementById('sc-name').value.trim();
-  if (!name) { showStatus('Campaign name is required', 'error'); return; }
-  const scSvc = readServiceFocusBoxes('sc-svc-major');
+  if (!name) { showStatus('Title is required', 'error'); return; }
   const payload = {
     name,
-    segment: document.getElementById('sc-segment').value.trim() || null,
+    purpose: document.getElementById('sc-purpose').value.trim() || null,
+    industry_sector_id: +document.getElementById('sc-industry-sector-id').value || null,
     region_id: +document.getElementById('sc-region-id').value || null,
-    branch_id: +document.getElementById('sc-branch-id').value || null,
-    service_major_ids: scSvc.length ? scSvc : null,
-    service_major_id:  scSvc[0] || null,
     status: document.getElementById('sc-status').value,
-    notes: document.getElementById('sc-notes').value.trim() || null,
     owner_id: +document.getElementById('sc-owner-id').value || null,
   };
   try {
@@ -16177,13 +16299,15 @@ async function saveSalesCampaign() {
     if (salesCampaignData.id) {
       const result = await api('sales_campaigns', 'PATCH', payload, 'id=eq.' + salesCampaignData.id + '&select=*');
       saved = result[0];
-      showStatus('Campaign updated');
+      showStatus('Research Study updated');
     } else {
       payload.created_by = currentUser?.personId || null;
       const result = await api('sales_campaigns', 'POST', payload, 'select=*');
       saved = result[0];
-      showStatus('Campaign created');
+      showStatus('Research Study created');
     }
+    // Sync the participant junctions (replace-all).
+    if (saved && saved.id) await _scSyncParticipants(saved.id);
     // Refresh the campaigns cache so the lead form picker stays current
     allData['sales_campaigns'] = null;
     closeModal();
