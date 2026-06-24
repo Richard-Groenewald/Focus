@@ -1,20 +1,22 @@
 -- Focus CRM — extend the service taxonomy
 -- ----------------------------------------------------------------------------
--- Adds the "Advisory & Design" major category and its supporting service lines,
--- plus a recurring "Monitoring & Maintenance" line under Technology Works.
+-- Adds the "Advisory & Design" major category and its supporting service lines.
 --
--- WHY: the live taxonomy only had Manpower + Technology Works (Project). The real
--- offering includes supporting services (design consulting, risk reviews, process
--- design) and recurring technology (monitoring), which the flat list could not
--- represent. Categories/lines are data-driven, so adding rows is all that's needed
--- for them to appear in the campaign / lead Service Focus pickers and the
--- opportunity stream builder.
+-- WHY: the live taxonomy had Manpower + Technology only. The real offering also
+-- includes supporting services (design consulting, risk reviews, process design).
+-- Categories/lines are data-driven, so adding rows is all that's needed for them
+-- to appear in the campaign / lead Service Focus pickers and the opportunity
+-- stream builder.
 --
--- ⚠️  default_margin values for the NEW lines are PLACEHOLDERS (40% advisory,
---     30% tech monitoring). Confirm the real margins with Richard, then adjust
---     here or in Admin → Service Sub Categories.
+-- NOTE: a recurring Technology line ALREADY exists in the live DBs as
+-- "Maintenance" (Technology / Maintenance / recurring / 30%), so we do NOT add a
+-- separate monitoring line — that would duplicate it.
 --
--- Idempotent: safe to re-run. Run on Dev first; promote to prod when ready.
+-- ⚠️  default_margin for the Advisory lines is a PLACEHOLDER (40%). Confirm the
+--     real margins with Richard, then adjust here or in Admin → Service Sub Categories.
+--
+-- Verified applied to Dev (rfazs…) 2026-06-24. Idempotent: safe to re-run.
+-- Run on prod (kevrf…) when ready.
 -- ----------------------------------------------------------------------------
 
 -- 1. New major category --------------------------------------------------------
@@ -22,15 +24,7 @@ insert into service_major (name, active, created_at)
 select 'Advisory & Design', true, now()
 where not exists (select 1 from service_major where name = 'Advisory & Design');
 
--- 2. Recurring technology line -------------------------------------------------
---    (corrects the gap where monitoring/maintenance had to be logged as the
---     non-recurring "Project" line)
-insert into service_sub (major_id, name, is_recurring, default_margin, active, default_duration, created_at)
-select (select id from service_major where name = 'Technology Works'),
-       'Monitoring & Maintenance', true, 30, true, 12, now()
-where not exists (select 1 from service_sub where name = 'Monitoring & Maintenance');
-
--- 3. Advisory & Design lines (non-recurring, one-off engagements) ---------------
+-- 2. Advisory & Design lines (non-recurring, one-off engagements) ---------------
 insert into service_sub (major_id, name, is_recurring, default_margin, active, default_duration, created_at)
 select m.id, v.name, false, 40, true, 1, now()
 from service_major m
