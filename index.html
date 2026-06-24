@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.19 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -524,7 +524,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.19 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1584,6 +1584,8 @@ async function api(table, method='GET', body=null, params='') {
         throw new Error(`${res.status}: ${err}`);
       }
       const text = await res.text();
+      // A successful write to a cached lookup busts it so the next read refetches.
+      if (method !== 'GET' && typeof LOOKUP_KEYS !== 'undefined' && LOOKUP_KEYS.has(table)) _lkInvalidate(table);
       return text ? JSON.parse(text) : [];
     } catch(e) {
       clearTimeout(timer);
@@ -1603,6 +1605,68 @@ async function api(table, method='GET', body=null, params='') {
 async function apiGet(table, params='') { return api(table, 'GET', null, params); }
 async function apiPost(table, body) { return api(table, 'POST', body, 'select=*'); }
 async function apiPatch(table, id, body) { return api(table, 'PATCH', body, `id=eq.${id}&select=*`); }
+
+// ── Lookup cache ──────────────────────────────────────────────────────────────
+// Small, rarely-changing tables are re-fetched on every page and every reload,
+// which is most of the proxy round-trips. We mirror them in localStorage
+// (hydrated into allData at login) so reloads are instant, and warm them in ONE
+// parallel batch at login so pages then fetch only their own primary data.
+// Cache busts automatically when a write hits the table (see api()), and expires
+// after LOOKUP_TTL. Each entry stores under the same allData key the pages read,
+// fetched with select=* so any caller gets a superset of what it needs.
+const LOOKUP_CONFIG = [
+  // persist:true  → also cached in localStorage across reloads (stable tables).
+  // persist:false → warmed in memory each login only (same staleness as today),
+  //   never persisted — these change often enough that a cross-reload cache could
+  //   hide a freshly-created row.
+  { key: 'regions',       params: 'select=*', persist: true  },
+  { key: 'branches',      params: 'select=*', persist: true  },
+  { key: 'service_major', params: 'select=*', persist: true  },
+  { key: 'lead_sources',  params: 'select=*', persist: true  },
+  { key: 'stages',        params: 'select=*', persist: true  },
+  { key: 'people',        params: 'select=*', persist: false },
+  { key: 'organisations', params: 'select=*', persist: false },
+];
+const LOOKUP_KEYS = new Set(LOOKUP_CONFIG.map(c => c.key));            // also table names
+const LOOKUP_PERSIST = new Set(LOOKUP_CONFIG.filter(c => c.persist).map(c => c.key));
+const LOOKUP_TTL = 24 * 60 * 60 * 1000;   // 24h
+const LOOKUP_PREFIX = 'focus_lk_';
+
+function _lkPersist(key, data) {
+  if (!LOOKUP_PERSIST.has(key)) return;
+  try { localStorage.setItem(LOOKUP_PREFIX + key, JSON.stringify({ ts: Date.now(), data })); }
+  catch (e) { /* quota / private mode — in-memory cache still applies */ }
+}
+function _lkInvalidate(key) {
+  allData[key] = null;
+  try { localStorage.removeItem(LOOKUP_PREFIX + key); } catch (e) {}
+}
+// Pull non-stale lookups from localStorage into allData (called at login).
+function hydrateLookupCache() {
+  const now = Date.now();
+  LOOKUP_CONFIG.forEach(c => {
+    try {
+      const raw = localStorage.getItem(LOOKUP_PREFIX + c.key);
+      if (!raw) return;
+      const { ts, data } = JSON.parse(raw);
+      if (now - ts > LOOKUP_TTL) { localStorage.removeItem(LOOKUP_PREFIX + c.key); return; }
+      if (Array.isArray(data)) allData[c.key] = data;
+    } catch (e) {}
+  });
+}
+// Warm any lookups not already in allData. Run in small chunks (not one wide
+// burst) to stay gentle on the proxy. Per-table failures are swallowed so a
+// single slow lookup can't block login; the page lazily fetches a missing one
+// via its existing `allData[k] || apiGet` path.
+async function preloadLookups() {
+  const todo = LOOKUP_CONFIG.filter(c => !(Array.isArray(allData[c.key]) && allData[c.key].length));
+  const CONCURRENCY = 4;
+  for (let i = 0; i < todo.length; i += CONCURRENCY) {
+    await Promise.all(todo.slice(i, i + CONCURRENCY).map(c =>
+      apiGet(c.key, c.params).then(d => { allData[c.key] = d; _lkPersist(c.key, d); }).catch(() => {})
+    ));
+  }
+}
 async function apiDelete(table, id) { return api(table, 'DELETE', null, `id=eq.${id}`); }
 
 // ── Connection check ─────────────────────────────────────
@@ -7799,35 +7863,38 @@ async function doLogin() {
   }
 
   try {
-    // Load user and their roles
-    const users = await apiGet('system_users', 'id=eq.' + userId + '&select=*');
+    // Warm allData from any persisted lookup cache before we start fetching.
+    hydrateLookupCache();
+
+    // Round 1 — everything keyed only on the (already-known) userId, in parallel.
+    // Region/branch scope tolerate failure (older users may have no assignments).
+    const [users, userRoles, userRegions, userBranches] = await Promise.all([
+      apiGet('system_users', 'id=eq.' + userId + '&select=*'),
+      apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id'),
+      apiGet('system_user_regions', 'system_user_id=eq.' + userId + '&select=region_id').catch(() => []),
+      apiGet('system_user_branches', 'system_user_id=eq.' + userId + '&select=branch_id').catch(() => []),
+    ]);
     const user = users[0];
     if (!user) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
+    const roleIds = userRoles.map(r => r.role_id);
 
-    // Load person details
-    const people = await apiGet('people', 'id=eq.' + user.person_id + '&select=*');
+    // Round 2 — person details, roles, and role→permission links, in parallel.
+    const [people, roles, rp] = await Promise.all([
+      apiGet('people', 'id=eq.' + user.person_id + '&select=*'),
+      roleIds.length ? apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*') : Promise.resolve([]),
+      roleIds.length ? apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id') : Promise.resolve([]),
+    ]);
     const person = people[0] || {};
 
-    // Load roles
-    const userRoles = await apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id');
-    const roleIds = userRoles.map(r => r.role_id);
-    let roles = [];
-    if (roleIds.length) {
-      roles = await apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*');
-    }
-
-    // Load permissions for those roles
+    // Round 3 — resolve permission names.
+    const permIds = rp.map(r => r.permission_id);
     let permissions = [];
-    if (roleIds.length) {
-      const rp = await apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id');
-      const permIds = rp.map(r => r.permission_id);
-      if (permIds.length) {
-        const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
-        permissions = perms.map(p => p.name);
-      }
+    if (permIds.length) {
+      const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
+      permissions = perms.map(p => p.name);
     }
 
-    // Set current user
+    // Set current user (unchanged shape)
     currentUser = {
       id: user.id,
       personId: user.person_id,
@@ -7836,28 +7903,13 @@ async function doLogin() {
       permissions,
       isAdmin: roles.some(r => r.name === 'Admin')
     };
-
     // If admin and no permissions set yet, grant all
     if (currentUser.isAdmin && !permissions.length) {
       currentUser.permissions = ['all'];
     }
-
-    // Load the region(s) this user covers (used by canEditRecord in increment 3
-    // to scope a manager's override permissions). Admins ignore this.
-    try {
-      const userRegions = await apiGet('system_user_regions', 'system_user_id=eq.' + userId + '&select=region_id');
-      currentUser.regions = userRegions.map(r => +r.region_id);
-    } catch(e) {
-      currentUser.regions = [];
-    }
-    // Branch-level scope (covers all the branch's regions). Assignment can be at
-    // either level; the effective scope is the union (see recordInUserScope).
-    try {
-      const userBranches = await apiGet('system_user_branches', 'system_user_id=eq.' + userId + '&select=branch_id');
-      currentUser.branches = userBranches.map(r => +r.branch_id);
-    } catch(e) {
-      currentUser.branches = [];
-    }
+    // Region/branch scope (union is the effective scope, see recordInUserScope).
+    currentUser.regions  = userRegions.map(r => +r.region_id);
+    currentUser.branches = userBranches.map(r => +r.branch_id);
 
     // Show app
     document.getElementById('login-screen').style.display = 'none';
@@ -7866,10 +7918,15 @@ async function doLogin() {
     document.getElementById('sidebar-user-role').textContent = roles.map(r => r.name).join(', ') || 'No role';
 
     // Login already made several successful calls — we're demonstrably online.
-    // Skip the extra checkConnection() ping (one fewer function invocation).
     setOnline(true);
-    await loadAppSettings();
-    try { await ensureHomeOrgMembers(); } catch (e) {} // valid owners = home-org members
+    // Tail — settings, home-org members and the lookup preload all run together
+    // so the first page lands with its lookups already cached (one burst, not
+    // a fan-out on every page). setEnvLabel needs settings, so it waits.
+    await Promise.all([
+      loadAppSettings(),
+      ensureHomeOrgMembers().catch(() => {}),   // valid owners = home-org members
+      preloadLookups(),
+    ]);
     setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
     buildNav();
   } catch(e) {

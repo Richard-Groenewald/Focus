@@ -3,6 +3,12 @@ const https = require('https');
 // deploy context. Falls back to the production project if SUPABASE_HOST is unset.
 const SB = process.env.SUPABASE_HOST || 'kevrfdjqyuhmgziqxuvs.supabase.co';
 
+// Reuse TLS connections to Supabase across warm invocations. Without this, every
+// proxied query opened a fresh cross-Atlantic TLS handshake (~the bulk of the
+// per-call latency). Module scope so the agent (and its socket pool) survives
+// between invocations on a warm function instance.
+const sbAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSockets: 64 });
+
 exports.handler = async (event) => {
   const KEY = process.env.SUPABASE_SECRET_KEY;
   if (!KEY) return { statusCode: 500, headers: { 'Access-Control-Allow-Origin': '*' }, body: 'Missing SUPABASE_SECRET_KEY env var' };
@@ -15,7 +21,7 @@ exports.handler = async (event) => {
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   return new Promise(resolve => {
     const req = https.request({
-      hostname: SB, port: 443, path: path + qs, method: event.httpMethod,
+      hostname: SB, port: 443, path: path + qs, method: event.httpMethod, agent: sbAgent,
       headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Prefer': event.headers['prefer'] || '' }
     }, res => {
       let d = ''; res.on('data', c => d += c);
