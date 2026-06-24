@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.17 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -524,7 +524,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.17 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1536,6 +1536,26 @@ function _mockSeed() {
 }
 
 // ── API ──────────────────────────────────────────────────
+// Per-attempt timeout + retry/backoff. The whole app talks to Supabase through a
+// single Netlify proxy function; under cold-start/concurrency it intermittently
+// times out, which (with no retry) used to reject an entire page's Promise.all
+// as "Failed to fetch". We now abort a hung attempt and retry transient failures.
+// IMPORTANT: only GET is retried — replaying a POST/PATCH whose response merely
+// timed out could duplicate a write. Writes keep single-shot behaviour.
+const API_TIMEOUT_MS  = 12000;  // abort one attempt after this
+const API_GET_RETRIES = 3;      // total attempts for idempotent reads
+
+function _apiBackoff(attempt) {
+  // Exponential backoff with jitter so parallel retries don't thunder together.
+  const base = 400 * Math.pow(2, attempt - 1);   // 400ms, 800ms, 1600ms…
+  return new Promise(r => setTimeout(r, base + Math.random() * 250));
+}
+function _apiTransient(e, status) {
+  if (status === 502 || status === 503 || status === 504) return true;
+  if (e && (e.name === 'AbortError' || /Failed to fetch|NetworkError|load failed/i.test(e.message || ''))) return true;
+  return false;
+}
+
 async function api(table, method='GET', body=null, params='') {
   if (MOCK) return mockApi(table, method, body, params);
   const url = `${FN_URL}/${table}${params ? '?' + params : ''}`;
@@ -1544,18 +1564,40 @@ async function api(table, method='GET', body=null, params='') {
     headers: { 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : method === 'PATCH' ? 'return=representation' : '' }
   };
   if (body) opts.body = JSON.stringify(body);
-  try {
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`${res.status}: ${err}`);
+
+  const maxAttempts = (method === 'GET') ? API_GET_RETRIES : 1;
+  let lastErr;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...opts, signal: ctrl.signal });
+      clearTimeout(timer);
+      if (!res.ok) {
+        const err = await res.text();
+        if (method === 'GET' && _apiTransient(null, res.status) && attempt < maxAttempts) {
+          lastErr = new Error(`${res.status}: ${err}`);
+          console.warn(`API GET ${table} attempt ${attempt} → ${res.status}; retrying…`);
+          await _apiBackoff(attempt);
+          continue;
+        }
+        throw new Error(`${res.status}: ${err}`);
+      }
+      const text = await res.text();
+      return text ? JSON.parse(text) : [];
+    } catch(e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (method === 'GET' && _apiTransient(e) && attempt < maxAttempts) {
+        console.warn(`API GET ${table} attempt ${attempt} failed (${e.name || e.message}); retrying…`);
+        await _apiBackoff(attempt);
+        continue;
+      }
+      console.error(`API ${method} ${table}:`, e.message);
+      throw e;
     }
-    const text = await res.text();
-    return text ? JSON.parse(text) : [];
-  } catch(e) {
-    console.error(`API ${method} ${table}:`, e.message);
-    throw e;
   }
+  throw lastErr;
 }
 
 async function apiGet(table, params='') { return api(table, 'GET', null, params); }
