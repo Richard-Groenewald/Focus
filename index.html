@@ -495,7 +495,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -524,7 +524,7 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1622,6 +1622,7 @@ const LOOKUP_CONFIG = [
   { key: 'regions',       params: 'select=*', persist: true  },
   { key: 'branches',      params: 'select=*', persist: true  },
   { key: 'service_major', params: 'select=*', persist: true  },
+  { key: 'service_sub',   params: 'select=*', persist: true  },
   { key: 'lead_sources',  params: 'select=*', persist: true  },
   { key: 'stages',        params: 'select=*', persist: true  },
   { key: 'people',        params: 'select=*', persist: false },
@@ -8450,12 +8451,11 @@ async function _dashPipeline() {
     .filter(d => _dashInScope(d, scope) && open.has(+d.stage_id));
   if (!deals.length) return _dashCard('Pipeline', scope, [['Weighted', 'R 0'], ['Total', 'R 0']], 'No open opportunities', 'revenue_pipeline', 'Full pipeline');
   const ids = deals.map(d => d.id);
-  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=id,deal_id`);
-  const streamDeal = Object.fromEntries(streams.map(s => [+s.id, +s.deal_id]));
-  let months = [];
-  if (streams.length) months = await apiGet('revenue_stream_months', `stream_id=in.(${streams.map(s => s.id).join(',')})&select=stream_id,opportunity_revenue`);
+  // One embedded call: opportunity streams with their months nested (FK-backed;
+  // nested rows aren't subject to the 1000-row cap — verified against the DB).
+  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=deal_id,revenue_stream_months(opportunity_revenue)`);
   const dealTotal = {};
-  for (const m of months) { const did = streamDeal[+m.stream_id]; if (did != null) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  for (const s of streams) { const did = +s.deal_id; for (const m of (s.revenue_stream_months || [])) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
   let total = 0, weighted = 0;
   for (const d of deals) { const t = dealTotal[d.id] || 0; total += t; weighted += t * ((+d.probability || 0) / 100); }
   return _dashCard('Pipeline', scope, [
@@ -8882,7 +8882,7 @@ const RPP = (function () {
 
   // ── data load (bulk fetch + client-side join) ──
   async function loadData(){
-    const [deals, orgs, people, regions, stages, smaj, ssub, streams, branches] = await Promise.all([
+    const [deals, orgs, people, regions, stages, smaj, ssub, streamsEmb, branches] = await Promise.all([
       apiGet('deals','select=*'),
       allData['organisations'] || apiGet('organisations','select=*'),
       allData['people']        || apiGet('people','select=*'),
@@ -8890,17 +8890,22 @@ const RPP = (function () {
       allData['stages']        || apiGet('stages','select=*'),
       allData['service_major'] || apiGet('service_major','select=*'),
       allData['service_sub']   || apiGet('service_sub','select=*'),
-      apiGet('revenue_streams','select=id,deal_id,stream_type'),
+      // Streams WITH their months nested — one embedded call replaces the old
+      // streams fetch + the paginated months fetch (apiGetIn). Nested rows aren't
+      // subject to the 1000-row cap (verified: returns all months), so this also
+      // retires the pagination that previously dropped overflow months.
+      apiGet('revenue_streams','select=id,deal_id,stream_type,revenue_stream_months(stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin)'),
       allData['branches']      || apiGet('branches','select=*'),
     ]);
     allData['organisations']=orgs; allData['people']=people; allData['regions']=regions;
     allData['stages']=stages; allData['service_major']=smaj; allData['service_sub']=ssub;
     allData['branches']=branches;
 
+    // Flatten the embedded result back to the flat shapes the aggregation expects.
+    const streams = streamsEmb.map(s => ({ id: s.id, deal_id: s.deal_id, stream_type: s.stream_type }));
     const streamToDeal = new Map(streams.map(s=>[+s.id, +s.deal_id]));
-    const streamIds = streams.map(s=>+s.id);
-    const months = streamIds.length ? await apiGetIn('revenue_stream_months','stream_id', streamIds,
-      'select=stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin') : [];
+    const months = [];
+    streamsEmb.forEach(s => (s.revenue_stream_months || []).forEach(m => months.push({ ...m, stream_id: s.id })));
 
     const pick = (a,v)=> a!=null ? a : (v!=null ? +v : a);
     const byDeal = new Map();
