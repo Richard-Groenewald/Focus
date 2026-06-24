@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.26 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.26 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9468,22 +9468,24 @@ async function renderResearchCampaignsPage() {
   body.innerHTML = '<tr class="empty-row"><td colspan="8">Loading…</td></tr>';
 
   try {
-    const [campaigns, regions, services, people] = await Promise.all([
+    const [campaigns, regions, services, people, sectors] = await Promise.all([
       apiGet('research_campaigns', 'select=*&order=created_at.desc'),
-      allData['regions']       || apiGet('regions', 'select=*'),
-      allData['service_major'] || apiGet('service_major', 'select=*'),
-      allData['people']        || apiGet('people', 'select=*'),
+      allData['regions']          || apiGet('regions', 'select=*'),
+      allData['service_major']    || apiGet('service_major', 'select=*'),
+      allData['people']           || apiGet('people', 'select=*'),
+      allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
     ]);
-    allData['regions']       = regions;
-    allData['service_major'] = services;
-    allData['people']        = people;
+    allData['regions']          = regions;
+    allData['service_major']    = services;
+    allData['people']           = people;
+    allData['industry_sectors'] = sectors;
     allData['research_campaigns'] = campaigns;
 
     document.getElementById('page-sub').textContent =
       campaigns.length + ' campaign' + (campaigns.length !== 1 ? 's' : '');
 
     if (!campaigns.length) {
-      head.innerHTML = '<tr><th>Name</th><th>Segment</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
+      head.innerHTML = '<tr><th>Name</th><th>Sector</th><th>Region</th><th>Service Focus</th><th>Status</th><th>Owner</th><th>Created</th><th></th></tr>';
       body.innerHTML = '<tr class="empty-row"><td colspan="8">No marketing campaigns yet. Click "+ New Marketing Campaign" to create one.</td></tr>';
       return;
     }
@@ -9501,7 +9503,7 @@ async function renderResearchCampaignsPage() {
 
     const cols = [
       { key: 'name',    label: 'Name',          get: c => c.name || '' },
-      { key: 'segment', label: 'Segment',       get: c => c.segment || '' },
+      { key: 'sector',  label: 'Sector',        get: c => (sectors.find(s => +s.id === +c.industry_sector_id)?.name) || c.segment || '' },
       { key: 'region',  label: 'Region',        get: c => (regions.find(r => +r.id === +c.region_id)?.name) || '' },
       { key: 'service', label: 'Service Focus', get: c => focusMajorNames(c, ' + ', services) },
       { key: 'status',  label: 'Status',        get: c => c.status || '' },
@@ -9519,7 +9521,7 @@ async function renderResearchCampaignsPage() {
       // Row opens the cockpit (drive & manage); the trailing Edit opens the mission modal.
       return `<tr onclick="openResearchCampaignCockpit(${c.id})" style="cursor:pointer;">
         <td style="font-weight:600;">${c.name}</td>
-        <td>${c.segment || '—'}</td>
+        <td>${(sectors.find(s => +s.id === +c.industry_sector_id)?.name) || c.segment || '—'}</td>
         <td>${region?.name || '—'}</td>
         <td>${focusMajorNames(c, ' + ', services) || '—'}</td>
         <td><span style="${statusColour}padding:3px 8px;border-radius:4px;font-size:11px;font-weight:600;">${c.status}</span></td>
@@ -9845,7 +9847,7 @@ async function renderResearchCampaignCockpit() {
     cockpitData = { campaign, regions, services, people, sources, targets, leads, steps, interactions };
 
     document.getElementById('page-title').textContent = campaign.name || 'Campaign Cockpit';
-    document.getElementById('page-sub').textContent = campaign.segment || '';
+    document.getElementById('page-sub').textContent = (allData['industry_sectors']||[]).find(s => +s.id === +campaign.industry_sector_id)?.name || campaign.segment || '';
 
     body.innerHTML = `<tr><td style="padding:0;border:none;">
       <div style="padding:0 0 32px 0;">
@@ -9889,7 +9891,7 @@ function cockpitMissionHeader(c, regions, services, people) {
             <span style="font-size:18px;font-weight:800;color:var(--dark-blue,#003057);">${cEsc(c.name)}</span>
             <span style="${statusColour}padding:3px 9px;border-radius:4px;font-size:11px;font-weight:700;">${cEsc(c.status)}</span>
           </div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${c.segment ? cEsc(c.segment) : '<span style="color:var(--text3);">No target segment defined</span>'}</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${(() => { const sn = (allData['industry_sectors']||[]).find(s => +s.id === +c.industry_sector_id)?.name || c.segment; return sn ? cEsc(sn) : '<span style="color:var(--text3);">No sector defined</span>'; })()}</div>
           <div style="display:flex;gap:24px;flex-wrap:wrap;">
             ${cell('Region', cEsc(region))}
             ${cell('Service focus', cEsc(service))}
@@ -15924,16 +15926,18 @@ async function openResearchCampaignModal(id) {
 
 async function renderResearchCampaignModal() {
   // Load lookups if not cached
-  const [regions, services, people, branches] = await Promise.all([
-    allData['regions']       || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
-    allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
-    allData['people']        || apiGet('people', 'select=*&order=first_name.asc'),
-    allData['branches']      || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+  const [regions, services, people, branches, sectors] = await Promise.all([
+    allData['regions']          || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
+    allData['service_major']    || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
+    allData['people']           || apiGet('people', 'select=*&order=first_name.asc'),
+    allData['branches']         || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+    allData['industry_sectors'] || apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc'),
   ]);
-  allData['regions']       = regions;
-  allData['service_major'] = services;
-  allData['people']        = people;
-  allData['branches']      = branches;
+  allData['regions']          = regions;
+  allData['service_major']    = services;
+  allData['people']           = people;
+  allData['branches']         = branches;
+  allData['industry_sectors'] = sectors;
   await ensureHomeOrgMembers();
 
   const ownerPool = homeOrgPeople(people, [researchCampaignData.owner_id, currentUser?.personId]);
@@ -15955,8 +15959,11 @@ async function renderResearchCampaignModal() {
             <input type="text" id="rc-name" class="form-control" value="${(d.name||'').replace(/"/g,'&quot;')}" placeholder="e.g. Q3 Limpopo mining outreach">
           </div>
           <div class="form-group">
-            <label class="form-label">Target segment</label>
-            <input type="text" id="rc-segment" class="form-control" value="${(d.segment||'').replace(/"/g,'&quot;')}" placeholder="Who are you targeting? e.g. Mid-tier mining houses in Limpopo">
+            <label class="form-label">Sector</label>
+            <select id="rc-industry-sector-id" class="form-control">
+              <option value="">— select —</option>
+              ${sectors.map(s => `<option value="${s.id}" ${d.industry_sector_id==s.id?'selected':''}>${String(s.name).replace(/</g,'&lt;')}</option>`).join('')}
+            </select>
           </div>
           <div class="form-row">
             <div class="form-group">
@@ -16043,7 +16050,7 @@ async function saveResearchCampaign() {
   const rcSvc = readServiceFocusBoxes('rc-svc-major');
   const payload = {
     name,
-    segment: document.getElementById('rc-segment').value.trim() || null,
+    industry_sector_id: +document.getElementById('rc-industry-sector-id').value || null,
     region_id: +document.getElementById('rc-region-id').value || null,
     branch_id: +document.getElementById('rc-branch-id').value || null,
     service_major_ids: rcSvc.length ? rcSvc : null,
