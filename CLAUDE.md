@@ -6,7 +6,7 @@ This file is read by Claude Code at the start of every session. It is the source
 
 Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (Pty) Ltd**, a South African integrated security solutions company. Used by sales and management to track opportunities, contracts, leads, and engagements across mining, hospitality, residential estates, and FMCG sectors.
 
-- **Current version:** v7.7.24 (Activity bar + crisp CSS spinner-follower on click/busy; Dev only; as of 24 June 2026)
+- **Current version:** v7.7.25 (Activity bar + spinner-follower, 25px/4px offset right; Dev only; as of 24 June 2026)
 - **Tagline:** Lead by Example
 - **Font:** Arial
 - **Brand colours:**
