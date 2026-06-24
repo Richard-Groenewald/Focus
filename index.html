@@ -187,9 +187,13 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 #net-bar.on{opacity:1;}
 #net-bar::before{content:'';position:absolute;top:0;height:100%;width:35%;border-radius:3px;background:linear-gradient(90deg,rgba(250,10,17,0),var(--red,#FA0A11),rgba(250,10,17,0));box-shadow:0 0 10px rgba(250,10,17,.55);animation:net-bar-slide 1.05s ease-in-out infinite;}
 @keyframes net-bar-slide{0%{left:-35%;}100%{left:100%;}}
-/* Progress cursor while a request is in flight (.net-busy) AND the instant an
-   action is pressed (.click-busy), so the click is acknowledged immediately. */
-body.net-busy,body.net-busy *,body.click-busy,body.click-busy *{cursor:progress!important;}
+/* A crisp, CSS-drawn spinner follows the pointer while a request is in flight
+   (.net-busy) or the instant an action is pressed (.click-busy). Replaces the OS
+   busy cursor, which renders pixelated on Windows. Positioned at the pointer (JS
+   sets left/top) with a small offset so it sits just below-right of it. */
+#busy-cursor{position:fixed;left:-100px;top:0;width:15px;height:15px;margin:13px 0 0 13px;z-index:100001;pointer-events:none;opacity:0;transition:opacity .1s ease;border-radius:50%;border:2px solid rgba(250,10,17,.25);border-top-color:var(--red,#FA0A11);}
+body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy-cursor-spin .55s linear infinite;}
+@keyframes busy-cursor-spin{to{transform:rotate(360deg);}}
 
 /* ── Connection ────────────────────────────────────────── */
 .conn-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;}
@@ -490,6 +494,7 @@ body.net-busy,body.net-busy *,body.click-busy,body.click-busy *{cursor:progress!
 </head>
 <body>
 <div id="net-bar"></div>
+<div id="busy-cursor"></div>
 
 <!-- Login Screen -->
 <div id="login-screen" style="display:flex;position:fixed;inset:0;z-index:99999;background:var(--navy);align-items:center;justify-content:center;">
@@ -508,7 +513,7 @@ body.net-busy,body.net-busy *,body.click-busy,body.click-busy *{cursor:progress!
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.23 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.24 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -537,7 +542,7 @@ body.net-busy,body.net-busy *,body.click-busy,body.click-busy *{cursor:progress!
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.23 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.24 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1587,7 +1592,13 @@ function _netBusy(on) {
 // element is pressed — before any request fires. Auto-clears after a short flash;
 // if the click starts a request, _netBusy() keeps the cursor up until it finishes.
 let _clickCursorTimer = null;
+function _positionBusyCursor(x, y) {
+  const el = document.getElementById('busy-cursor');
+  if (el) { el.style.left = x + 'px'; el.style.top = y + 'px'; }
+}
+document.addEventListener('mousemove', (e) => _positionBusyCursor(e.clientX, e.clientY), { passive: true });
 document.addEventListener('mousedown', (e) => {
+  _positionBusyCursor(e.clientX, e.clientY);   // spinner appears exactly at the click point
   const t = e.target && e.target.closest && e.target.closest('button, a, [onclick], [role="button"], .btn, .tab, .opp-tab, label, select');
   if (!t || t.disabled) return;
   document.body.classList.add('click-busy');
