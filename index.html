@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.33 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.34 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.33 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.34 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10384,6 +10384,7 @@ async function cockpitQuickLogTouch(leadId) {
     document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
     await loadLiLookups();
     await maybeApplyCadencePrefill();
+    await _liLoadPeople();
   } catch (e) {
     showStatus('Could not open quick log: ' + e.message, 'error');
   }
@@ -15926,6 +15927,14 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
             </div>
           </div>
           <div class="form-group">
+            <label class="form-label">People Involved <span style="font-weight:400;color:var(--text3);font-size:11px;">— client contacts in this engagement</span></label>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;" id="li-people-selected"></div>
+            ${(isView || fullyLocked) ? '' : `<div style="display:flex;gap:8px;">
+              <select id="li-person-pool" class="form-control" style="flex:1;"><option value="">— add person —</option></select>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addLiPerson()">Add</button>
+            </div>`}
+          </div>
+          <div class="form-group">
             <label class="form-label">Engagement Details</label>
             <textarea id="li-notes" class="form-control" rows="3" placeholder="What happened?" ${dis}>${notesValue}</textarea>
           </div>
@@ -15974,6 +15983,7 @@ async function openLeadInteractionView(interactionId, locked = false) {
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
   populateLiCompletionSection(i);
+  await _liLoadPeople();
 }
 
 // Edit modal for an interaction still within the grace period.
@@ -15988,6 +15998,7 @@ async function openEditLeadInteractionModal(interactionId) {
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
   populateLiCompletionSection(i);
+  await _liLoadPeople();
 }
 
 // Sets the engagement modal's related-record context to the open lead (lead-form
@@ -16026,6 +16037,7 @@ async function openEngagement(engId) {
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', eng);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     eng);
   populateLiCompletionSection(eng);
+  await _liLoadPeople();
 }
 
 async function openLeadInteractionModal() {
@@ -16042,6 +16054,7 @@ async function openLeadInteractionModal() {
   window._liEditing = null;
   await loadLiLookups();
   await maybeApplyCadencePrefill();
+  await _liLoadPeople();
 }
 
 // Initiate a NEW interaction that references an existing one (the chain parent).
@@ -16055,6 +16068,7 @@ async function openLeadInteractionRelated(parentId) {
   window._liEditing = null;
   await loadLiLookups();
   await maybeApplyCadencePrefill();
+  await _liLoadPeople();
 }
 
 // Populate Type and Next Action dropdowns scoped to leads.
@@ -16149,6 +16163,96 @@ function populateLiCompletionSection(i) {
   if (noteInput) noteInput.value = i.next_action_completion_note || '';
 }
 
+// ── People Involved on the (shared) lead/standalone engagement form ──────────
+// Writes to engagement_people (the same M:N table deal engagements use), so an
+// engagement records WHICH client contacts it was with. Candidate pool is built
+// from the engagement's parent (window._engParent): a lead → its target contact +
+// real-person lead_contacts + target-org affiliates; a deal → its org affiliates.
+// Only REAL people (with a people row) are pickable — free-text-only lead contacts
+// become linkable after promote, by design.
+function addLiPerson() {
+  const sel = document.getElementById('li-person-pool'); if (!sel) return;
+  const id = sel.value; const name = sel.options[sel.selectedIndex]?.text;
+  if (!id) return;
+  window._liPeople = window._liPeople || [];
+  if (window._liPeople.some(p => String(p.id) === String(id))) return;
+  window._liPeople.push({ id: String(id), name });
+  sel.options[sel.selectedIndex].remove(); sel.value = '';
+  renderLiPeople();
+}
+function removeLiPerson(id) {
+  const person = (window._liPeople || []).find(p => String(p.id) === String(id));
+  window._liPeople = (window._liPeople || []).filter(p => String(p.id) !== String(id));
+  const sel = document.getElementById('li-person-pool');
+  if (person && sel) { const opt = document.createElement('option'); opt.value = person.id; opt.textContent = person.name; sel.appendChild(opt); }
+  renderLiPeople();
+}
+function renderLiPeople() {
+  const el = document.getElementById('li-people-selected'); if (!el) return;
+  const editable = !!document.getElementById('li-person-pool');
+  el.innerHTML = (window._liPeople || []).map(p =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">${String(p.name||'').replace(/</g,'&lt;')}${editable?`<button type="button" onclick="removeLiPerson('${p.id}')" style="background:none;border:none;color:white;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>`:''}</span>`
+  ).join('') || '<span style="font-size:12px;color:var(--text3);">None yet</span>';
+}
+
+// Loads the engagement's already-linked people (edit/view) and builds the add pool.
+async function _liLoadPeople() {
+  if (!document.getElementById('li-people-selected')) return;
+  window._liPeople = [];
+  const allPeople = allData['people'] || [];
+  const nameOf = p => [p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + p.id);
+  const resolveNames = async (ids) => {
+    ids = [...new Set(ids.map(Number))];
+    let known = ids.map(id => allPeople.find(p => +p.id === id)).filter(Boolean);
+    if (known.length < ids.length) {
+      try { known = await apiGet('people', `id=in.(${ids.join(',')})&select=id,first_name,last_name`); } catch (e) {}
+    }
+    return ids.map(id => { const p = known.find(x => +x.id === id) || allPeople.find(x => +x.id === id); return { id, name: p ? nameOf(p) : ('Person #' + id) }; });
+  };
+
+  // 1) Already-linked people for an existing engagement.
+  const engId = window._liEditing && window._liEditing.id;
+  if (engId) {
+    try {
+      const rows = await apiGet('engagement_people', `engagement_id=eq.${engId}&select=person_id`);
+      const ids = rows.map(r => +r.person_id);
+      if (ids.length) window._liPeople = (await resolveNames(ids)).map(x => ({ id: String(x.id), name: x.name }));
+    } catch (e) { /* best-effort */ }
+  }
+
+  // 2) Candidate pool for the add dropdown (only present when editable).
+  const sel = document.getElementById('li-person-pool');
+  if (sel) {
+    const cand = new Map();
+    const parent = window._engParent || null;
+    try {
+      if (parent && parent.kind === 'lead') {
+        const lead = (await apiGet('leads', `id=eq.${parent.id}&select=target_org_id,target_person_id`))[0] || {};
+        const ids = [];
+        if (lead.target_person_id) ids.push(+lead.target_person_id);
+        const lcs = await apiGet('lead_contacts', `lead_id=eq.${parent.id}&person_id=not.is.null&select=person_id`);
+        lcs.forEach(c => ids.push(+c.person_id));
+        if (lead.target_org_id) {
+          const links = await apiGet('person_organisation_roles', `org_id=eq.${lead.target_org_id}&select=person_id`);
+          links.forEach(l => ids.push(+l.person_id));
+        }
+        (await resolveNames(ids)).forEach(x => cand.set(+x.id, x.name));
+      } else if (parent && parent.kind === 'deal') {
+        const deal = (await apiGet('deals', `id=eq.${parent.id}&select=org_id`))[0] || {};
+        if (deal.org_id) {
+          const links = await apiGet('person_organisation_roles', `org_id=eq.${deal.org_id}&select=person_id`);
+          (await resolveNames(links.map(l => +l.person_id))).forEach(x => cand.set(+x.id, x.name));
+        }
+      }
+    } catch (e) { /* best-effort */ }
+    const selectedIds = new Set((window._liPeople || []).map(p => String(p.id)));
+    sel.innerHTML = '<option value="">— add person —</option>' +
+      [...cand.entries()].filter(([id]) => !selectedIds.has(String(id)))
+        .map(([id, name]) => `<option value="${id}">${cEsc(name)}</option>`).join('');
+  }
+  renderLiPeople();
+}
+
 async function saveLeadInteraction(editId) {
   const date = document.getElementById('li-date').value;
   const typeSel = document.getElementById('li-type');
@@ -16191,18 +16295,30 @@ async function saveLeadInteraction(editId) {
       next_action_completed_at: completedAt,
       next_action_completion_note: completionNote,
     };
+    let engId = editId;
     if (editId) {
       await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
     } else {
-      await api('engagements', 'POST', {
+      const res = await api('engagements', 'POST', {
         ...payload,
         lead_id: leadData.id,
         related_interaction_id: window._liRelatedTo || null,
         created_by: currentUser?.personId || null,
-      }, '');
+      }, 'select=*');
+      engId = res && res[0] ? res[0].id : null;
       window._liRelatedTo = null;
       showStatus('Engagement logged');
+    }
+    // Sync People Involved → engagement_people (replace-all on edit). Best-effort:
+    // never fail the whole save if a person link can't be written.
+    if (engId) {
+      try {
+        if (editId) await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + engId);
+        for (const p of (window._liPeople || [])) {
+          try { await api('engagement_people', 'POST', { engagement_id: engId, person_id: +p.id }, ''); } catch (e) { /* ignore dup */ }
+        }
+      } catch (e) { /* best-effort */ }
     }
     // Standalone engagement edit (e.g. opened from the dashboard): no lead form to
     // reload. Bump last_touch only when the parent is actually a lead, then refresh
