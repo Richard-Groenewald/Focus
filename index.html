@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.31 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.32 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.31 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.32 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10465,6 +10465,7 @@ function renderCampaignTargetModal() {
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
+  window._ctAffilCache = {};   // fresh affiliated-contact lookups for this modal session
   // If the target is already linked to an org, surface its affiliated contacts now.
   if (d.organisation_id) refreshCtContactSuggestions();
 }
@@ -10585,6 +10586,32 @@ function checkCtContactSimilarity() {
   _ctContactTimer = setTimeout(refreshCtContactSuggestions, 400);
 }
 
+// Resolve an org's affiliated people, cap-safely. Queries person_organisation_roles
+// SCOPED to the org (so PostgREST's global 1000-row cap can't hide later-added
+// contacts — the bug where only the first contact showed) and fetches the people
+// by id, merging any missing ones into allData['people'] so a click can resolve
+// them. Cached per-org for the life of the open modal (reset in
+// renderCampaignTargetModal) to avoid a network hit on every keystroke.
+async function _ctAffiliatedPeople(orgId) {
+  window._ctAffilCache = window._ctAffilCache || {};
+  if (window._ctAffilCache[orgId]) return window._ctAffilCache[orgId];
+  let list = [];
+  try {
+    const links = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id&order=is_primary.desc`);
+    const ids = [...new Set(links.map(l => +l.person_id))];
+    if (ids.length) {
+      const cache = allData['people'] || (allData['people'] = []);
+      list = ids.map(id => cache.find(p => +p.id === id)).filter(Boolean);
+      if (list.length < ids.length) {
+        list = await apiGet('people', `id=in.(${ids.join(',')})&select=id,first_name,last_name,title,email,phone`);
+        list.forEach(p => { if (!cache.some(x => +x.id === +p.id)) cache.push(p); });
+      }
+    }
+  } catch (e) { console.warn('Could not load org contacts:', e.message); }
+  window._ctAffilCache[orgId] = list;
+  return list;
+}
+
 // Affiliated-first contact suggestions, modelled on the lead target-contact field.
 //  • Company linked to an existing org (ct-org-id set) → surface that org's
 //    affiliated contacts (person_organisation_roles) as quick-picks, ranked by
@@ -10603,13 +10630,8 @@ async function refreshCtContactSuggestions() {
   const people = allData['people'] || [];
 
   if (orgId) {
-    // Affiliated contacts for the linked org.
-    await _ensurePersonAffiliationsLoaded();
-    const seen = new Set();
-    let list = (allData['person_organisation_roles'] || [])
-      .filter(l => +l.org_id === orgId)
-      .map(l => people.find(p => +p.id === +l.person_id))
-      .filter(p => p && !seen.has(p.id) && seen.add(p.id));
+    // Affiliated contacts for the linked org (cap-safe, org-scoped fetch).
+    let list = await _ctAffiliatedPeople(orgId);
     if (!list.length) { clear(); return; }   // org on file but no affiliated contacts yet
     // Once a name is being typed, rank the affiliated contacts by closeness to it.
     if (fullName.length >= 2) {
