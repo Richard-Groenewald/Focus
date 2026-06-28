@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.30 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.31 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.30 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.31 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10465,6 +10465,8 @@ function renderCampaignTargetModal() {
       </div>
     </div>`;
   document.getElementById('modal-root').innerHTML = html;
+  // If the target is already linked to an org, surface its affiliated contacts now.
+  if (d.organisation_id) refreshCtContactSuggestions();
 }
 
 async function saveCampaignTarget() {
@@ -10520,6 +10522,7 @@ function onCtCompanyInput() {
   // Typing means they're (re)choosing — drop any existing link.
   const hid = document.getElementById('ct-org-id');
   if (hid && hid.value) { hid.value = ''; const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none'; }
+  refreshCtContactSuggestions();   // org link may have just dropped → switch contact suggestions to general mode
   const name = (document.getElementById('ct-company')?.value || '').trim();
   if (window._ctOrgNewConfirmed === name.toLowerCase()) { matchEl.innerHTML = ''; return; }
   window._ctOrgNewConfirmed = null;
@@ -10557,6 +10560,7 @@ function useCtOrgMatch(orgId) {
   const li = document.getElementById('ct-company-linked'); if (li) li.style.display = '';
   const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
   window._ctOrgNewConfirmed = (o.name || '').toLowerCase();
+  refreshCtContactSuggestions();   // org now linked → surface its affiliated contacts
 }
 function confirmCtOrgNew() {
   const name = (document.getElementById('ct-company')?.value || '').trim();
@@ -10565,35 +10569,70 @@ function confirmCtOrgNew() {
   const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
   window._ctOrgNewConfirmed = name.toLowerCase();
   const matchEl = document.getElementById('ct-company-matches'); if (matchEl) matchEl.innerHTML = '';
+  refreshCtContactSuggestions();   // confirmed new org (no FK) → general contact mode
 }
 function unlinkCtOrg() {
   document.getElementById('ct-org-id').value = '';
   const li = document.getElementById('ct-company-linked'); if (li) li.style.display = 'none';
   document.getElementById('ct-company')?.focus();
+  refreshCtContactSuggestions();   // org unlinked → general contact mode
 }
 
-// New Target: contact name dup-check (warn-only — mirrors checkNewOppContactSimilarity).
-// Flags existing people with a similar name so the same person isn't re-keyed;
-// "use details" autofills the contact fields. No FK is stored on the target.
+// New Target: contact suggestions. Debounced entry point for the name field.
 let _ctContactTimer;
 function checkCtContactSimilarity() {
   clearTimeout(_ctContactTimer);
-  _ctContactTimer = setTimeout(() => {
-    const fullName = (document.getElementById('ct-contact-name')?.value || '').trim();
-    const matchEl = document.getElementById('ct-contact-match');
-    if (!matchEl) return;
-    if (fullName.length < 3) { matchEl.style.display = 'none'; matchEl.innerHTML = ''; return; }
-    const matches = findSimilar(fullName, allData['people'] || [], p => [p.first_name, p.last_name].filter(Boolean).join(' '));
-    if (matches.length) {
-      matchEl.style.display = 'block';
-      matchEl.innerHTML = '🔍 Similar people already on record: ' + matches.slice(0, 4).map(m => {
-        const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
-        return `<strong>${cEsc(nm)}</strong> (${m.score}%) <a href="#" onclick="useCtContactDetails(${m.item.id});return false;" style="color:var(--red);">use details</a>`;
-      }).join(', ');
-    } else {
-      matchEl.style.display = 'none'; matchEl.innerHTML = '';
+  _ctContactTimer = setTimeout(refreshCtContactSuggestions, 400);
+}
+
+// Affiliated-first contact suggestions, modelled on the lead target-contact field.
+//  • Company linked to an existing org (ct-org-id set) → surface that org's
+//    affiliated contacts (person_organisation_roles) as quick-picks, ranked by
+//    similarity once a name is being typed.
+//  • Company is a new / unaffiliated name → general name-similarity warn so an
+//    existing person isn't re-keyed.
+// Either way the choice only autofills name/role/email/phone as TEXT — no person
+// FK is stored on the target and no people row is created here; brand-new people
+// are created at promote (mirrors the lead flow).
+async function refreshCtContactSuggestions() {
+  const matchEl = document.getElementById('ct-contact-match');
+  if (!matchEl) return;
+  const clear = () => { matchEl.style.display = 'none'; matchEl.innerHTML = ''; };
+  const orgId = +(document.getElementById('ct-org-id')?.value) || 0;
+  const fullName = (document.getElementById('ct-contact-name')?.value || '').trim();
+  const people = allData['people'] || [];
+
+  if (orgId) {
+    // Affiliated contacts for the linked org.
+    await _ensurePersonAffiliationsLoaded();
+    const seen = new Set();
+    let list = (allData['person_organisation_roles'] || [])
+      .filter(l => +l.org_id === orgId)
+      .map(l => people.find(p => +p.id === +l.person_id))
+      .filter(p => p && !seen.has(p.id) && seen.add(p.id));
+    if (!list.length) { clear(); return; }   // org on file but no affiliated contacts yet
+    // Once a name is being typed, rank the affiliated contacts by closeness to it.
+    if (fullName.length >= 2) {
+      list = list.map(p => ({ p, s: _personMatchScore(p, fullName) })).sort((a, b) => b.s - a.s).map(x => x.p);
     }
-  }, 400);
+    const orgName = (allData['organisations'] || []).find(o => +o.id === orgId)?.name || 'this organisation';
+    matchEl.style.display = 'block';
+    matchEl.innerHTML = `Contacts at <strong>${cEsc(orgName)}</strong>: ` + list.slice(0, 6).map(p => {
+      const nm = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      return `<a href="#" onclick="useCtContactDetails(${p.id});return false;" style="color:var(--red);">${cEsc(nm)}</a>`;
+    }).join(', ') + `<span style="color:var(--text3);"> — or type a new contact.</span>`;
+    return;
+  }
+
+  // No linked org → unaffiliated new person: general similarity warn (typed name only).
+  if (fullName.length < 3) { clear(); return; }
+  const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+  if (!matches.length) { clear(); return; }
+  matchEl.style.display = 'block';
+  matchEl.innerHTML = '🔍 Similar people already on record: ' + matches.slice(0, 4).map(m => {
+    const nm = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
+    return `<strong>${cEsc(nm)}</strong> (${m.score}%) <a href="#" onclick="useCtContactDetails(${m.item.id});return false;" style="color:var(--red);">use details</a>`;
+  }).join(', ');
 }
 function useCtContactDetails(personId) {
   const p = (allData['people'] || []).find(x => +x.id === +personId);
