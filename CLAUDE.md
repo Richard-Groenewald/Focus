@@ -6,7 +6,7 @@ This file is read by Claude Code at the start of every session. It is the source
 
 Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (Pty) Ltd**, a South African integrated security solutions company. Used by sales and management to track opportunities, contracts, leads, and engagements across mining, hospitality, residential estates, and FMCG sectors.
 
-- **Current version:** v7.7.32 (Marketing Campaigns target form: affiliated-contact suggestions now org-scoped + cap-safe — fixes only-first-contact-shown when an org has multiple contacts; Dev only; as of 28 June 2026)
+- **Current version:** v7.7.33 (Engagement History v1: read-only view under Outreach/Sales/Contract/Project — reverse-chron timeline + filters + per-category group-by; category derived from lead/deal stage/service.is_recurring; person via engagement_people; Dev only; as of 28 June 2026)
 - **Tagline:** Lead by Example
 - **Font:** Arial
 - **Brand colours:**
