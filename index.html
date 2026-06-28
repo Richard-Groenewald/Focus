@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.34 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.35 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.34 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.35 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10715,7 +10715,6 @@ const ENG_CAT_STYLE = {
   Contract: 'background:#DCFCE7;color:#166534;',
   Project:  'background:#EDE9FE;color:#5B21B6;',
 };
-const ENG_GROUP_DEFAULT = { Outreach: 'client', Sales: 'deal', Contract: 'client', Project: 'deal', All: 'none' };
 
 function _engHistCat(stageId, sub) {
   const s = +stageId;
@@ -10738,8 +10737,9 @@ async function renderEngagementHistory(category) {
     viewCategory: category,
     from: prev.category === category && prev.from ? prev.from : new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10),
     to: '',
-    group: ENG_GROUP_DEFAULT[category] || 'none',
-    rows: [], owners: [], capHit: false,
+    group: 'client',     // Client is the default grouping in every category
+    scope: 'mine',       // default to the current user's own engagements
+    rows: [], clients: [], deals: [], persons: [], capHit: false,
   };
   try {
     await _engHistLoad();
@@ -10755,8 +10755,7 @@ async function _engHistReload() {
   const st = window._engHist; if (!st) return;
   st.from = document.getElementById('eh-from')?.value || '';
   st.to   = document.getElementById('eh-to')?.value || '';
-  const newCat = document.getElementById('eh-category')?.value || st.category;
-  if (newCat !== st.viewCategory) { st.viewCategory = newCat; st.group = ENG_GROUP_DEFAULT[newCat] || 'none'; }
+  st.viewCategory = document.getElementById('eh-category')?.value || st.category;   // group/scope choices persist across category switches
   const body = document.getElementById('eh-results');
   if (body) body.innerHTML = '<div style="padding:24px;color:var(--text3);">Loading…</div>';
   try { await _engHistLoad(); _engHistShell(); _engHistApply(); }
@@ -10825,7 +10824,11 @@ async function _engHistLoad() {
       ownerId, ownerName: ownerId ? pName(ownerId) : '—',
     };
   }).filter(r => r.cat);
-  st.owners = [...new Map(st.rows.filter(r => r.ownerId).map(r => [String(r.ownerId), r.ownerName])).entries()];
+  // Distinct values for the "filter by" dropdowns.
+  st.clients = [...new Set(st.rows.map(r => r.clientName).filter(n => n && n !== '—'))].sort();
+  st.deals = [...new Map(st.rows.map(r => [r.parentKind + ':' + r.parentId, r.parentLabel])).entries()]
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  st.persons = [...new Set(st.rows.flatMap(r => r.persons))].filter(Boolean).sort();
 }
 
 // Build the page shell ONCE: the persistent filter bar + an #eh-results container.
@@ -10835,31 +10838,47 @@ function _engHistShell() {
   const st = window._engHist;
   const body = document.getElementById('table-body');
   if (!st || !body) return;
-  const owners = st.owners || [];
+  const lbl = t => `<label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">${t}</label>`;
+  const opts = (pairs, cur) => pairs.map(([v, l]) => `<option value="${cEsc(String(v))}" ${String(cur)===String(v)?'selected':''}>${cEsc(l)}</option>`).join('');
   const bar = `
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;">
-      <div><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">Category</label>
-        <select id="eh-category" class="form-control" style="height:34px;" onchange="_engHistReload()">
-          ${['Outreach','Sales','Contract','Project','All'].map(c => `<option value="${c}" ${st.viewCategory===c?'selected':''}>${c}</option>`).join('')}
-        </select></div>
-      <div><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">From</label>
-        <input type="date" id="eh-from" class="form-control" style="height:34px;" value="${st.from}" onchange="_engHistReload()"></div>
-      <div><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">To</label>
-        <input type="date" id="eh-to" class="form-control" style="height:34px;" value="${st.to}" onchange="_engHistReload()"></div>
-      <div><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">Group by</label>
-        <select id="eh-group" class="form-control" style="height:34px;" onchange="window._engHist.group=this.value;_engHistApply()">
-          ${[['client','Client'],['deal','Deal / Lead'],['person','Person'],['none','Timeline']].map(([v,l]) => `<option value="${v}" ${st.group===v?'selected':''}>${l}</option>`).join('')}
-        </select></div>
-      <div><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">Owner</label>
-        <select id="eh-owner" class="form-control" style="height:34px;" onchange="_engHistApply()">
-          <option value="">All owners</option>
-          ${owners.map(([id,name]) => `<option value="${id}">${cEsc(name)}</option>`).join('')}
-        </select></div>
-      <div style="flex:1;min-width:160px;"><label style="display:block;font-size:11px;color:var(--text3);margin-bottom:3px;">Search</label>
-        <input type="text" id="eh-search" class="form-control" style="height:34px;" placeholder="client, deal, person, notes…" oninput="_engHistApply()"></div>
-      <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);height:34px;cursor:pointer;">
-        <input type="checkbox" id="eh-open" style="margin:0;" onchange="_engHistApply()"> Open next-action only
-      </label>
+    <div style="padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;">
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+        <div>${lbl('Scope')}
+          <select id="eh-scope" class="form-control" style="height:34px;" onchange="window._engHist.scope=this.value;_engHistApply()">
+            ${opts([['mine','My engagements'],['all','All']], st.scope)}
+          </select></div>
+        <div>${lbl('Group by')}
+          <select id="eh-group" class="form-control" style="height:34px;" onchange="window._engHist.group=this.value;_engHistApply()">
+            ${opts([['client','Client'],['deal','Deal / Lead'],['person','Person'],['none','Timeline']], st.group)}
+          </select></div>
+        <div>${lbl('Category')}
+          <select id="eh-category" class="form-control" style="height:34px;" onchange="_engHistReload()">
+            ${opts(['Outreach','Sales','Contract','Project','All'].map(c=>[c,c]), st.viewCategory)}
+          </select></div>
+        <div>${lbl('From')}<input type="date" id="eh-from" class="form-control" style="height:34px;" value="${st.from}" onchange="_engHistReload()"></div>
+        <div>${lbl('To')}<input type="date" id="eh-to" class="form-control" style="height:34px;" value="${st.to}" onchange="_engHistReload()"></div>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);height:34px;cursor:pointer;">
+          <input type="checkbox" id="eh-outstanding" style="margin:0;" onchange="_engHistApply()"> Outstanding</label>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);height:34px;cursor:pointer;">
+          <input type="checkbox" id="eh-nextonly" style="margin:0;" onchange="_engHistApply()"> Next action only</label>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
+        <span style="font-size:11px;color:var(--text3);align-self:center;font-weight:600;">Filter by:</span>
+        <div>${lbl('Client')}
+          <select id="eh-client" class="form-control" style="height:34px;min-width:150px;" onchange="_engHistApply()">
+            <option value="">All clients</option>${opts((st.clients||[]).map(c=>[c,c]), '')}
+          </select></div>
+        <div>${lbl('Deal / Lead')}
+          <select id="eh-deal" class="form-control" style="height:34px;min-width:150px;" onchange="_engHistApply()">
+            <option value="">All</option>${opts((st.deals||[]).map(([k,l])=>[k,l]), '')}
+          </select></div>
+        <div>${lbl('Person')}
+          <select id="eh-person" class="form-control" style="height:34px;min-width:150px;" onchange="_engHistApply()">
+            <option value="">All people</option>${opts((st.persons||[]).map(p=>[p,p]), '')}
+          </select></div>
+        <div style="flex:1;min-width:140px;">${lbl('Search')}
+          <input type="text" id="eh-search" class="form-control" style="height:34px;" placeholder="notes, type…" oninput="_engHistApply()"></div>
+      </div>
     </div>`;
   body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:0 0 24px;">${bar}<div id="eh-results"></div></div></td></tr>`;
 }
@@ -10871,11 +10890,20 @@ function _engHistApply() {
   if (!st || !out) return;
 
   const q = (document.getElementById('eh-search')?.value || '').trim().toLowerCase();
-  const owner = document.getElementById('eh-owner')?.value || '';
-  const openOnly = document.getElementById('eh-open')?.checked || false;
+  const scope = document.getElementById('eh-scope')?.value || st.scope || 'mine';
+  const client = document.getElementById('eh-client')?.value || '';
+  const dealKey = document.getElementById('eh-deal')?.value || '';
+  const person = document.getElementById('eh-person')?.value || '';
+  const outstanding = document.getElementById('eh-outstanding')?.checked || false;
+  const nextOnly = document.getElementById('eh-nextonly')?.checked || false;
+  const me = currentUser && currentUser.personId;
   let rows = st.rows.slice();
-  if (owner) rows = rows.filter(r => String(r.ownerId) === owner);
-  if (openOnly) rows = rows.filter(r => r.e.next_action && !r.e.next_action_done);
+  if (scope === 'mine' && me) rows = rows.filter(r => String(r.ownerId) === String(me) || String(r.e.created_by) === String(me));
+  if (client) rows = rows.filter(r => r.clientName === client);
+  if (dealKey) rows = rows.filter(r => (r.parentKind + ':' + r.parentId) === dealKey);
+  if (person) rows = rows.filter(r => r.persons.includes(person));
+  if (outstanding) rows = rows.filter(r => r.e.next_action && !r.e.next_action_done);
+  if (nextOnly) rows = rows.filter(r => !!r.e.next_action);
   if (q) rows = rows.filter(r =>
     (r.clientName + ' ' + r.parentLabel + ' ' + r.persons.join(' ') + ' ' + (r.e.notes || '') + ' ' + (r.e.engagement_type || '') + ' ' + (r.e.next_action || '')).toLowerCase().includes(q));
 
