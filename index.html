@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.28 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.29 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.28 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.29 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11460,7 +11460,11 @@ function resetLeadForm() {
     'lead-description','lead-region-id','lead-branch-id','lead-service-combo','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
-    'lead-dead-reason-value','lead-dead-notes-value'
+    'lead-dead-reason-value','lead-dead-notes-value',
+    // Additional-contact add row — the lead form is persistent DOM, so a
+    // half-typed name (and its "sounds like" strip) would otherwise carry over
+    // to the next lead opened.
+    'lead-contact-add-name','lead-contact-add-email','lead-contact-add-phone'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.querySelectorAll('.lead-svc-major').forEach(el => { el.checked = false; });
@@ -11471,6 +11475,11 @@ function resetLeadForm() {
   if (orgMatchEl) orgMatchEl.innerHTML = '';
   const personMatchEl = document.getElementById('lead-target-person-matches');
   if (personMatchEl) personMatchEl.innerHTML = '';
+  // Additional-contact add row: clear its "sounds like" + duplicate strips too.
+  const addMatchEl = document.getElementById('lead-contact-add-matches');
+  if (addMatchEl) addMatchEl.innerHTML = '';
+  const addDupeEl = document.getElementById('lead-contact-add-dupe');
+  if (addDupeEl) addDupeEl.innerHTML = '';
   // Clear referrer (source person) similarity + confirmation + contact strips.
   // IMPORTANT: only the confirmation panel may be display:none — the matches
   // strip must keep its default display so a later render is visible (an empty
@@ -11649,6 +11658,8 @@ async function addLeadContact() {
       contact_phone: phone || null, is_primary: false, created_by: currentUser?.personId || null,
     }, '');
     ['lead-contact-add-name', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    // The row is now empty — drop its lingering "sounds like" + duplicate strips.
+    ['lead-contact-add-matches', 'lead-contact-add-dupe'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
     await loadLeadContacts(leadData.id);
     renderAdditionalContacts();
     showStatus('Contact added');
@@ -11751,6 +11762,13 @@ function populateLeadForm() {
   });
   if (leadData.target_person_name) {
     document.getElementById('lead-target-person-name').value = leadData.target_person_name;
+    // A lead saved with a free-text contact name (no FK) was already confirmed as
+    // a new contact — keep the "sounds like" match strip closed on reopen (mirrors
+    // the org field's confirmLeadTargetOrgNew above). The strip only re-surfaces if
+    // the user edits the name again. Set the flag BEFORE the input handler so its
+    // guard (see onLeadTargetPersonNameInput) suppresses the strip while still
+    // running the contacts-availability / validation side effects.
+    if (!leadData.target_person_id) window._leadTargetPersonNewConfirmed = leadData.target_person_name.trim().toLowerCase();
     // Surface similarity hints if the lead was saved with a free-text contact name
     onLeadTargetPersonNameInput();
   }
