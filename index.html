@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2888,6 +2888,9 @@ async function loadTable(page) {
       const contactsBtn = currentPage === 'clients'
         ? `<button class="btn btn-ghost btn-sm" onclick="showClientContacts(${row.id})">Contacts</button>`
         : '';
+      const profileBtn = currentPage === 'people'
+        ? `<button class="btn btn-ghost btn-sm" onclick="showPersonProfile(${row.id})">Profile</button>`
+        : '';
       // System rows (cfg.systemFlag) are required by app logic keyed on their name —
       // editable (e.g. to deactivate) but not deletable.
       const isSystemRow = cfg.systemFlag && row[cfg.systemFlag];
@@ -2896,6 +2899,7 @@ async function loadTable(page) {
         : `<button class="btn btn-danger btn-sm" onclick="confirmDelete(${row.id})">Delete</button>`;
       const actions = cfg.readOnly ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
         ${contactsBtn}
+        ${profileBtn}
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${row.id})">Edit</button>
         ${delBtn}
       </td>`;
@@ -3539,6 +3543,62 @@ async function removeClientContact(affiliationId) {
     await renderClientContactsPage();
   } catch(e) {
     showStatus('Failed to remove contact: ' + e.message, 'error');
+  }
+}
+
+// ── Person profile: who they are + their job titles via affiliations ──────────
+// Answers "what is this person's title?" — e.g. Operations Director @ Xone —
+// with current affiliations first and previous roles (closed) as history.
+async function showPersonProfile(personId) {
+  const p = (allData['people'] || []).find(x => +x.id === +personId)
+         || (currentData || []).find(x => +x.id === +personId) || {};
+  const nm = [p.title, p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + personId);
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:560px;max-width:95vw;">
+        <div class="modal-header">
+          <div class="modal-title">${String(nm).replace(/</g, '&lt;')}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body" id="person-profile-body">
+          <div style="text-align:center;padding:24px;color:var(--text3);">Loading…</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    </div>`;
+  try {
+    const [affs, orgs] = await Promise.all([
+      apiGet('person_organisation_roles', `person_id=eq.${personId}&select=id,org_id,job_title,is_primary,start_date,end_date`),
+      allData['organisations'] || apiGet('organisations', 'select=id,name'),
+    ]);
+    allData['organisations'] = orgs;
+    const orgName = id => (orgs.find(o => +o.id === +id)?.name) || ('Org #' + id);
+    const current = affs.filter(a => !a.end_date);
+    const past = affs.filter(a => a.end_date).sort((a, b) => String(b.end_date).localeCompare(String(a.end_date)));
+    const esc = s => String(s).replace(/</g, '&lt;');
+    const line = (a, isPast) => {
+      const primary = a.is_primary ? ' <span class="badge badge-green">Primary</span>' : '';
+      const dates = isPast
+        ? ` <span style="color:var(--text3);font-size:11px;">${a.start_date || '?'} – ${a.end_date}</span>`
+        : (a.start_date ? ` <span style="color:var(--text3);font-size:11px;">since ${a.start_date}</span>` : '');
+      return `<div style="padding:7px 0;border-bottom:1px solid var(--border);">
+        <strong>${esc(a.job_title || '(no title recorded)')}</strong> <span style="color:var(--text2);">@ ${esc(orgName(a.org_id))}</span>${primary}${dates}
+      </div>`;
+    };
+    const contact = [p.email ? '✉ ' + esc(p.email) : '', p.phone ? '☎ ' + esc(p.phone) : ''].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    const body = document.getElementById('person-profile-body');
+    if (!body) return;
+    body.innerHTML = `
+      ${contact ? `<div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${contact}</div>` : ''}
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:4px;">Current affiliations</div>
+      ${current.length ? current.map(a => line(a, false)).join('') : '<div style="font-size:12px;color:var(--text3);padding:4px 0;">Not currently affiliated with any organisation.</div>'}
+      ${past.length ? `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin:16px 0 4px;">Previous roles</div>${past.map(a => line(a, true)).join('')}` : ''}
+    `;
+  } catch (e) {
+    const body = document.getElementById('person-profile-body');
+    if (body) body.innerHTML = `<div style="color:var(--red);padding:16px;">Failed to load profile: ${e.message}</div>`;
   }
 }
 
