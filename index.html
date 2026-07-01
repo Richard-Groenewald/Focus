@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1078,6 +1078,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <div id="lead-additional-contacts" style="margin-bottom:8px;"></div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
               <input type="text" id="lead-contact-add-name"  class="form-control" placeholder="First and last name" style="flex:2;min-width:120px;" oninput="onLeadAddContactNameInput()">
+              <input type="text" id="lead-contact-add-title" class="form-control" placeholder="Job title (optional)" style="flex:1;min-width:110px;">
               <input type="email" id="lead-contact-add-email" class="form-control" placeholder="Email" style="flex:2;min-width:120px;" oninput="onLeadAddContactDetailInput()" onblur="validateLeadEmail(this)">
               <input type="text" id="lead-contact-add-phone" class="form-control" placeholder="Phone" style="flex:1;min-width:100px;" oninput="onLeadAddContactDetailInput()">
               <button class="btn btn-secondary btn-sm" onclick="addLeadContact()">Add</button>
@@ -7347,9 +7348,10 @@ async function openAddOppContactModal(editIdx) {
   const orgId = oppData?.org_id;
   if (!orgId) { showStatus('Please select a client first', 'error'); return; }
 
-  // Load client-affiliated people excluding already-added contacts
-  const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
+  // Load client-affiliated people (open affiliations) excluding already-added contacts
+  const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&end_date=is.null&select=person_id,job_title`);
   const affiliatedIds = affiliations.map(a => a.person_id);
+  const jobTitleById = {}; affiliations.forEach(a => { if (a.job_title) jobTitleById[+a.person_id] = a.job_title; });
   const people = allData['people'] || await apiGet('people', 'select=*');
   allData['people'] = people;
   const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'active=eq.true&select=*&order=name.asc');
@@ -7372,7 +7374,7 @@ async function openAddOppContactModal(editIdx) {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="oc-person-id" class="form-control" ${editing ? 'disabled' : ''}>
               <option value="">— select from client contacts —</option>
-              ${pool.map(p => `<option value="${p.id}" ${editing?.personId==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}${p.title?' ('+p.title+')':''}</option>`).join('')}
+              ${pool.map(p => { const jt = jobTitleById[+p.id]; return `<option value="${p.id}" ${editing?.personId==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}${jt?' — '+jt:''}</option>`; }).join('')}
             </select>
             ${!pool.length && !editing ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No client contacts available — use "Create New Client Contact" to add one</div>' : ''}
           </div>
@@ -7512,6 +7514,10 @@ async function openCreateOppContactModal() {
               <input type="email" id="noc-email" class="form-control">
             </div>
           </div>
+          <div class="form-group">
+            <label class="form-label">Job title</label>
+            <input type="text" id="noc-job-title" class="form-control" placeholder="e.g. Operations Director">
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">DMU Role</label>
@@ -7610,10 +7616,13 @@ async function saveNewOppContact() {
     const person = personResult[0];
     allData['people'] = null;
 
-    // Auto-affiliate with client
+    // Auto-affiliate with client, carrying the optional job title.
+    const jobTitle = (document.getElementById('noc-job-title')?.value || '').trim();
     if (orgId) {
       await api('person_organisation_roles', 'POST', {
         person_id: person.id, org_id: +orgId, role_type: 'Contact', is_primary: false,
+        job_title: jobTitle || null, start_date: new Date().toISOString().slice(0, 10),
+        created_by: currentUser?.personId || null,
       }, '');
     }
 
@@ -11934,7 +11943,7 @@ function resetLeadForm() {
     // Additional-contact add row — the lead form is persistent DOM, so a
     // half-typed name (and its "sounds like" strip) would otherwise carry over
     // to the next lead opened.
-    'lead-contact-add-name','lead-contact-add-email','lead-contact-add-phone'
+    'lead-contact-add-name','lead-contact-add-title','lead-contact-add-email','lead-contact-add-phone'
   ];
   ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   document.querySelectorAll('.lead-svc-major').forEach(el => { el.checked = false; });
@@ -12094,10 +12103,19 @@ async function loadLeadContacts(leadId) {
     const rows = await apiGet('deal_contacts', `lead_id=eq.${leadId}&is_primary=eq.false&select=id,person_id,dmu_role_id&order=id`);
     const people = allData['people'] || await apiGet('people', 'select=*');
     allData['people'] = people;
+    // Derive each contact's current job title from their open affiliation at the lead's target org.
+    const affTitle = {};
+    if (leadData?.target_org_id) {
+      try {
+        const affs = await apiGet('person_organisation_roles', `org_id=eq.${leadData.target_org_id}&end_date=is.null&select=person_id,job_title`);
+        affs.forEach(a => { if (a.job_title) affTitle[+a.person_id] = a.job_title; });
+      } catch (e) {}
+    }
     leadContacts = rows.map(r => {
       const p = people.find(x => +x.id === +r.person_id) || {};
       return {
         id: r.id, person_id: r.person_id, dmu_role_id: r.dmu_role_id,
+        job_title: affTitle[+r.person_id] || '',
         contact_name: [p.first_name, p.last_name].filter(Boolean).join(' '),
         contact_email: p.email || '', contact_phone: p.phone || '',
       };
@@ -12113,7 +12131,8 @@ function renderAdditionalContacts() {
     return;
   }
   el.innerHTML = leadContacts.map(c => {
-    const bits = [c.contact_name, c.contact_email, c.contact_phone].filter(Boolean).join(' · ');
+    const nameWithTitle = (c.contact_name || '') + (c.job_title ? ' — ' + c.job_title : '');
+    const bits = [nameWithTitle, c.contact_email, c.contact_phone].filter(Boolean).join(' · ');
     return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;padding:4px 10px;border-radius:999px;margin:0 6px 6px 0;">
       ${String(bits || 'Contact').replace(/</g, '&lt;')}
       <button onclick="removeLeadContact(${c.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:var(--text3);cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0;">×</button>
@@ -12126,6 +12145,7 @@ async function addLeadContact() {
   const name  = (document.getElementById('lead-contact-add-name')?.value  || '').trim();
   const email = (document.getElementById('lead-contact-add-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-add-phone')?.value || '').trim();
+  const jobTitle = (document.getElementById('lead-contact-add-title')?.value || '').trim();
   // Contacts are real people now, so a name is required unless linking an existing person.
   if (!_leadAddContactSelectedPersonId && !name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (name && !leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name for the contact', 'error'); return; }
@@ -12153,13 +12173,19 @@ async function addLeadContact() {
     // Affiliate to the lead's target org (if known) so a job title has a home.
     if (leadData.target_org_id) {
       try {
-        const ex = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${leadData.target_org_id}&end_date=is.null&select=id`);
+        const ex = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${leadData.target_org_id}&end_date=is.null&select=id,job_title`);
         if (!ex.length) await api('person_organisation_roles', 'POST', {
           person_id: personId, org_id: +leadData.target_org_id, role_type: 'Contact',
-          is_primary: false, start_date: new Date().toISOString().slice(0, 10),
+          is_primary: false, job_title: jobTitle || null,
+          start_date: new Date().toISOString().slice(0, 10),
           created_by: currentUser?.personId || null,
         }, '');
+        // Existing affiliation with no title yet — fill it from what was typed.
+        else if (jobTitle && !(ex[0].job_title || '').trim())
+          await api('person_organisation_roles', 'PATCH', { job_title: jobTitle }, 'id=eq.' + ex[0].id);
       } catch (e) { /* affiliation is best-effort */ }
+    } else if (jobTitle) {
+      showStatus('Contact added — set a target organisation to record the job title', 'info');
     }
     await api('deal_contacts', 'POST', {
       lead_id: leadData.id, person_id: personId, is_primary: false,
@@ -12167,7 +12193,7 @@ async function addLeadContact() {
     }, '');
     _leadAddContactSelectedPersonId = null;
     if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
-    ['lead-contact-add-name', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+    ['lead-contact-add-name', 'lead-contact-add-title', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
     // The row is now empty — drop its lingering "sounds like" + duplicate strips.
     ['lead-contact-add-matches', 'lead-contact-add-dupe'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
     await loadLeadContacts(leadData.id);
