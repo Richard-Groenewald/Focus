@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.35 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.35 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1545,7 +1545,7 @@ function _mockSeed() {
     ],
     // Tables the leads flow writes to — start empty.
     leads: [],
-    lead_contacts: [],
+    deal_contacts: [],
     lead_interactions: [],
     lead_description_log: [],
     lead_red_flags: [],
@@ -2476,8 +2476,8 @@ const PAGES = {
   },
 
   opportunity_contacts: {
-    title: 'Opportunity Contacts',
-    table: 'opportunity_contacts',
+    title: 'Deal Contacts',
+    table: 'deal_contacts',
     custom: true,
     columns: [],
     fields: [],
@@ -3175,7 +3175,7 @@ async function showClientContacts(orgId) {
     </div>`;
   try {
     const links = await apiGet('person_organisation_roles',
-      `org_id=eq.${orgId}&select=person_id,role_type,is_primary&order=is_primary.desc`);
+      `org_id=eq.${orgId}&end_date=is.null&select=person_id,job_title,is_primary&order=is_primary.desc`);
     const bodyEl = document.getElementById('client-contacts-body');
     if (!bodyEl) return;
     if (!links.length) {
@@ -3199,13 +3199,13 @@ async function showClientContacts(orgId) {
       const email = p.email ? `<a href="mailto:${p.email}">${p.email}</a>` : '—';
       return `<tr>
         <td>${name}${primary}</td>
-        <td>${l.role_type || '—'}</td>
+        <td>${l.job_title || '—'}</td>
         <td>${email}</td>
         <td>${p.phone || '—'}</td>
       </tr>`;
     }).join('');
     bodyEl.innerHTML = `<table style="width:100%;border-collapse:collapse;white-space:nowrap;">
-      <thead><tr><th style="text-align:left;padding-right:18px;">Name</th><th style="text-align:left;padding-right:18px;">Role</th><th style="text-align:left;padding-right:18px;">Email</th><th style="text-align:left;">Phone</th></tr></thead>
+      <thead><tr><th style="text-align:left;padding-right:18px;">Name</th><th style="text-align:left;padding-right:18px;">Job title</th><th style="text-align:left;padding-right:18px;">Email</th><th style="text-align:left;">Phone</th></tr></thead>
       <tbody>${rows}</tbody></table>`;
   } catch(err) {
     const bodyEl = document.getElementById('client-contacts-body');
@@ -3242,11 +3242,11 @@ async function renderClientContactsPage() {
   document.getElementById('page-title').textContent = 'Contacts — ' + (org ? org.name : 'Client');
   if (addBtn) { addBtn.style.display = ''; addBtn.onclick = () => openAddContactToClient(); addBtn.textContent = '+ Add Contact'; }
 
-  head.innerHTML = '<tr><th>Name</th><th>Role</th><th>Email</th><th>Phone</th><th>Actions</th></tr>';
+  head.innerHTML = '<tr><th>Name</th><th>Job title</th><th>Email</th><th>Phone</th><th>Actions</th></tr>';
   body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading…</td></tr>';
 
   const links = await apiGet('person_organisation_roles',
-    `org_id=eq.${_contactsClientId}&select=id,person_id,role_type,is_primary&order=is_primary.desc`);
+    `org_id=eq.${_contactsClientId}&end_date=is.null&select=id,person_id,job_title,is_primary&order=is_primary.desc`);
   document.getElementById('page-sub').textContent = links.length + ' contact' + (links.length !== 1 ? 's' : '');
   if (!links.length) {
     body.innerHTML = '<tr class="empty-row"><td colspan="5">No contacts yet — click “+ Add Contact”.</td></tr>';
@@ -3262,7 +3262,7 @@ async function renderClientContactsPage() {
     const email = p.email ? `<a href="mailto:${p.email}">${p.email}</a>` : '—';
     return `<tr>
       <td>${name}${primary}</td>
-      <td>${l.role_type || '—'}</td>
+      <td>${l.job_title || '—'}</td>
       <td>${email}</td>
       <td>${p.phone || '—'}</td>
       <td style="white-space:nowrap;">
@@ -3306,7 +3306,7 @@ function openAddContactToClient() {
           </div>
           <div id="acc-person-warning" style="display:none;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;margin-bottom:10px;"></div>
           <div class="form-row">
-            <div class="form-group"><label class="form-label">Position</label><input type="text" id="acc-position" class="form-control" placeholder="e.g. Financial Director"></div>
+            <div class="form-group"><label class="form-label">Job title</label><input type="text" id="acc-position" class="form-control" placeholder="e.g. Financial Director"></div>
             <div class="form-group"><label class="form-label">Email</label><input type="email" id="acc-email" class="form-control"></div>
             <div class="form-group"><label class="form-label">Phone</label><input type="text" id="acc-phone" class="form-control"></div>
           </div>
@@ -3382,7 +3382,7 @@ async function saveAddContactToClient() {
   const last = document.getElementById('acc-last')?.value.trim();
   if (!_addContactSelectedPersonId && (!first || !last)) { showStatus('First and last name are required', 'error'); return; }
   const isPrimary = document.getElementById('acc-primary')?.checked || false;
-  const position = document.getElementById('acc-position')?.value.trim() || '';
+  const jobTitle = document.getElementById('acc-position')?.value.trim() || '';
   try {
     let personId = _addContactSelectedPersonId;
     if (!personId) {
@@ -3397,13 +3397,16 @@ async function saveAddContactToClient() {
       personId = personResult[0].id;
       allData['people'] = null;
     }
-    // Don't link the same person to this client twice.
+    // Don't create a second OPEN affiliation for the same person+client. A closed
+    // (historical) affiliation is fine — this would be a re-hire, a new open row.
     const existing = await apiGet('person_organisation_roles',
-      `org_id=eq.${_contactsClientId}&person_id=eq.${personId}&select=id`);
+      `org_id=eq.${_contactsClientId}&person_id=eq.${personId}&end_date=is.null&select=id`);
     if (existing.length) { showStatus('That person is already a contact for this client', 'error'); return; }
     await api('person_organisation_roles', 'POST', {
       person_id: personId, org_id: _contactsClientId,
-      role_type: position || 'Contact', is_primary: isPrimary,
+      job_title: jobTitle || null, role_type: 'Contact', is_primary: isPrimary,
+      start_date: new Date().toISOString().slice(0, 10),
+      created_by: currentUser?.personId || null,
     }, '');
     showStatus('Contact added');
     closeModal();
@@ -3419,10 +3422,25 @@ async function saveAddContactToClient() {
 async function openEditClientContact(affiliationId, personId) {
   try {
     const [affs, ppl] = await Promise.all([
-      apiGet('person_organisation_roles', `id=eq.${affiliationId}&select=id,role_type,is_primary`),
+      apiGet('person_organisation_roles', `id=eq.${affiliationId}&select=id,org_id,job_title,role_type,is_primary,start_date`),
       apiGet('people', `id=eq.${personId}&select=*`),
     ]);
     const a = affs[0] || {}; const p = ppl[0] || {};
+    // Prior (closed) roles at this org, most recent first — the job-title history.
+    let history = [];
+    if (a.org_id) {
+      try {
+        history = await apiGet('person_organisation_roles',
+          `person_id=eq.${personId}&org_id=eq.${a.org_id}&end_date=not.is.null&select=job_title,start_date,end_date&order=end_date.desc`);
+      } catch (e) { history = []; }
+    }
+    const histHtml = history.length ? `
+      <div class="form-group" style="margin-top:4px;">
+        <label class="form-label">Previous roles at this organisation</label>
+        <div style="font-size:12px;color:var(--text2);border:1px solid var(--border);border-radius:var(--radius);padding:6px 10px;background:var(--bg);">
+          ${history.map(h => `<div>${h.job_title || '(untitled)'} <span style="color:var(--text3);">— ${h.start_date || '?'} to ${h.end_date || '?'}</span></div>`).join('')}
+        </div>
+      </div>` : '';
     const titleOpts = ['', 'Mr', 'Mrs', 'Ms', 'Dr', 'Prof']
       .map(t => `<option value="${t}" ${(p.title || '') === t ? 'selected' : ''}>${t || '—'}</option>`).join('');
     document.getElementById('modal-root').innerHTML = `
@@ -3442,17 +3460,19 @@ async function openEditClientContact(affiliationId, personId) {
                 <input type="text" id="ec-last" class="form-control" value="${p.last_name || ''}"></div>
             </div>
             <div class="form-row">
-              <div class="form-group"><label class="form-label">Position</label>
-                <input type="text" id="ec-position" class="form-control" value="${a.role_type || ''}"></div>
+              <div class="form-group"><label class="form-label">Job title</label>
+                <input type="text" id="ec-position" class="form-control" value="${(a.job_title || '').replace(/"/g, '&quot;')}"></div>
               <div class="form-group"><label class="form-label">Email</label>
                 <input type="email" id="ec-email" class="form-control" value="${p.email || ''}"></div>
               <div class="form-group"><label class="form-label">Phone</label>
                 <input type="text" id="ec-phone" class="form-control" value="${p.phone || ''}"></div>
             </div>
+            <div style="font-size:11px;color:var(--text3);margin:-4px 0 10px;">Changing the job title keeps the old one as history (dated), rather than overwriting it.</div>
             <div class="form-group" style="display:flex;align-items:center;gap:8px;">
               <input type="checkbox" id="ec-primary" ${a.is_primary ? 'checked' : ''} style="width:16px;height:16px;accent-color:var(--red);">
               <label for="ec-primary" class="form-label" style="margin:0;">Primary contact</label>
             </div>
+            ${histHtml}
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -3478,10 +3498,30 @@ async function saveEditClientContact(affiliationId, personId) {
       phone: document.getElementById('ec-phone')?.value.trim() || null,
       initials,
     }, 'id=eq.' + personId);
-    await api('person_organisation_roles', 'PATCH', {
-      role_type: document.getElementById('ec-position')?.value.trim() || 'Contact',
-      is_primary: document.getElementById('ec-primary')?.checked || false,
-    }, 'id=eq.' + affiliationId);
+
+    const newTitle  = document.getElementById('ec-position')?.value.trim() || '';
+    const isPrimary = document.getElementById('ec-primary')?.checked || false;
+    // Load the current affiliation to decide: a real job-title change (old title was
+    // set and differs) is a career event → close the old row and open a new one so
+    // history is preserved. First-time set / same title just patches in place.
+    const cur = (await apiGet('person_organisation_roles',
+      `id=eq.${affiliationId}&select=person_id,org_id,job_title,role_type,is_primary`))[0] || {};
+    const oldTitle = (cur.job_title || '').trim();
+    if (oldTitle && newTitle && newTitle !== oldTitle) {
+      const today = new Date().toISOString().slice(0, 10);
+      await api('person_organisation_roles', 'PATCH', { end_date: today }, 'id=eq.' + affiliationId);
+      await api('person_organisation_roles', 'POST', {
+        person_id: cur.person_id, org_id: cur.org_id,
+        job_title: newTitle, role_type: cur.role_type || 'Contact',
+        is_primary: isPrimary, start_date: today,
+        created_by: currentUser?.personId || null,
+      }, '');
+    } else {
+      await api('person_organisation_roles', 'PATCH', {
+        job_title: newTitle || null,
+        is_primary: isPrimary,
+      }, 'id=eq.' + affiliationId);
+    }
     showStatus('Contact updated');
     closeModal();
     allData['people'] = null;
@@ -3815,7 +3855,7 @@ const MENU = [
             icon: '<circle cx="5" cy="6" r="2.5"/><circle cx="11" cy="6" r="2.5"/><path d="M0 13c0-2 2-3.5 5-3.5M16 13c0-2-2-3.5-5-3.5M5.5 13c0-2 1.1-3.5 2.5-3.5s2.5 1.5 2.5 3.5"/>' },
           { page: 'home_org_members',    label: 'Home Org Members',    permission: 'manage_people',
             icon: '<path d="M8 1L3 4v4c0 3 2.2 5.7 5 6.4C11 13.7 13 11 13 8V4L8 1z"/>' },
-          { page: 'opportunity_contacts', label: 'Opportunity Contacts', permission: 'manage_opportunities',
+          { page: 'opportunity_contacts', label: 'Deal Contacts', permission: 'manage_opportunities',
             icon: '<circle cx="8" cy="5" r="3"/><path d="M2 13c0-3 2.7-5 6-5s6 2 6 5"/>' },
         ]
       },
@@ -7170,11 +7210,20 @@ async function loadOppContacts(dealId) {
   oppContacts = [];
   if (!dealId) { renderOppContacts(); return; }
   try {
-    const contacts = await apiGet('opportunity_contacts', `deal_id=eq.${dealId}&select=*`);
+    const contacts = await apiGet('deal_contacts', `deal_id=eq.${dealId}&select=*`);
     const people = allData['people'] || await apiGet('people', 'select=*');
     const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'select=*');
     allData['people'] = people;
     allData['dmu_roles'] = dmuRoles;
+    // Derive each contact's job title from their open affiliation at this deal's org
+    // (title lives on the affiliation now, not on the person record).
+    const affTitle = {};
+    if (oppData?.org_id) {
+      try {
+        const affs = await apiGet('person_organisation_roles', `org_id=eq.${oppData.org_id}&end_date=is.null&select=person_id,job_title`);
+        affs.forEach(a => { if (a.job_title) affTitle[+a.person_id] = a.job_title; });
+      } catch (e) {}
+    }
     contacts.forEach(c => {
       const p = people.find(x => +x.id === +c.person_id);
       const dmu = dmuRoles.find(x => +x.id === +c.dmu_role_id);
@@ -7182,7 +7231,7 @@ async function loadOppContacts(dealId) {
         id: c.id,
         personId: c.person_id,
         name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown',
-        title: p?.title || '',
+        title: affTitle[+c.person_id] || '',
         phone: p?.phone || '',
         dmuRole: dmu?.name || '',
         dmuRoleId: c.dmu_role_id,
@@ -7309,7 +7358,7 @@ async function saveOppContact(editIdx) {
     // Update existing
     const c = oppContacts[editIdx];
     try {
-      await api('opportunity_contacts', 'PATCH', { dmu_role_id: dmuRoleId || null, note }, `id=eq.${c.id}`);
+      await api('deal_contacts', 'PATCH', { dmu_role_id: dmuRoleId || null, note }, `id=eq.${c.id}`);
       c.dmuRoleId = dmuRoleId;
       c.dmuRole = dmu?.name || '';
       c.note = note;
@@ -7329,7 +7378,7 @@ async function saveOppContact(editIdx) {
     };
     if (oppData.id) {
       try {
-        const result = await api('opportunity_contacts', 'POST', {
+        const result = await api('deal_contacts', 'POST', {
           deal_id: oppData.id, person_id: +personId,
           dmu_role_id: dmuRoleId || null, note,
         }, 'select=*');
@@ -7349,7 +7398,7 @@ async function removeOppContact(idx) {
   if (!await confirmDialog({title:'Remove contact', message:'Remove this contact from the opportunity?', confirmLabel:'Remove', danger:true})) return;
   if (c.id) {
     try {
-      await api('opportunity_contacts', 'DELETE', null, `id=eq.${c.id}`);
+      await api('deal_contacts', 'DELETE', null, `id=eq.${c.id}`);
     } catch(e) { showStatus('Failed: ' + e.message, 'error'); return; }
   }
   oppContacts.splice(idx, 1);
@@ -7519,7 +7568,7 @@ async function saveNewOppContact() {
     };
 
     if (oppData.id) {
-      const result = await api('opportunity_contacts', 'POST', {
+      const result = await api('deal_contacts', 'POST', {
         deal_id: oppData.id, person_id: person.id,
         dmu_role_id: dmuRoleId || null, note,
       }, 'select=*');
@@ -7540,7 +7589,7 @@ async function saveOppContacts(dealId) {
   for (const c of oppContacts) {
     if (!c.isNew) continue;
     try {
-      const result = await api('opportunity_contacts', 'POST', {
+      const result = await api('deal_contacts', 'POST', {
         deal_id: dealId, person_id: c.personId,
         dmu_role_id: c.dmuRoleId || null, note: c.note || '',
       }, 'select=*');
@@ -9181,7 +9230,7 @@ async function adminDeleteDeal(id) {
     }
     await api('revenue_streams',     'DELETE', null, `deal_id=eq.${id}`);
     await api('engagements',         'DELETE', null, `deal_id=eq.${id}`);
-    await api('opportunity_contacts','DELETE', null, `deal_id=eq.${id}`);
+    await api('deal_contacts','DELETE', null, `deal_id=eq.${id}`);
     await api('deal_collaborators',  'DELETE', null, `deal_id=eq.${id}`);
     // Optional/loosely-coupled children — tolerate absence of table or column.
     for (const t of ['secured_snapshots', 'interactions', 'risks']) {
@@ -11422,9 +11471,17 @@ function validateLeadName(el) {
 }
 
 // ── Additional-contact: name similarity + duplicate email/phone warning ──
+// When the user clicks "Use this" on a match we link that existing person rather
+// than creating a new one; cleared if they then edit the name away from that person.
+let _leadAddContactSelectedPersonId = null;
 function onLeadAddContactNameInput() {
   const el = document.getElementById('lead-contact-add-name');
   validateLeadName(el);
+  if (_leadAddContactSelectedPersonId) {
+    const sp = (allData['people'] || []).find(x => +x.id === +_leadAddContactSelectedPersonId);
+    const spName = sp ? [sp.first_name, sp.last_name].filter(Boolean).join(' ') : '';
+    if ((el?.value || '').trim() !== spName) _leadAddContactSelectedPersonId = null;
+  }
   const out = document.getElementById('lead-contact-add-matches');
   if (!out) return;
   const name = (el?.value || '').trim();
@@ -11456,11 +11513,14 @@ function useLeadAddContactMatch(personId) {
   if (typeof FocusPhone !== 'undefined') FocusPhone.refreshAll();
   const out = document.getElementById('lead-contact-add-matches'); if (out) out.innerHTML = '';
   onLeadAddContactDetailInput();
+  // Set AFTER the field fills (their input events run onLeadAddContactNameInput first).
+  _leadAddContactSelectedPersonId = +personId;
 }
 async function _ensureAllLeadContactsLoaded() {
-  if (allData['lead_contacts_all']) return;
-  try { allData['lead_contacts_all'] = await apiGet('lead_contacts', 'select=id,lead_id,contact_name,contact_email,contact_phone'); }
-  catch (e) { allData['lead_contacts_all'] = []; }
+  // Contacts are real people now, so people cover the dupe scan on their own.
+  if (allData['people']) return;
+  try { allData['people'] = await apiGet('people', 'select=*'); }
+  catch (e) { allData['people'] = []; }
 }
 function _phoneDigits(v) { return String(v || '').replace(/\D/g, ''); }
 // Find existing people / lead-contacts that share an email or phone (warn, never block).
@@ -11471,7 +11531,6 @@ function _findContactDupes(email, phone) {
   const phoneMatch = p => { const d = _phoneDigits(p); return pd.length >= 7 && d.length >= 7 && (d === pd || d.slice(-9) === pd.slice(-9)); };
   const out = [];
   (allData['people'] || []).forEach(p => { if (emailMatch(p.email) || phoneMatch(p.phone)) out.push([p.first_name, p.last_name].filter(Boolean).join(' ') || 'a known contact'); });
-  (allData['lead_contacts_all'] || []).forEach(c => { if (emailMatch(c.contact_email) || phoneMatch(c.contact_phone)) out.push(c.contact_name || 'another lead contact'); });
   return [...new Set(out)];
 }
 async function onLeadAddContactDetailInput() {
@@ -11502,7 +11561,7 @@ async function _revertChildAdditions(table, leadId, keepIds) {
   } catch (e) { /* best-effort */ }
 }
 async function _deleteLeadCascade(id) {
-  for (const t of ['lead_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
+  for (const t of ['deal_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
     try { await api(t, 'DELETE', null, 'lead_id=eq.' + id); } catch (e) {}
   }
   try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
@@ -11522,7 +11581,7 @@ async function revertLead() {
       closeLeadPage({ force: true });
       return;
     }
-    await _revertChildAdditions('lead_contacts', id, snap.contacts);
+    await _revertChildAdditions('deal_contacts', id, snap.contacts);
     await _revertChildAdditions('engagements', id, snap.interactions);
     await _revertChildAdditions('lead_description_log', id, snap.descLog);
     const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
@@ -11967,11 +12026,23 @@ async function initLeadForm() {
   // org is chosen (a known contact must belong to a known org).
 }
 
-// ── Additional contacts (lead_contacts; the primary stays in target_person_*) ─
+// ── Additional contacts (deal_contacts by lead_id; primary stays in target_person_*) ─
+// Contacts are real people now; we resolve their names/detail for display.
 async function loadLeadContacts(leadId) {
   if (!leadId) { leadContacts = []; return; }
-  try { leadContacts = await apiGet('lead_contacts', `lead_id=eq.${leadId}&is_primary=eq.false&select=*&order=id`); }
-  catch (e) { leadContacts = []; }
+  try {
+    const rows = await apiGet('deal_contacts', `lead_id=eq.${leadId}&is_primary=eq.false&select=id,person_id,dmu_role_id&order=id`);
+    const people = allData['people'] || await apiGet('people', 'select=*');
+    allData['people'] = people;
+    leadContacts = rows.map(r => {
+      const p = people.find(x => +x.id === +r.person_id) || {};
+      return {
+        id: r.id, person_id: r.person_id, dmu_role_id: r.dmu_role_id,
+        contact_name: [p.first_name, p.last_name].filter(Boolean).join(' '),
+        contact_email: p.email || '', contact_phone: p.phone || '',
+      };
+    });
+  } catch (e) { leadContacts = []; }
 }
 
 function renderAdditionalContacts() {
@@ -11995,7 +12066,8 @@ async function addLeadContact() {
   const name  = (document.getElementById('lead-contact-add-name')?.value  || '').trim();
   const email = (document.getElementById('lead-contact-add-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-add-phone')?.value || '').trim();
-  if (!name && !email && !phone) { showStatus('Enter a name or contact detail', 'error'); return; }
+  // Contacts are real people now, so a name is required unless linking an existing person.
+  if (!_leadAddContactSelectedPersonId && !name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (name && !leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name for the contact', 'error'); return; }
   // Contacts persist immediately, so the lead must exist — auto-save a new lead first.
   if (!leadData.id) {
@@ -12004,10 +12076,37 @@ async function addLeadContact() {
   }
   startBusy('Adding contact…');
   try {
-    await api('lead_contacts', 'POST', {
-      lead_id: leadData.id, contact_name: name || null, contact_email: email || null,
-      contact_phone: phone || null, is_primary: false, created_by: currentUser?.personId || null,
+    // Resolve to a person: link the chosen match, else create a new people row.
+    let personId = _leadAddContactSelectedPersonId;
+    if (!personId) {
+      const parts = name.split(/\s+/);
+      const first = parts.shift();
+      const last  = parts.join(' ') || null;
+      const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
+      const pr = await api('people', 'POST', {
+        first_name: first, last_name: last,
+        email: email || null, phone: phone || null, initials,
+      }, 'select=*');
+      personId = pr[0].id;
+      allData['people'] = null;
+    }
+    // Affiliate to the lead's target org (if known) so a job title has a home.
+    if (leadData.target_org_id) {
+      try {
+        const ex = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${leadData.target_org_id}&end_date=is.null&select=id`);
+        if (!ex.length) await api('person_organisation_roles', 'POST', {
+          person_id: personId, org_id: +leadData.target_org_id, role_type: 'Contact',
+          is_primary: false, start_date: new Date().toISOString().slice(0, 10),
+          created_by: currentUser?.personId || null,
+        }, '');
+      } catch (e) { /* affiliation is best-effort */ }
+    }
+    await api('deal_contacts', 'POST', {
+      lead_id: leadData.id, person_id: personId, is_primary: false,
+      created_by: currentUser?.personId || null,
     }, '');
+    _leadAddContactSelectedPersonId = null;
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
     ['lead-contact-add-name', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
     // The row is now empty — drop its lingering "sounds like" + duplicate strips.
     ['lead-contact-add-matches', 'lead-contact-add-dupe'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
@@ -12022,7 +12121,7 @@ async function removeLeadContact(id) {
   if (leadReadOnly) return;
   startBusy('Removing…');
   try {
-    await api('lead_contacts', 'DELETE', null, 'id=eq.' + id);
+    await api('deal_contacts', 'DELETE', null, 'id=eq.' + id);
     await loadLeadContacts(leadData.id);
     renderAdditionalContacts();
   } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
@@ -14958,7 +15057,7 @@ async function commitPromotion(s) {
 
     // === 6. Deal contact: the Q3 contact =====================
     try {
-      await api('opportunity_contacts', 'POST', {
+      await api('deal_contacts', 'POST', {
         deal_id: dealId, person_id: +personId,
         dmu_role_id: null, note: '',
       }, '');
@@ -15056,12 +15155,26 @@ async function commitPromotion(s) {
         const last  = parts.join(' ') || null;
         const createdRef = await api('people', 'POST', {
           first_name: first, last_name: last,
-          title: leadData.source_person_title || null,
+          // people.title is the honorific (Mr/Mrs/…), NOT the job title. The
+          // referrer's job title lives on their affiliation (below), not here.
+          title: null,
           email: leadData.source_person_email || null,
           phone: leadData.source_person_phone || null,
         }, 'select=*');
         sourcePersonId = createdRef[0].id;
         (allData['people'] = allData['people'] || []).push(createdRef[0]);
+        // If we know the referrer's organisation, record their job title as an
+        // affiliation so it has a proper home (derive-not-store model).
+        if (leadData.source_org_id && (leadData.source_person_title || '').trim()) {
+          try {
+            await api('person_organisation_roles', 'POST', {
+              person_id: sourcePersonId, org_id: +leadData.source_org_id,
+              job_title: leadData.source_person_title.trim(), role_type: 'Contact',
+              is_primary: false, start_date: new Date().toISOString().slice(0, 10),
+              created_by: currentUser?.personId || null,
+            }, '');
+          } catch (e) { console.warn('Could not record referrer affiliation on promote:', e.message); }
+        }
       } catch (e) {
         // Non-fatal: a referrer-creation failure shouldn't block the promote.
         console.warn('Could not create referral contact on promote:', e.message);
@@ -16258,7 +16371,7 @@ async function _liLoadPeople() {
         const lead = (await apiGet('leads', `id=eq.${parent.id}&select=target_org_id,target_person_id`))[0] || {};
         const ids = [];
         if (lead.target_person_id) ids.push(+lead.target_person_id);
-        const lcs = await apiGet('lead_contacts', `lead_id=eq.${parent.id}&person_id=not.is.null&select=person_id`);
+        const lcs = await apiGet('deal_contacts', `lead_id=eq.${parent.id}&person_id=not.is.null&select=person_id`);
         lcs.forEach(c => ids.push(+c.person_id));
         if (lead.target_org_id) {
           const links = await apiGet('person_organisation_roles', `org_id=eq.${lead.target_org_id}&select=person_id`);
@@ -17302,11 +17415,12 @@ async function renderAllOppContacts() {
   head.innerHTML = '';
   body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
   try {
-    const [contacts, people, orgs, deals, dmuRoles] = await Promise.all([
-      apiGet('opportunity_contacts', 'select=*'),
+    const [contacts, people, orgs, deals, leads, dmuRoles] = await Promise.all([
+      apiGet('deal_contacts', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
       allData['organisations'] || apiGet('organisations', 'select=*'),
       apiGet('deals', 'select=id,name,org_id'),
+      apiGet('leads', 'select=id,description,target_org_id,target_org_name'),
       allData['dmu_roles'] || apiGet('dmu_roles', 'select=*'),
     ]);
     allData['people'] = people;
@@ -17314,8 +17428,8 @@ async function renderAllOppContacts() {
     allData['dmu_roles'] = dmuRoles;
     document.getElementById('page-sub').textContent = contacts.length + ' contact' + (contacts.length !== 1 ? 's' : '');
     if (!contacts.length) {
-      head.innerHTML = '<tr><th>Person</th><th>Organisation</th><th>Opportunity</th><th>DMU Role</th><th>Note</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="5">No opportunity contacts yet</td></tr>';
+      head.innerHTML = '<tr><th>Person</th><th>Organisation</th><th>Lead / Opportunity</th><th>DMU Role</th><th>Note</th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="5">No deal contacts yet</td></tr>';
       return;
     }
 
@@ -17323,30 +17437,34 @@ async function renderAllOppContacts() {
       const p = people.find(x => +x.id === +c.person_id);
       return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
     };
-    const dealName = (c) => deals.find(x => +x.id === +c.deal_id)?.name || '';
+    // A deal_contacts row hangs off EITHER a deal (opportunity) or a lead.
+    const ctxName = (c) => {
+      if (c.deal_id) return deals.find(x => +x.id === +c.deal_id)?.name || '';
+      const l = leads.find(x => +x.id === +c.lead_id);
+      return l ? ('Lead: ' + String(l.description || ('#' + l.id)).slice(0, 40)) : '';
+    };
     const orgName  = (c) => {
-      const d = deals.find(x => +x.id === +c.deal_id);
-      return d ? (orgs.find(x => +x.id === +d.org_id)?.name || '') : '';
+      if (c.deal_id) { const d = deals.find(x => +x.id === +c.deal_id); return d ? (orgs.find(x => +x.id === +d.org_id)?.name || '') : ''; }
+      const l = leads.find(x => +x.id === +c.lead_id);
+      return l ? (orgs.find(x => +x.id === +l.target_org_id)?.name || l.target_org_name || '') : '';
     };
     const dmuName  = (c) => dmuRoles.find(x => +x.id === +c.dmu_role_id)?.name || '';
 
     const cols = [
-      { key: 'person', label: 'Person',       get: personName },
-      { key: 'org',    label: 'Organisation', get: orgName },
-      { key: 'deal',   label: 'Opportunity',  get: dealName },
-      { key: 'dmu',    label: 'DMU Role',     get: dmuName },
-      { key: 'note',   label: 'Note',         get: c => c.note || '' },
+      { key: 'person', label: 'Person',            get: personName },
+      { key: 'org',    label: 'Organisation',      get: orgName },
+      { key: 'deal',   label: 'Lead / Opportunity', get: ctxName },
+      { key: 'dmu',    label: 'DMU Role',          get: dmuName },
+      { key: 'note',   label: 'Note',              get: c => c.note || '' },
     ];
 
     const rowRenderer = (c) => {
       const p = people.find(x => +x.id === +c.person_id);
-      const d = deals.find(x => +x.id === +c.deal_id);
-      const o = orgs.find(x => d && +x.id === +d.org_id);
       const dmu = dmuRoles.find(x => +x.id === +c.dmu_role_id);
       return `<tr>
         <td style="font-weight:600;">${p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : '—'}</td>
-        <td>${o?.name || '—'}</td>
-        <td>${d?.name || '—'}</td>
+        <td>${orgName(c) || '—'}</td>
+        <td>${ctxName(c) || '—'}</td>
         <td>${dmu ? '<span class="badge badge-blue">'+dmu.name+'</span>' : '—'}</td>
         <td style="font-size:12px;color:var(--text2);">${c.note || ''}</td>
       </tr>`;
