@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11739,8 +11739,9 @@ async function onLeadAddContactDetailInput() {
 // ── Revert-to-before-opening (full undo of this edit session) ──
 function _snapshotLeadForRevert() {
   window._leadRevert = {
+    // Additional contacts live in the lead row (additional_contacts jsonb), so the
+    // full-lead snapshot below already captures them — no separate child list.
     lead: JSON.parse(JSON.stringify(leadData || {})),
-    contacts:     (leadContacts || []).map(c => c.id),
     interactions: (leadInteractions || []).map(i => i.id),
     descLog:      (leadDescriptionLog || []).map(d => d.id),
   };
@@ -11773,7 +11774,6 @@ async function revertLead() {
       closeLeadPage({ force: true });
       return;
     }
-    await _revertChildAdditions('deal_contacts', id, snap.contacts);
     await _revertChildAdditions('engagements', id, snap.interactions);
     await _revertChildAdditions('lead_description_log', id, snap.descLog);
     const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
@@ -12218,32 +12218,27 @@ async function initLeadForm() {
   // org is chosen (a known contact must belong to a known org).
 }
 
-// ── Additional contacts (deal_contacts by lead_id; primary stays in target_person_*) ─
-// Contacts are real people now; we resolve their names/detail for display.
+// ── Additional contacts (PROVISIONAL: leads.additional_contacts jsonb) ─────────
+// No people are created for lead contacts — they're captured as text on the lead
+// and materialised into people/affiliations/deal_contacts only on promote, the
+// same way the primary target contact is deferred. Each entry:
+//   { person_id?, name, job_title?, email?, phone?, dmu_role_id? }
 async function loadLeadContacts(leadId) {
   if (!leadId) { leadContacts = []; return; }
-  try {
-    const rows = await apiGet('deal_contacts', `lead_id=eq.${leadId}&is_primary=eq.false&select=id,person_id,dmu_role_id&order=id`);
-    const people = allData['people'] || await apiGet('people', 'select=*');
-    allData['people'] = people;
-    // Derive each contact's current job title from their open affiliation at the lead's target org.
-    const affTitle = {};
-    if (leadData?.target_org_id) {
-      try {
-        const affs = await apiGet('person_organisation_roles', `org_id=eq.${leadData.target_org_id}&end_date=is.null&select=person_id,job_title`);
-        affs.forEach(a => { if (a.job_title) affTitle[+a.person_id] = a.job_title; });
-      } catch (e) {}
-    }
-    leadContacts = rows.map(r => {
-      const p = people.find(x => +x.id === +r.person_id) || {};
-      return {
-        id: r.id, person_id: r.person_id, dmu_role_id: r.dmu_role_id,
-        job_title: affTitle[+r.person_id] || '',
-        contact_name: [p.first_name, p.last_name].filter(Boolean).join(' '),
-        contact_email: p.email || '', contact_phone: p.phone || '',
-      };
-    });
-  } catch (e) { leadContacts = []; }
+  let arr = leadData && leadData.additional_contacts;
+  if (arr == null) {
+    // Column may not have been in the lead's select — fetch it on its own.
+    try { const r = await apiGet('leads', `id=eq.${leadId}&select=additional_contacts`); arr = r[0] && r[0].additional_contacts; if (leadData) leadData.additional_contacts = arr; }
+    catch (e) { arr = []; }
+  }
+  leadContacts = Array.isArray(arr) ? arr.slice() : [];
+}
+
+// Persist the current provisional list onto the lead (best-effort autosave).
+async function _saveLeadAdditionalContacts() {
+  if (!leadData || !leadData.id) return;
+  const arr = Array.isArray(leadData.additional_contacts) ? leadData.additional_contacts : [];
+  await api('leads', 'PATCH', { additional_contacts: arr, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id);
 }
 
 function renderAdditionalContacts() {
@@ -12253,12 +12248,12 @@ function renderAdditionalContacts() {
     el.innerHTML = '<span style="font-size:12px;color:var(--text3);">None yet</span>';
     return;
   }
-  el.innerHTML = leadContacts.map(c => {
-    const nameWithTitle = (c.contact_name || '') + (c.job_title ? ' — ' + c.job_title : '');
-    const bits = [nameWithTitle, c.contact_email, c.contact_phone].filter(Boolean).join(' · ');
+  el.innerHTML = leadContacts.map((c, i) => {
+    const nameWithTitle = (c.name || '') + (c.job_title ? ' — ' + c.job_title : '');
+    const bits = [nameWithTitle, c.email, c.phone].filter(Boolean).join(' · ');
     return `<span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--border);font-size:12px;padding:4px 10px;border-radius:999px;margin:0 6px 6px 0;">
       ${String(bits || 'Contact').replace(/</g, '&lt;')}
-      <button onclick="removeLeadContact(${c.id})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:var(--text3);cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0;">×</button>
+      <button onclick="removeLeadContact(${i})" ${leadReadOnly ? 'disabled' : ''} style="background:none;border:none;color:var(--text3);cursor:${leadReadOnly ? 'default' : 'pointer'};font-size:14px;line-height:1;padding:0;">×</button>
     </span>`;
   }).join('');
 }
@@ -12269,53 +12264,37 @@ async function addLeadContact() {
   const email = (document.getElementById('lead-contact-add-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-add-phone')?.value || '').trim();
   const jobTitle = (document.getElementById('lead-contact-add-title')?.value || '').trim();
-  // Contacts are real people now, so a name is required unless linking an existing person.
-  if (!_leadAddContactSelectedPersonId && !name) { showStatus('Enter the contact’s name', 'error'); return; }
+  const sel = _leadAddContactSelectedPersonId;
+  // A name is required unless an existing person is linked from the match modal.
+  if (!sel && !name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (name && !leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name for the contact', 'error'); return; }
-  // Contacts persist immediately, so the lead must exist — auto-save a new lead first.
+  // Provisional contacts are stored on the lead, so it must exist — autosave first.
   if (!leadData.id) {
     const ok = await saveLead({ keepOpen: true });
     if (!ok || !leadData.id) return;
   }
   startBusy('Adding contact…');
   try {
-    // Resolve to a person: link the chosen match, else create a new people row.
-    let personId = _leadAddContactSelectedPersonId;
-    if (!personId) {
-      const parts = name.split(/\s+/);
-      const first = parts.shift();
-      const last  = parts.join(' ') || null;
-      const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
-      const pr = await api('people', 'POST', {
-        first_name: first, last_name: last,
-        email: email || null, phone: phone || null, initials,
-      }, 'select=*');
-      personId = pr[0].id;
-      allData['people'] = null;
+    // No people/affiliations are created here — the contact is captured as text
+    // and only becomes a real person + affiliation + deal_contact on promote.
+    // An existing person picked from the modal is referenced by id (not created).
+    let entry;
+    if (sel) {
+      const p = (allData['people'] || []).find(x => +x.id === +sel) || {};
+      entry = {
+        person_id: +sel,
+        name: [p.first_name, p.last_name].filter(Boolean).join(' ') || name || null,
+        job_title: jobTitle || null, email: p.email || null, phone: p.phone || null,
+        dmu_role_id: null,
+      };
+    } else {
+      entry = { person_id: null, name, job_title: jobTitle || null, email: email || null, phone: phone || null, dmu_role_id: null };
     }
-    // Affiliate to the lead's target org (if known) so a job title has a home.
-    if (leadData.target_org_id) {
-      try {
-        const ex = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${leadData.target_org_id}&end_date=is.null&select=id,job_title`);
-        if (!ex.length) await api('person_organisation_roles', 'POST', {
-          person_id: personId, org_id: +leadData.target_org_id, role_type: 'Contact',
-          is_primary: false, job_title: jobTitle || null,
-          start_date: new Date().toISOString().slice(0, 10),
-          created_by: currentUser?.personId || null,
-        }, '');
-        // Existing affiliation with no title yet — fill it from what was typed.
-        else if (jobTitle && !(ex[0].job_title || '').trim())
-          await api('person_organisation_roles', 'PATCH', { job_title: jobTitle }, 'id=eq.' + ex[0].id);
-      } catch (e) { /* affiliation is best-effort */ }
-    } else if (jobTitle) {
-      showStatus('Contact added — set a target organisation to record the job title', 'info');
-    }
-    await api('deal_contacts', 'POST', {
-      lead_id: leadData.id, person_id: personId, is_primary: false,
-      created_by: currentUser?.personId || null,
-    }, '');
+    const arr = Array.isArray(leadData.additional_contacts) ? leadData.additional_contacts.slice() : [];
+    arr.push(entry);
+    leadData.additional_contacts = arr;
+    await _saveLeadAdditionalContacts();
     _leadAddContactSelectedPersonId = null;
-    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
     ['lead-contact-add-name', 'lead-contact-add-title', 'lead-contact-add-email', 'lead-contact-add-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
     // The row is now empty — drop its lingering "sounds like" + duplicate strips.
     ['lead-contact-add-matches', 'lead-contact-add-dupe'].forEach(id => { const e = document.getElementById(id); if (e) e.innerHTML = ''; });
@@ -12328,11 +12307,14 @@ async function addLeadContact() {
   finally { stopBusy(); }
 }
 
-async function removeLeadContact(id) {
+async function removeLeadContact(idx) {
   if (leadReadOnly) return;
   startBusy('Removing…');
   try {
-    await api('deal_contacts', 'DELETE', null, 'id=eq.' + id);
+    const arr = Array.isArray(leadData.additional_contacts) ? leadData.additional_contacts.slice() : [];
+    arr.splice(idx, 1);
+    leadData.additional_contacts = arr;
+    await _saveLeadAdditionalContacts();
     await loadLeadContacts(leadData.id);
     renderAdditionalContacts();
   } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
@@ -15231,6 +15213,41 @@ async function commitPromotion(s) {
       }, '');
     } catch (e) { console.warn('Could not add deal contact:', e.message); }
 
+    // === 6.5. Materialise the lead's provisional additional contacts =========
+    // These were captured as text on the lead (no people created). Now create a
+    // person for each new one (reuse a linked existing person_id), affiliate at
+    // the org with the captured job title, and add as a deal contact.
+    const _addlContacts = Array.isArray(leadData.additional_contacts) ? leadData.additional_contacts : [];
+    for (const c of _addlContacts) {
+      try {
+        let cpid = c.person_id ? +c.person_id : null;
+        if (!cpid) {
+          const parts = String(c.name || '').trim().split(/\s+/);
+          const first = parts.shift() || String(c.name || '').trim() || 'Contact';
+          const last  = parts.join(' ') || null;
+          const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
+          const cp = await api('people', 'POST', {
+            first_name: first, last_name: last, email: c.email || null, phone: c.phone || null, initials,
+          }, 'select=*');
+          cpid = cp[0].id;
+        }
+        // Affiliate at the deal's org, carrying the captured job title.
+        try {
+          const ex = await apiGet('person_organisation_roles', `person_id=eq.${cpid}&org_id=eq.${orgId}&end_date=is.null&select=id,job_title`);
+          if (!ex.length) await api('person_organisation_roles', 'POST', {
+            person_id: cpid, org_id: +orgId, role_type: 'Contact', is_primary: false,
+            job_title: c.job_title || null, start_date: new Date().toISOString().slice(0, 10),
+            created_by: currentUser?.personId || null,
+          }, '');
+          else if ((c.job_title || '').trim() && !(ex[0].job_title || '').trim())
+            await api('person_organisation_roles', 'PATCH', { job_title: c.job_title }, 'id=eq.' + ex[0].id);
+        } catch (e) { /* affiliation best-effort */ }
+        await api('deal_contacts', 'POST', {
+          deal_id: dealId, person_id: cpid, dmu_role_id: c.dmu_role_id || null, note: '',
+        }, '');
+      } catch (e) { console.warn('Could not materialise additional contact on promote:', e.message); }
+    }
+
     // === 7. Revenue stream + months ==========================
     const stream = await api('revenue_streams', 'POST', {
       deal_id: dealId, stream_type: 'opportunity', locked: false,
@@ -16536,11 +16553,11 @@ async function _liLoadPeople() {
     const parent = window._engParent || null;
     try {
       if (parent && parent.kind === 'lead') {
-        const lead = (await apiGet('leads', `id=eq.${parent.id}&select=target_org_id,target_person_id`))[0] || {};
+        const lead = (await apiGet('leads', `id=eq.${parent.id}&select=target_org_id,target_person_id,additional_contacts`))[0] || {};
         const ids = [];
         if (lead.target_person_id) ids.push(+lead.target_person_id);
-        const lcs = await apiGet('deal_contacts', `lead_id=eq.${parent.id}&person_id=not.is.null&select=person_id`);
-        lcs.forEach(c => ids.push(+c.person_id));
+        // Provisional additional contacts that reference an already-known person.
+        (Array.isArray(lead.additional_contacts) ? lead.additional_contacts : []).forEach(c => { if (c && c.person_id) ids.push(+c.person_id); });
         if (lead.target_org_id) {
           const links = await apiGet('person_organisation_roles', `org_id=eq.${lead.target_org_id}&select=person_id`);
           links.forEach(l => ids.push(+l.person_id));
