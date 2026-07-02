@@ -513,7 +513,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.39 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -542,7 +542,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.39 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11531,6 +11531,40 @@ function leadNameHasTwoParts(s) { return String(s || '').trim().split(/\s+/).fil
 function leadMatchBox(html) {
   return html ? `<div style="background:#FFF5F5;border-left:3px solid var(--red);border-radius:6px;padding:10px 12px;">${html}</div>` : '';
 }
+
+// ── Org-scoped contact matching: surface people already at the lead's target
+// organisation first, and guard against adding a same/similar name twice there ─
+function _leadTargetOrgId() {
+  const sel = +(document.getElementById('lead-target-org-id')?.value || 0);
+  return sel || +(leadData?.target_org_id || 0) || 0;
+}
+function _isPersonAtOrg(personId, orgId) {
+  if (!orgId) return false;
+  return (allData['person_organisation_roles'] || []).some(l =>
+    +l.person_id === +personId && +l.org_id === +orgId && !l.end_date);
+}
+function _leadOrgMatches(people, orgId) {
+  if (!orgId) return [];
+  return people.filter(p => _isPersonAtOrg(p.id, orgId));
+}
+function _leadOrgName(orgId) {
+  return (allData['organisations'] || []).find(o => +o.id === +orgId)?.name || 'this client';
+}
+function _atClientBadge() {
+  return ' <span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;background:#DCFCE7;border-radius:999px;padding:1px 7px;margin-left:4px;">At this client</span>';
+}
+function _leadOrgDupBanner(hits, orgId, warn) {
+  const esc = s => String(s).replace(/</g, '&lt;');
+  const names = [...new Set(hits.map(p => [p.first_name, p.last_name].filter(Boolean).join(' ')).filter(Boolean))];
+  if (!names.length) return '';
+  const org = _leadOrgName(orgId);
+  const many = names.length > 1;
+  const style = warn ? 'background:#FEF3C7;border-left:3px solid #D97706;' : 'background:#DCFCE7;border-left:3px solid #16a34a;';
+  const msg = warn
+    ? `⚠ <strong>${esc(names.join(', '))}</strong> ${many ? 'are already contacts' : 'is already a contact'} at <strong>${esc(org)}</strong> — click “Use this” instead of adding a duplicate.`
+    : `✓ Already at <strong>${esc(org)}</strong>: <strong>${esc(names.join(', '))}</strong>.`;
+  return `<div style="${style}border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:12px;line-height:1.5;">${msg}</div>`;
+}
 function validateLeadName(el) {
   if (!el) return;
   const v = (el.value || '').trim();
@@ -11555,20 +11589,32 @@ function onLeadAddContactNameInput() {
   if (!out) return;
   const name = (el?.value || '').trim();
   if (name.length < 3) { out.innerHTML = ''; return; }
+  // Load affiliations in the background so the org-scoped guard can flag people
+  // already at this client (re-render once ready; never block typing).
+  if (!allData['person_organisation_roles']) {
+    _ensurePersonAffiliationsLoaded().then(() => {
+      if ((document.getElementById('lead-contact-add-name')?.value || '').trim() === name) onLeadAddContactNameInput();
+    });
+  }
   const { exact, shortlist } = _findPersonMatches(name);
+  const orgId = _leadTargetOrgId();
+  const atOrg = p => _isPersonAtOrg(p.id, orgId);
   const render = (p, isExact) => {
     const full = [p.first_name, p.last_name].filter(Boolean).join(' ');
-    const colour = isExact ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
+    const colour = (isExact || atOrg(p)) ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
     return `<div style="padding:8px 10px;border:${colour};border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
-      <div style="font-size:13px;">${isExact ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Exact name match · </span>' : ''}<strong>${full}</strong>${p.title ? ` <span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${p.title} — same person?</span>` : ''}</div>
+      <div style="font-size:13px;">${isExact ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Exact name match · </span>' : ''}<strong>${full}</strong>${atOrg(p) ? _atClientBadge() : ''}${p.title ? ` <span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${p.title} — same person?</span>` : ''}</div>
       <button type="button" class="btn ${isExact ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="useLeadAddContactMatch(${p.id})">Use this</button>
     </div>`;
   };
+  const sortedShort = [...shortlist].sort((a, b) => (atOrg(b) ? 1 : 0) - (atOrg(a) ? 1 : 0));
   let html = '';
+  const orgHits = _leadOrgMatches([exact, ...shortlist].filter(Boolean), orgId);
+  if (orgHits.length) html += _leadOrgDupBanner(orgHits, orgId, true);
   if (exact) html += render(exact, true);
-  if (shortlist.length) {
+  if (sortedShort.length) {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0;">Possible matches</div>`;
-    html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
+    html += sortedShort.slice(0, 3).map(p => render(p, false)).join('');
   }
   out.innerHTML = leadMatchBox(html);
 }
@@ -12778,7 +12824,7 @@ async function _ensurePersonAffiliationsLoaded() {
   if (allData['person_organisation_roles']) return;
   try {
     allData['person_organisation_roles'] =
-      await apiGet('person_organisation_roles', 'select=person_id,org_id,role_type,is_primary');
+      await apiGet('person_organisation_roles', 'select=person_id,org_id,role_type,is_primary,end_date,job_title');
   } catch (e) {
     allData['person_organisation_roles'] = [];
     console.warn('Could not load affiliations:', e.message);
@@ -12786,7 +12832,7 @@ async function _ensurePersonAffiliationsLoaded() {
 }
 
 function _personAffiliationsLabel(personId) {
-  const links = (allData['person_organisation_roles'] || []).filter(l => +l.person_id === +personId);
+  const links = (allData['person_organisation_roles'] || []).filter(l => +l.person_id === +personId && !l.end_date);
   if (!links.length) return 'no current affiliations';
   const orgs = allData['organisations'] || [];
   const names = links
@@ -12984,27 +13030,33 @@ async function onLeadTargetPersonNameInput() {
   }
 
   const { exact, shortlist } = _findPersonMatches(name);
+  const orgId = _leadTargetOrgId();
+  const atOrg = p => _isPersonAtOrg(p.id, orgId);
   const render = (p, isExact) => {
     const fullName = [p.first_name, p.last_name].filter(Boolean).join(' ');
     const affil = _personAffiliationsLabel(p.id);
     const meta = [p.title, affil].filter(Boolean).join(' · ');
-    const colour = isExact ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
+    const colour = (isExact || atOrg(p)) ? '2px solid #16a34a;background:#F0FDF4;' : '1px solid var(--border);background:white;';
     return `
       <div style="padding:8px 10px;border:${colour};border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px;">
         <div style="font-size:13px;">
           ${isExact ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:#166534;">Exact name match · </span>' : ''}
-          <strong>${fullName}</strong>
+          <strong>${fullName}</strong>${atOrg(p) ? _atClientBadge() : ''}
           ${meta ? ` <span style="color:var(--text3);font-size:11px;display:block;margin-top:2px;">${meta} — same person?</span>` : ''}
         </div>
         <button type="button" class="btn ${isExact ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="useLeadTargetPersonMatch(${p.id})">Use this</button>
       </div>`;
   };
 
+  // Surface people already affiliated with this client first + flag them.
+  const sortedShort = [...shortlist].sort((a, b) => (atOrg(b) ? 1 : 0) - (atOrg(a) ? 1 : 0));
   let html = '';
+  const orgHits = _leadOrgMatches([exact, ...shortlist].filter(Boolean), orgId);
+  if (orgHits.length) html += _leadOrgDupBanner(orgHits, orgId, false);
   if (exact) html += render(exact, true);
-  if (shortlist.length) {
+  if (sortedShort.length) {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
-    html += shortlist.slice(0, 3).map(p => render(p, false)).join('');
+    html += sortedShort.slice(0, 3).map(p => render(p, false)).join('');
   }
   // Always offer the typed name as a brand-new contact (mirrors the org field's
   // "Use as new") — gated on the first + last name rule.
