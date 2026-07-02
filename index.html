@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.40 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.40 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1053,27 +1053,23 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
           </div>
 
           <div class="form-group">
-            <label class="form-label">Target contact person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-            <select id="lead-target-person-id" class="form-control" onchange="onLeadTargetPersonChange()" style="display:none;">
-              <option value="">— pick existing affiliated contact —</option>
-            </select>
-            <input type="text" id="lead-target-person-name" class="form-control" placeholder="Contact name" style="margin-top:8px;" oninput="onLeadTargetPersonNameInput()" onblur="onLeadTargetPersonNameBlur()">
-            <div id="lead-target-person-matches" style="margin-top:8px;"></div>
-            <!-- Telephone OR email for a new (free-text) contact (one is required;
-                 filling either drops the other's asterisk). Hidden when an existing
-                 affiliated contact is picked. -->
-            <div id="lead-target-person-contact" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">
-              <div style="flex:1;min-width:120px;">
-                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Telephone <span id="lead-target-person-phone-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                <input type="tel" id="lead-target-person-phone" class="form-control" placeholder="+27 …" style="width:100%;" oninput="onLeadContactPairInput()">
-              </div>
-              <div style="flex:1;min-width:120px;">
-                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Email <span id="lead-target-person-email-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                <input type="email" id="lead-target-person-email" class="form-control" placeholder="name@example.com" style="width:100%;" oninput="onLeadContactPairInput()" onblur="validateLeadEmail(this)">
+            <label class="form-label">Target contact person <span class="lead-req-star" style="color:var(--red)">*</span></label>
+            <!-- Hidden FK holder — set when an existing person is chosen via the match modal -->
+            <select id="lead-target-person-id" onchange="onLeadTargetPersonChange()" style="display:none;"></select>
+            <!-- Existing person chosen → summary chip (details come from their record) -->
+            <div id="lead-target-person-existing" style="display:none;font-size:12px;color:var(--text2);"></div>
+            <!-- New / free-text contact: name (fuzzy-checked on blur), then email + phone -->
+            <div id="lead-target-person-entry">
+              <input type="text" id="lead-target-person-name" class="form-control" placeholder="First and last name" oninput="onLeadTargetPersonNameInput()" onblur="onLeadTargetPersonNameBlur()">
+              <div id="lead-target-person-matches" style="display:none;"></div>
+              <div id="lead-target-person-contact" style="margin-top:6px;">
+                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Email <span id="lead-target-person-email-star" class="lead-req-star" style="color:var(--red)">*</span> <span style="font-weight:400;color:var(--text3);">— email or phone required</span></label>
+                <input type="email" id="lead-target-person-email" class="form-control" placeholder="name@example.com" style="margin-bottom:6px;" oninput="onLeadContactPairInput()" onblur="validateLeadEmail(this)">
+                <label class="form-label" style="font-size:11px;margin-bottom:2px;">Phone <span id="lead-target-person-phone-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+                <input type="tel" id="lead-target-person-phone" class="form-control" placeholder="+27 …" oninput="onLeadContactPairInput()">
+                <div id="lead-target-person-dupe" style="font-size:11px;color:#b45309;margin-top:6px;"></div>
               </div>
             </div>
-            <div id="lead-target-person-dupe" style="font-size:11px;color:#b45309;margin-top:6px;"></div>
-            <div id="lead-target-person-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick an existing organisation-affiliated person or create a new one below.</div>
           </div>
 
           <!-- Additional contacts (lead_contacts) -->
@@ -12417,13 +12413,8 @@ function populateLeadForm() {
   // chosen-org chip the create flow produces — consistent "picked" state.
   if (!leadData.target_org_id && leadData.target_org_name) confirmLeadTargetOrgNew();
   refreshLeadTargetPersonDropdown().then(() => {
-    if (leadData.target_person_id) {
-      const sel = document.getElementById('lead-target-person-id');
-      if (sel) sel.value = leadData.target_person_id;
-    }
-    // Recompute show/hide on the person's free-text input now that the dropdown
-    // has its loaded value (or stays empty if no affiliated contacts).
-    onLeadTargetPersonChange();
+    if (leadData.target_person_id) _setLeadTargetPersonFk(leadData.target_person_id);
+    _syncLeadTargetPersonUI();
   });
   if (leadData.target_person_name) {
     document.getElementById('lead-target-person-name').value = leadData.target_person_name;
@@ -12699,107 +12690,21 @@ function refreshLeadServiceSubDropdown() {
 // chosen (parallels the Promote Q3 contact-picker rule — a known contact must
 // belong to a known org).
 async function refreshLeadTargetPersonDropdown() {
-  const orgId = document.getElementById('lead-target-org-id')?.value || '';
-  const sel   = document.getElementById('lead-target-person-id');
-  const hint  = document.getElementById('lead-target-person-hint');
-  if (!sel) return;
-
-  if (!orgId) {
-    sel.style.display = 'none';
-    sel.innerHTML = '<option value="">— pick existing affiliated contact —</option>';
-    sel.value = '';  // ensure stale selection doesn't survive into save payload
-    if (hint) {
-      // A confirmed new org is a chosen org — no affiliated contacts on file yet,
-      // and no guidance needed (the name/phone/email fields speak for themselves).
-      // Only the "pick an org first" nudge applies when nothing is chosen at all.
-      const newOrgChosen = document.getElementById('lead-target-org-chosen')?.style.display !== 'none'
-        && (document.getElementById('lead-target-org-name')?.value || '').trim();
-      if (newOrgChosen) {
-        hint.style.display = 'none';
-      } else {
-        hint.style.display = '';
-        hint.textContent = 'Pick an existing target organisation above to see its affiliated contacts.';
-      }
-    }
-    return;
+  // The affiliated-contact dropdown was retired: the primary contact now works
+  // like an additional contact (type a name → match modal surfaces people at
+  // this client first). Just make sure the people cache is loaded so matching
+  // works, then reflect the current FK state.
+  if (!allData['people']) {
+    try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) { /* matching degrades gracefully */ }
   }
-
-  let people = [];
-  try {
-    const links = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
-    const all = allData['people'] || [];
-    people = links.map(l => all.find(p => +p.id === +l.person_id)).filter(Boolean);
-  } catch (e) {
-    console.warn('Could not load org affiliations:', e.message);
-  }
-
-  if (!people.length) {
-    sel.style.display = 'none';
-    sel.value = '';
-    if (hint) {
-      hint.style.display = '';
-      hint.textContent = 'This organisation has no affiliated contacts yet — enter a name below.';
-    }
-    return;
-  }
-
-  // Populate + show. Placeholder names the org so the choice is contextualised.
-  const orgName = (allData['organisations'] || []).find(o => +o.id === +orgId)?.name || 'this organisation';
-  const placeholderText = `Pick from existing contacts affiliated to ${orgName}`;
-  const prevValue = +sel.value || +leadData.target_person_id || 0;
-  sel.innerHTML = `<option value="">${placeholderText.replace(/</g,'&lt;')}</option>` +
-    people.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}">${name}</option>`;
-    }).join('') +
-    `<option value="__new__">➕ Add a new contact to this organisation…</option>`;
-  // Keep the previous selection only if it's still in the affiliated list
-  sel.value = people.some(p => +p.id === prevValue) ? prevValue : '';
-  sel.style.display = '';
-  if (hint) hint.style.display = 'none';
-  // Sync the free-text capture fields to the (possibly restored) selection.
-  onLeadTargetPersonChange();
+  _syncLeadTargetPersonUI();
 }
 
 function onLeadTargetPersonChange() {
-  // Same logic as org: picking an existing affiliated contact hides the
-  // "new contact" free-text, its phone/email fields, and the similarity match
-  // strip (an existing person already carries those). Clearing brings them back.
-  const dd        = document.getElementById('lead-target-person-id');
-  const rawVal    = dd?.value || '';
-  const personId  = +rawVal || 0;                 // '__new__' coerces to 0
-  const nameField = document.getElementById('lead-target-person-name');
-  const matchEl   = document.getElementById('lead-target-person-matches');
-  const contactEl = document.getElementById('lead-target-person-contact');
-  const showFreeText = () => {
-    if (nameField) nameField.style.display = '';
-    if (matchEl)   matchEl.style.display = '';
-    if (contactEl) contactEl.style.display = 'flex';
-  };
-  const hideFreeText = (clearValues) => {
-    if (nameField) { if (clearValues) nameField.value = ''; nameField.style.display = 'none'; }
-    if (matchEl)   { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
-    if (contactEl) {
-      contactEl.style.display = 'none';
-      if (clearValues) ['lead-target-person-phone','lead-target-person-email'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
-    }
-  };
-  if (personId) {
-    hideFreeText(true);
-  } else if (rawVal === '__new__') {
-    // "➕ Add a new contact to this organisation" — reveal the free-text name +
-    // phone/email capture (same flow as an org with no contacts on file).
-    showFreeText();
-    nameField?.focus();
-  } else {
-    // Placeholder selection: while the dropdown is offering known contacts, keep
-    // the free-text capture tucked away (pick one, or choose "add new") — unless
-    // a free-text name is already present (e.g. a restored free-text primary).
-    const ddVisible = dd && dd.style.display !== 'none';
-    const hasName = !!(nameField?.value || '').trim();
-    if (ddVisible && !hasName) hideFreeText(false); else showFreeText();
-  }
-  updateLeadAdditionalContactsAvailability();
+  // The dropdown was retired — the primary contact now works like an additional
+  // contact (type a name → match modal, or a chip for an existing pick). This
+  // just reflects the current FK state in the UI.
+  _syncLeadTargetPersonUI();
 }
 
 // Additional contacts only become available once a primary target contact is
@@ -13179,34 +13084,68 @@ function confirmLeadTargetPersonNew() {
 }
 
 // Picking a suggested match: drop them into the dropdown FK, clear free text + matches.
-function useLeadTargetPersonMatch(personId) {
+// Set (or clear) the hidden FK holder for an existing target person, creating a
+// matching <option> so the <select> retains the value for the save payload.
+function _setLeadTargetPersonFk(personId, nameHint) {
   const dd = document.getElementById('lead-target-person-id');
   if (!dd) return;
-  // Ensure the option exists (the dropdown was filtered to org-affiliated people only)
-  if (!Array.from(dd.options).some(o => +o.value === +personId)) {
-    const person = (allData['people'] || []).find(p => +p.id === +personId);
-    if (person) {
+  if (personId) {
+    if (!Array.from(dd.options).some(o => +o.value === +personId)) {
+      const p = (allData['people'] || []).find(x => +x.id === +personId);
+      const nm = nameHint || (p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ('Person #' + personId));
       const opt = document.createElement('option');
-      opt.value = person.id;
-      opt.textContent = [person.first_name, person.last_name].filter(Boolean).join(' ');
-      dd.appendChild(opt);
+      opt.value = personId; opt.textContent = nm; dd.appendChild(opt);
     }
+    dd.value = personId;
+  } else {
+    dd.value = '';
   }
-  dd.value = personId;
-  dd.style.display = '';
-  // Clear free-text + match strip + the new-contact phone/email row
-  const free = document.getElementById('lead-target-person-name');
-  if (free) free.value = '';
-  const matchEl = document.getElementById('lead-target-person-matches');
-  if (matchEl) matchEl.innerHTML = '';
-  const contactEl = document.getElementById('lead-target-person-contact');
-  if (contactEl) {
-    contactEl.style.display = 'none';
-    ['lead-target-person-phone','lead-target-person-email'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+}
+
+// Show either the "using existing contact" chip (FK set) or the name+contact
+// entry (free text). Mirrors the additional-contacts widget.
+function _syncLeadTargetPersonUI() {
+  const fk    = +(document.getElementById('lead-target-person-id')?.value || 0);
+  const chip  = document.getElementById('lead-target-person-existing');
+  const entry = document.getElementById('lead-target-person-entry');
+  if (fk) {
+    const p = (allData['people'] || []).find(x => +x.id === +fk);
+    const nm = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'selected contact';
+    if (chip) {
+      chip.style.display = '';
+      chip.innerHTML = `✓ Using existing contact <strong>${String(nm).replace(/</g, '&lt;')}</strong> — details come from their record.
+        <button type="button" class="btn btn-secondary btn-sm" style="margin-left:6px;" ${leadReadOnly ? 'disabled' : ''} onclick="clearLeadTargetPerson()">Change</button>`;
+    }
+    if (entry) entry.style.display = 'none';
+  } else {
+    if (chip) { chip.style.display = 'none'; chip.innerHTML = ''; }
+    if (entry) entry.style.display = '';
   }
-  const hint = document.getElementById('lead-target-person-hint');
-  if (hint) hint.style.display = 'none';
   updateLeadAdditionalContactsAvailability();
+}
+
+// "Change" on the chip: drop the existing person and return to name entry.
+function clearLeadTargetPerson() {
+  if (leadReadOnly) return;
+  _setLeadTargetPersonFk(null);
+  const nameEl = document.getElementById('lead-target-person-name');
+  if (nameEl) nameEl.value = '';
+  ['lead-target-person-email', 'lead-target-person-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  window._leadTargetPersonNewConfirmed = null;
+  _syncLeadTargetPersonUI();
+  nameEl?.focus();
+}
+
+// Picking a suggested match from the modal: hold the FK, show the chip.
+function useLeadTargetPersonMatch(personId) {
+  _setLeadTargetPersonFk(personId);
+  window._leadTargetPersonNewConfirmed = null;
+  // An existing person carries their own details — clear the free-text capture so
+  // the save payload stores the FK alone (not a stale name/phone/email).
+  const nameEl = document.getElementById('lead-target-person-name');
+  if (nameEl) nameEl.value = '';
+  ['lead-target-person-email', 'lead-target-person-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  _syncLeadTargetPersonUI();
 }
 
 // ── Referral source: free-type referrer + similarity test ──
