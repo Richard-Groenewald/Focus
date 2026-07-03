@@ -194,6 +194,18 @@ tr.lineage-child td.lin-name::before{content:"";position:absolute;left:18px;top:
 #busy-cursor{position:fixed;left:-100px;top:0;width:25px;height:25px;margin:-2px 0 0 24px;z-index:100001;pointer-events:none;opacity:0;transition:opacity .1s ease;border-radius:50%;border:4px solid rgba(250,10,17,.25);border-top-color:var(--red,#FA0A11);}
 body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy-cursor-spin .55s linear infinite;}
 @keyframes busy-cursor-spin{to{transform:rotate(360deg);}}
+/* Context-sensitive help drawer — reusable across pages */
+.help-drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:100002;display:none;}
+.help-drawer-overlay.show{display:block;}
+.help-drawer{position:fixed;top:0;right:0;height:100%;width:440px;max-width:92vw;background:var(--bg2);box-shadow:-6px 0 28px rgba(0,0,0,0.20);z-index:100003;transform:translateX(100%);transition:transform .22s ease;display:flex;flex-direction:column;}
+.help-drawer.show{transform:translateX(0);}
+.help-drawer-header{padding:15px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.help-drawer-body{padding:14px 18px 24px;overflow-y:auto;font-size:13px;line-height:1.6;color:var(--text2);}
+.help-drawer-body h4{font-size:13px;font-weight:700;color:var(--navy);margin:16px 0 4px;}
+.help-drawer-body h4:first-child{margin-top:0;}
+.help-drawer-body ul{margin:4px 0 6px 18px;padding:0;}
+.help-drawer-body li{margin-bottom:3px;}
+.help-drawer-body strong{color:var(--text);}
 
 /* ── Connection ────────────────────────────────────────── */
 .conn-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:4px 10px;border-radius:999px;}
@@ -519,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -853,6 +865,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary btn-sm" style="display:none;">Promote →</button>
       <button type="button" id="lead-reject-btn" onclick="openRejectPromotion()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Reject…</button>
       <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Decline…</button>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="openHelpDrawer('lead')" title="Help for this page" aria-label="Help">? Help</button>
       <button class="btn btn-secondary btn-sm" id="lead-revert-btn" onclick="revertLead()" title="Undo every change made since you opened this lead">↺ Revert changes</button>
     </div>
   </div>
@@ -1188,6 +1201,8 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 
 <!-- Modal Root (always at body level - no z-index issues) -->
 <div id="modal-root"></div>
+<div id="help-drawer-overlay" class="help-drawer-overlay" onclick="closeHelpDrawer()"></div>
+<div id="help-drawer" class="help-drawer" role="dialog" aria-label="Help"></div>
 
 <!-- Status Bar -->
 <div id="status-bar" class="status-bar"></div>
@@ -3568,6 +3583,58 @@ async function showPersonProfile(personId) {
 
 function closeModal() {
   document.getElementById('modal-root').innerHTML = '';
+}
+
+// ── Context-sensitive help drawer ─────────────────────────────────────────────
+// Reusable across pages: add a HELP_CONTENT entry (object, or a function for
+// state-aware content) and drop a `? Help` button calling openHelpDrawer('<key>')
+// into that page's header. Content is curated here.
+const HELP_CONTENT = {
+  lead: () => {
+    const status = (typeof leadData !== 'undefined' && leadData && leadData.status) || 'New';
+    const nextStep = {
+      New: 'Fill the required (<span style="color:var(--red)">*</span>) fields and log a next action to move this lead to <strong>Working</strong>.',
+      Working: 'Keep engaging. Set the primary service interest and estimated value, and get the four qualification dots to Strong to reach <strong>Qualified</strong>.',
+      Qualified: 'A peer review is needed before promotion. Once reviewed, use <strong>Promote →</strong> to turn this lead into an opportunity.',
+      Dormant: 'This lead is parked. Set or clear the wake date, or re-engage to bring it back to Working.',
+      Dead: 'This lead was declined. It stays on record; reopen it if things change.',
+      Promoted: 'This lead has been promoted — open the deal to continue there.',
+    }[status] || '';
+    return {
+      title: 'Leads — how this page works',
+      sections: [
+        { h: `Right now: ${status}`, body: nextStep },
+        { h: 'What a lead is', body: 'A provisional opportunity. Nothing becomes “real” (people, organisations, the deal) until you <strong>Promote</strong> it — until then everything here is captured on the lead and can be freely changed.' },
+        { h: 'Required to reach “Working”', body: 'The fields marked <span style="color:var(--red)">*</span>: a <strong>source</strong> (and its detail), a <strong>description</strong>, a <strong>target organisation</strong>, a <strong>primary contact</strong> (name + email or phone), and a logged <strong>next action</strong> (Engagements tab). The moment they are all set the lead becomes Working.' },
+        { h: 'Contacts', body: 'One list — the <strong>first is the primary</strong>. Type a name and it is checked against people we already know:<ul><li><strong>New contact</strong> — nobody similar on file.</li><li><strong>Existing · Affiliated</strong> — already a contact at this organisation.</li><li><strong>Existing · not affiliated</strong> — known to us elsewhere; you are asked if they have <em>moved here</em> (applied on promote).</li></ul>Click a contact to expand it, then use <strong>Edit</strong>, <strong>Make primary</strong> or <strong>Delete</strong>.' },
+        { h: 'Qualifying', body: 'The four dots — <strong>Fit, Trigger, Access, Capacity</strong> — drive qualification. All four Strong, plus a primary service interest and an estimated value, makes the lead <strong>Qualified</strong>.' },
+        { h: 'Promoting', body: 'Promotion runs a short wizard, then creates only what is new (organisation, people), links affiliations, and opens the opportunity. Existing organisations and people are reused, never duplicated.' },
+        { h: 'Declining', body: 'Use <strong>Decline…</strong> to mark a lead Dead with a reason. It is kept for the record and can be reopened later.' },
+      ],
+    };
+  },
+};
+
+function openHelpDrawer(key) {
+  const entry = HELP_CONTENT[key];
+  const content = typeof entry === 'function' ? entry() : entry;
+  const drawer = document.getElementById('help-drawer');
+  const overlay = document.getElementById('help-drawer-overlay');
+  if (!content || !drawer || !overlay) return;
+  drawer.innerHTML = `
+    <div class="help-drawer-header">
+      <div style="font-weight:700;font-size:15px;color:var(--navy);">${content.title}</div>
+      <button class="modal-close" onclick="closeHelpDrawer()" aria-label="Close help">×</button>
+    </div>
+    <div class="help-drawer-body">
+      ${content.sections.filter(s => s.body).map(s => `<h4>${s.h}</h4><div>${s.body}</div>`).join('')}
+    </div>`;
+  overlay.classList.add('show');
+  requestAnimationFrame(() => drawer.classList.add('show'));
+}
+function closeHelpDrawer() {
+  document.getElementById('help-drawer')?.classList.remove('show');
+  document.getElementById('help-drawer-overlay')?.classList.remove('show');
 }
 
 // ── In-app dialogs — NEVER use native confirm()/prompt()/alert() ──────────
