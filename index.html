@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1058,7 +1058,11 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <label class="form-label">Contacts <span class="lead-req-star" style="color:var(--red)">*</span></label>
             <div id="lead-contacts-list" style="margin-bottom:8px;"></div>
             <!-- Add a contact: type a name (checked against known people), then details -->
-            <div id="lead-contact-entry">
+            <!-- Collapsed: a button; clicking it reveals the entry fields. -->
+            <div id="lead-contact-add-btn-wrap">
+              <button class="btn btn-secondary btn-sm" onclick="showLeadContactEntry()">+ Add contact</button>
+            </div>
+            <div id="lead-contact-entry" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:10px;">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
                 <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()">
                 <input type="text" id="lead-contact-title" class="form-control" placeholder="Job title (optional)">
@@ -1066,8 +1070,9 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
                 <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Phone">
               </div>
               <div id="lead-contact-entry-hint" style="font-size:11px;color:var(--text3);margin-top:3px;">First &amp; last name required. The primary contact also needs an email or phone.</div>
-              <div style="display:flex;justify-content:flex-end;margin-top:6px;">
-                <button class="btn btn-secondary btn-sm" onclick="addLeadContactEntry()">Add contact</button>
+              <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">
+                <button class="btn btn-ghost btn-sm" onclick="hideLeadContactEntry()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="addLeadContactEntry()">Add contact</button>
               </div>
             </div>
           </div>
@@ -1192,10 +1197,6 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
      inherits to render the 4-frame Xone-logo flipbook. -->
 <div id="input-ack" class="input-ack xone-sprite" aria-hidden="true"></div>
 
-<!-- Sustained busy overlay — driven by startBusy(label) / stopBusy() -->
-<div id="busy-overlay" class="busy-overlay xone-sprite" aria-live="polite">
-  <span class="busy-overlay-label" id="busy-label">Working…</span>
-</div>
 
 <!-- Shared filter popup for sortable/filterable tables — positioned via JS -->
 <div id="table-filter-popup" role="dialog" aria-label="Column filter"></div>
@@ -1767,35 +1768,12 @@ document.addEventListener('mousemove', (e) => {
   _lastMouseY = e.clientY;
 }, { passive: true });
 
-function startBusy(label) {
-  const el  = document.getElementById('busy-overlay');
-  const lbl = document.getElementById('busy-label');
-  if (lbl) lbl.textContent = label || 'Working…';
-  if (!el) return;
-
-  // Reset any prior inline positioning then apply mouse-relative if available
-  el.style.left = el.style.top = el.style.right = el.style.bottom = '';
-  if (_lastMouseX != null && _lastMouseY != null) {
-    // Estimate overlay size for edge-clamping. Element isn't laid out yet
-    // (display:none until .show), so we approximate from typical content.
-    const approxW = 180, approxH = 40;
-    const offsetX = 16, offsetY = 16;   // sit just below-right of the cursor
-    let x = _lastMouseX + offsetX;
-    let y = _lastMouseY + offsetY;
-    if (x + approxW > window.innerWidth)  x = Math.max(8, window.innerWidth  - approxW - 8);
-    if (y + approxH > window.innerHeight) y = Math.max(8, window.innerHeight - approxH - 8);
-    el.style.left = x + 'px';
-    el.style.top  = y + 'px';
-  } else {
-    el.style.right  = '20px';
-    el.style.bottom = '68px';
-  }
-  el.classList.add('show');
-}
-function stopBusy() {
-  const el = document.getElementById('busy-overlay');
-  if (el) el.classList.remove('show');
-}
+// Busy state is shown by the current indicator — the slim top progress bar
+// (#net-bar) + progress cursor, reference-counted in _netBusy(). These wrappers
+// keep every existing startBusy()/stopBusy() call site working but route it
+// through that one indicator instead of the old floating "Working…" overlay.
+function startBusy(label) { _netBusy(true); }
+function stopBusy() { _netBusy(false); }
 
 // ── Excel-style sortable + filterable table helper ──────
 //
@@ -11963,6 +11941,7 @@ function resetLeadForm() {
   applyLeadDescriptionMode();
   leadContacts = [];
   renderLeadContacts();
+  hideLeadContactEntry();
 }
 
 async function initLeadForm() {
@@ -12189,6 +12168,22 @@ function renderLeadContacts() {
   }).join('');
 }
 
+// The add-contact fields stay hidden behind a button until asked for.
+function showLeadContactEntry() {
+  const w = document.getElementById('lead-contact-add-btn-wrap');
+  const e = document.getElementById('lead-contact-entry');
+  if (w) w.style.display = 'none';
+  if (e) e.style.display = '';
+  document.getElementById('lead-contact-name')?.focus();
+}
+function hideLeadContactEntry() {
+  const w = document.getElementById('lead-contact-add-btn-wrap');
+  const e = document.getElementById('lead-contact-entry');
+  _clearLeadContactEntry();
+  if (e) e.style.display = 'none';
+  if (w) w.style.display = '';
+}
+
 async function addLeadContactEntry() {
   if (leadReadOnly) return;
   const name  = (document.getElementById('lead-contact-name')?.value  || '').trim();
@@ -12234,7 +12229,7 @@ async function _commitLeadContact(base, isPrimary) {
   }
   leadContacts.push(entry);
   startBusy('Adding contact…');
-  try { await _persistLeadContacts(); _clearLeadContactEntry(); renderLeadContacts(); showStatus('Contact added'); }
+  try { await _persistLeadContacts(); hideLeadContactEntry(); renderLeadContacts(); showStatus('Contact added'); }
   catch (e) { leadContacts.pop(); showStatus('Could not add contact: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
@@ -12386,6 +12381,7 @@ function populateLeadForm() {
   if (!leadData.target_org_id && leadData.target_org_name) confirmLeadTargetOrgNew();
   // Contacts: load the one unified list and render it (with existing/affiliated/new badges).
   loadLeadContacts(leadData.id).then(() => renderLeadContacts());
+  hideLeadContactEntry();
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
