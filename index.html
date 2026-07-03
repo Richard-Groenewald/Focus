@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12168,7 +12168,19 @@ async function _persistLeadContacts() {
   if (!leadData) return;
   const patch = _leadContactsPatch();
   Object.assign(leadData, patch);
-  if (leadData.id) await api('leads', 'PATCH', Object.assign({ updated_at: new Date().toISOString() }, patch), 'id=eq.' + leadData.id);
+  if (!leadData.id) return;
+  await api('leads', 'PATCH', Object.assign({ updated_at: new Date().toISOString() }, patch), 'id=eq.' + leadData.id);
+  // The primary contact's completeness is a New→Working criterion — re-derive the
+  // status now so adding/editing/re-primary-ing a contact flips it on the spot.
+  if (typeof recomputeOpenLeadStatus === 'function') {
+    const before = leadData.status;
+    await recomputeOpenLeadStatus();
+    if (leadData.status !== before) {
+      if (typeof renderLeadStatusBadge === 'function') renderLeadStatusBadge(leadData.status);
+      if (typeof refreshLeadWorkflowChrome === 'function') refreshLeadWorkflowChrome();
+      if (typeof applyLeadFormLayout === 'function') applyLeadFormLayout();
+    }
+  }
 }
 
 function _clearLeadContactEntry() {
