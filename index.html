@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12107,12 +12107,21 @@ async function loadLeadContacts(leadId) {
     catch (e) { arr = []; }
   }
   leadContacts = Array.isArray(arr) ? arr.map(c => ({
+    cid: c.cid || null,
     person_id: c.person_id || null, name: c.name || '', job_title: c.job_title || null,
     email: c.email || null, phone: c.phone || null, is_primary: !!c.is_primary, moved: c.moved == null ? null : !!c.moved,
   })) : [];
+  // Every contact carries a stable local id (cid) so engagements can reference a
+  // provisional contact. Backfill any that predate cids, and persist once.
+  let mx = leadContacts.reduce((m, c) => Math.max(m, +c.cid || 0), 0), assigned = false;
+  leadContacts.forEach(c => { if (!c.cid) { c.cid = ++mx; assigned = true; } });
+  if (assigned && leadData && leadData.id) { try { await _persistLeadContacts(); } catch (e) {} }
   if (leadContacts.some(c => c.person_id) && !allData['people']) {
     try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) {}
   }
+}
+function _nextLeadContactCid() {
+  return leadContacts.reduce((m, c) => Math.max(m, +c.cid || 0), 0) + 1;
 }
 
 // Resolve an entry's display fields + kind. Existing people show their record's
@@ -12318,6 +12327,7 @@ async function _commitLeadContact(base, isPrimary) {
   } else {
     entry = { person_id: null, name: base.name, job_title: base.job_title || null, email: base.email || null, phone: base.phone || null, is_primary: isPrimary, moved: null };
   }
+  entry.cid = _nextLeadContactCid();
   leadContacts.push(entry);
   startBusy('Adding contact…');
   try { await _persistLeadContacts(); hideLeadContactEntry(); renderLeadContacts(); showStatus('Contact added'); }
@@ -15135,11 +15145,16 @@ async function commitPromotion(s) {
     }
 
     // === 6. Deal contact: the Q3 contact =====================
+    // Map each lead-contact cid → the person it resolves to, so engagements that
+    // reference provisional contacts can be materialised into engagement_people (7.5).
+    const contactPersonByCid = {};
     try {
       await api('deal_contacts', 'POST', {
         deal_id: dealId, person_id: +personId,
         dmu_role_id: null, note: '',
       }, '');
+      const _primary = (Array.isArray(leadData.contacts) ? leadData.contacts : []).find(c => c.is_primary);
+      if (_primary && _primary.cid) contactPersonByCid[_primary.cid] = +personId;
     } catch (e) { console.warn('Could not add deal contact:', e.message); }
 
     // === 6.5. Materialise the lead's provisional NON-primary contacts ========
@@ -15184,6 +15199,7 @@ async function commitPromotion(s) {
         await api('deal_contacts', 'POST', {
           deal_id: dealId, person_id: cpid, dmu_role_id: null, note: '',
         }, '');
+        if (c.cid) contactPersonByCid[c.cid] = cpid;
       } catch (e) { console.warn('Could not materialise contact on promote:', e.message); }
     }
 
@@ -15218,7 +15234,7 @@ async function commitPromotion(s) {
         `lead_id=eq.${leadData.id}&next_action_done=eq.false&select=*&order=engagement_date.asc,id.asc`);
       for (const en of openRows) {
         // Copy onto the opportunity, carrying the open next-action.
-        await api('engagements', 'POST', {
+        const copied = await api('engagements', 'POST', {
           deal_id:          dealId,
           engagement_date:  en.engagement_date,
           engagement_type:  en.engagement_type || null,
@@ -15230,7 +15246,15 @@ async function commitPromotion(s) {
           next_action_date: en.next_action_date || null,
           next_action_done: false,
           created_by:       en.created_by || (currentUser?.personId || null),
-        }, '');
+        }, 'select=*');
+        // Materialise the engagement's provisional people-involved → engagement_people.
+        const newEngId = copied && copied[0] ? copied[0].id : null;
+        if (newEngId && Array.isArray(en.contacts)) {
+          for (const ref of en.contacts) {
+            const pid = ref.person_id || (ref.cid ? contactPersonByCid[ref.cid] : null);
+            if (pid) { try { await api('engagement_people', 'POST', { engagement_id: newEngId, person_id: +pid }, ''); } catch (e) { /* ignore dup */ } }
+          }
+        }
         // Close the lead's original with the explanatory note.
         await api('engagements', 'PATCH', {
           next_action_done:            true,
@@ -16429,26 +16453,28 @@ function populateLiCompletionSection(i) {
 // become linkable after promote, by design.
 function addLiPerson() {
   const sel = document.getElementById('li-person-pool'); if (!sel) return;
-  const id = sel.value; const name = sel.options[sel.selectedIndex]?.text;
-  if (!id) return;
+  const val = sel.value; if (!val) return;
+  if (val === '__new__') { sel.value = ''; createLeadContactForEngagement(); return; }
+  const name = sel.options[sel.selectedIndex]?.text;
   window._liPeople = window._liPeople || [];
-  if (window._liPeople.some(p => String(p.id) === String(id))) return;
-  window._liPeople.push({ id: String(id), name });
+  if (window._liPeople.some(p => p.key === val)) return;
+  const kind = val[0], rest = val.slice(1);
+  window._liPeople.push({ key: val, cid: kind === 'c' ? +rest : null, person_id: kind === 'p' ? +rest : null, name });
   sel.options[sel.selectedIndex].remove(); sel.value = '';
   renderLiPeople();
 }
-function removeLiPerson(id) {
-  const person = (window._liPeople || []).find(p => String(p.id) === String(id));
-  window._liPeople = (window._liPeople || []).filter(p => String(p.id) !== String(id));
+function removeLiPerson(key) {
+  const person = (window._liPeople || []).find(p => p.key === key);
+  window._liPeople = (window._liPeople || []).filter(p => p.key !== key);
   const sel = document.getElementById('li-person-pool');
-  if (person && sel) { const opt = document.createElement('option'); opt.value = person.id; opt.textContent = person.name; sel.appendChild(opt); }
+  if (person && sel) { const opt = document.createElement('option'); opt.value = person.key; opt.textContent = person.name; sel.appendChild(opt); }
   renderLiPeople();
 }
 function renderLiPeople() {
   const el = document.getElementById('li-people-selected'); if (!el) return;
   const editable = !!document.getElementById('li-person-pool');
   el.innerHTML = (window._liPeople || []).map(p =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">${String(p.name||'').replace(/</g,'&lt;')}${editable?`<button type="button" onclick="removeLiPerson('${p.id}')" style="background:none;border:none;color:white;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>`:''}</span>`
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">${String(p.name||'').replace(/</g,'&lt;')}${editable?`<button type="button" onclick="removeLiPerson('${p.key}')" style="background:none;border:none;color:white;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>`:''}</span>`
   ).join('') || '<span style="font-size:12px;color:var(--text3);">None yet</span>';
 }
 
@@ -16467,47 +16493,138 @@ async function _liLoadPeople() {
     return ids.map(id => { const p = known.find(x => +x.id === id) || allPeople.find(x => +x.id === id); return { id, name: p ? nameOf(p) : ('Person #' + id) }; });
   };
 
-  // 1) Already-linked people for an existing engagement.
+  const parent = window._engParent || null;
+  const isLead = !!(parent && parent.kind === 'lead');
   const engId = window._liEditing && window._liEditing.id;
+  const keyOf = c => c.person_id ? ('p' + c.person_id) : ('c' + c.cid);
+
+  // For a lead, its own contacts drive the picker; cache them for create-new.
+  let leadContactsList = null;
+  if (isLead) {
+    try { const lr = await apiGet('leads', `id=eq.${parent.id}&select=contacts`); leadContactsList = Array.isArray(lr[0] && lr[0].contacts) ? lr[0].contacts : []; }
+    catch (e) { leadContactsList = []; }
+    window._liLeadContacts = leadContactsList;
+  }
+
+  // 1) Already-linked people for an existing engagement.
   if (engId) {
-    try {
-      const rows = await apiGet('engagement_people', `engagement_id=eq.${engId}&select=person_id`);
-      const ids = rows.map(r => +r.person_id);
-      if (ids.length) window._liPeople = (await resolveNames(ids)).map(x => ({ id: String(x.id), name: x.name }));
-    } catch (e) { /* best-effort */ }
+    if (isLead) {
+      // Provisional refs stored on the engagement (contacts jsonb).
+      try {
+        const er = await apiGet('engagements', `id=eq.${engId}&select=contacts`);
+        const refs = Array.isArray(er[0] && er[0].contacts) ? er[0].contacts : [];
+        window._liPeople = refs.map(r => ({ key: r.person_id ? ('p' + r.person_id) : ('c' + r.cid), cid: r.cid || null, person_id: r.person_id || null, name: r.name || 'Contact' }));
+      } catch (e) { /* best-effort */ }
+    } else {
+      try {
+        const rows = await apiGet('engagement_people', `engagement_id=eq.${engId}&select=person_id`);
+        const ids = rows.map(r => +r.person_id);
+        if (ids.length) window._liPeople = (await resolveNames(ids)).map(x => ({ key: 'p' + x.id, cid: null, person_id: +x.id, name: x.name }));
+      } catch (e) { /* best-effort */ }
+    }
   }
 
   // 2) Candidate pool for the add dropdown (only present when editable).
   const sel = document.getElementById('li-person-pool');
   if (sel) {
-    const cand = new Map();
-    const parent = window._engParent || null;
-    try {
-      if (parent && parent.kind === 'lead') {
-        const lead = (await apiGet('leads', `id=eq.${parent.id}&select=target_org_id,target_person_id,additional_contacts`))[0] || {};
-        const ids = [];
-        if (lead.target_person_id) ids.push(+lead.target_person_id);
-        // Provisional additional contacts that reference an already-known person.
-        (Array.isArray(lead.additional_contacts) ? lead.additional_contacts : []).forEach(c => { if (c && c.person_id) ids.push(+c.person_id); });
-        if (lead.target_org_id) {
-          const links = await apiGet('person_organisation_roles', `org_id=eq.${lead.target_org_id}&select=person_id`);
-          links.forEach(l => ids.push(+l.person_id));
-        }
-        (await resolveNames(ids)).forEach(x => cand.set(+x.id, x.name));
-      } else if (parent && parent.kind === 'deal') {
+    const selectedKeys = new Set((window._liPeople || []).map(p => p.key));
+    let optionsHtml = '';
+    if (isLead) {
+      // The lead's own contacts — pick one, or create a new one (same as the lead form).
+      optionsHtml = (leadContactsList || [])
+        .filter(c => !selectedKeys.has(keyOf(c)))
+        .map(c => `<option value="${keyOf(c)}">${cEsc(c.name || 'Contact')}</option>`).join('')
+        + '<option value="__new__">＋ Create new contact…</option>';
+    } else if (parent && parent.kind === 'deal') {
+      const cand = new Map();
+      try {
         const deal = (await apiGet('deals', `id=eq.${parent.id}&select=org_id`))[0] || {};
         if (deal.org_id) {
           const links = await apiGet('person_organisation_roles', `org_id=eq.${deal.org_id}&select=person_id`);
           (await resolveNames(links.map(l => +l.person_id))).forEach(x => cand.set(+x.id, x.name));
         }
-      }
-    } catch (e) { /* best-effort */ }
-    const selectedIds = new Set((window._liPeople || []).map(p => String(p.id)));
-    sel.innerHTML = '<option value="">— add person —</option>' +
-      [...cand.entries()].filter(([id]) => !selectedIds.has(String(id)))
-        .map(([id, name]) => `<option value="${id}">${cEsc(name)}</option>`).join('');
+      } catch (e) { /* best-effort */ }
+      optionsHtml = [...cand.entries()].filter(([id]) => !selectedKeys.has('p' + id))
+        .map(([id, name]) => `<option value="p${id}">${cEsc(name)}</option>`).join('');
+    }
+    sel.innerHTML = '<option value="">— add person —</option>' + optionsHtml;
   }
   renderLiPeople();
+}
+
+// Create-new contact from within the engagement form — adds it to the lead's
+// own contact list (provisional, consistent with the lead form), then selects it.
+function createLeadContactForEngagement() {
+  const parent = window._engParent || null;
+  if (!parent || parent.kind !== 'lead') { showStatus('Contacts can only be created on a lead engagement', 'error'); return; }
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:440px;max-width:95vw;">
+        <div class="modal-header"><div class="modal-title">New contact</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          <div class="form-group"><label class="form-label">First and last name</label>
+            <input id="nlc-name" class="form-control" placeholder="First and last name"></div>
+          <div class="form-group"><label class="form-label">Job title</label>
+            <input id="nlc-title" class="form-control" placeholder="e.g. Operations Director"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Email</label>
+              <input id="nlc-email" type="email" class="form-control" onblur="validateLeadEmail(this)"></div>
+            <div class="form-group"><label class="form-label">Phone</label>
+              <input id="nlc-phone" type="tel" class="form-control"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text3);">Added to this lead’s contacts. It becomes a real person on promotion.</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewLeadContactForEngagement()">Add</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveNewLeadContactForEngagement() {
+  const parent = window._engParent || null; if (!parent) return;
+  const val = id => (document.getElementById(id)?.value || '').trim();
+  const name = val('nlc-name');
+  if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
+  if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
+  startBusy('Adding contact…');
+  try {
+    // Append a provisional contact to the lead's contacts jsonb (consistent shape).
+    const lr = await apiGet('leads', `id=eq.${parent.id}&select=contacts`);
+    const list = Array.isArray(lr[0] && lr[0].contacts) ? lr[0].contacts.slice() : [];
+    const cid = list.reduce((m, c) => Math.max(m, +c.cid || 0), 0) + 1;
+    const entry = { cid, person_id: null, name, job_title: val('nlc-title') || null, email: val('nlc-email') || null, phone: val('nlc-phone') || null, is_primary: list.length === 0, moved: null };
+    list.push(entry);
+    await api('leads', 'PATCH', { contacts: list, updated_at: new Date().toISOString() }, 'id=eq.' + parent.id);
+    if (typeof leadData !== 'undefined' && leadData && +leadData.id === +parent.id) { leadData.contacts = list; loadLeadContacts(leadData.id).then(() => renderLeadContacts()); }
+    // Select the new contact as involved; refresh the pool WITHOUT reloading (which
+    // would drop unsaved selections on a new engagement).
+    window._liLeadContacts = list;
+    window._liPeople = window._liPeople || [];
+    window._liPeople.push({ key: 'c' + cid, cid, person_id: null, name });
+    closeModal();
+    _liRefreshPool();
+    renderLiPeople();
+    showStatus('Contact added');
+  } catch (e) { showStatus('Could not add contact: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// Rebuild the lead engagement's add-dropdown from the cached lead contacts,
+// excluding those already selected. (Used after create-new so selections stick.)
+function _liRefreshPool() {
+  const sel = document.getElementById('li-person-pool'); if (!sel) return;
+  const parent = window._engParent || null;
+  if (!(parent && parent.kind === 'lead')) return;
+  const keyOf = c => c.person_id ? ('p' + c.person_id) : ('c' + c.cid);
+  const selectedKeys = new Set((window._liPeople || []).map(p => p.key));
+  const opts = (window._liLeadContacts || [])
+    .filter(c => !selectedKeys.has(keyOf(c)))
+    .map(c => `<option value="${keyOf(c)}">${cEsc(c.name || 'Contact')}</option>`).join('')
+    + '<option value="__new__">＋ Create new contact…</option>';
+  sel.innerHTML = '<option value="">— add person —</option>' + opts;
 }
 
 async function saveLeadInteraction(editId) {
@@ -16570,10 +16687,19 @@ async function saveLeadInteraction(editId) {
     // Sync People Involved → engagement_people (replace-all on edit). Best-effort:
     // never fail the whole save if a person link can't be written.
     if (engId) {
+      const parent = window._engParent || null;
+      const isDeal = !!(parent && parent.kind === 'deal');
       try {
-        if (editId) await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + engId);
-        for (const p of (window._liPeople || [])) {
-          try { await api('engagement_people', 'POST', { engagement_id: engId, person_id: +p.id }, ''); } catch (e) { /* ignore dup */ }
+        if (isDeal) {
+          if (editId) await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + engId);
+          for (const p of (window._liPeople || [])) {
+            if (p.person_id) { try { await api('engagement_people', 'POST', { engagement_id: engId, person_id: +p.person_id }, ''); } catch (e) { /* ignore dup */ } }
+          }
+        } else {
+          // Lead engagement: store the involved lead-contacts provisionally on the
+          // engagement; they materialise to engagement_people when the lead promotes.
+          const refs = (window._liPeople || []).map(p => ({ cid: p.cid || null, person_id: p.person_id || null, name: p.name || null }));
+          await api('engagements', 'PATCH', { contacts: refs }, 'id=eq.' + engId);
         }
       } catch (e) { /* best-effort */ }
     }
