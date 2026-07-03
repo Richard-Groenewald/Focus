@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -866,6 +866,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary btn-sm" style="display:none;">Promote →</button>
       <button type="button" id="lead-reject-btn" onclick="openRejectPromotion()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Reject…</button>
       <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Decline…</button>
+      <button type="button" id="lead-delete-btn" onclick="deleteLead()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);" title="Delete this lead (Admin; not for promoted leads)">Delete lead</button>
       <button class="btn btn-secondary btn-sm" id="lead-revert-btn" onclick="revertLead()" title="Undo every change made since you opened this lead">↺ Revert changes</button>
     </div>
   </div>
@@ -2221,6 +2222,28 @@ const PAGES = {
     fields: ORG_DETAIL_FIELDS,
   },
 
+  // Contacts management (under Clients & Contacts). Same people table as the
+  // Site-Admin People page, but scoped by inferred ownership (see loadTable):
+  // a contact is "yours" if they're on a lead/deal you own.
+  contacts: {
+    title: 'Contacts',
+    table: 'people',
+    columns: [
+      { key: 'first_name', label: 'First Name' },
+      { key: 'last_name',  label: 'Last Name' },
+      { key: 'title',      label: 'Title' },
+      { key: 'email',      label: 'Email' },
+      { key: 'phone',      label: 'Phone' },
+    ],
+    fields: [
+      { key: 'first_name', label: 'First Name', required: true },
+      { key: 'last_name',  label: 'Last Name' },
+      { key: 'title',      label: 'Title', type: 'select', options: ['Mr','Mrs','Ms','Dr','Prof',''] },
+      { key: 'email',      label: 'Email', type: 'email' },
+      { key: 'phone',      label: 'Primary Telephone' },
+    ],
+  },
+
   // Contacts for a specific client — reached via the Contacts popup's expand
   // button (not in the sidebar). Custom-rendered; context is _contactsClientId.
   client_contacts: {
@@ -2749,6 +2772,32 @@ function showPage(page) {
 }
 
 // ── Table Rendering ──────────────────────────────────────
+// Inferred ownership: a client (org) or contact (person) is "yours" if it sits on
+// a lead or deal you own. Orphans (on nothing) belong to no one, so only view_all
+// users see them. Computed per page-load — cheap at this scale.
+async function _ensureOwnershipScope() {
+  const me = +(currentUser?.personId || 0);
+  const ownedOrgs = new Set(), ownedPersons = new Set(), allContactPersons = new Set();
+  try {
+    const [leads, deals, dcs] = await Promise.all([
+      apiGet('leads', 'select=owner_id,target_org_id,contacts'),
+      apiGet('deals', 'select=id,owner_id,org_id'),
+      apiGet('deal_contacts', 'select=deal_id,person_id'),
+    ]);
+    const dealOwner = {};
+    deals.forEach(d => { dealOwner[+d.id] = +d.owner_id; if (+d.owner_id === me && d.org_id) ownedOrgs.add(+d.org_id); });
+    leads.forEach(l => {
+      const mine = +l.owner_id === me;
+      if (mine && l.target_org_id) ownedOrgs.add(+l.target_org_id);
+      (Array.isArray(l.contacts) ? l.contacts : []).forEach(c => {
+        if (c && c.person_id) { allContactPersons.add(+c.person_id); if (mine) ownedPersons.add(+c.person_id); }
+      });
+    });
+    dcs.forEach(c => { if (c.person_id) { allContactPersons.add(+c.person_id); if (dealOwner[+c.deal_id] === me) ownedPersons.add(+c.person_id); } });
+  } catch (e) { /* best-effort */ }
+  return { ownedOrgs, ownedPersons, allContactPersons };
+}
+
 async function loadTable(page) {
   const cfg = PAGES[page];
 
@@ -2821,6 +2870,18 @@ async function loadTable(page) {
       if (cfg.table === 'roles' || cfg.table === 'permissions') allData[cfg.table] = currentData;
     }
 
+    // Own/other scoping (inferred ownership). Reassigning currentData to a filtered
+    // copy leaves the full-table cache above intact for other pages.
+    if (page === 'clients' && !can('view_all_clients')) {
+      const s = await _ensureOwnershipScope();
+      currentData = currentData.filter(o => s.ownedOrgs.has(+o.id));
+    } else if (page === 'contacts') {
+      const s = await _ensureOwnershipScope();
+      currentData = can('view_all_contacts')
+        ? currentData.filter(p => s.allContactPersons.has(+p.id))   // all people who ARE contacts
+        : currentData.filter(p => s.ownedPersons.has(+p.id));       // only your contacts
+    }
+
     document.getElementById('page-sub').textContent = currentData.length + ' record' + (currentData.length !== 1 ? 's' : '');
 
     if (!currentData.length) {
@@ -2862,7 +2923,7 @@ async function loadTable(page) {
       const contactsBtn = currentPage === 'clients'
         ? `<button class="btn btn-ghost btn-sm" onclick="showClientContacts(${row.id})">Contacts</button>`
         : '';
-      const profileBtn = currentPage === 'people'
+      const profileBtn = (currentPage === 'people' || currentPage === 'contacts')
         ? `<button class="btn btn-ghost btn-sm" onclick="showPersonProfile(${row.id})">Profile</button>`
         : '';
       // System rows (cfg.systemFlag) are required by app logic keyed on their name —
@@ -3915,6 +3976,8 @@ const MENU = [
     items: [
       { page: 'clients',          label: 'Clients',       permission: 'manage_clients',
         icon: '<rect x="1" y="7" width="14" height="8" rx="1"/><rect x="4" y="3" width="8" height="5" rx="1"/><rect x="6" y="1" width="4" height="3" rx="1"/>' },
+      { page: 'contacts',         label: 'Contacts',      permission: 'manage_contacts',
+        icon: '<circle cx="8" cy="5" r="3"/><path d="M2 13c0-3 2.7-5 6-5s6 2 6 5"/>' },
     ]
   },
   {
@@ -11650,6 +11713,25 @@ async function _deleteLeadCascade(id) {
   }
   try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
 }
+
+// Delete a lead — Admin-only (delete_leads permission), never a promoted lead.
+async function deleteLead() {
+  if (!leadData || !leadData.id) return;
+  if (!can('delete_leads')) { showStatus('You do not have permission to delete leads', 'error'); return; }
+  if (leadData.promoted_deal_id || leadData.status === 'Promoted') { showStatus('A promoted lead can’t be deleted', 'error'); return; }
+  const nm = leadData.target_org_name
+    || (allData['organisations'] || []).find(o => +o.id === +leadData.target_org_id)?.name
+    || ('lead #' + leadData.id);
+  if (!await confirmDialog({ title: 'Delete lead', message: `Permanently delete this lead (${String(nm).replace(/</g,'&lt;')}) and its engagements, contacts and notes? This cannot be undone.`, confirmLabel: 'Delete lead', danger: true })) return;
+  startBusy('Deleting…');
+  try {
+    await _deleteLeadCascade(leadData.id);
+    leadFormDirty = false;
+    showStatus('Lead deleted');
+    await closeLeadPage({ force: true });
+  } catch (e) { showStatus('Delete failed: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
 async function revertLead() {
   if (leadReadOnly) return;
   const snap = window._leadRevert;
@@ -13275,6 +13357,13 @@ function refreshLeadWorkflowChrome() {
   const declineBtn = document.getElementById('lead-decline-btn');
   const wakeWrap   = document.getElementById('lead-wake-date-wrap');
   const deadBlock  = document.getElementById('lead-dead-block');
+
+  // Delete (Admin-only permission): available on any saved, non-promoted lead.
+  const deleteBtn = document.getElementById('lead-delete-btn');
+  if (deleteBtn) {
+    const canDel = can('delete_leads') && !!leadData.id && !leadData.promoted_deal_id && status !== 'Promoted';
+    deleteBtn.style.display = canDel ? '' : 'none';
+  }
 
   // Promote area. Owners assemble a request (standard or special); a manager
   // Reviews it → Accept (commits) / Reject (with reason). Managers also keep a
