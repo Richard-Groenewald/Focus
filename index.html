@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.44 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.45 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.44 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.45 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1056,7 +1056,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
                "target contact"; there is no separate concept. Each contact is a
                person — existing or new — captured provisionally until promote. -->
           <div class="form-group">
-            <label class="form-label">Contacts <span class="lead-req-star" style="color:var(--red)">*</span> <span style="font-weight:400;color:var(--text3);font-size:11px;">— the first is the primary contact</span></label>
+            <label class="form-label">Contacts <span class="lead-req-star" style="color:var(--red)">*</span></label>
             <div id="lead-contacts-list" style="margin-bottom:8px;"></div>
             <!-- Add a contact: type a name (checked against known people), then details -->
             <div id="lead-contact-entry">
@@ -12059,6 +12059,7 @@ async function initLeadForm() {
 // target_person_* so the Working gate / promote / views keep working. Each entry:
 //   { person_id?, name, job_title?, email?, phone?, is_primary, moved? }
 async function loadLeadContacts(leadId) {
+  _leadContactsExpanded.clear();
   if (!leadId) { leadContacts = []; return; }
   let arr = leadData && leadData.contacts;
   if (arr == null) {
@@ -12132,18 +12133,13 @@ function onLeadContactNameInput() {
 // Standard contact card (both primary + additional). Two rows, two columns:
 //   Name Surname        Position/Title
 //   Tel No              Email
-function _leadContactCardHtml({ name, title, phone, email, actions }) {
-  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
-  const cell = (v, strong) => strong
-    ? `<div style="font-weight:700;">${esc(v) || '—'}</div>`
-    : `<div style="color:var(--text2);">${esc(v) || '—'}</div>`;
-  return `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:6px;background:var(--bg2);">
-    <div style="display:grid;grid-template-columns:minmax(130px,1fr) 1fr;gap:2px 20px;font-size:12px;flex:1;min-width:0;">
-      ${cell(name, true)}${cell(title)}
-      ${cell(phone)}${cell(email)}
-    </div>
-    ${actions ? `<div style="flex-shrink:0;display:flex;flex-direction:column;gap:4px;align-items:flex-end;">${actions}</div>` : ''}
-  </div>`;
+// Contacts render as a compact accordion: collapsed shows just the name (+ a
+// "Primary contact" pill on the primary); click the name to expand into title /
+// telephone / email, the kind badge, and Make-primary / Remove actions.
+let _leadContactsExpanded = new Set();
+function toggleLeadContact(i) {
+  if (_leadContactsExpanded.has(i)) _leadContactsExpanded.delete(i); else _leadContactsExpanded.add(i);
+  renderLeadContacts();
 }
 
 function renderLeadContacts() {
@@ -12157,12 +12153,31 @@ function renderLeadContacts() {
     el.innerHTML = '<div style="font-size:12px;color:var(--text3);">No contacts yet — add the primary contact below.</div>';
     return;
   }
+  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
   el.innerHTML = leadContacts.map((c, i) => {
     const r = _resolveLeadContact(c);
-    const badges = `${c.is_primary ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;background:var(--navy);color:#fff;border-radius:999px;padding:1px 7px;">Primary</span>' : ''}${_leadKindBadge(r.kind)}`;
-    const buttons = leadReadOnly ? '' :
-      `${c.is_primary ? '' : `<button class="btn btn-ghost btn-sm" title="Make primary" onclick="makeLeadContactPrimary(${i})" style="padding:1px 6px;font-size:11px;">★ Primary</button>`}<button title="Remove" onclick="removeLeadContact(${i})" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;line-height:1;padding:0;">×</button>`;
-    return _leadContactCardHtml({ name: r.name, title: r.title, phone: r.phone, email: r.email, actions: badges + buttons });
+    const open = _leadContactsExpanded.has(i);
+    const primaryPill = c.is_primary
+      ? '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.03em;background:var(--navy);color:#fff;border-radius:999px;padding:2px 10px;white-space:nowrap;">Primary contact</span>'
+      : '';
+    const header = `<div onclick="toggleLeadContact(${i})" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;">
+        <strong style="font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.name)}</strong>
+        <span style="display:flex;align-items:center;gap:8px;flex-shrink:0;">${primaryPill}<span style="color:var(--text3);font-size:10px;">${open ? '▲' : '▼'}</span></span>
+      </div>`;
+    let body = '';
+    if (open) {
+      const line = (v) => `<div style="font-size:12px;color:var(--text2);padding:1px 0;">${esc(v) || '—'}</div>`;
+      const makeBtn = (c.is_primary || leadReadOnly) ? '' : `<button class="btn btn-ghost btn-sm" onclick="makeLeadContactPrimary(${i})" style="font-size:11px;">★ Make primary</button>`;
+      const rmBtn = leadReadOnly ? '' : `<button class="btn btn-danger btn-sm" onclick="removeLeadContact(${i})" style="font-size:11px;">Remove</button>`;
+      body = `<div style="padding:2px 10px 8px;border-top:1px solid var(--border);">
+          ${line(r.title)}${line(r.phone)}${line(r.email)}
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;">
+            ${_leadKindBadge(r.kind)}
+            <span style="display:flex;gap:6px;flex-shrink:0;">${makeBtn}${rmBtn}</span>
+          </div>
+        </div>`;
+    }
+    return `<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg2);">${header}${body}</div>`;
   }).join('');
 }
 
@@ -12220,6 +12235,7 @@ async function removeLeadContact(idx) {
   if (leadReadOnly) return;
   const removed = leadContacts.splice(idx, 1)[0];
   if (removed && removed.is_primary && leadContacts.length) leadContacts[0].is_primary = true;
+  _leadContactsExpanded.clear();
   startBusy('Removing…');
   try { await _persistLeadContacts(); renderLeadContacts(); }
   catch (e) { leadContacts.splice(idx, 0, removed); showStatus('Could not remove: ' + e.message, 'error'); }
