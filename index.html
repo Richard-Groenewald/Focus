@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.47 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.47 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12169,13 +12169,20 @@ function renderLeadContacts() {
     let body = '';
     if (open) {
       const line = (v) => `<div style="font-size:12px;color:var(--text2);padding:1px 0;">${esc(v) || '—'}</div>`;
-      const makeBtn = (c.is_primary || leadReadOnly) ? '' : `<button class="btn btn-ghost btn-sm" onclick="makeLeadContactPrimary(${i})" style="font-size:11px;">★ Make primary</button>`;
-      const rmBtn = leadReadOnly ? '' : `<button class="btn btn-danger btn-sm" onclick="removeLeadContact(${i})" style="font-size:11px;">Remove</button>`;
+      const btn = (label, cls, fn) => `<button class="btn ${cls} btn-sm" onclick="${fn}(${i})" style="width:100%;font-size:11px;">${label}</button>`;
+      // Actions stacked top-right: Make primary, then Edit, then Delete.
+      const btnCol = leadReadOnly ? '' : `<div style="display:flex;flex-direction:column;gap:4px;flex-shrink:0;width:120px;">
+            ${c.is_primary ? '' : btn('★ Make primary', 'btn-secondary', 'makeLeadContactPrimary')}
+            ${btn('Edit', 'btn-ghost', 'editLeadContact')}
+            ${btn('Delete', 'btn-danger', 'removeLeadContact')}
+          </div>`;
       body = `<div style="padding:2px 10px 8px;border-top:1px solid var(--border);">
-          ${line(r.title)}${line(r.phone)}${line(r.email)}
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:8px;">
-            ${_leadKindBadge(r.kind, orgName)}
-            <span style="display:flex;gap:6px;flex-shrink:0;">${makeBtn}${rmBtn}</span>
+          <div style="display:flex;justify-content:space-between;gap:10px;">
+            <div style="flex:1;min-width:0;">
+              ${line(r.title)}${line(r.phone)}${line(r.email)}
+              <div style="margin-top:8px;">${_leadKindBadge(r.kind, orgName)}</div>
+            </div>
+            ${btnCol}
           </div>
         </div>`;
     }
@@ -12250,6 +12257,58 @@ async function makeLeadContactPrimary(idx) {
   startBusy('Updating…');
   try { await _persistLeadContacts(); renderLeadContacts(); }
   catch (e) { showStatus('Could not update: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// Edit a contact. For an existing person, name/email/phone come from their record
+// (read-only here) — only the job title is editable; a new contact edits all.
+function editLeadContact(i) {
+  if (leadReadOnly) return;
+  const c = leadContacts[i]; if (!c) return;
+  const r = _resolveLeadContact(c);
+  const isExisting = !!c.person_id;
+  const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  const ro = isExisting ? 'disabled' : '';
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:460px;max-width:95vw;">
+        <div class="modal-header"><div class="modal-title">Edit contact</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body">
+          ${isExisting ? '<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Existing person — their name, email and phone come from their record; only the job title is editable here.</div>' : ''}
+          <div class="form-group"><label class="form-label">First and last name</label>
+            <input id="elc-name" class="form-control" value="${esc(r.name)}" ${ro}></div>
+          <div class="form-group"><label class="form-label">Job title</label>
+            <input id="elc-title" class="form-control" value="${esc(c.job_title || r.title || '')}" placeholder="e.g. Operations Director"></div>
+          <div class="form-row">
+            <div class="form-group"><label class="form-label">Email</label>
+              <input id="elc-email" type="email" class="form-control" value="${esc(r.email)}" ${ro} onblur="validateLeadEmail(this)"></div>
+            <div class="form-group"><label class="form-label">Phone</label>
+              <input id="elc-phone" type="tel" class="form-control" value="${esc(r.phone)}" ${ro}></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveLeadContactEdit(${i})">Save</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function saveLeadContactEdit(i) {
+  const c = leadContacts[i]; if (!c) return;
+  const val = id => (document.getElementById(id)?.value || '').trim();
+  if (!c.person_id) {
+    const name = val('elc-name');
+    if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
+    if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
+    if (c.is_primary && !val('elc-email') && !val('elc-phone')) { showStatus('The primary contact needs an email or phone', 'error'); return; }
+    c.name = name; c.email = val('elc-email') || null; c.phone = val('elc-phone') || null;
+  }
+  c.job_title = val('elc-title') || null;
+  closeModal();
+  startBusy('Saving…');
+  try { await _persistLeadContacts(); renderLeadContacts(); showStatus('Contact updated'); }
+  catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
 
