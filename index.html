@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1042,6 +1042,19 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
             <div id="lead-target-org-matches" style="margin-top:8px;"></div>
             <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
+          </div>
+
+          <!-- Site: the premises this lead is about ("Access World West Gate").
+               Optional and soft at lead stage. Scoped to the chosen client; pick one
+               of its sites, leave as "same as company", or name a new one (which
+               materialises as a real site on promotion, like a typed new org). -->
+          <div class="form-group" id="lead-site-group">
+            <label class="form-label">Site <span style="font-weight:400;color:var(--text3);font-size:11px;">— the premises (optional)</span></label>
+            <select id="lead-site-id" class="form-control" onchange="onLeadSiteChange()">
+              <option value="">— same as company —</option>
+            </select>
+            <input type="text" id="lead-site-name" class="form-control" placeholder="New site name (e.g. West Gate)" style="display:none;margin-top:8px;" maxlength="120">
+            <div id="lead-site-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">Pick the client above first, then choose one of its sites or add a new one.</div>
           </div>
 
           <!-- Region + Branch (one row — below the client / Organisation name) -->
@@ -1678,6 +1691,7 @@ const LOOKUP_CONFIG = [
   { key: 'stages',        params: 'select=*', persist: true  },
   { key: 'people',        params: 'select=*', persist: false },
   { key: 'organisations', params: 'select=*', persist: false },
+  { key: 'sites',         params: 'select=*', persist: false },
 ];
 const LOOKUP_KEYS = new Set(LOOKUP_CONFIG.map(c => c.key));            // also table names
 const LOOKUP_PERSIST = new Set(LOOKUP_CONFIG.filter(c => c.persist).map(c => c.key));
@@ -12031,6 +12045,7 @@ function resetLeadForm() {
     'lead-source-person-title','lead-source-person-email','lead-source-person-phone',
     'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name',
+    'lead-site-id','lead-site-name',
     'lead-description','lead-region-id','lead-branch-id','lead-service-combo','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
@@ -12092,7 +12107,7 @@ async function initLeadForm() {
   // Load all needed lookups in parallel
   // NB: loadLeadQualificationLookups returns void (side-effects allData) — kept
   // at the end of the array so destructuring lines up cleanly without `_` placeholders.
-  const [sources, regions, services, people, orgs, campaigns, salesCampaigns, serviceSubs, branches] = await Promise.all([
+  const [sources, regions, services, people, orgs, campaigns, salesCampaigns, serviceSubs, branches, sites] = await Promise.all([
     allData['lead_sources']       || apiGet('lead_sources', 'active=eq.true&select=*&order=id.asc'),
     allData['regions']            || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major']      || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
@@ -12102,6 +12117,7 @@ async function initLeadForm() {
     allData['sales_campaigns']    || apiGet('sales_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['service_sub_all']    || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc'),
     allData['branches']           || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+    allData['sites']              || apiGet('sites', 'select=*&order=name.asc'),
     loadLeadQualificationLookups(),
   ]);
   allData['lead_sources']        = sources;
@@ -12110,6 +12126,7 @@ async function initLeadForm() {
   allData['service_major']       = services;
   allData['people']              = people;
   allData['organisations']       = orgs;
+  allData['sites']               = sites;
   allData['research_campaigns']  = campaigns;
   allData['sales_campaigns']     = salesCampaigns;
   allData['service_sub_all']     = serviceSubs;
@@ -12586,6 +12603,20 @@ function populateLeadForm() {
   // A lead saved with a free-text new org (name, no FK) collapses to the same
   // chosen-org chip the create flow produces — consistent "picked" state.
   if (!leadData.target_org_id && leadData.target_org_name) confirmLeadTargetOrgNew();
+  // Site: the picker was (re)built by onLeadTargetOrgChange → populateLeadSites above.
+  // Restore an existing site_id, or a typed prospective site_name (→ "＋ New site…").
+  const _siteSel = document.getElementById('lead-site-id');
+  if (_siteSel) {
+    if (leadData.site_id && [...(_siteSel.options)].some(o => o.value === String(leadData.site_id))) {
+      _siteSel.value = String(leadData.site_id);
+      onLeadSiteChange();
+    } else if ((leadData.site_name || '').trim()) {
+      _siteSel.value = '__new__';
+      onLeadSiteChange();
+      const _siteName = document.getElementById('lead-site-name');
+      if (_siteName) _siteName.value = leadData.site_name;
+    }
+  }
   // Contacts: load the one unified list and render it (with existing/affiliated/new badges).
   loadLeadContacts(leadData.id).then(() => renderLeadContacts());
   hideLeadContactEntry();
@@ -12710,6 +12741,42 @@ function onLeadTargetOrgChange() {
   }
   // Refresh the contact-person dropdown to match the chosen org's affiliations.
   renderLeadContacts();
+  // Re-scope the Site picker to the chosen organisation's sites.
+  populateLeadSites();
+}
+
+// Fill the Site dropdown with the chosen client's sites, plus "same as company"
+// (the default primary/fallback) and a "＋ New site…" escape hatch. Called on
+// org change and on form load. Preserves the current selection when still valid.
+function populateLeadSites() {
+  const sel = document.getElementById('lead-site-id');
+  if (!sel) return;
+  const orgId = +(document.getElementById('lead-target-org-id')?.value || 0);
+  const hint  = document.getElementById('lead-site-hint');
+  const sites = (allData['sites'] || [])
+    .filter(s => +s.organisation_id === orgId && s.active !== false)
+    .sort((a, b) => (b.is_primary - a.is_primary) || String(a.name).localeCompare(String(b.name)));
+  const prev = sel.value;
+  sel.innerHTML =
+    '<option value="">— same as company —</option>' +
+    sites.map(s => `<option value="${s.id}">${String(s.name).replace(/</g, '&lt;')}${s.is_primary ? ' (default)' : ''}</option>`).join('') +
+    '<option value="__new__">＋ New site…</option>';
+  // Keep the prior choice if it still exists in the rebuilt list.
+  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  else sel.value = '';
+  onLeadSiteChange();
+  if (hint) hint.textContent = orgId
+    ? "Choose one of this client's sites, leave as “same as company”, or add a new one."
+    : 'Pick the client above first — or, for a new client, add a site name here.';
+}
+
+// Reveal the free-text name input only when "＋ New site…" is chosen.
+function onLeadSiteChange() {
+  const sel = document.getElementById('lead-site-id');
+  const name = document.getElementById('lead-site-name');
+  if (!sel || !name) return;
+  if (sel.value === '__new__') { name.style.display = ''; }
+  else { name.style.display = 'none'; name.value = ''; }
 }
 
 // Service-focus pair: major drives sub. When the major changes, refilter sub
@@ -15207,6 +15274,43 @@ async function commitPromotion(s) {
       }, '');
     }
 
+    // === 3.5. Site: resolve the deal's site =================
+    // The org is now known, so the deal always lands on a concrete site:
+    //   • lead carries an existing site_id → use it;
+    //   • lead carries a typed site_name  → find-or-create that site under the org;
+    //   • neither                          → the org's primary ("same as company")
+    //     site, creating a default one if this org is brand-new.
+    let dealSiteId = null;
+    try {
+      const orgSites = await apiGet('sites', `organisation_id=eq.${orgId}&select=id,name,is_primary`);
+      if (leadData.site_id && orgSites.some(x => +x.id === +leadData.site_id)) {
+        dealSiteId = +leadData.site_id;
+      } else if ((leadData.site_name || '').trim()) {
+        const nm = leadData.site_name.trim();
+        const hit = orgSites.find(x => String(x.name || '').trim().toLowerCase() === nm.toLowerCase());
+        if (hit) dealSiteId = +hit.id;
+        else {
+          const cs = await api('sites', 'POST', {
+            organisation_id: +orgId, name: nm, created_by: currentUser?.personId || null,
+          }, 'select=id');
+          dealSiteId = cs && cs[0] ? +cs[0].id : null;
+        }
+      }
+      if (!dealSiteId) {
+        const prim = orgSites.find(x => x.is_primary) || orgSites[0];
+        if (prim) dealSiteId = +prim.id;
+        else {
+          const org = (allData['organisations'] || []).find(o => +o.id === +orgId);
+          const cs = await api('sites', 'POST', {
+            organisation_id: +orgId, name: (org?.name) || s.colloquial || 'Site',
+            is_primary: true, created_by: currentUser?.personId || null,
+          }, 'select=id');
+          dealSiteId = cs && cs[0] ? +cs[0].id : null;
+        }
+      }
+      allData['sites'] = null;   // corpus changed → reload on next use
+    } catch (e) { console.warn('Could not resolve site on promote:', e.message); }
+
     // === 4. Deal ============================================
     // Resolve the first stage in the 'Opportunity-Open' category
     if (!allData['stages'])           allData['stages']           = await apiGet('stages',           'active=eq.true&select=*&order=sort_order.asc');
@@ -15220,6 +15324,7 @@ async function commitPromotion(s) {
     const dealPayload = {
       name:             s.q4.dealName,
       org_id:           +orgId,
+      site_id:          dealSiteId,
       region_id:        leadData.region_id || null,
       branch_id:        leadData.branch_id || null,
       stage_id:         +firstStage.id,
@@ -15434,6 +15539,8 @@ async function commitPromotion(s) {
     await api('leads', 'PATCH', {
       target_org_id:      +orgId,
       target_org_name:    null,
+      site_id:            dealSiteId,
+      site_name:          null,
       target_person_id:   +personId,
       target_person_name: null,
       target_person_phone: null,
@@ -16023,6 +16130,18 @@ async function saveLead(opts) {
 
     target_org_id:      +document.getElementById('lead-target-org-id').value || null,
     target_org_name:    document.getElementById('lead-target-org-name').value.trim() || null,
+    // Site: an existing site_id, or (when "＋ New site…" is chosen) a prospective
+    // site_name that materialises on promote. Mutually exclusive.
+    site_id:   (function () {
+      const v = document.getElementById('lead-site-id')?.value || '';
+      return (v && v !== '__new__') ? +v : null;
+    })(),
+    site_name: (function () {
+      const sel = document.getElementById('lead-site-id');
+      return (sel && sel.value === '__new__')
+        ? (document.getElementById('lead-site-name')?.value.trim() || null)
+        : null;
+    })(),
     // Contacts: primary projected onto target_person_*; full list → contacts jsonb.
     ...(_leadContactsPatch()),
 
