@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1064,7 +1064,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             </div>
             <div id="lead-contact-entry" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:10px;">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-                <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()">
+                <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()" onblur="onLeadContactNameBlur()">
                 <input type="text" id="lead-contact-title" class="form-control" placeholder="Job title (optional)">
                 <input type="email" id="lead-contact-email" class="form-control" placeholder="Email" onblur="validateLeadEmail(this)">
                 <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Phone">
@@ -12101,12 +12101,34 @@ async function _persistLeadContacts() {
 }
 
 function _clearLeadContactEntry() {
+  window._leadContactNewConfirmed = null;
   ['lead-contact-name', 'lead-contact-title', 'lead-contact-email', 'lead-contact-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
 }
 
 function onLeadContactNameInput() {
   validateLeadName(document.getElementById('lead-contact-name'));
+  window._leadContactNewConfirmed = null;   // editing the name re-arms the lookup
   if (!allData['person_organisation_roles']) _ensurePersonAffiliationsLoaded();
+}
+
+// Fuzzy lookup runs when the name field loses focus. A match opens the "use this?"
+// modal (use → adds the existing person; new → remembers the choice so the Add
+// button just confirms). No match silently marks it new.
+async function onLeadContactNameBlur() {
+  if (leadReadOnly) return;
+  const name = (document.getElementById('lead-contact-name')?.value || '').trim();
+  if (name.length < 3 || !leadNameHasTwoParts(name)) return;
+  if (window._leadContactNewConfirmed === name.toLowerCase()) return;
+  if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) {} }
+  const { exact, shortlist } = _findPersonMatches(name);
+  if (!exact && !shortlist.length) { window._leadContactNewConfirmed = name.toLowerCase(); return; }
+  const isPrimary = leadContacts.length === 0;
+  const title = (document.getElementById('lead-contact-title')?.value || '').trim();
+  openLeadPersonMatchModal({
+    name, exact, shortlist, title: 'Is this someone we already know?', warnDup: true,
+    onUse: (pid) => _commitLeadContact({ person_id: +pid, job_title: title }, isPrimary),
+    onNew: () => { window._leadContactNewConfirmed = name.toLowerCase(); },
+  });
 }
 
 // Standard contact card (both primary + additional). Two rows, two columns:
@@ -12192,10 +12214,17 @@ async function addLeadContactEntry() {
   const phone = (document.getElementById('lead-contact-phone')?.value || '').trim();
   if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
+  // The blur lookup may have just opened the match modal — let the user resolve it.
+  if ((document.getElementById('modal-root')?.innerHTML || '').trim()) return;
   const isPrimary = leadContacts.length === 0;
   if (isPrimary && !email && !phone) { showStatus('The primary contact needs an email or phone', 'error'); return; }
   if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) {} }
-  // Check for existing people; a match asks "use this?" before creating anything.
+  // Already checked (on blur) and confirmed new → add straight away.
+  if (window._leadContactNewConfirmed === name.toLowerCase()) {
+    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary);
+    return;
+  }
+  // Otherwise run the check now (e.g. added without leaving the name field).
   const { exact, shortlist } = _findPersonMatches(name);
   if (exact || shortlist.length) {
     openLeadPersonMatchModal({
