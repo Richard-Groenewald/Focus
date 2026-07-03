@@ -519,7 +519,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -548,7 +548,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12276,9 +12276,21 @@ async function removeLeadContact(idx) {
 
 async function makeLeadContactPrimary(idx) {
   if (leadReadOnly) return;
-  leadContacts.forEach((c, i) => { c.is_primary = (i === idx); });
+  const c = leadContacts[idx];
+  if (!c) return;
+  // The primary must be reachable — require a valid email or phone.
+  const r = _resolveLeadContact(c);
+  if (!r.email && !r.phone) {
+    showStatus('The primary contact needs an email or phone — add one before making this contact primary', 'error');
+    return;
+  }
+  // Move it to the top; the primary is always the first contact.
+  leadContacts.splice(idx, 1);
+  leadContacts.unshift(c);
+  leadContacts.forEach((x, i) => { x.is_primary = (i === 0); });
+  _leadContactsExpanded.clear();
   startBusy('Updating…');
-  try { await _persistLeadContacts(); renderLeadContacts(); }
+  try { await _persistLeadContacts(); renderLeadContacts(); showStatus('Primary contact updated'); }
   catch (e) { showStatus('Could not update: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
