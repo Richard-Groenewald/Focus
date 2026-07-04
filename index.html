@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.61 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.62 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.61 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.62 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1031,15 +1031,22 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
         <div class="opp-section" id="lead-target-section">
           <div class="opp-section-title">Site <span class="lead-req-star" style="color:var(--red)">*</span></div>
 
-          <div class="form-group">
-            <!-- Primary chooser: every known site, grouped by organisation, + New site -->
-            <div id="lead-site-picker" style="display:flex;gap:8px;">
-              <select id="lead-site-id" class="form-control" style="flex:1;" onchange="onLeadSiteChange()">
-                <option value="">Pick the site this lead is about, or add a new one…</option>
-              </select>
+          <div class="form-group" style="position:relative;">
+            <!-- Source of truth (hidden): an existing site id OR a typed new-site name -->
+            <input type="hidden" id="lead-site-id">
+            <input type="hidden" id="lead-site-name">
+            <!-- Primary control: type a site name → fuzzy-search existing sites -->
+            <div id="lead-site-picker">
+              <input type="text" id="lead-site-search" class="form-control" autocomplete="off"
+                placeholder="Type a site name (e.g. West Gate)…"
+                oninput="onLeadSiteInput()" onkeydown="onLeadSiteKeydown(event)" onblur="onLeadSiteBlur()">
+              <div id="lead-site-matches" style="margin-top:6px;"></div>
             </div>
-            <!-- New-site name (shown only when "＋ New site…" is chosen) -->
-            <input type="text" id="lead-site-name" class="form-control" placeholder="New site name (e.g. West Gate)" style="display:none;margin-top:8px;" maxlength="120">
+            <!-- Chosen chip: shown once a site (existing or new) is locked in -->
+            <div id="lead-site-chosen" style="display:none;align-items:center;gap:10px;">
+              <button type="button" class="btn btn-secondary btn-sm" id="lead-site-change-btn" onclick="changeLeadSite()">Change</button>
+              <span id="lead-site-chosen-name" style="font-weight:600;"></span>
+            </div>
             <!-- Derived organisation, read-only, shown when an existing site is picked -->
             <div id="lead-site-org-derived" style="display:none;font-size:12px;color:var(--text2);margin-top:6px;">
               Organisation: <span id="lead-site-org-derived-name" style="font-weight:600;"></span>
@@ -12085,11 +12092,8 @@ function resetLeadForm() {
   const srcHint = document.getElementById('lead-source-person-hint');
   if (srcHint) srcHint.style.display = '';
   onLeadTargetOrgChange();
-  // Rebuild + clear the primary Site chooser (org sub-picker hides via onLeadSiteChange).
-  populateLeadSiteChooser();
-  const siteSel = document.getElementById('lead-site-id');
-  if (siteSel) siteSel.value = '';
-  onLeadSiteChange();
+  // Clear the primary Site typeahead (also hides the org sub-picker).
+  clearLeadSiteField();
   // Status badge resets to New
   renderLeadStatusBadge('New');
   // Hide conditional sections
@@ -12203,8 +12207,8 @@ async function initLeadForm() {
   tgtOrgSel.innerHTML = '<option value="">Pick a known organisation or create a new one below</option>' +
     orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
 
-  // Primary Site chooser: all sites grouped by organisation (+ New site).
-  populateLeadSiteChooser();
+  // Primary Site typeahead starts empty (search is live against allData['sites']).
+  clearLeadSiteField();
 
   // Contacts are rendered from the unified list (renderLeadContacts) on populate.
 }
@@ -12606,19 +12610,18 @@ function populateLeadForm() {
   if (leadData.sales_campaign_id) document.getElementById('lead-sales-campaign-id').value = leadData.sales_campaign_id;
   if (leadData.source_detail) document.getElementById('lead-source-detail').value = leadData.source_detail;
   // Site-first: the site is the primary handle; the organisation derives from it.
-  //   • existing site_id → select it (onLeadSiteChange derives + locks the org);
-  //   • prospective site_name → "＋ New site…" + load its owning org sub-picker;
+  //   • existing site_id → select it (derives + locks the org);
+  //   • prospective site_name → new-site chip + load its owning org sub-picker;
   //   • legacy lead with an org but no site → default to that org's primary site.
-  const _siteSel = document.getElementById('lead-site-id');
-  if (_siteSel) {
-    if (leadData.site_id && [...(_siteSel.options)].some(o => o.value === String(leadData.site_id))) {
-      _siteSel.value = String(leadData.site_id);
-      onLeadSiteChange();
+  // _leadPopulating guards selectLeadSite/chooseNewLeadSite from dirtying the form.
+  window._leadPopulating = true;
+  try {
+    clearLeadSiteField();
+    if (leadData.site_id && (allData['sites'] || []).some(s => +s.id === +leadData.site_id)) {
+      selectLeadSite(+leadData.site_id);
     } else if ((leadData.site_name || '').trim()) {
-      _siteSel.value = '__new__';
-      onLeadSiteChange();                       // reveals name + org sub-picker
-      const _siteName = document.getElementById('lead-site-name');
-      if (_siteName) _siteName.value = leadData.site_name;
+      document.getElementById('lead-site-search').value = leadData.site_name;
+      chooseNewLeadSite();                         // sets new-site chip + reveals org sub-picker
       // Load the organisation this new site belongs to into the sub-picker.
       if (leadData.target_org_id) {
         document.getElementById('lead-target-org-id').value = leadData.target_org_id;
@@ -12631,12 +12634,9 @@ function populateLeadForm() {
     } else if (leadData.target_org_id) {
       const prim = (allData['sites'] || []).find(s => +s.organisation_id === +leadData.target_org_id && s.is_primary)
                || (allData['sites'] || []).find(s => +s.organisation_id === +leadData.target_org_id);
-      if (prim && [...(_siteSel.options)].some(o => o.value === String(prim.id))) {
-        _siteSel.value = String(prim.id);
-        onLeadSiteChange();
-      }
+      if (prim) selectLeadSite(+prim.id);
     }
-  }
+  } finally { window._leadPopulating = false; }
   // Contacts: load the one unified list and render it (with existing/affiliated/new badges).
   loadLeadContacts(leadData.id).then(() => renderLeadContacts());
   hideLeadContactEntry();
@@ -12721,14 +12721,11 @@ function onLeadSourceOrgChange() {
 
   // Site-first: preselect the expanding client's site (its org derives from it).
   // Only fill when the site is still empty, so we never overwrite a chosen one.
-  const siteSel = document.getElementById('lead-site-id');
-  if (!siteSel || siteSel.value) return;
+  const siteId = document.getElementById('lead-site-id');
+  if (!siteId || siteId.value) return;
   const prim = (allData['sites'] || []).find(s => +s.organisation_id === clientId && s.is_primary)
            || (allData['sites'] || []).find(s => +s.organisation_id === clientId);
-  if (prim && [...siteSel.options].some(o => o.value === String(prim.id))) {
-    siteSel.value = String(prim.id);
-    onLeadSiteChange();   // derives + locks the organisation, refreshes contacts
-  }
+  if (prim) selectLeadSite(+prim.id);   // derives + locks the organisation, refreshes contacts
 }
 
 function onLeadTargetOrgChange() {
@@ -12763,75 +12760,158 @@ function onLeadTargetOrgChange() {
   renderLeadContacts();
 }
 
-// Build the primary Site chooser: every known site, grouped by organisation, plus
-// a "＋ New site…" escape hatch. Preserves the current selection when still valid.
-// The site is the lead's primary field; the organisation is derived from it.
-function populateLeadSiteChooser() {
-  const sel = document.getElementById('lead-site-id');
-  if (!sel) return;
-  const prev = sel.value;
-  const orgs  = allData['organisations'] || [];
-  const sites = (allData['sites'] || []).filter(s => s.active !== false);
-  const esc = t => String(t).replace(/</g, '&lt;');
-  const orgName = id => (orgs.find(o => +o.id === +id)?.name) || 'Unknown organisation';
-  const byOrg = {};
-  sites.forEach(s => { (byOrg[s.organisation_id] = byOrg[s.organisation_id] || []).push(s); });
-  const groups = Object.keys(byOrg)
-    .sort((a, b) => orgName(a).localeCompare(orgName(b)))
-    .map(oid => {
-      const opts = byOrg[oid]
-        .sort((a, b) => (b.is_primary - a.is_primary) || String(a.name).localeCompare(String(b.name)))
-        .map(s => `<option value="${s.id}">${esc(s.name)}${s.is_primary ? ' (default)' : ''}</option>`).join('');
-      return `<optgroup label="${esc(orgName(oid))}">${opts}</optgroup>`;
-    }).join('');
-  sel.innerHTML =
-    '<option value="">Pick the site this lead is about, or add a new one…</option>' +
-    groups +
-    '<option value="__new__">＋ New site…</option>';
-  if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+// ── Site typeahead ────────────────────────────────────────────────────────────
+// The site is the lead's PRIMARY field: type a name → fuzzy-search existing sites
+// (across all orgs). Pick one → its organisation is derived + locked. None fit →
+// add the typed name as a new site and say which org it belongs to. Source of truth
+// is two hidden inputs: lead-site-id (existing) XOR lead-site-name (new). target_org_id
+// stays in sync (derived) so contacts + save + promote are unchanged.
+
+// Fuzzy search over sites; substring hits rank first, then tokenSetRatio catches
+// typos. Returns up to 8 {s, on(orgName), contains, score}, best first.
+function _leadSiteSearch(query) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return [];
+  const orgs = allData['organisations'] || [];
+  const orgNameOf = id => (orgs.find(o => +o.id === +id)?.name) || '';
+  return (allData['sites'] || [])
+    .filter(s => s.active !== false)
+    .map(s => {
+      const name = String(s.name || '');
+      const on   = orgNameOf(s.organisation_id);
+      const contains = (name + ' ' + on).toLowerCase().includes(q);
+      let score = 0;
+      try { score = Math.max(tokenSetRatio(q, name), tokenSetRatio(q, name + ' ' + on)); } catch (e) {}
+      return { s, on, contains, score };
+    })
+    .filter(x => x.contains || x.score >= 60)
+    .sort((a, b) => (b.contains - a.contains) || (b.score - a.score) || String(a.s.name).localeCompare(String(b.s.name)))
+    .slice(0, 8);
 }
 
-// React to the Site choice. Existing site → derive + lock its organisation and hide
-// the manual org entry. "＋ New site…" → reveal the name box + the org sub-picker
-// (org follows the site). Empty → clear the derived org too. target_org_id is kept
-// in sync as the derived org so contacts + save + promote are unchanged.
-function onLeadSiteChange() {
-  const sel = document.getElementById('lead-site-id');
-  if (!sel) return;
-  const val       = sel.value;
-  const nameInput = document.getElementById('lead-site-name');
-  const orgGroup  = document.getElementById('lead-target-org-group');
+// Render the match strip as the user types (existing sites + an "add new" row).
+function onLeadSiteInput() {
+  const input   = document.getElementById('lead-site-search');
+  const matchEl = document.getElementById('lead-site-matches');
+  if (!input || !matchEl) return;
+  // Typing means no confirmed choice yet — clear the hidden source-of-truth.
+  document.getElementById('lead-site-id').value = '';
+  document.getElementById('lead-site-name').value = '';
+  const q = input.value.trim();
+  if (q.length < 2) { matchEl.innerHTML = ''; matchEl.style.display = 'none'; return; }
+  const esc  = t => String(t).replace(/</g, '&lt;');
+  const hits = _leadSiteSearch(q);
+  let html = '';
+  if (hits.length) {
+    html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Matching sites</div>`;
+    html += hits.map(h => `
+      <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+        <div style="font-size:12px;min-width:0;"><span style="font-weight:600;">${esc(h.s.name)}</span><span style="color:var(--text3);"> — ${esc(h.on)}</span></div>
+        <button type="button" class="btn btn-secondary btn-sm" onmousedown="event.preventDefault()" onclick="selectLeadSite(${h.s.id})">Use</button>
+      </div>`).join('');
+  }
+  html += `
+    <div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:${hits.length ? 6 : 0}px;">
+      <div style="font-size:12px;color:var(--text2);">${hits.length ? 'None of these — add' : 'Add'} “<strong>${esc(q)}</strong>” as a new site</div>
+      <button type="button" class="btn btn-primary btn-sm" onmousedown="event.preventDefault()" onclick="chooseNewLeadSite()">Add new</button>
+    </div>`;
+  matchEl.innerHTML = html;
+  matchEl.style.display = '';
+}
+
+// Enter picks the top row (a match, or the add-new row when there are none);
+// Escape closes the strip.
+function onLeadSiteKeydown(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    document.querySelector('#lead-site-matches button')?.click();
+  } else if (e.key === 'Escape') {
+    const matchEl = document.getElementById('lead-site-matches');
+    if (matchEl) { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  }
+}
+
+// Hide the strip when focus leaves (buttons use onmousedown-preventDefault so a
+// click still registers first).
+function onLeadSiteBlur() {
+  setTimeout(() => { const m = document.getElementById('lead-site-matches'); if (m) m.style.display = 'none'; }, 150);
+}
+
+// Pick an existing site → lock it in and derive + lock its organisation.
+function selectLeadSite(id) {
+  const site = (allData['sites'] || []).find(s => +s.id === +id);
+  if (!site) return;
+  const on = (allData['organisations'] || []).find(o => +o.id === +site.organisation_id)?.name || '';
+  document.getElementById('lead-site-id').value = String(site.id);
+  document.getElementById('lead-site-name').value = '';
+  const orgDd = document.getElementById('lead-target-org-id');
+  const orgNm = document.getElementById('lead-target-org-name');
+  if (orgDd) orgDd.value = site.organisation_id ? String(site.organisation_id) : '';
+  if (orgNm) orgNm.value = '';
+  const orgGroup = document.getElementById('lead-target-org-group');
+  if (orgGroup) orgGroup.style.display = 'none';
+  _showLeadSiteChosen(site.name, on, false);
+  renderLeadContacts();
+  if (!window._leadPopulating) markLeadDirty();
+}
+
+// Commit the typed name as a NEW site → reveal the org sub-picker (org follows).
+function chooseNewLeadSite() {
+  const name = (document.getElementById('lead-site-search')?.value || '').trim();
+  if (!name) return;
+  document.getElementById('lead-site-id').value = '';
+  document.getElementById('lead-site-name').value = name;
+  _showLeadSiteChosen(name, null, true);
+  const orgGroup = document.getElementById('lead-target-org-group');
+  if (orgGroup) orgGroup.style.display = '';
+  renderLeadContacts();
+  if (!window._leadPopulating) markLeadDirty();
+}
+
+// Collapse the typeahead into a "chosen" chip (name + Change), like the org picker.
+function _showLeadSiteChosen(label, orgNm, isNew) {
+  const picker    = document.getElementById('lead-site-picker');
+  const matchEl   = document.getElementById('lead-site-matches');
+  const chosen    = document.getElementById('lead-site-chosen');
+  const chosenNm  = document.getElementById('lead-site-chosen-name');
   const derived   = document.getElementById('lead-site-org-derived');
   const derivedNm = document.getElementById('lead-site-org-derived-name');
-  const orgDd     = document.getElementById('lead-target-org-id');
-  const orgName   = document.getElementById('lead-target-org-name');
-
-  if (val === '__new__') {
-    // New site: reveal name + the org sub-picker so the user names the owning org.
-    if (nameInput) nameInput.style.display = '';
-    if (orgGroup)  orgGroup.style.display = '';
-    if (derived)   derived.style.display = 'none';
-  } else if (val) {
-    // Existing site: derive + lock the organisation; hide the manual org entry.
-    if (nameInput) { nameInput.style.display = 'none'; nameInput.value = ''; }
-    if (orgGroup)  orgGroup.style.display = 'none';
-    const site = (allData['sites'] || []).find(s => +s.id === +val);
-    const oid  = site ? +site.organisation_id : 0;
-    if (orgDd)   orgDd.value = oid ? String(oid) : '';
-    if (orgName) orgName.value = '';                 // don't let a stale typed name create a dup org
-    const nm = (allData['organisations'] || []).find(o => +o.id === oid)?.name || '';
-    if (derivedNm) derivedNm.textContent = nm;
-    if (derived)   derived.style.display = nm ? '' : 'none';
-    renderLeadContacts();
+  if (matchEl) { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  if (picker)  picker.style.display = 'none';
+  if (chosen)  chosen.style.display = 'flex';
+  if (chosenNm) chosenNm.innerHTML = isNew
+    ? `${String(label).replace(/</g, '&lt;')} <span style="font-weight:400;color:var(--text3);font-size:11px;">(new site)</span>`
+    : String(label).replace(/</g, '&lt;');
+  if (isNew) {
+    if (derived) derived.style.display = 'none';
   } else {
-    // Nothing chosen: clear the derived org too.
-    if (nameInput) { nameInput.style.display = 'none'; nameInput.value = ''; }
-    if (orgGroup)  orgGroup.style.display = 'none';
-    if (derived)   derived.style.display = 'none';
-    if (orgDd)   orgDd.value = '';
-    if (orgName) orgName.value = '';
-    renderLeadContacts();
+    if (derivedNm) derivedNm.textContent = orgNm || '';
+    if (derived)   derived.style.display = orgNm ? '' : 'none';
   }
+}
+
+// Drop back to the typeahead to re-pick.
+function changeLeadSite() {
+  clearLeadSiteField();
+  document.getElementById('lead-site-search')?.focus();
+}
+
+// Full reset of the site field (init / reset form / Change).
+function clearLeadSiteField() {
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+  set('lead-site-id', ''); set('lead-site-name', ''); set('lead-site-search', '');
+  const matchEl  = document.getElementById('lead-site-matches');
+  const picker   = document.getElementById('lead-site-picker');
+  const chosen   = document.getElementById('lead-site-chosen');
+  const derived  = document.getElementById('lead-site-org-derived');
+  const orgGroup = document.getElementById('lead-target-org-group');
+  if (matchEl)  { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
+  if (picker)   picker.style.display = '';
+  if (chosen)   chosen.style.display = 'none';
+  if (derived)  derived.style.display = 'none';
+  if (orgGroup) orgGroup.style.display = 'none';
+  set('lead-target-org-id', ''); set('lead-target-org-name', '');
+  renderLeadContacts();
 }
 
 // Service-focus pair: major drives sub. When the major changes, refilter sub
@@ -16147,19 +16227,17 @@ async function saveLead(opts) {
   if (!description) { flagLeadField('lead-description', 'Description is required'); return false; }
 
   // Site is the lead's primary handle and is required — the organisation derives
-  // from it. Either an existing site is chosen, or "＋ New site…" with a name and
-  // the organisation it belongs to.
-  const _siteSelV = document.getElementById('lead-site-id');
-  const _siteVal  = _siteSelV ? _siteSelV.value : '';
-  if (_siteVal === '__new__') {
-    if (!(document.getElementById('lead-site-name')?.value || '').trim()) {
-      flagLeadField('lead-site-name', 'Name the new site'); return false;
-    }
+  // from it. Source of truth: hidden lead-site-id (existing) XOR lead-site-name (new,
+  // which also needs the organisation it belongs to).
+  const _siteId   = (document.getElementById('lead-site-id')?.value || '').trim();
+  const _siteNewNm = (document.getElementById('lead-site-name')?.value || '').trim();
+  if (!_siteId && !_siteNewNm) {
+    flagLeadField('lead-site-search', 'Type and pick a site, or add a new one'); return false;
+  }
+  if (!_siteId && _siteNewNm) {
     const _hasOrg = (+document.getElementById('lead-target-org-id').value)
       || (document.getElementById('lead-target-org-name').value.trim());
     if (!_hasOrg) { flagLeadField('lead-target-org-id', 'Choose the organisation this site belongs to'); return false; }
-  } else if (!_siteVal) {
-    flagLeadField('lead-site-id', 'Pick a site, or add a new one'); return false;
   }
 
   // Contacts are validated when added to the list; nothing to check here.
@@ -16201,18 +16279,10 @@ async function saveLead(opts) {
 
     target_org_id:      +document.getElementById('lead-target-org-id').value || null,
     target_org_name:    document.getElementById('lead-target-org-name').value.trim() || null,
-    // Site: an existing site_id, or (when "＋ New site…" is chosen) a prospective
-    // site_name that materialises on promote. Mutually exclusive.
-    site_id:   (function () {
-      const v = document.getElementById('lead-site-id')?.value || '';
-      return (v && v !== '__new__') ? +v : null;
-    })(),
-    site_name: (function () {
-      const sel = document.getElementById('lead-site-id');
-      return (sel && sel.value === '__new__')
-        ? (document.getElementById('lead-site-name')?.value.trim() || null)
-        : null;
-    })(),
+    // Site: an existing site_id (hidden), or a typed new-site name that materialises
+    // on promote. Mutually exclusive — the typeahead sets exactly one.
+    site_id:   +document.getElementById('lead-site-id')?.value || null,
+    site_name: (document.getElementById('lead-site-name')?.value || '').trim() || null,
     // Contacts: primary projected onto target_person_*; full list → contacts jsonb.
     ...(_leadContactsPatch()),
 
