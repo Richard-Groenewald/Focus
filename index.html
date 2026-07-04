@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.63 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.63 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -16243,19 +16243,13 @@ async function saveLead(opts) {
   if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return false; }
   if (!description) { flagLeadField('lead-description', 'Description is required'); return false; }
 
-  // Site is the lead's primary handle and is required — the organisation derives
-  // from it. Source of truth: hidden lead-site-id (existing) XOR lead-site-name (new,
-  // which also needs the organisation it belongs to).
-  const _siteId   = (document.getElementById('lead-site-id')?.value || '').trim();
-  const _siteNewNm = (document.getElementById('lead-site-name')?.value || '').trim();
-  if (!_siteId && !_siteNewNm) {
-    flagLeadField('lead-site-search', 'Type and pick a site, or add a new one'); return false;
-  }
-  if (!_siteId && _siteNewNm) {
-    const _hasOrg = (+document.getElementById('lead-target-org-id').value)
-      || (document.getElementById('lead-target-org-name').value.trim());
-    if (!_hasOrg) { flagLeadField('lead-target-org-id', 'Choose the organisation this site belongs to'); return false; }
-  }
+  // NB: the site is NOT a hard save-block. Site is the primary handle and is
+  // required to PROGRESS a lead (the status engine keeps it "New" until an
+  // organisation is set, and an org can only be set via a site) — but blocking
+  // persistence here would silently kill the background autosave (e.g. of the
+  // Qualification tab) for any lead whose site field is momentarily empty, and
+  // flag a field on the hidden Overview tab. So we save whatever is present and
+  // let the Working gate enforce the site requirement.
 
   // Contacts are validated when added to the list; nothing to check here.
   const spName = (document.getElementById('lead-source-person-name')?.value || '').trim();
