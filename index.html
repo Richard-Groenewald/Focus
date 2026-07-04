@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.62 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.63 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.62 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.63 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9435,6 +9435,17 @@ async function adminDeleteDeal(id) {
 }
 
 
+// A lead's SITE label: its linked site name, else the prospective (typed) site
+// name, else '' so callers can fall back to the organisation. Site-first display.
+function leadSiteLabel(l) {
+  if (!l) return '';
+  if (l.site_id) {
+    const s = (allData['sites'] || []).find(x => +x.id === +l.site_id);
+    if (s && s.name) return s.name;
+  }
+  return (l.site_name || '').trim();
+}
+
 // ── Leads Page ────────────────────────────────────────────
 // View tab state — persists across re-renders within the session
 let leadsViewTab = 'Working';
@@ -9459,7 +9470,7 @@ async function renderLeadsPage() {
 
   try {
     // Load lookups + leads in parallel
-    let [leads, sources, regions, services, people, orgs, campaigns] = await Promise.all([
+    let [leads, sources, regions, services, people, orgs, campaigns, sites] = await Promise.all([
       apiGet('leads', 'select=*&order=created_at.desc'),
       allData['lead_sources'] || apiGet('lead_sources', 'select=*'),
       allData['regions']      || apiGet('regions', 'select=*'),
@@ -9467,6 +9478,7 @@ async function renderLeadsPage() {
       allData['people']       || apiGet('people', 'select=*'),
       allData['organisations']|| apiGet('organisations', 'select=*'),
       allData['research_campaigns'] || apiGet('research_campaigns', 'select=*'),
+      allData['sites']        || apiGet('sites', 'select=*'),
     ]);
     allData['lead_sources']       = sources;
     allData['regions']            = regions;
@@ -9474,6 +9486,7 @@ async function renderLeadsPage() {
     allData['people']             = people;
     allData['organisations']      = orgs;
     allData['research_campaigns'] = campaigns;
+    allData['sites']              = sites;
 
     // App-layer New→Working sweep: flip eligible New leads whose waiting period
     // has elapsed (replaces the retired DB status trigger).
@@ -9537,7 +9550,11 @@ async function renderLeadsPage() {
       const p = people.find(x => +x.id === +l.owner_id);
       return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Shared';
     };
+    // Site-first: a lead's headline is its SITE (leadSiteLabel), falling back to
+    // the organisation so legacy/pre-site leads still show.
     const targetName = (l) => {
+      const site = leadSiteLabel(l);
+      if (site) return site;
       const o = l.target_org_id ? orgs.find(x => +x.id === +l.target_org_id) : null;
       return o?.name || l.target_org_name || '';
     };
@@ -9548,7 +9565,7 @@ async function renderLeadsPage() {
 
     const cols = [
       { key: 'source', label: 'Source',      get: l => (sources.find(s => +s.id === +l.source_id)?.name) || '' },
-      { key: 'target', label: 'Target',      get: l => targetName(l) },
+      { key: 'target', label: 'Site',        get: l => targetName(l) },
       { key: 'region', label: 'Region',      get: l => (regions.find(r => +r.id === +l.region_id)?.name) || '' },
       { key: 'branch', label: 'Branch',      get: l => ((allData['branches']||[]).find(b => +b.id === +l.branch_id)?.name) || '' },
       { key: 'qual',   label: 'Qual',        get: l => (+l.fit||0)+(+l.trigger_score||0)+(+l.access||0)+(+l.capacity||0), align: 'center' },
@@ -9581,8 +9598,8 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   const owner  = people.find(p => +p.id === +l.owner_id);
   const targetOrg = l.target_org_id ? orgs.find(o => +o.id === +l.target_org_id) : null;
 
-  // Target display: known org → org name; otherwise free-text name; otherwise dash
-  let targetDisplay = targetOrg?.name || l.target_org_name || '—';
+  // Site-first display: the lead's headline is its SITE, else the organisation.
+  let targetDisplay = leadSiteLabel(l) || targetOrg?.name || l.target_org_name || '—';
 
   // On Dead leads, append a small ⓘ that surfaces the close reason on hover.
   // Two cases:
@@ -10324,7 +10341,7 @@ function cockpitWorkQueueHtml() {
         else                dueCell = `<span style="color:var(--text2);">in ${diff}d</span>`;
       }
     }
-    const target = l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
+    const target = leadSiteLabel(l) || l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
     return `<tr style="cursor:pointer;" onclick="openLeadForm(${l.id})">
       <td style="font-weight:600;">${cEsc(target)}</td>
       <td><span class="badge" style="${LEAD_STATUS_STYLES[l.status]||''}padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;">${cEsc(l.status)}</span></td>
@@ -10456,7 +10473,7 @@ function cockpitResultsHtml() {
     if (!arr.length) return `<div style="margin-bottom:18px;"><div style="font-size:13px;font-weight:700;color:${accent};margin-bottom:6px;">${title} (0)</div>
       <div style="font-size:12px;color:var(--text3);padding:8px 0;">None yet.</div></div>`;
     const rows = arr.map(l => {
-      const target = l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
+      const target = leadSiteLabel(l) || l.target_org_name || l.target_person_name || (l.description || '').slice(0, 60) || 'Lead';
       return `<tr style="cursor:pointer;" onclick="openLeadForm(${l.id})">
         <td style="padding:8px 12px;font-weight:600;">${cEsc(target)}</td>
         <td style="padding:8px 12px;">${cEsc(cockpitPersonName(people, l.owner_id) || '—')}</td>
