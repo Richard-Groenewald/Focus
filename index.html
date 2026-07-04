@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1686,6 +1686,24 @@ async function apiGet(table, params='') { return api(table, 'GET', null, params)
 async function apiPost(table, body) { return api(table, 'POST', body, 'select=*'); }
 async function apiPatch(table, id, body) { return api(table, 'PATCH', body, `id=eq.${id}&select=*`); }
 
+// Fetch EVERY row of a query, paging past PostgREST's 1000-row response cap.
+// Plain apiGet silently truncates at 1000 rows — invisible today on small
+// tables, data-loss the day a table grows past it (bit the pipeline's month
+// fetch once already). Use this for any unbounded "load the whole table" read.
+// Caller's params should include a deterministic order; id.asc is appended as a
+// tiebreak so offset paging never skips/duplicates rows on ties.
+async function apiGetAll(table, params='') {
+  const PAGE = 1000;                 // PostgREST db-max-rows
+  const sep  = params ? '&' : '';
+  const tie  = /(^|&)order=/.test(params) ? params.replace(/((?:^|&)order=[^&]*)/, '$1,id.asc') : params + sep + 'order=id.asc';
+  const out  = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const page = await api(table, 'GET', null, `${tie}${tie ? '&' : ''}limit=${PAGE}&offset=${offset}`);
+    out.push(...page);
+    if (page.length < PAGE) return out;
+  }
+}
+
 // ── Lookup cache ──────────────────────────────────────────────────────────────
 // Small, rarely-changing tables are re-fetched on every page and every reload,
 // which is most of the proxy round-trips. We mirror them in localStorage
@@ -1745,7 +1763,9 @@ async function preloadLookups() {
   const CONCURRENCY = 4;
   for (let i = 0; i < todo.length; i += CONCURRENCY) {
     await Promise.all(todo.slice(i, i + CONCURRENCY).map(c =>
-      apiGet(c.key, c.params).then(d => { allData[c.key] = d; _lkPersist(c.key, d); }).catch(() => {})
+      // apiGetAll: these caches feed most of the app, so they must survive the
+      // PostgREST 1000-row cap once people/organisations/sites grow past it.
+      apiGetAll(c.key, c.params).then(d => { allData[c.key] = d; _lkPersist(c.key, d); }).catch(() => {})
     ));
   }
 }
@@ -2872,27 +2892,26 @@ async function loadTable(page) {
   body.innerHTML = '<tr class="empty-row"><td colspan="' + totalColCount + '">Loading...</td></tr>';
 
   try {
-    // Preload any lookup tables needed
-    for (const col of cfg.columns) {
-      if (col.lookup && !allData[col.lookup]) {
-        allData[col.lookup] = await apiGet(col.lookup, 'select=*');
-      }
-    }
+    // Preload every missing lookup in ONE parallel batch — each apiGet is a
+    // ~1.4s proxied round-trip, so fetching them serially stacked the latency.
+    const needed = new Set();
+    for (const col of cfg.columns) if (col.lookup && !allData[col.lookup]) needed.add(col.lookup);
     // Parties page needs both people and organisations for ref_id rendering
     if (page === 'parties') {
-      if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
-      if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
+      if (!allData['people']) needed.add('people');
+      if (!allData['organisations']) needed.add('organisations');
     }
+    let needEligible = false;
     for (const field of (cfg.fields || [])) {
-      if (field.lookupTable === 'eligible_people') {
-        // Load only people eligible to be system users
-        allData['eligible_people'] = await loadEligiblePeople();
-      } else if (field.lookupTable && !allData[field.lookupTable]) {
-        allData[field.lookupTable] = await apiGet(field.lookupTable, 'select=*');
-      }
+      if (field.lookupTable === 'eligible_people') needEligible = true;   // people eligible to be system users
+      else if (field.lookupTable && !allData[field.lookupTable]) needed.add(field.lookupTable);
     }
-
-    currentData = await apiGet(cfg.table, 'select=*&order=id.asc' + (cfg.filter ? '&' + cfg.filter : ''));
+    const [primaryRows] = await Promise.all([
+      apiGetAll(cfg.table, 'select=*&order=id.asc' + (cfg.filter ? '&' + cfg.filter : '')),   // paged: admin lists must show every row
+      ...[...needed].map(k => apiGet(k, 'select=*').then(rows => { allData[k] = rows; })),
+      ...(needEligible ? [loadEligiblePeople().then(rows => { allData['eligible_people'] = rows; })] : []),
+    ]);
+    currentData = primaryRows;
     // Never cache a *filtered* result under the table key (e.g. the clients page
     // filters organisations) — it would clobber the full-table cache other pages rely on.
     if (!cfg.filter) {
@@ -5163,7 +5182,11 @@ async function pbRenameHeading(headingId, newName) {
   const old = h.name;
   h.name = newName;
   try {
-    for (const p of h.posts) { await apiPatch('quote_posts', p.id, { heading_text: newName }); p.heading_text = newName; }
+    // Same value for every post → one in-filtered PATCH, not one call per post.
+    if (h.posts.length) {
+      await api('quote_posts', 'PATCH', { heading_text: newName }, `id=in.(${h.posts.map(p => p.id).join(',')})`);
+      h.posts.forEach(p => { p.heading_text = newName; });
+    }
     renderQuoteEditor();
   } catch (e) { h.name = old; showStatus('Rename failed: ' + e.message, 'error'); renderQuoteEditor(); }
 }
@@ -5175,7 +5198,9 @@ async function pbDeleteHeading(headingId) {
     if (!await confirmDialog({title:'Delete heading', message:'Delete "' + h.name + '"? Its ' + h.posts.length + ' post(s) will move to Ungrouped.', confirmLabel:'Delete', danger:true})) return;
     const u = pbHeadings.find(x => x.isUngrouped);
     try {
-      for (const p of h.posts) { await apiPatch('quote_posts', p.id, { heading_text: null }); p.heading_text = null; u.posts.push(p); }
+      // One in-filtered PATCH moves every post to Ungrouped in a single call.
+      await api('quote_posts', 'PATCH', { heading_text: null }, `id=in.(${h.posts.map(p => p.id).join(',')})`);
+      h.posts.forEach(p => { p.heading_text = null; u.posts.push(p); });
     } catch (e) { showStatus('Move failed: ' + e.message, 'error'); return; }
   } else if (!await confirmDialog({title:'Delete heading', message:'Delete empty heading "' + h.name + '"?', confirmLabel:'Delete', danger:true})) return;
   pbHeadings = pbHeadings.filter(x => x.id !== headingId);
@@ -5326,8 +5351,10 @@ async function pbUpdateShiftCell(postId, shiftIdx, dayTypes, field, rawValue, an
   const dbField = field === 'num' ? 'num_officers' : (field === 'start' ? 'start_time' : 'end_time');
   const dbValue = field === 'num' ? value : (value + ':00');
   try {
+    // Same body for every day type → one in-filtered PATCH (was one call per day type).
+    await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue },
+      'post_id=eq.' + postId + '&shift_index=eq.' + shiftIdx + '&day_type=in.(' + dts.join(',') + ')');
     for (const dt of dts) {
-      await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue }, 'post_id=eq.' + postId + '&shift_index=eq.' + shiftIdx + '&day_type=eq.' + dt);
       if (!p.shifts[pbKey(shiftIdx, dt)]) p.shifts[pbKey(shiftIdx, dt)] = { num: 0, start: '06:00', end: '18:00' };
       p.shifts[pbKey(shiftIdx, dt)][field] = value;
     }
@@ -5360,10 +5387,11 @@ async function pbToggleWeekdaysExpanded(postId) {
       try {
         for (let s = 1; s <= N; s++) {
           const ref = p.shifts[pbKey(s, 'monday')];
-          for (const d of PB_WEEKDAYS.slice(1)) {
-            await api('quote_post_shifts', 'PATCH', { num_officers: ref.num, start_time: ref.start + ':00', end_time: ref.end + ':00' }, 'post_id=eq.' + postId + '&shift_index=eq.' + s + '&day_type=eq.' + d);
-            p.shifts[pbKey(s, d)] = { ...ref };
-          }
+          // Same Monday values for all of Tue–Fri → one in-filtered PATCH per shift.
+          await api('quote_post_shifts', 'PATCH',
+            { num_officers: ref.num, start_time: ref.start + ':00', end_time: ref.end + ':00' },
+            'post_id=eq.' + postId + '&shift_index=eq.' + s + '&day_type=in.(' + PB_WEEKDAYS.slice(1).join(',') + ')');
+          for (const d of PB_WEEKDAYS.slice(1)) p.shifts[pbKey(s, d)] = { ...ref };
         }
       } catch (e) { showStatus('Collapse failed: ' + e.message, 'error'); return; }
     }
@@ -5500,12 +5528,19 @@ async function pbApplyCopy(prompt) {
   const strategy = strat ? strat.value : null;
   const dayTypesAffected = new Set(sourceDayTypes);
   targetGroups.forEach(cb => cb.dataset.daytypes.split(',').forEach(dt => dayTypesAffected.add(dt)));
+  // All the loops below share one body per group, so each collapses to a single
+  // in-filtered PATCH — a full "copy to everything" went from ~30 round-trips
+  // (~1.4s each via the proxy) to at most N+2.
+  const dtsIn = set => 'day_type=in.(' + [...set].join(',') + ')';
   try {
     if (strategy === 'equal' && equalDist) {
-      for (const dt of dayTypesAffected) {
-        for (let i = 0; i < equalDist.length; i++) {
-          const s = i + 1;
-          await api('quote_post_shifts', 'PATCH', { start_time: equalDist[i].start + ':00', end_time: equalDist[i].end + ':00' }, 'post_id=eq.' + postId + '&shift_index=eq.' + s + '&day_type=eq.' + dt);
+      // Body differs per shift index, is identical across day types → one PATCH per shift.
+      for (let i = 0; i < equalDist.length; i++) {
+        const s = i + 1;
+        await api('quote_post_shifts', 'PATCH',
+          { start_time: equalDist[i].start + ':00', end_time: equalDist[i].end + ':00' },
+          'post_id=eq.' + postId + '&shift_index=eq.' + s + '&' + dtsIn(dayTypesAffected));
+        for (const dt of dayTypesAffected) {
           if (!p.shifts[pbKey(s, dt)]) p.shifts[pbKey(s, dt)] = { num: 0, start: '06:00', end: '18:00' };
           p.shifts[pbKey(s, dt)].start = equalDist[i].start;
           p.shifts[pbKey(s, dt)].end = equalDist[i].end;
@@ -5515,32 +5550,37 @@ async function pbApplyCopy(prompt) {
     }
     const dbField = field === 'num' ? 'num_officers' : (field === 'start' ? 'start_time' : 'end_time');
     const dbValue = field === 'num' ? value : (value + ':00');
-    // Same shift, other day-type groups
-    for (const cb of targetGroups) {
-      for (const dt of cb.dataset.daytypes.split(',')) {
-        await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue }, 'post_id=eq.' + postId + '&shift_index=eq.' + shift + '&day_type=eq.' + dt);
+    // Same shift, other day-type groups — one PATCH across every checked group's day types.
+    const groupDts = new Set();
+    targetGroups.forEach(cb => cb.dataset.daytypes.split(',').forEach(dt => groupDts.add(dt)));
+    if (groupDts.size) {
+      await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue },
+        'post_id=eq.' + postId + '&shift_index=eq.' + shift + '&' + dtsIn(groupDts));
+      for (const dt of groupDts) {
         if (!p.shifts[pbKey(shift, dt)]) p.shifts[pbKey(shift, dt)] = { num: 0, start: '06:00', end: '18:00' };
         p.shifts[pbKey(shift, dt)][field] = value;
       }
     }
-    // Other shifts (num)
-    for (const cb of targetShifts) {
-      const targetShift = +cb.dataset.shift;
-      for (const dt of PB_DAY_TYPES) {
-        await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue }, 'post_id=eq.' + postId + '&shift_index=eq.' + targetShift + '&day_type=eq.' + dt);
+    // Other shifts (num) — one PATCH across all target shifts × all day types.
+    const shiftIdxs = [...targetShifts].map(cb => +cb.dataset.shift);
+    if (shiftIdxs.length) {
+      await api('quote_post_shifts', 'PATCH', { [dbField]: dbValue },
+        'post_id=eq.' + postId + '&shift_index=in.(' + shiftIdxs.join(',') + ')&day_type=in.(' + PB_DAY_TYPES.join(',') + ')');
+      for (const targetShift of shiftIdxs) for (const dt of PB_DAY_TYPES) {
         if (!p.shifts[pbKey(targetShift, dt)]) p.shifts[pbKey(targetShift, dt)] = { num: 0, start: '06:00', end: '18:00' };
         p.shifts[pbKey(targetShift, dt)][field] = value;
       }
     }
-    // Adjacent / sequence
+    // Adjacent / sequence — one PATCH across the affected day types.
     const doSeq = adjCb || strategy === 'sequence';
     if (doSeq && strategy !== 'none') {
       let aShift, aField;
       if (adjCb) { aShift = +adjCb.dataset.shift; aField = adjCb.dataset.field; }
       else { if (field === 'start') { aShift = shift === 1 ? N : shift - 1; aField = 'end'; } else { aShift = shift === N ? 1 : shift + 1; aField = 'start'; } }
       const adbField = aField === 'start' ? 'start_time' : 'end_time';
+      await api('quote_post_shifts', 'PATCH', { [adbField]: dbValue },
+        'post_id=eq.' + postId + '&shift_index=eq.' + aShift + '&' + dtsIn(dayTypesAffected));
       for (const dt of dayTypesAffected) {
-        await api('quote_post_shifts', 'PATCH', { [adbField]: dbValue }, 'post_id=eq.' + postId + '&shift_index=eq.' + aShift + '&day_type=eq.' + dt);
         if (!p.shifts[pbKey(aShift, dt)]) p.shifts[pbKey(aShift, dt)] = { num: 0, start: '06:00', end: '18:00' };
         p.shifts[pbKey(aShift, dt)][aField] = value;
       }
@@ -8466,7 +8506,7 @@ async function renderOpportunitiesPage() {
 
   try {
     let [deals, orgs, stages, people, stageCats] = await Promise.all([
-      apiGet('deals', 'select=*&order=created_at.desc'),
+      apiGetAll('deals', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['organisations'] || apiGet('organisations', 'select=*'),
       allData['stages'] || apiGet('stages', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
@@ -9190,18 +9230,18 @@ const RPP = (function () {
   // ── data load (bulk fetch + client-side join) ──
   async function loadData(){
     const [deals, orgs, people, regions, stages, smaj, ssub, streamsEmb, branches] = await Promise.all([
-      apiGet('deals','select=*'),
-      allData['organisations'] || apiGet('organisations','select=*'),
-      allData['people']        || apiGet('people','select=*'),
+      apiGetAll('deals','select=*'),                      // paged: the pipeline must see EVERY deal
+      allData['organisations'] || apiGetAll('organisations','select=*'),
+      allData['people']        || apiGetAll('people','select=*'),
       allData['regions']       || apiGet('regions','select=*'),
       allData['stages']        || apiGet('stages','select=*'),
       allData['service_major'] || apiGet('service_major','select=*'),
       allData['service_sub']   || apiGet('service_sub','select=*'),
       // Streams WITH their months nested — one embedded call replaces the old
       // streams fetch + the paginated months fetch (apiGetIn). Nested rows aren't
-      // subject to the 1000-row cap (verified: returns all months), so this also
-      // retires the pagination that previously dropped overflow months.
-      apiGet('revenue_streams','select=id,deal_id,stream_type,revenue_stream_months(stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin)'),
+      // subject to the 1000-row cap (verified: returns all months), but the TOP-
+      // LEVEL stream rows are — so page the streams themselves too.
+      apiGetAll('revenue_streams','select=id,deal_id,stream_type,revenue_stream_months(stream_id,month,opportunity_revenue,opportunity_margin,secured_revenue,secured_margin,actual_revenue,is_actual_revenue,actual_margin,is_actual_margin)'),
       allData['branches']      || apiGet('branches','select=*'),
     ]);
     allData['organisations']=orgs; allData['people']=people; allData['regions']=regions;
@@ -9332,7 +9372,7 @@ async function renderDealAdminPage() {
 
   try {
     const [deals, orgs, stages, people, streams] = await Promise.all([
-      apiGet('deals', 'select=*&order=created_at.desc'),
+      apiGetAll('deals', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['organisations'] || apiGet('organisations', 'select=*'),
       allData['stages'] || apiGet('stages', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
@@ -9471,7 +9511,7 @@ async function renderLeadsPage() {
   try {
     // Load lookups + leads in parallel
     let [leads, sources, regions, services, people, orgs, campaigns, sites] = await Promise.all([
-      apiGet('leads', 'select=*&order=created_at.desc'),
+      apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['lead_sources'] || apiGet('lead_sources', 'select=*'),
       allData['regions']      || apiGet('regions', 'select=*'),
       allData['service_major']|| apiGet('service_major', 'select=*'),
@@ -11751,13 +11791,15 @@ async function _revertChildAdditions(table, leadId, keepIds) {
   try {
     const rows = await apiGet(table, `lead_id=eq.${leadId}&select=id`);
     const keep = new Set((keepIds || []).map(String));
-    for (const r of rows) if (!keep.has(String(r.id))) await api(table, 'DELETE', null, 'id=eq.' + r.id);
+    const drop = rows.filter(r => !keep.has(String(r.id))).map(r => r.id);
+    // One in-filtered DELETE instead of a round-trip per row.
+    if (drop.length) await api(table, 'DELETE', null, `id=in.(${drop.join(',')})`);
   } catch (e) { /* best-effort */ }
 }
 async function _deleteLeadCascade(id) {
-  for (const t of ['deal_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']) {
-    try { await api(t, 'DELETE', null, 'lead_id=eq.' + id); } catch (e) {}
-  }
+  // Child tables are independent — delete them in parallel, then the lead.
+  await Promise.all(['deal_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']
+    .map(t => api(t, 'DELETE', null, 'lead_id=eq.' + id).catch(() => {})));
   try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
 }
 
@@ -15541,8 +15583,10 @@ async function commitPromotion(s) {
             // Affiliate a new person always; an existing one only if they've moved here.
             if (isNew || c.moved === true) {
               if (c.moved === true) {
+                // Close all open affiliations in one in-filtered PATCH (was one call per row).
                 const others = await apiGet('person_organisation_roles', `person_id=eq.${cpid}&end_date=is.null&select=id`);
-                for (const o of others) await api('person_organisation_roles', 'PATCH', { end_date: new Date().toISOString().slice(0, 10) }, 'id=eq.' + o.id);
+                if (others.length) await api('person_organisation_roles', 'PATCH',
+                  { end_date: new Date().toISOString().slice(0, 10) }, `id=in.(${others.map(o => o.id).join(',')})`);
               }
               await api('person_organisation_roles', 'POST', {
                 person_id: cpid, org_id: +orgId, role_type: 'Contact', is_primary: false,
@@ -15567,19 +15611,20 @@ async function commitPromotion(s) {
     }, 'select=*');
     const streamId = stream[0].id;
     const startDate = new Date(startDt);
-    for (let i = 0; i < monthValues.length; i++) {
+    // Bulk insert: PostgREST accepts an array body, so all months go in ONE
+    // round-trip (each proxied call costs ~1.4s — a 36-month deal was 36 calls).
+    const monthRows = monthValues.map((v, i) => {
       const m = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
       // Month key matches the existing opportunity form's format: YYYY-MM with
       // no day. The grid lookup uses this same shape — sending YYYY-MM-01 would
       // store under a different key and the grid would show blank.
       const monthStr = m.toISOString().slice(0,7);
-      const revenue  = +monthValues[i];
+      const revenue  = +v;
       const marginR  = Math.round((revenue * margin / 100) * 100) / 100;
-      await api('revenue_stream_months', 'POST', {
-        stream_id: streamId, month: monthStr,
-        opportunity_revenue: revenue, opportunity_margin: marginR,
-      }, '');
-    }
+      return { stream_id: streamId, month: monthStr,
+               opportunity_revenue: revenue, opportunity_margin: marginR };
+    });
+    if (monthRows.length) await api('revenue_stream_months', 'POST', monthRows, '');
 
     // === 7.5. Carry forward UNCOMPLETED engagements to the opportunity =====
     // Completed engagements stay on the lead as history (history is where it
@@ -15590,9 +15635,10 @@ async function commitPromotion(s) {
     try {
       const openRows = await apiGet('engagements',
         `lead_id=eq.${leadData.id}&next_action_done=eq.false&select=*&order=engagement_date.asc,id.asc`);
-      for (const en of openRows) {
-        // Copy onto the opportunity, carrying the open next-action.
-        const copied = await api('engagements', 'POST', {
+      if (openRows.length) {
+        // Bulk copy onto the opportunity in ONE POST (array body); PostgREST
+        // returns the created rows in input order, so copies line up with originals.
+        const copies = openRows.map(en => ({
           deal_id:          dealId,
           engagement_date:  en.engagement_date,
           engagement_type:  en.engagement_type || null,
@@ -15604,21 +15650,27 @@ async function commitPromotion(s) {
           next_action_date: en.next_action_date || null,
           next_action_done: false,
           created_by:       en.created_by || (currentUser?.personId || null),
-        }, 'select=*');
-        // Materialise the engagement's provisional people-involved → engagement_people.
-        const newEngId = copied && copied[0] ? copied[0].id : null;
-        if (newEngId && Array.isArray(en.contacts)) {
-          for (const ref of en.contacts) {
-            const pid = ref.person_id || (ref.cid ? contactPersonByCid[ref.cid] : null);
-            if (pid) { try { await api('engagement_people', 'POST', { engagement_id: newEngId, person_id: +pid }, ''); } catch (e) { /* ignore dup */ } }
+        }));
+        const created = await api('engagements', 'POST', copies, 'select=*');
+        // Materialise each copy's provisional people-involved → engagement_people,
+        // all in one bulk POST.
+        const epRows = [];
+        openRows.forEach((en, i) => {
+          const newEngId = created && created[i] ? created[i].id : null;
+          if (newEngId && Array.isArray(en.contacts)) {
+            for (const ref of en.contacts) {
+              const pid = ref.person_id || (ref.cid ? contactPersonByCid[ref.cid] : null);
+              if (pid) epRows.push({ engagement_id: newEngId, person_id: +pid });
+            }
           }
-        }
-        // Close the lead's original with the explanatory note.
+        });
+        if (epRows.length) { try { await api('engagement_people', 'POST', epRows, ''); } catch (e) { /* ignore dup */ } }
+        // Close every lead original with the explanatory note in one PATCH.
         await api('engagements', 'PATCH', {
           next_action_done:            true,
           next_action_completed_at:    new Date().toISOString(),
           next_action_completion_note: 'Engagement copied to opportunity for completion.',
-        }, `id=eq.${en.id}`);
+        }, `id=in.(${openRows.map(en => en.id).join(',')})`);
       }
     } catch (e) {
       // Non-fatal: log and continue so a copy failure doesn't block the promote
