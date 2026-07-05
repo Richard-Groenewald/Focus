@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.70 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.71 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.70 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.71 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17643,16 +17643,20 @@ async function openSalesCampaignModal(id) {
 }
 
 async function renderSalesCampaignModal() {
-  // Load lookups (cached where possible)
-  const [regions, sectors, people, orgs] = await Promise.all([
+  // Load lookups. People / organisations / home-org members are fetched FRESH
+  // (not from the login-time snapshot): this form's owner pool and participant
+  // pickers must include records created mid-session by other users — the stale
+  // snapshot rendered "#4157" chips and hid newly-registered owners.
+  const [regions, sectors, people, orgs, homeMembers] = await Promise.all([
     allData['regions']          || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['industry_sectors'] || apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc'),
-    allData['people']           || apiGet('people', 'select=*&order=first_name.asc'),
-    allData['organisations']    || apiGet('organisations', 'select=*&order=name.asc'),
+    apiGetAll('people', 'select=*&order=first_name.asc'),
+    apiGetAll('organisations', 'select=*&order=name.asc'),
+    apiGet('home_organisation_members', 'select=person_id'),
   ]);
   allData['regions'] = regions; allData['industry_sectors'] = sectors;
   allData['people'] = people;   allData['organisations'] = orgs;
-  await ensureHomeOrgMembers();
+  allData['home_organisation_members'] = homeMembers;
 
   const ownerPool = homeOrgPeople(people, [salesCampaignData.owner_id, currentUser?.personId]);
   const isEdit = !!salesCampaignData.id;
