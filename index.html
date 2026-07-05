@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.74 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.74 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1241,8 +1241,63 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 <!-- Shared filter popup for sortable/filterable tables — positioned via JS -->
 <div id="table-filter-popup" role="dialog" aria-label="Column filter"></div>
 
+<!-- Floating bug-report button — every page, above modals (a bug can be filed
+     mid-modal). Its dialog renders into its OWN root so it never destroys an
+     open modal-root dialog. -->
+<button id="bug-fab" onclick="openBugReportDialog()" title="Report a bug"
+  style="position:fixed;bottom:18px;right:18px;z-index:100000;width:44px;height:44px;border-radius:50%;background:var(--red);border:none;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:flex;align-items:center;justify-content:center;padding:0;">
+  <svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true">
+    <!-- antennae (elbowed, tips out) -->
+    <path d="M10.6 4.6 9.2 2.9 7.7 2.5 M13.4 4.6 14.8 2.9 16.3 2.5" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- six angular legs: upper pair up-out, middle pair out, lower pair down-out -->
+    <path d="M7.4 9.6 4.9 8.4 4.3 5.9 M16.6 9.6 19.1 8.4 19.7 5.9 M7 13 4.2 13.4 2.9 15.3 M17 13 19.8 13.4 21.1 15.3 M7.6 16.6 5.2 18.5 4.7 20.9 M16.4 16.6 18.8 18.5 19.3 20.9" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- head + shell -->
+    <circle cx="12" cy="5.6" r="2" fill="white"/>
+    <rect x="6.8" y="6.6" width="10.4" height="13.2" rx="5.2" fill="white"/>
+    <!-- shell split: centre seam + shoulder line (drawn in the disc's red) -->
+    <path d="M12 6.8v13M7 10.2h10" stroke="var(--red)" stroke-width="1.1"/>
+  </svg>
+</button>
+<div id="bug-root"></div>
+
 <script>
 'use strict';
+
+// ── Bug-report diagnostics: console + error ring buffer ─────────────────────
+// The browser offers NO API to read past console output, so the bug reporter
+// captures it as it happens: console methods are wrapped FIRST THING (before
+// any app code logs), plus window.onerror / unhandledrejection. The last 200
+// entries live in _bugConsoleBuf; api() feeds _bugApiBuf with the request
+// trail. Both are dumped into a bug_reports row when the red bug is clicked.
+const _bugConsoleBuf = [];
+const _bugApiBuf = [];
+(function () {
+  const CAP = 200;
+  const push = (level, args) => {
+    let msg;
+    try {
+      msg = args.map(a => {
+        if (a instanceof Error) return a.message + (a.stack ? ' | ' + String(a.stack).split('\n')[1] : '');
+        if (typeof a === 'object') { try { return JSON.stringify(a); } catch (e) { return String(a); } }
+        return String(a);
+      }).join(' ');
+    } catch (e) { msg = '(unserialisable)'; }
+    _bugConsoleBuf.push({ t: new Date().toISOString(), level, msg: msg.slice(0, 500) });
+    if (_bugConsoleBuf.length > CAP) _bugConsoleBuf.shift();
+  };
+  ['log', 'info', 'warn', 'error'].forEach(level => {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => { push(level, args); orig(...args); };
+  });
+  window.addEventListener('error', e =>
+    push('error', [`Uncaught: ${e.message} (${(e.filename || '').split('/').pop()}:${e.lineno})`]));
+  window.addEventListener('unhandledrejection', e =>
+    push('error', ['Unhandled rejection: ' + (e.reason && e.reason.message ? e.reason.message : String(e.reason))]));
+})();
+function _bugApiPush(entry) {
+  _bugApiBuf.push(entry);
+  if (_bugApiBuf.length > 100) _bugApiBuf.shift();
+}
 
 // ── Config ───────────────────────────────────────────────
 const APP_VERSION = 'v1.0';
@@ -1652,26 +1707,32 @@ async function api(table, method='GET', body=null, params='') {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+    const _t0 = Date.now();   // bug-report API trail timing
     try {
       const res = await fetch(url, { ...opts, signal: ctrl.signal });
       clearTimeout(timer);
       if (!res.ok) {
         const err = await res.text();
+        _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
         if (method === 'GET' && _apiTransient(null, res.status) && attempt < maxAttempts) {
           lastErr = new Error(`${res.status}: ${err}`);
           console.warn(`API GET ${table} attempt ${attempt} → ${res.status}; retrying…`);
           await _apiBackoff(attempt);
           continue;
         }
-        throw new Error(`${res.status}: ${err}`);
+        const httpErr = new Error(`${res.status}: ${err}`);
+        httpErr._bugLogged = true;   // trail entry already pushed above — don't double-log in catch
+        throw httpErr;
       }
       const text = await res.text();
+      _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
       // A successful write to a cached lookup busts it so the next read refetches.
       if (method !== 'GET' && typeof LOOKUP_KEYS !== 'undefined' && LOOKUP_KEYS.has(table)) _lkInvalidate(table);
       return text ? JSON.parse(text) : [];
     } catch(e) {
       clearTimeout(timer);
       lastErr = e;
+      if (!e || !e._bugLogged) _bugApiPush({ t: new Date().toISOString(), method, table, status: e && e.name === 'AbortError' ? 'timeout' : 'network', ms: Date.now() - _t0 });
       if (method === 'GET' && _apiTransient(e) && attempt < maxAttempts) {
         console.warn(`API GET ${table} attempt ${attempt} failed (${e.name || e.message}); retrying…`);
         await _apiBackoff(attempt);
@@ -2217,6 +2278,17 @@ const PAGES = {
   // populated by the audit_row_change trigger; see sql/add_audit_log.sql).
   audit_log: {
     title: 'Audit Log',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
+
+  // In-app bug reports (filed via the floating red bug button; see
+  // sql/add_bug_reports.sql). Custom triage viewer with a status workflow.
+  bug_reports: {
+    title: 'Bug Reports',
     table: null,
     custom: true,
     readOnly: true,
@@ -2929,6 +3001,7 @@ async function loadTable(page) {
     if (page === 'opportunity_contacts') { await renderAllOppContacts(); return; }
     if (page === 'client_contacts') { await renderClientContactsPage(); return; }
     if (page === 'audit_log') { await renderAuditLogPage(); return; }
+    if (page === 'bug_reports') { await renderBugReportsPage(); return; }
   }
 
   const body = document.getElementById('table-body');
@@ -4113,6 +4186,8 @@ const MENU = [
             icon: '<circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M3.2 12.8l1.4-1.4M11.4 4.6l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'audit_log', label: 'Audit Log', permission: 'manage_settings',
             icon: '<rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
+          { page: 'bug_reports', label: 'Bug Reports', permission: 'manage_settings',
+            icon: '<ellipse cx="8" cy="9" rx="4" ry="5"/><path d="M4 9H1.6M12 9h2.4M4.6 6 2.8 4.6M11.4 6l1.8-1.4M4.6 12l-1.8 1.4M11.4 12l1.8 1.4M6.4 4.2 5.4 2.4M9.6 4.2l1-1.8" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round"/>' },
         ]
       },
       {
@@ -6508,7 +6583,7 @@ async function loadEngagements(dealId) {
       return;
     }
 
-    const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+    const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const now = Date.now();
 
     const rows = engs.map(e => {
@@ -6584,7 +6659,7 @@ async function openEngagementRow(engId) {
     const engs = await apiGet('engagements', `id=eq.${engId}&select=created_at`);
     const eng = engs[0];
     if (!eng) return;
-    const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+    const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const ageMs = Date.now() - new Date(eng.created_at).getTime();
     const isEditable = ageMs < graceMins * 60 * 1000;
     if (isEditable) await openEditEngagementModal(engId);
@@ -9666,6 +9741,230 @@ function _auditRowHtml(r) {
     <div style="word-break:break-word;"><span style="font-weight:600;">${_audEsc(r.table_name)}</span>${r.row_id ? ' #' + r.row_id : ''}${_auditRowLabel(r)}</div>
     <div style="min-width:0;">${detail}</div>
   </div>`;
+}
+
+// ── Bug reporter (floating red bug on every page) ─────────────────────────────
+// Dialog: severity + description + auto-context, with the console ring buffer
+// and API trail attached. Submits a bug_reports row; reviewed on
+// Admin → Settings → Bug Reports.
+const BUG_SEVERITIES = ['Low', 'Annoying', 'Time Wasting', 'Blocking'];
+const _bugSevColour = { 'Low': ['#E0E7FF', '#3730A3'], 'Annoying': ['#FEF3C7', '#92400E'], 'Time Wasting': ['#FED7AA', '#9A3412'], 'Blocking': ['#FEE2E2', '#991B1B'] };
+function _bugEsc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+
+function _bugContext() {
+  const stampEl = document.querySelector('.build-stamp');
+  const version = stampEl ? (stampEl.parentElement.textContent || '').replace(stampEl.textContent, '').trim() : '';
+  const leadOpen = document.getElementById('lead-page')?.classList.contains('active');
+  const record = (leadOpen && typeof leadData !== 'undefined' && leadData?.id) ? ('lead #' + leadData.id)
+    : ((typeof oppData !== 'undefined' && oppData?.id) ? ('deal #' + oppData.id) : null);
+  return {
+    page: (typeof currentPage !== 'undefined' ? currentPage : null),
+    record_ref: record,
+    app_version: version || null,
+    build: (typeof buildStampText === 'function' ? buildStampText() : null),
+    environment: (document.querySelector('.env-label')?.textContent || '').trim() || null,
+    user_agent: navigator.userAgent,
+    viewport: window.innerWidth + '×' + window.innerHeight,
+    online: navigator.onLine,
+  };
+}
+
+function openBugReportDialog() {
+  const root = document.getElementById('bug-root');
+  if (!root) return;
+  window._bugSeverity = 'Annoying';
+  const ctx = _bugContext();
+  const who = (typeof currentUser !== 'undefined' && currentUser?.name) ? currentUser.name : 'not signed in';
+  const consoleRows = [..._bugConsoleBuf].reverse();
+  const apiRows = [..._bugApiBuf].reverse();
+  const lvlColour = { error: 'color:#991B1B;font-weight:700;', warn: 'color:#92400E;font-weight:600;', info: '', log: '' };
+  const consoleTable = consoleRows.length ? `<table style="width:100%;border-collapse:collapse;font-size:11px;">
+      ${consoleRows.map(r => `<tr style="border-bottom:1px solid var(--border);vertical-align:top;">
+        <td style="padding:3px 6px;white-space:nowrap;color:var(--text3);">${new Date(r.t).toLocaleTimeString()}</td>
+        <td style="padding:3px 6px;${lvlColour[r.level] || ''}">${r.level}</td>
+        <td style="padding:3px 6px;word-break:break-word;">${_bugEsc(r.msg)}</td>
+      </tr>`).join('')}
+    </table>` : '<div style="padding:8px;color:var(--text3);font-size:12px;">No console messages this session.</div>';
+  const apiTable = apiRows.length ? `<table style="width:100%;border-collapse:collapse;font-size:11px;">
+      ${apiRows.map(r => `<tr style="border-bottom:1px solid var(--border);">
+        <td style="padding:3px 6px;white-space:nowrap;color:var(--text3);">${new Date(r.t).toLocaleTimeString()}</td>
+        <td style="padding:3px 6px;">${r.method}</td>
+        <td style="padding:3px 6px;">${_bugEsc(r.table)}</td>
+        <td style="padding:3px 6px;${(+r.status >= 400 || isNaN(+r.status)) ? 'color:#991B1B;font-weight:700;' : ''}">${_bugEsc(r.status)}</td>
+        <td style="padding:3px 6px;text-align:right;color:var(--text3);">${r.ms} ms</td>
+      </tr>`).join('')}
+    </table>` : '<div style="padding:8px;color:var(--text3);font-size:12px;">No API calls recorded.</div>';
+  root.innerHTML = `
+    <div class="modal-overlay" style="z-index:100001;" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeBugReportDialog()">
+      <div class="modal" style="width:640px;max-width:95vw;">
+        <div class="modal-header">
+          <div class="modal-title">🐞 Report a bug</div>
+          <button class="modal-close" onclick="closeBugReportDialog()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">How bad is it?</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              ${BUG_SEVERITIES.map(s => `<button type="button" id="bug-sev-${s.replace(/ /g,'_')}" class="btn btn-sm" onclick="bugSetSeverity('${s}')" style="border:1px solid var(--border);background:${s==='Annoying'?_bugSevColour[s][0]:'white'};color:${s==='Annoying'?_bugSevColour[s][1]:'var(--text2)'};font-weight:600;">${s}</button>`).join('')}
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">What happened? <span style="color:var(--red)">*</span></label>
+            <textarea id="bug-desc" class="form-control" rows="4" placeholder="What were you doing? What did you expect? What happened instead?"></textarea>
+          </div>
+          <div style="font-size:11px;color:var(--text3);margin-bottom:10px;line-height:1.6;">
+            Sent with this report: <strong>${_bugEsc(who)}</strong> · page <strong>${_bugEsc(ctx.page || '—')}</strong>${ctx.record_ref ? ` · ${_bugEsc(ctx.record_ref)}` : ''} · ${_bugEsc(ctx.app_version || '')} ${_bugEsc(ctx.build || '')} · ${_bugEsc(ctx.environment || '')} · ${_bugEsc(ctx.viewport)}${ctx.online ? '' : ' · OFFLINE'}
+          </div>
+          <details style="margin-bottom:8px;">
+            <summary style="cursor:pointer;font-size:12px;color:var(--text2);font-weight:600;">Console messages (${consoleRows.length})</summary>
+            <div style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-top:6px;">${consoleTable}</div>
+          </details>
+          <details>
+            <summary style="cursor:pointer;font-size:12px;color:var(--text2);font-weight:600;">Recent API calls (${apiRows.length})</summary>
+            <div style="max-height:180px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-top:6px;">${apiTable}</div>
+          </details>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeBugReportDialog()">Cancel</button>
+          <button class="btn btn-primary" id="bug-submit-btn" onclick="submitBugReport()">Send bug report</button>
+        </div>
+      </div>
+    </div>`;
+  document.getElementById('bug-desc')?.focus();
+}
+function closeBugReportDialog() { const r = document.getElementById('bug-root'); if (r) r.innerHTML = ''; }
+function bugSetSeverity(s) {
+  window._bugSeverity = s;
+  BUG_SEVERITIES.forEach(x => {
+    const b = document.getElementById('bug-sev-' + x.replace(/ /g, '_'));
+    if (!b) return;
+    const on = x === s;
+    b.style.background = on ? _bugSevColour[x][0] : 'white';
+    b.style.color = on ? _bugSevColour[x][1] : 'var(--text2)';
+  });
+}
+async function submitBugReport() {
+  const desc = (document.getElementById('bug-desc')?.value || '').trim();
+  if (!desc) { showStatus('Please describe what happened', 'error'); return; }
+  const btn = document.getElementById('bug-submit-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  try {
+    const payload = Object.assign(_bugContext(), {
+      reporter_id: (typeof currentUser !== 'undefined' && currentUser?.personId) || null,
+      severity: window._bugSeverity || 'Annoying',
+      description: desc,
+      console_log: _bugConsoleBuf,
+      api_log: _bugApiBuf,
+    });
+    const res = await api('bug_reports', 'POST', payload, 'select=id');
+    closeBugReportDialog();
+    showStatus(`Bug report #${res && res[0] ? res[0].id : ''} sent — thank you`);
+  } catch (e) {
+    showStatus('Could not send report: ' + e.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Send bug report'; }
+  }
+}
+
+// ── Bug Reports admin viewer (Admin → Settings → Bug Reports) ────────────────
+async function renderBugReportsPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr><td style="padding:0;border:none;"><div style="padding:20px;color:var(--text3);">Loading…</div></td></tr>';
+  try {
+    const [reports, people] = await Promise.all([
+      apiGetAll('bug_reports', 'select=*&order=created_at.desc'),
+      allData['people'] || apiGet('people', 'select=*'),
+    ]);
+    allData['people'] = people;
+    window._bugReports = reports;
+    const pName = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : (id ? 'Person #' + id : '—'); };
+    const stColour = { New: ['#FEE2E2', '#991B1B'], Acknowledged: ['#FEF3C7', '#92400E'], Fixed: ['#DCFCE7', '#166534'], Dismissed: ['#E5E7EB', '#4B5563'] };
+    const open = reports.filter(r => r.status === 'New' || r.status === 'Acknowledged').length;
+    document.getElementById('page-sub').textContent = `${reports.length} report${reports.length === 1 ? '' : 's'} · ${open} open`;
+    body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:0 0 24px 0;">
+      ${reports.length ? `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden;">` + reports.map(r => {
+        const [sb, sf] = _bugSevColour[r.severity] || ['#E5E7EB', '#4B5563'];
+        const [tb, tf] = stColour[r.status] || ['#E5E7EB', '#4B5563'];
+        return `<div onclick="openBugReportDetail(${r.id})" style="display:grid;grid-template-columns:140px 100px 110px 140px 110px 1fr;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12.5px;cursor:pointer;align-items:center;">
+          <div style="color:var(--text2);white-space:nowrap;">${new Date(r.created_at).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+          <div><span style="background:${tb};color:${tf};padding:1px 8px;border-radius:8px;font-size:10.5px;font-weight:700;">${r.status}</span></div>
+          <div><span style="background:${sb};color:${sf};padding:1px 8px;border-radius:8px;font-size:10.5px;font-weight:700;">${_bugEsc(r.severity)}</span></div>
+          <div>${_bugEsc(pName(r.reporter_id))}</div>
+          <div style="color:var(--text3);">${_bugEsc(r.page || '—')}</div>
+          <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">#${r.id} · ${_bugEsc(r.description)}</div>
+        </div>`;
+      }).join('') + '</div>'
+      : '<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">No bug reports yet — the red bug button is bottom-right on every page.</div>'}
+    </div></td></tr>`;
+  } catch (e) {
+    body.innerHTML = `<tr class="empty-row"><td>Error: ${_bugEsc(e.message)}</td></tr>`;
+  }
+}
+
+function openBugReportDetail(id) {
+  const r = (window._bugReports || []).find(x => +x.id === +id);
+  if (!r) return;
+  const people = allData['people'] || [];
+  const pName = pid => { const p = people.find(x => +x.id === +pid); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : (pid ? 'Person #' + pid : '—'); };
+  const lvlColour = { error: 'color:#991B1B;font-weight:700;', warn: 'color:#92400E;font-weight:600;' };
+  const cRows = Array.isArray(r.console_log) ? r.console_log.slice().reverse() : [];
+  const aRows = Array.isArray(r.api_log) ? r.api_log.slice().reverse() : [];
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:720px;max-width:95vw;">
+        <div class="modal-header">
+          <div class="modal-title">🐞 Bug report #${r.id} — ${_bugEsc(r.severity)}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;white-space:pre-wrap;background:var(--bg);border-radius:6px;padding:10px 12px;margin-bottom:10px;">${_bugEsc(r.description)}</div>
+          <div style="font-size:11.5px;color:var(--text3);line-height:1.7;margin-bottom:10px;">
+            <strong>${_bugEsc(pName(r.reporter_id))}</strong> · ${new Date(r.created_at).toLocaleString('en-ZA')} · page <strong>${_bugEsc(r.page || '—')}</strong>${r.record_ref ? ` · ${_bugEsc(r.record_ref)}` : ''}<br>
+            ${_bugEsc(r.app_version || '')} ${_bugEsc(r.build || '')} · ${_bugEsc(r.environment || '')} · ${_bugEsc(r.viewport || '')}${r.online === false ? ' · OFFLINE' : ''}<br>
+            <span style="word-break:break-all;">${_bugEsc(r.user_agent || '')}</span>
+          </div>
+          <details style="margin-bottom:8px;" ${cRows.some(x => x.level === 'error') ? 'open' : ''}>
+            <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);">Console messages (${cRows.length})</summary>
+            <div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-top:6px;">
+              <table style="width:100%;border-collapse:collapse;font-size:11px;">${cRows.map(x => `<tr style="border-bottom:1px solid var(--border);vertical-align:top;"><td style="padding:3px 6px;white-space:nowrap;color:var(--text3);">${new Date(x.t).toLocaleTimeString()}</td><td style="padding:3px 6px;${lvlColour[x.level] || ''}">${x.level}</td><td style="padding:3px 6px;word-break:break-word;">${_bugEsc(x.msg)}</td></tr>`).join('')}</table>
+            </div>
+          </details>
+          <details style="margin-bottom:12px;">
+            <summary style="cursor:pointer;font-size:12px;font-weight:600;color:var(--text2);">API calls (${aRows.length})</summary>
+            <div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:6px;margin-top:6px;">
+              <table style="width:100%;border-collapse:collapse;font-size:11px;">${aRows.map(x => `<tr style="border-bottom:1px solid var(--border);"><td style="padding:3px 6px;white-space:nowrap;color:var(--text3);">${new Date(x.t).toLocaleTimeString()}</td><td style="padding:3px 6px;">${x.method}</td><td style="padding:3px 6px;">${_bugEsc(x.table)}</td><td style="padding:3px 6px;${(+x.status >= 400 || isNaN(+x.status)) ? 'color:#991B1B;font-weight:700;' : ''}">${_bugEsc(x.status)}</td><td style="padding:3px 6px;text-align:right;color:var(--text3);">${x.ms} ms</td></tr>`).join('')}</table>
+            </div>
+          </details>
+          <div class="form-group">
+            <label class="form-label">Admin notes</label>
+            <input type="text" id="bug-admin-notes" class="form-control" value="${_bugEsc(r.admin_notes || '')}" placeholder="e.g. fixed in v7.7.75">
+          </div>
+          ${r.resolved_at ? `<div style="font-size:11px;color:var(--text3);">Resolved by ${_bugEsc(pName(r.resolved_by))} · ${new Date(r.resolved_at).toLocaleString('en-ZA')}</div>` : ''}
+        </div>
+        <div class="modal-footer" style="justify-content:space-between;">
+          <div style="display:flex;gap:6px;">
+            ${['Acknowledged', 'Fixed', 'Dismissed'].map(s => `<button class="btn ${s === 'Fixed' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="setBugReportStatus(${r.id}, '${s}')">${s === 'Acknowledged' ? 'Acknowledge' : s}</button>`).join('')}
+          </div>
+          <button class="btn btn-ghost" onclick="closeModal()">Close</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function setBugReportStatus(id, status) {
+  try {
+    const done = status === 'Fixed' || status === 'Dismissed';
+    await api('bug_reports', 'PATCH', {
+      status,
+      admin_notes: (document.getElementById('bug-admin-notes')?.value || '').trim() || null,
+      resolved_by: done ? (currentUser?.personId || null) : null,
+      resolved_at: done ? new Date().toISOString() : null,
+    }, 'id=eq.' + id);
+    closeModal();
+    showStatus(`Report #${id} → ${status}`);
+    await renderBugReportsPage();
+  } catch (e) { showStatus('Update failed: ' + e.message, 'error'); }
 }
 
 // A lead's SITE label: its linked site name, else the prospective (typed) site
@@ -16415,6 +16714,16 @@ async function sweepNewToWorking(leads) {
 // ── Edit-grace countdown (shared: New-leads + engagements) ────────────────
 // Both surfaces are "editable for a while, then locked". A single 1s ticker
 // updates every on-screen .edit-cd chip and fires the lock at zero.
+
+// The engagement edit window, resolved from settings. 'indefinite' → Infinity:
+// every editability check is arithmetic (age < grace*60000), so Infinity means
+// "never locks" everywhere without touching the call sites; the countdown chip
+// skips rendering (nothing to count down).
+function engagementEditMinutes() {
+  const v = (typeof appSettings !== 'undefined' && appSettings['engagement_edit_minutes']) || '60';
+  if (String(v) === 'indefinite') return Infinity;
+  return +v || 60;
+}
 function fmtCountdown(ms) {
   if (ms <= 0) return '0:00';
   const t = Math.ceil(ms / 1000);
@@ -16424,6 +16733,7 @@ function fmtCountdown(ms) {
 // behaviour in the ticker. opts: {openForm, expiredLabel}.
 function editCountdownChipHtml(startMs, graceMins, kind, opts) {
   opts = opts || {};
+  if (!isFinite(graceMins)) return '';   // indefinite window → no countdown chip
   const remain = (startMs + graceMins * 60000) - Date.now();
   const expired = remain <= 0;
   const expiredLabel = opts.expiredLabel || '🔒 locked';
@@ -16700,7 +17010,7 @@ function renderLeadInteractions() {
     list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>';
     return;
   }
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const now = Date.now();
   const gracePeriodMs = graceMins * 60 * 1000;
 
@@ -16771,7 +17081,7 @@ function openLeadInteractionRow(interactionId) {
   // On a read-only lead (Promoted / Dead / non-owner) engagements are managed on
   // the opportunity — open fully locked so nothing can be edited or completed here.
   if (leadReadOnly) { openLeadInteractionView(interactionId, true); return; }
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const ageMs = Date.now() - new Date(i.created_at).getTime();
   const isEditable = ageMs < graceMins * 60 * 1000;
   if (isEditable) openEditLeadInteractionModal(interactionId);
@@ -16955,7 +17265,7 @@ async function openEngagement(engId) {
   window._engStandalone = true;
   window._liEditing = eng;
   window._liQuickLogContext = null;
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const editable = eng.created_at && (Date.now() - new Date(eng.created_at).getTime()) < graceMins * 60000;
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
   await loadLiLookups();
@@ -18043,8 +18353,9 @@ async function renderSettingsPage() {
                 const label = m < 60 ? m+'m' : (m/60)+'h';
                 return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${label}</option>`;
               }).join('')}
+              <option value="indefinite" ${(appSettings['engagement_edit_minutes']||'60')==='indefinite'?'selected':''}>Indefinite — never locks</option>
             </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited. <strong>Indefinite</strong> means engagements stay editable forever (no lock, no countdown).</div>
           </div>
         </div>
       </div>
@@ -18108,6 +18419,10 @@ async function saveSettings() {
     const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
     const newLeadWait = document.getElementById('setting-new-lead-wait').value || '0';
     const dueSoonDays = document.getElementById('setting-due-soon-days').value || '0';
+    // NB: this dropdown existed but was never persisted (latent bug — it silently
+    // stayed on the DB value). 'indefinite' is stored as-is; engagementEditMinutes()
+    // resolves it to Infinity.
+    const engEdit = document.getElementById('setting-eng-edit')?.value || '60';
     const promoMinGreen = String(Math.min(4, Math.max(1, +document.getElementById('setting-promotion-min-green').value || 4)));
     const promoWeak = document.getElementById('setting-promotion-weak').value === 'true' ? 'true' : 'false';
     await Promise.all([
@@ -18118,6 +18433,7 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
       api('settings', 'PATCH', { value: newLeadWait, updated_at: new Date().toISOString() }, 'key=eq.new_lead_waiting_minutes'),
       api('settings', 'PATCH', { value: dueSoonDays, updated_at: new Date().toISOString() }, 'key=eq.lead_due_soon_days'),
+      api('settings', 'PATCH', { value: engEdit, updated_at: new Date().toISOString() }, 'key=eq.engagement_edit_minutes'),
       api('settings', 'PATCH', { value: promoMinGreen, updated_at: new Date().toISOString() }, 'key=eq.promotion_min_green'),
       api('settings', 'PATCH', { value: promoWeak, updated_at: new Date().toISOString() }, 'key=eq.promotion_green_counts_weak'),
     ]);
@@ -18132,6 +18448,7 @@ async function saveSettings() {
     appSettings['eligible_collaborator_roles'] = collabRoles;
     appSettings['new_lead_waiting_minutes'] = newLeadWait;
     appSettings['lead_due_soon_days'] = dueSoonDays;
+    appSettings['engagement_edit_minutes'] = engEdit;
     appSettings['promotion_min_green'] = promoMinGreen;
     appSettings['promotion_green_counts_weak'] = promoWeak;
     showStatus('Settings saved');
