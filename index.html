@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.67 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.67 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11531,12 +11531,8 @@ let _leadAutoSaveInFlight = false;
 // leads.description; it bakes in as the ORIGINAL exactly once, when the window closes.
 function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New' && !leadInEditGrace(leadData)); }
 
-// The obligatory fields that must be present before a lead can be persisted.
-function leadObligatoryFilled() {
-  const src  = document.getElementById('lead-source-id')?.value;
-  const desc = (document.getElementById('lead-description')?.value || '').trim();
-  return !!src && (leadIsAppendMode() ? true : !!desc);
-}
+// (leadObligatoryFilled removed 2026-07-05: capture-always — persistence never
+// gates on completeness; the status engine gates progression instead.)
 
 function setLeadSaveIndicator(state) {
   const el = document.getElementById('lead-save-indicator');
@@ -11906,7 +11902,9 @@ function markLeadDirty(e) {
 async function leadAutoSaveNow() {
   clearTimeout(_leadAutoSaveTimer);
   if (leadReadOnly || _leadAutoSaveInFlight || !leadFormDirty) return;
-  if (!leadObligatoryFilled()) { setLeadSaveIndicator(''); return; }
+  // Capture-always: NO completeness gate here. Filled fields (qualification dots,
+  // red flags, comments…) persist immediately; the status engine — not the save
+  // path — decides whether the lead is ready to progress to Working.
   _leadAutoSaveInFlight = true;
   // Save silently — no "saving…" indicator.
   let ok = false;
@@ -11938,13 +11936,11 @@ function resetLeadDirty() {
 async function closeLeadPage(opts) {
   opts = opts || {};
   clearTimeout(_leadAutoSaveTimer);
-  // Don't lose unsaved work: flush a savable lead, else confirm discard.
+  // Don't lose unsaved work: capture-always means a dirty lead is ALWAYS savable
+  // (source/description are nullable; the status engine gates progression, not
+  // persistence), so flush unconditionally — no discard dialog.
   if (!opts.force && leadFormDirty && !leadReadOnly) {
-    if (leadObligatoryFilled()) {
-      await saveLead({ keepOpen: true });   // commits core + any pending description note
-    } else if (!await confirmDialog({title:'Discard changes?', message:'This lead has unsaved changes but can’t be saved yet (Source and Description are required). Leave and discard them?', confirmLabel:'Discard', danger:true})) {
-      return;
-    }
+    await saveLead({ keepOpen: true });   // commits core + any pending description note
   }
   leadFormDirty = false;
   setLeadSaveIndicator('');
@@ -16329,16 +16325,12 @@ async function saveLead(opts) {
   const appendMode  = leadIsAppendMode();
   const description = appendMode ? (leadData.description || '') : descInput;
 
-  if (!sourceId)    { flagLeadField('lead-source-id',   'Source is required');      return false; }
-  if (!description) { flagLeadField('lead-description', 'Description is required'); return false; }
-
-  // NB: the site is NOT a hard save-block. Site is the primary handle and is
-  // required to PROGRESS a lead (the status engine keeps it "New" until an
-  // organisation is set, and an org can only be set via a site) — but blocking
-  // persistence here would silently kill the background autosave (e.g. of the
-  // Qualification tab) for any lead whose site field is momentarily empty, and
-  // flag a field on the hidden Overview tab. So we save whatever is present and
-  // let the Working gate enforce the site requirement.
+  // Capture-always: NOTHING here hard-blocks a save. Source, description and
+  // site are required to PROGRESS (the status engine keeps the lead at 'New'
+  // until they're present — see computeLeadStatus / "Required to reach Working"),
+  // but a filled-in field (qualification dot, red flag, comment…) must persist
+  // the moment it exists. Hard-blocking here silently killed the background
+  // autosave and threw Qualification-tab work away on incomplete leads.
 
   // Contacts are validated when added to the list; nothing to check here.
   const spName = (document.getElementById('lead-source-person-name')?.value || '').trim();
@@ -16359,7 +16351,7 @@ async function saveLead(opts) {
   const sourceName = source?.name || '';
 
   const payload = {
-    source_id: +sourceId,
+    source_id: +sourceId || null,   // nullable: capture-always (0/'' must not hit the FK)
     source_person_id: sourceName === 'Referral'         ? (+document.getElementById('lead-source-person-id').value || null) : null,
     // Referrer free-text + contact detail: stored only when Referral AND no
     // existing person was matched (FK wins). Resolved into a people row on promote.
@@ -16386,7 +16378,7 @@ async function saveLead(opts) {
     // Contacts: primary projected onto target_person_*; full list → contacts jsonb.
     ...(_leadContactsPatch()),
 
-    description,
+    description: description || null,   // nullable: capture-always
     region_id:        +document.getElementById('lead-region-id').value || null,
     branch_id:        +document.getElementById('lead-branch-id').value || null,
     service_major_ids: (function () {
