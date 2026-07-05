@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.71 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.72 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.71 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.72 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17589,10 +17589,33 @@ function scRemoveSector(id) { _scSectorIds = _scSectorIds.filter(x => x !== +id)
 // Inline create of a participant Organisation / Person (name only, persisted
 // immediately so it can be linked) — lets you add a new org/person without
 // leaving the form, like the lead flow.
-function scToggleNewOrg(show) { const el = document.getElementById('sc-org-new'); if (el) el.style.display = show ? 'flex' : 'none'; if (show) { const i = document.getElementById('sc-new-org-name'); if (i) { i.value=''; i.focus(); } } }
-async function scCreateOrg() {
+function scToggleNewOrg(show) { const el = document.getElementById('sc-org-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-org-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-org-name'); if (i) { i.value=''; i.focus(); } } }
+async function scCreateOrg(force) {
   const name = (document.getElementById('sc-new-org-name').value || '').trim();
   if (!name) { showStatus('Organisation name is required', 'error'); return; }
+  // Fuzzy duplicate check, same engine + threshold as every other org-create
+  // spot (findSimilar/tokenSetRatio). An unchecked "+ New" here minted duplicate
+  // orgs ("welgevonden" ×2, 13s apart — prod, 2026-07-05). force=true = the user
+  // saw the matches and chose "Create anyway".
+  const matchEl = document.getElementById('sc-org-matches');
+  if (!force) {
+    const hits = findSimilar(name, allData['organisations'] || [], o => o.name || '');
+    if (hits.length && matchEl) {
+      matchEl.innerHTML = `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:6px 0 4px;">Similar organisations exist</div>`
+        + hits.slice(0, 5).map(h => `
+          <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+            <div style="font-size:12px;">${String(h.item.name).replace(/</g,'&lt;')}</div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="scUseExistingOrg(${h.item.id})">Use this</button>
+          </div>`).join('')
+        + `<div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:4px;">
+            <div style="font-size:12px;color:var(--text2);">None of these — it's genuinely new.</div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="scCreateOrg(true)">Create anyway</button>
+          </div>`;
+      return;
+    }
+  }
+  if (matchEl) matchEl.innerHTML = '';
+  const btn = document.querySelector('#sc-org-new .btn-primary'); if (btn) btn.disabled = true;   // double-click guard
   try {
     const res = await api('organisations', 'POST', { name }, 'select=*');
     const org = res[0]; if (!org) throw new Error('No record returned');
@@ -17602,12 +17625,40 @@ async function scCreateOrg() {
     if (sel) { const o = document.createElement('option'); o.value = org.id; o.textContent = org.name; sel.appendChild(o); }
     scToggleNewOrg(false); _scRenderOrgChips(); showStatus('Organisation created');
   } catch (e) { showStatus('Create failed: ' + e.message, 'error'); }
+  finally { if (btn) btn.disabled = false; }
 }
-function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); if (i) i.value=''; if (l) l.value=''; if (i) i.focus(); } }
-async function scCreatePerson() {
+// Similarity strip: adopt an existing org as the participant instead of creating.
+function scUseExistingOrg(id) {
+  if (!_scOrgIds.includes(+id)) _scOrgIds.push(+id);
+  const matchEl = document.getElementById('sc-org-matches'); if (matchEl) matchEl.innerHTML = '';
+  scToggleNewOrg(false); _scRenderOrgChips();
+}
+function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-person-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); if (i) i.value=''; if (l) l.value=''; if (i) i.focus(); } }
+async function scCreatePerson(force) {
   const first = (document.getElementById('sc-new-person-first').value || '').trim();
   const last  = (document.getElementById('sc-new-person-last').value || '').trim();
   if (!first) { showStatus('First name is required', 'error'); return; }
+  // Fuzzy duplicate check against known people (same engine as org above).
+  const matchEl = document.getElementById('sc-person-matches');
+  if (!force) {
+    const full = [first, last].filter(Boolean).join(' ');
+    const hits = findSimilar(full, allData['people'] || [], p => [p.first_name, p.last_name].filter(Boolean).join(' '));
+    if (hits.length && matchEl) {
+      matchEl.innerHTML = `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:6px 0 4px;">Similar people exist</div>`
+        + hits.slice(0, 5).map(h => `
+          <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
+            <div style="font-size:12px;">${[h.item.first_name, h.item.last_name].filter(Boolean).join(' ').replace(/</g,'&lt;')}${h.item.email ? ` <span style="color:var(--text3);">· ${String(h.item.email).replace(/</g,'&lt;')}</span>` : ''}</div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="scUseExistingPerson(${h.item.id})">Use this</button>
+          </div>`).join('')
+        + `<div style="padding:6px 10px;border:1px dashed var(--border);border-radius:var(--radius);background:#F8FAFC;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:4px;">
+            <div style="font-size:12px;color:var(--text2);">None of these — it's a new person.</div>
+            <button type="button" class="btn btn-primary btn-sm" onclick="scCreatePerson(true)">Create anyway</button>
+          </div>`;
+      return;
+    }
+  }
+  if (matchEl) matchEl.innerHTML = '';
+  const btn = document.querySelector('#sc-person-new .btn-primary'); if (btn) btn.disabled = true;   // double-click guard
   try {
     const res = await api('people', 'POST', { first_name: first, last_name: last || null }, 'select=*');
     const person = res[0]; if (!person) throw new Error('No record returned');
@@ -17617,6 +17668,12 @@ async function scCreatePerson() {
     if (sel) { const o = document.createElement('option'); o.value = person.id; o.textContent = [person.first_name, person.last_name].filter(Boolean).join(' '); sel.appendChild(o); }
     scToggleNewPerson(false); _scRenderPersonChips(); showStatus('Person created');
   } catch (e) { showStatus('Create failed: ' + e.message, 'error'); }
+  finally { if (btn) btn.disabled = false; }
+}
+function scUseExistingPerson(id) {
+  if (!_scPersonIds.includes(+id)) _scPersonIds.push(+id);
+  const matchEl = document.getElementById('sc-person-matches'); if (matchEl) matchEl.innerHTML = '';
+  scToggleNewPerson(false); _scRenderPersonChips();
 }
 
 async function openNewSalesCampaign() {
@@ -17743,6 +17800,7 @@ async function renderSalesCampaignModal() {
               <button type="button" class="btn btn-primary" onclick="scCreateOrg()">Create &amp; add</button>
               <button type="button" class="btn btn-secondary" onclick="scToggleNewOrg(false)">Cancel</button>
             </div>
+            <div id="sc-org-matches" style="margin-top:4px;"></div>
             <div id="sc-org-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
           </div>
 
@@ -17762,6 +17820,7 @@ async function renderSalesCampaignModal() {
               <button type="button" class="btn btn-primary" onclick="scCreatePerson()">Create &amp; add</button>
               <button type="button" class="btn btn-secondary" onclick="scToggleNewPerson(false)">Cancel</button>
             </div>
+            <div id="sc-person-matches" style="margin-top:4px;"></div>
             <div id="sc-person-chips" style="margin-top:8px;display:flex;flex-wrap:wrap;"></div>
           </div>
 
