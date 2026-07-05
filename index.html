@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.69 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.70 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.69 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.70 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17673,6 +17673,17 @@ async function renderSalesCampaignModal() {
       ]);
       _scOrgIds = orgLinks.map(r => +r.organisation_id);
       _scPersonIds = personLinks.map(r => +r.person_id);
+      // The in-session lookup caches are warmed at LOGIN — an org/person created
+      // since (another user, another tab) resolves to "#id" in the chips. Fetch
+      // any participant ids missing from the caches and merge them in.
+      const missOrg = _scOrgIds.filter(id => !(allData['organisations'] || []).some(o => +o.id === id));
+      const missPpl = _scPersonIds.filter(id => !(allData['people'] || []).some(p => +p.id === id));
+      const [gotOrgs, gotPpl] = await Promise.all([
+        missOrg.length ? apiGet('organisations', `id=in.(${missOrg.join(',')})&select=*`) : [],
+        missPpl.length ? apiGet('people', `id=in.(${missPpl.join(',')})&select=*`) : [],
+      ]);
+      if (gotOrgs.length) (allData['organisations'] = allData['organisations'] || []).push(...gotOrgs);
+      if (gotPpl.length)  (allData['people'] = allData['people'] || []).push(...gotPpl);
     } catch (e) { /* leave empty */ }
   }
 
