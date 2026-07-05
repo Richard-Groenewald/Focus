@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2250,6 +2250,38 @@ const PAGES = {
     ],
   },
 
+  // Sites — the premises a lead/deal is about ("Access World West Gate"), the
+  // natural unit users talk in. organisation 1:N sites 1:N leads/deals; address
+  // lives HERE, not on the org. See sql/add_sites.sql.
+  sites: {
+    title: 'Sites',
+    table: 'sites',
+    columns: [
+      { key: 'name',            label: 'Name' },
+      { key: 'organisation_id', label: 'Organisation', lookup: 'organisations', lookupLabel: r => r.name },
+      { key: 'province',        label: 'Province', render: v => v || '<span style="color:var(--text3);">—</span>' },
+      { key: 'is_primary',      label: 'Primary', render: v => v ? '<span class="badge badge-blue">Default</span>' : '' },
+      { key: 'active',          label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { type: 'section', label: 'General' },
+      { key: 'name',            label: 'Site Name', required: true, placeholder: 'e.g. West Gate' },
+      { key: 'organisation_id', label: 'Organisation', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
+      { key: 'is_primary',      label: 'Primary ("same as company") Site', type: 'checkbox' },
+      { key: 'active',          label: 'Active', type: 'checkbox', default: true },
+      { key: 'notes',           label: 'Notes', type: 'textarea' },
+
+      { type: 'section', label: 'Address' },
+      { key: 'physical_line1', label: 'Physical Address Line 1' },
+      { key: 'physical_line2', label: 'Physical Address Line 2' },
+      { key: 'physical_line3', label: 'Physical Address Line 3' },
+      { key: 'physical_line4', label: 'Physical Address Line 4' },
+      { key: 'physical_code',  label: 'Physical Postal Code' },
+      { key: 'province',       label: 'Province', type: 'select', options: ['', 'Eastern Cape', 'Free State', 'Gauteng', 'KwaZulu-Natal', 'Limpopo', 'Mpumalanga', 'North West', 'Northern Cape', 'Western Cape'] },
+      { key: 'country',        label: 'Country' },
+    ],
+  },
+
   // Clients are organisations flagged is_client=true. They can never be a home
   // organisation or system-user-eligible — those flags are hidden on this form
   // and forced false on save (see saveRecord). The admin Organisations page
@@ -3033,7 +3065,8 @@ function renderTabbedForm(data) {
   cfg.fields.forEach(f => {
     if (f.type === 'section') { cur = { label: f.label, html: '' }; tabs.push(cur); return; }
     if (!cur) { cur = { label: 'General', html: '' }; tabs.push(cur); }
-    const val = data ? (data[f.key] ?? '') : (f.type === 'checkbox' ? false : '');
+    // f.default seeds NEW records only (e.g. sites.active starts ticked).
+    const val = data ? (data[f.key] ?? '') : (f.default !== undefined ? f.default : (f.type === 'checkbox' ? false : ''));
     const full = (f.type === 'textarea' || f.type === 'checkbox') ? ' style="grid-column:1/-1;"' : '';
     cur.html += `<div${full}>${renderField(f, val)}</div>`;
   });
@@ -3092,7 +3125,8 @@ async function renderModal(data) {
   // (e.g. a lead source's name is load-bearing for conditional UI).
   const lockedSystem = cfg.systemFlag && data && data[cfg.systemFlag];
   const fields = cfg.fields.map(f => {
-    const val = data ? (data[f.key] ?? '') : (f.type === 'checkbox' ? false : '');
+    // f.default seeds NEW records only (e.g. sites.active starts ticked).
+    const val = data ? (data[f.key] ?? '') : (f.default !== undefined ? f.default : (f.type === 'checkbox' ? false : ''));
     return renderField(f, val, lockedSystem && f.lockWhenSystem);
   }).join('');
 
@@ -4047,6 +4081,9 @@ const MENU = [
             icon: '<circle cx="8" cy="5" r="3"/><path d="M2 13c0-3 2.7-5 6-5s6 2 6 5"/>' },
           { page: 'organisations',    label: 'Organisations', permission: 'manage_organisations',
             icon: '<rect x="1" y="7" width="14" height="8" rx="1"/><rect x="4" y="3" width="8" height="5" rx="1"/><rect x="6" y="1" width="4" height="3" rx="1"/>' },
+          // Sites ride on the organisations permission — they're the org's premises.
+          { page: 'sites',            label: 'Sites',         permission: 'manage_organisations',
+            icon: '<path d="M8 1C5.2 1 3 3.2 3 6c0 3.8 5 9 5 9s5-5.2 5-9c0-2.8-2.2-5-5-5z"/><circle cx="8" cy="6" r="2" fill="white"/>' },
           { page: 'person_org_roles', label: 'Affiliations',  permission: 'manage_affiliations',
             icon: '<path d="M8 1L3 4v4c0 3 2.2 5.7 5 6.4C11 13.7 13 11 13 8V4L8 1z"/>' },
           { page: 'parties',          label: 'Unaffiliated Collaborators',       permission: 'manage_parties',
