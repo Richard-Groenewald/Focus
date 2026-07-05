@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.75 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.76 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.75 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.76 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6577,7 +6577,7 @@ async function loadEngagements(dealId) {
       return;
     }
 
-    const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+    const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const now = Date.now();
 
     const rows = engs.map(e => {
@@ -6653,7 +6653,7 @@ async function openEngagementRow(engId) {
     const engs = await apiGet('engagements', `id=eq.${engId}&select=created_at`);
     const eng = engs[0];
     if (!eng) return;
-    const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+    const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const ageMs = Date.now() - new Date(eng.created_at).getTime();
     const isEditable = ageMs < graceMins * 60 * 1000;
     if (isEditable) await openEditEngagementModal(engId);
@@ -16708,6 +16708,16 @@ async function sweepNewToWorking(leads) {
 // ── Edit-grace countdown (shared: New-leads + engagements) ────────────────
 // Both surfaces are "editable for a while, then locked". A single 1s ticker
 // updates every on-screen .edit-cd chip and fires the lock at zero.
+
+// The engagement edit window, resolved from settings. 'indefinite' → Infinity:
+// every editability check is arithmetic (age < grace*60000), so Infinity means
+// "never locks" everywhere without touching the call sites; the countdown chip
+// skips rendering (nothing to count down).
+function engagementEditMinutes() {
+  const v = (typeof appSettings !== 'undefined' && appSettings['engagement_edit_minutes']) || '60';
+  if (String(v) === 'indefinite') return Infinity;
+  return +v || 60;
+}
 function fmtCountdown(ms) {
   if (ms <= 0) return '0:00';
   const t = Math.ceil(ms / 1000);
@@ -16717,6 +16727,7 @@ function fmtCountdown(ms) {
 // behaviour in the ticker. opts: {openForm, expiredLabel}.
 function editCountdownChipHtml(startMs, graceMins, kind, opts) {
   opts = opts || {};
+  if (!isFinite(graceMins)) return '';   // indefinite window → no countdown chip
   const remain = (startMs + graceMins * 60000) - Date.now();
   const expired = remain <= 0;
   const expiredLabel = opts.expiredLabel || '🔒 locked';
@@ -16993,7 +17004,7 @@ function renderLeadInteractions() {
     list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>';
     return;
   }
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const now = Date.now();
   const gracePeriodMs = graceMins * 60 * 1000;
 
@@ -17064,7 +17075,7 @@ function openLeadInteractionRow(interactionId) {
   // On a read-only lead (Promoted / Dead / non-owner) engagements are managed on
   // the opportunity — open fully locked so nothing can be edited or completed here.
   if (leadReadOnly) { openLeadInteractionView(interactionId, true); return; }
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const ageMs = Date.now() - new Date(i.created_at).getTime();
   const isEditable = ageMs < graceMins * 60 * 1000;
   if (isEditable) openEditLeadInteractionModal(interactionId);
@@ -17248,7 +17259,7 @@ async function openEngagement(engId) {
   window._engStandalone = true;
   window._liEditing = eng;
   window._liQuickLogContext = null;
-  const graceMins = +(appSettings['engagement_edit_minutes'] || 60);
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
   const editable = eng.created_at && (Date.now() - new Date(eng.created_at).getTime()) < graceMins * 60000;
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
   await loadLiLookups();
@@ -18336,8 +18347,9 @@ async function renderSettingsPage() {
                 const label = m < 60 ? m+'m' : (m/60)+'h';
                 return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${label}</option>`;
               }).join('')}
+              <option value="indefinite" ${(appSettings['engagement_edit_minutes']||'60')==='indefinite'?'selected':''}>Indefinite — never locks</option>
             </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">After this period, logged engagements are locked and cannot be edited. <strong>Indefinite</strong> means engagements stay editable forever (no lock, no countdown).</div>
           </div>
         </div>
       </div>
@@ -18401,6 +18413,10 @@ async function saveSettings() {
     const collabRoles = [...document.querySelectorAll('.setting-collab-role:checked')].map(cb => cb.value).join(',');
     const newLeadWait = document.getElementById('setting-new-lead-wait').value || '0';
     const dueSoonDays = document.getElementById('setting-due-soon-days').value || '0';
+    // NB: this dropdown existed but was never persisted (latent bug — it silently
+    // stayed on the DB value). 'indefinite' is stored as-is; engagementEditMinutes()
+    // resolves it to Infinity.
+    const engEdit = document.getElementById('setting-eng-edit')?.value || '60';
     const promoMinGreen = String(Math.min(4, Math.max(1, +document.getElementById('setting-promotion-min-green').value || 4)));
     const promoWeak = document.getElementById('setting-promotion-weak').value === 'true' ? 'true' : 'false';
     await Promise.all([
@@ -18411,6 +18427,7 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: collabRoles, updated_at: new Date().toISOString() }, 'key=eq.eligible_collaborator_roles'),
       api('settings', 'PATCH', { value: newLeadWait, updated_at: new Date().toISOString() }, 'key=eq.new_lead_waiting_minutes'),
       api('settings', 'PATCH', { value: dueSoonDays, updated_at: new Date().toISOString() }, 'key=eq.lead_due_soon_days'),
+      api('settings', 'PATCH', { value: engEdit, updated_at: new Date().toISOString() }, 'key=eq.engagement_edit_minutes'),
       api('settings', 'PATCH', { value: promoMinGreen, updated_at: new Date().toISOString() }, 'key=eq.promotion_min_green'),
       api('settings', 'PATCH', { value: promoWeak, updated_at: new Date().toISOString() }, 'key=eq.promotion_green_counts_weak'),
     ]);
@@ -18425,6 +18442,7 @@ async function saveSettings() {
     appSettings['eligible_collaborator_roles'] = collabRoles;
     appSettings['new_lead_waiting_minutes'] = newLeadWait;
     appSettings['lead_due_soon_days'] = dueSoonDays;
+    appSettings['engagement_edit_minutes'] = engEdit;
     appSettings['promotion_min_green'] = promoMinGreen;
     appSettings['promotion_green_counts_weak'] = promoWeak;
     showStatus('Settings saved');
