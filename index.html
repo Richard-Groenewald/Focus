@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.73 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.74 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.73 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.74 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3476,28 +3476,10 @@ function checkContactPersonSimilarity() {
     const people = allData['people'] || [];
     const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
     if (!matches.length) { warningEl.style.display = 'none'; return; }
-    // Describe each match with its current affiliation(s), tel and email so the
-    // user can decide whether it's truly the same person.
-    if (!allData['person_organisation_roles']) {
-      try { allData['person_organisation_roles'] = await apiGet('person_organisation_roles', 'select=person_id,org_id,role_type,is_primary'); }
-      catch (e) { allData['person_organisation_roles'] = []; }
-    }
-    if (!allData['organisations']) {
-      try { allData['organisations'] = await apiGet('organisations', 'select=*'); } catch (e) {}
-    }
-    const links = allData['person_organisation_roles'] || [];
-    const orgs = allData['organisations'] || [];
-    const orgName = id => (orgs.find(o => +o.id === +id)?.name) || ('Org #' + id);
+    // Shared org-aware strip: matches already at THIS client rank first with the
+    // "At this client" badge + the amber duplicate banner.
     warningEl.style.display = 'block';
-    warningEl.innerHTML = matches.map(m => {
-      const p = m.item;
-      const nm = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      const affs = links.filter(l => +l.person_id === +p.id).map(l => orgName(l.org_id));
-      const affStr = affs.length ? affs.join(', ') : 'no current organisation';
-      const tel = p.phone || '—';
-      const email = p.email || '—';
-      return `<div style="margin-bottom:8px;">A similar person (${m.score}% match) with the name <strong>${nm}</strong>, affiliated with <strong>${affStr}</strong>, Tel No ${tel} and email ${email} exists. If this is the same person click <button type="button" class="btn btn-secondary btn-sm" onclick="useExistingContactPerson(${p.id})">Use this person</button>; otherwise a new person is created.</div>`;
-    }).join('');
+    warningEl.innerHTML = await _personMatchRowsHtml(matches, _contactsClientId, p => `useExistingContactPerson(${p.id})`);
   }, 400);
 }
 
@@ -7133,6 +7115,7 @@ let _addClientMode = 'opportunity';
 async function openAddClientModal(mode) {
   _addClientMode = (mode === 'clients') ? 'clients' : 'opportunity';
   newClientContacts = [];
+  window._ncUsePersonIds = {};   // clear stale "use existing person" row selections
 
   // Ensure organisations and people are loaded
   if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
@@ -7330,9 +7313,29 @@ function removeContact(idx) {
 }
 
 let _personCheckTimers = {};
+// Per-row "use existing person" selections for the Add-Client contact rows,
+// keyed by row idx. Consumed by saveNewClient (link instead of create).
+window._ncUsePersonIds = {};
+function ncUseExistingPerson(idx, personId) {
+  (window._ncUsePersonIds = window._ncUsePersonIds || {})[idx] = +personId;
+  const p = (allData['people'] || []).find(x => +x.id === +personId);
+  const row = document.getElementById('nc-contact-' + idx);
+  if (p && row) {
+    const set = (cls, v) => { const el = row.querySelector('.' + cls); if (el) el.value = v || ''; };
+    set('nc-title', p.title); set('nc-first', p.first_name); set('nc-last', p.last_name);
+    set('nc-email', p.email); set('nc-phone', p.phone);
+  }
+  const w = document.getElementById('nc-person-warning-' + idx);
+  if (w) {
+    w.style.display = 'block';
+    w.innerHTML = `✓ Linking existing person: <strong>${[p?.first_name, p?.last_name].filter(Boolean).join(' ').replace(/</g,'&lt;')}</strong> — no duplicate will be created; they'll simply be affiliated with this new organisation.`;
+  }
+}
 function checkPersonSimilarity(idx) {
   clearTimeout(_personCheckTimers[idx]);
-  _personCheckTimers[idx] = setTimeout(() => {
+  _personCheckTimers[idx] = setTimeout(async () => {
+    // Typing again means it's a fresh person unless "Use this person" is re-clicked.
+    if (window._ncUsePersonIds) delete window._ncUsePersonIds[idx];
     const first = document.querySelector(`.nc-first[data-idx="${idx}"]`)?.value || '';
     const last = document.querySelector(`.nc-last[data-idx="${idx}"]`)?.value || '';
     const fullName = (first + ' ' + last).trim();
@@ -7343,9 +7346,9 @@ function checkPersonSimilarity(idx) {
     const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
     if (matches.length) {
       warningEl.style.display = 'block';
-      warningEl.innerHTML = '⚠️ Similar contacts found: ' +
-        matches.map(m => `<strong>${[m.item.first_name,m.item.last_name].filter(Boolean).join(' ')}</strong> (${m.score}% match)`).join(', ') +
-        '. Please confirm this is a new person.';
+      // Org is brand-new (created on save) so there's no org scope yet — the strip
+      // still shows affiliations + a "Use this person" action (was warn-only).
+      warningEl.innerHTML = await _personMatchRowsHtml(matches, null, p => `ncUseExistingPerson(${idx}, ${p.id})`);
     } else {
       warningEl.style.display = 'none';
     }
@@ -7373,6 +7376,8 @@ async function saveNewClient() {
       email: el.querySelector('.nc-email')?.value.trim() || '',
       phone: el.querySelector('.nc-phone')?.value.trim() || '',
       isPrimary: idx === '0',
+      // "Use this person" selection from the similarity strip → link, don't create.
+      usePersonId: (window._ncUsePersonIds && window._ncUsePersonIds[idx]) || null,
     });
   }
 
@@ -7412,20 +7417,26 @@ async function saveNewClient() {
     const org = orgResult[0];
     allData['organisations'] = null; // clear cache
 
-    // Create people and affiliations
+    // Create (or link) people and affiliations
     for (const c of contacts) {
-      const initials = ((c.first[0]||'') + (c.last[0]||'')).toUpperCase();
-      const personResult = await api('people', 'POST', {
-        first_name: c.first, last_name: c.last,
-        title: c.title || null, email: c.email || null,
-        phone: c.phone || null, initials,
-      }, 'select=*');
-      const person = personResult[0];
-      allData['people'] = null; // clear cache
+      let personId;
+      if (c.usePersonId) {
+        // Existing person chosen from the similarity strip — affiliate, don't duplicate.
+        personId = +c.usePersonId;
+      } else {
+        const initials = ((c.first[0]||'') + (c.last[0]||'')).toUpperCase();
+        const personResult = await api('people', 'POST', {
+          first_name: c.first, last_name: c.last,
+          title: c.title || null, email: c.email || null,
+          phone: c.phone || null, initials,
+        }, 'select=*');
+        personId = personResult[0].id;
+        allData['people'] = null; // clear cache
+      }
 
       // Create affiliation
       await api('person_organisation_roles', 'POST', {
-        person_id: person.id, org_id: org.id,
+        person_id: personId, org_id: org.id,
         role_type: c.position || 'Contact',
         is_primary: c.isPrimary,
       }, '');
@@ -7759,7 +7770,7 @@ async function openCreateOppContactModal() {
 let _nocCheckTimer;
 function checkNewOppContactSimilarity() {
   clearTimeout(_nocCheckTimer);
-  _nocCheckTimer = setTimeout(() => {
+  _nocCheckTimer = setTimeout(async () => {
     const first = document.getElementById('noc-first')?.value || '';
     const last = document.getElementById('noc-last')?.value || '';
     const fullName = (first + ' ' + last).trim();
@@ -7769,11 +7780,9 @@ function checkNewOppContactSimilarity() {
     const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
     if (matches.length) {
       matchEl.style.display = 'block';
-      matchEl.innerHTML = '🔍 Similar people found: ' +
-        matches.map(m => {
-          const name = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
-          return `<strong>${name}</strong> (${m.score}% match) — <a href="#" onclick="useExistingOppContact(${m.item.id},'${name}');return false;" style="color:var(--red);">Use this person</a>`;
-        }).join(', ');
+      // Shared org-aware strip: matches at the deal's client rank first with the
+      // badge + duplicate banner. Id-only onclick (names with quotes broke the old links).
+      matchEl.innerHTML = await _personMatchRowsHtml(matches, oppData?.org_id, p => `useExistingOppContact(${p.id})`);
     } else {
       matchEl.style.display = 'none';
     }
@@ -7782,6 +7791,11 @@ function checkNewOppContactSimilarity() {
 
 async function useExistingOppContact(personId, name) {
   const orgId = oppData?.org_id;
+  // name is optional (the similarity strip passes only the id).
+  if (!name) {
+    const _p = (allData['people'] || []).find(x => +x.id === +personId);
+    name = [_p?.first_name, _p?.last_name].filter(Boolean).join(' ') || ('Person #' + personId);
+  }
   // Check if affiliated with client
   if (orgId) {
     const affiliations = await apiGet('person_organisation_roles', `person_id=eq.${personId}&org_id=eq.${orgId}&select=id`);
@@ -8124,11 +8138,9 @@ async function checkNewCollabSimilarity() {
     const matches = findSimilar(fullName, people, p => [p.first_name, p.last_name].filter(Boolean).join(' '));
     if (matches.length) {
       matchEl.style.display = 'block';
-      matchEl.innerHTML = '🔍 Similar people found: ' +
-        matches.map(m => {
-          const name = [m.item.first_name, m.item.last_name].filter(Boolean).join(' ');
-          return `<strong>${name}</strong> (${m.score}% match) — <a href="#" onclick="useExistingPerson(${m.item.id},'${name}');return false;" style="color:var(--red);">Use this person</a>`;
-        }).join(', ');
+      // Shared org-aware strip, scoped to the deal's client. Id-only onclick.
+      const orgId = +(document.getElementById('opp-org-id')?.value) || oppData?.org_id || null;
+      matchEl.innerHTML = await _personMatchRowsHtml(matches, orgId, p => `useExistingPerson(${p.id})`);
     } else {
       matchEl.style.display = 'none';
     }
@@ -8136,6 +8148,11 @@ async function checkNewCollabSimilarity() {
 }
 
 function useExistingPerson(personId, name) {
+  // name is optional (the similarity strip passes only the id).
+  if (!name) {
+    const _p = (allData['people'] || []).find(x => +x.id === +personId);
+    name = [_p?.first_name, _p?.last_name].filter(Boolean).join(' ') || ('Person #' + personId);
+  }
   const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
   oppCollaborators.push({ personId, name, role, isOwner: false, isNew: true });
   renderCollaborators();
@@ -11887,6 +11904,42 @@ function _leadOrgDupBanner(hits, orgId, warn) {
     ? `⚠ <strong>${esc(names.join(', '))}</strong> ${many ? 'are already contacts' : 'is already a contact'} at <strong>${esc(org)}</strong> — click “Use this” instead of adding a duplicate.`
     : `✓ Already at <strong>${esc(org)}</strong>: <strong>${esc(names.join(', '))}</strong>.`;
   return `<div style="${style}border-radius:6px;padding:8px 10px;margin-bottom:8px;font-size:12px;line-height:1.5;">${msg}</div>`;
+}
+
+// ── Shared org-aware similarity strip ─────────────────────────────────────────
+// Used by the OTHER contact-create spots (Client Add-Contact, Add-Client rows,
+// Opp new contact, Collaborator modal) — they are modals themselves, so the
+// lead form's match MODAL can't nest; this renders the same intelligence inline:
+// org-affiliated matches first with the "At this client" badge, the amber
+// already-at-this-org banner, affiliations/email/phone per row, and a "Use this
+// person" button whose onclick comes from mkUseAttr(p) (id-based — never
+// interpolate names into onclick, quotes break it).
+async function _personMatchRowsHtml(matches, orgId, mkUseAttr) {
+  if (!allData['person_organisation_roles']) {
+    try { allData['person_organisation_roles'] = await apiGet('person_organisation_roles', 'select=person_id,org_id,role_type,is_primary,end_date'); }
+    catch (e) { allData['person_organisation_roles'] = []; }
+  }
+  if (!allData['organisations']) {
+    try { allData['organisations'] = await apiGet('organisations', 'select=*'); } catch (e) {}
+  }
+  const esc = s => String(s ?? '').replace(/</g, '&lt;');
+  const links = allData['person_organisation_roles'] || [];
+  const orgs  = allData['organisations'] || [];
+  const orgName = id => (orgs.find(o => +o.id === +id)?.name) || ('Org #' + id);
+  const atOrg = p => orgId ? _isPersonAtOrg(p.id, orgId) : false;
+  const sorted = [...matches].sort((a, b) => (atOrg(b.item) ? 1 : 0) - (atOrg(a.item) ? 1 : 0)).slice(0, 5);
+  const orgHits = sorted.map(m => m.item).filter(atOrg);
+  const banner = orgHits.length ? _leadOrgDupBanner(orgHits, orgId, true) : '';
+  return banner + sorted.map(m => {
+    const p = m.item;
+    const nm = [p.first_name, p.last_name].filter(Boolean).join(' ');
+    const affs = links.filter(l => +l.person_id === +p.id && !l.end_date).map(l => orgName(l.org_id));
+    const meta = [affs.length ? affs.join(', ') : 'no current organisation', p.email || null, p.phone || null].filter(Boolean).join(' · ');
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;margin-bottom:4px;">
+      <div style="font-size:12px;min-width:0;"><strong>${esc(nm)}</strong> <span style="color:var(--text3);">(${m.score}%)</span>${atOrg(p) ? _atClientBadge() : ''}<span style="display:block;color:var(--text3);font-size:11px;margin-top:1px;">${esc(meta)}</span></div>
+      <button type="button" class="btn btn-secondary btn-sm" onclick="${mkUseAttr(p)}">Use this person</button>
+    </div>`;
+  }).join('');
 }
 
 // ── Shared person-match modal (lead form). Opens on leaving a name field when
