@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.67 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.68 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.67 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.68 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1642,6 +1642,9 @@ async function api(table, method='GET', body=null, params='') {
     method,
     headers: { 'Content-Type': 'application/json', 'Prefer': method === 'POST' ? 'return=representation' : method === 'PATCH' ? 'return=representation' : '' }
   };
+  // Audit attribution: who is acting. Forwarded by the sb proxy to PostgREST,
+  // where the audit_row_change trigger reads it (request.headers GUC).
+  if (typeof currentUser !== 'undefined' && currentUser?.personId) opts.headers['X-Actor-Id'] = String(currentUser.personId);
   if (body) opts.body = JSON.stringify(body);
 
   const maxAttempts = (method === 'GET') ? API_GET_RETRIES : 1;
@@ -2203,6 +2206,17 @@ const PAGES = {
   },
   campaign_help: {
     title: 'Campaign Setup Guide',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
+
+  // Read-only viewer over the DB-side audit_log (who changed what, when —
+  // populated by the audit_row_change trigger; see sql/add_audit_log.sql).
+  audit_log: {
+    title: 'Audit Log',
     table: null,
     custom: true,
     readOnly: true,
@@ -2914,6 +2928,7 @@ async function loadTable(page) {
     if (page === 'pb_change_management')      { await renderPbPlaceholderPage('Change Management');       return; }
     if (page === 'opportunity_contacts') { await renderAllOppContacts(); return; }
     if (page === 'client_contacts') { await renderClientContactsPage(); return; }
+    if (page === 'audit_log') { await renderAuditLogPage(); return; }
   }
 
   const body = document.getElementById('table-body');
@@ -4114,6 +4129,8 @@ const MENU = [
         items: [
           { page: 'settings', label: 'Settings', permission: 'manage_settings',
             icon: '<circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M3.2 12.8l1.4-1.4M11.4 4.6l1.4-1.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'audit_log', label: 'Audit Log', permission: 'manage_settings',
+            icon: '<rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
         ]
       },
       {
@@ -9511,6 +9528,123 @@ async function adminDeleteDeal(id) {
   }
 }
 
+
+// ── Audit Log viewer (Admin → Settings → Audit Log) ──────────────────────────
+// Read-only window onto audit_log (populated by the DB trigger audit_row_change;
+// see sql/add_audit_log.sql). Filterable by date/table/actor/action/row id,
+// reverse-chron, paged 200 at a time.
+const AUDIT_TABLES = ['leads','deals','organisations','people','sites','engagements',
+  'revenue_streams','revenue_stream_months','deal_contacts','deal_collaborators',
+  'person_organisation_roles','promotion_requests','lead_red_flags',
+  'settings','system_users','user_roles','role_permissions'];
+const AUDIT_PAGE_SIZE = 200;
+let _auditOffset = 0;
+
+async function renderAuditLogPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  const inp = 'class="form-control" style="font-size:12px;padding:6px 8px;"';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:0 0 24px 0;">
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:14px;">
+        <div><label class="form-label" style="font-size:11px;">From</label><input type="date" id="audit-from" ${inp}></div>
+        <div><label class="form-label" style="font-size:11px;">To</label><input type="date" id="audit-to" ${inp}></div>
+        <div><label class="form-label" style="font-size:11px;">Table</label><select id="audit-table" ${inp}><option value="">All tables</option>${AUDIT_TABLES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+        <div><label class="form-label" style="font-size:11px;">Who</label><select id="audit-actor" ${inp}><option value="">Everyone</option><option value="__system__">System / SQL</option></select></div>
+        <div><label class="form-label" style="font-size:11px;">Action</label><select id="audit-op" ${inp}><option value="">All</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select></div>
+        <div><label class="form-label" style="font-size:11px;">Row ID</label><input type="number" id="audit-rowid" ${inp} style="width:90px;font-size:12px;padding:6px 8px;" placeholder="e.g. 42"></div>
+        <button class="btn btn-primary btn-sm" onclick="_auditReload(false)">Apply</button>
+        <button class="btn btn-ghost btn-sm" onclick="renderAuditLogPage()">Reset</button>
+      </div>
+      <div id="audit-rows" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;overflow:hidden;"></div>
+      <div id="audit-more" style="text-align:center;margin-top:12px;"></div>
+    </div>
+  </td></tr>`;
+  // People for the Who filter + actor name resolution.
+  if (!allData['people']) { try { allData['people'] = await apiGetAll('people', 'select=*'); } catch (e) { allData['people'] = []; } }
+  const actorSel = document.getElementById('audit-actor');
+  if (actorSel) actorSel.innerHTML += (allData['people'] || [])
+    .slice().sort((a, b) => String(a.first_name).localeCompare(String(b.first_name)))
+    .map(p => `<option value="${p.id}">${[p.first_name, p.last_name].filter(Boolean).join(' ')}</option>`).join('');
+  await _auditReload(false);
+}
+
+async function _auditReload(append) {
+  const rowsEl = document.getElementById('audit-rows');
+  const moreEl = document.getElementById('audit-more');
+  if (!rowsEl) return;
+  if (!append) { _auditOffset = 0; rowsEl.innerHTML = '<div style="padding:20px;color:var(--text3);">Loading…</div>'; }
+  const v = id => document.getElementById(id)?.value || '';
+  const parts = ['select=*', 'order=at.desc,id.desc', `limit=${AUDIT_PAGE_SIZE}`, `offset=${_auditOffset}`];
+  if (v('audit-from'))  parts.push(`at=gte.${v('audit-from')}T00:00:00`);
+  if (v('audit-to'))    parts.push(`at=lte.${v('audit-to')}T23:59:59`);
+  if (v('audit-table')) parts.push(`table_name=eq.${v('audit-table')}`);
+  if (v('audit-op'))    parts.push(`op=eq.${v('audit-op')}`);
+  if (v('audit-rowid')) parts.push(`row_id=eq.${+v('audit-rowid')}`);
+  const actor = v('audit-actor');
+  if (actor === '__system__') parts.push('actor_id=is.null');
+  else if (actor)             parts.push(`actor_id=eq.${+actor}`);
+  let rows = [];
+  try { rows = await apiGet('audit_log', parts.join('&')); }
+  catch (e) { rowsEl.innerHTML = `<div style="padding:20px;color:var(--red);">Could not load audit log: ${_audEsc(e.message)}</div>`; return; }
+
+  const html = rows.map(_auditRowHtml).join('');
+  if (append) rowsEl.insertAdjacentHTML('beforeend', html);
+  else rowsEl.innerHTML = html || '<div style="padding:24px;text-align:center;color:var(--text3);">No audit entries match these filters.</div>';
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = `${rowsEl.querySelectorAll('.audit-row').length} entr${rowsEl.querySelectorAll('.audit-row').length === 1 ? 'y' : 'ies'} shown — newest first`;
+  if (moreEl) moreEl.innerHTML = rows.length === AUDIT_PAGE_SIZE
+    ? `<button class="btn btn-secondary btn-sm" onclick="_auditOffset+=${AUDIT_PAGE_SIZE};_auditReload(true)">Load ${AUDIT_PAGE_SIZE} more</button>`
+    : '';
+}
+
+function _audEsc(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
+
+// One value, display-safe and short. Objects/arrays stringify; long text truncates.
+function _audVal(x) {
+  if (x === null || x === undefined || x === '') return '<span style="color:var(--text3);">—</span>';
+  let s = (typeof x === 'object') ? JSON.stringify(x) : String(x);
+  if (s.length > 80) s = s.slice(0, 77) + '…';
+  return _audEsc(s);
+}
+
+function _auditActorName(id) {
+  if (!id) return '<span style="color:var(--text3);font-style:italic;">System / SQL</span>';
+  const p = (allData['people'] || []).find(x => +x.id === +id);
+  return p ? _audEsc([p.first_name, p.last_name].filter(Boolean).join(' ')) : ('Person #' + id);
+}
+
+// Best-effort human label for the affected row, from whatever fields exist.
+function _auditRowLabel(r) {
+  const d = r.row_data || {};
+  const nm = d.name || [d.first_name, d.last_name].filter(Boolean).join(' ')
+    || d.description || d.notes || '';
+  return nm ? ` <span style="color:var(--text3);">· ${_audEsc(String(nm).slice(0, 40))}</span>` : '';
+}
+
+function _auditRowHtml(r) {
+  const opColours = { INSERT: ['#DCFCE7', '#166534'], UPDATE: ['#FEF3C7', '#92400E'], DELETE: ['#FEE2E2', '#991B1B'] };
+  const [bg, fg] = opColours[r.op] || ['#E5E7EB', '#374151'];
+  const when = new Date(r.at).toLocaleString('en-ZA', { dateStyle: 'medium', timeStyle: 'short' });
+  let detail = '';
+  if (r.op === 'UPDATE' && r.changes) {
+    detail = Object.entries(r.changes).map(([k, c]) =>
+      `<div style="margin:1px 0;"><span style="font-weight:600;">${_audEsc(k)}</span>: ${_audVal(c.o)} <span style="color:var(--text3);">→</span> ${_audVal(c.n)}</div>`).join('');
+  } else if (r.row_data) {
+    // Insert/delete: a collapsed snapshot of the non-empty fields.
+    const kv = Object.entries(r.row_data).filter(([, x]) => x !== null && x !== '' && x !== undefined);
+    detail = `<details><summary style="cursor:pointer;color:var(--text2);font-size:12px;">${kv.length} fields</summary>
+      <div style="margin-top:4px;">${kv.map(([k, x]) => `<div style="margin:1px 0;"><span style="font-weight:600;">${_audEsc(k)}</span>: ${_audVal(x)}</div>`).join('')}</div></details>`;
+  }
+  return `<div class="audit-row" style="display:grid;grid-template-columns:150px 150px 76px 210px 1fr;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:start;">
+    <div style="color:var(--text2);white-space:nowrap;">${when}</div>
+    <div>${_auditActorName(r.actor_id)}</div>
+    <div><span style="display:inline-block;padding:1px 7px;border-radius:8px;background:${bg};color:${fg};font-size:10.5px;font-weight:700;">${r.op}</span></div>
+    <div style="word-break:break-word;"><span style="font-weight:600;">${_audEsc(r.table_name)}</span>${r.row_id ? ' #' + r.row_id : ''}${_auditRowLabel(r)}</div>
+    <div style="min-width:0;">${detail}</div>
+  </div>`;
+}
 
 // A lead's SITE label: its linked site name, else the prospective (typed) site
 // name, else '' so callers can fall back to the organisation. Site-first display.
