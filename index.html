@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.79 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.80 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.79 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.80 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11517,15 +11517,20 @@ async function renderEngagementHistory(category) {
   // (Re)initialise state. Date + category drive a server reload; the rest filter
   // in-memory. Default window: last 180 days (keeps us under the 1000-row cap).
   const prev = window._engHist || {};
+  // Own/All scope is remembered per user across sessions (topbar pills, like
+  // the leads/opportunities pages). First visit defaults to own engagements.
+  let savedScope = 'mine';
+  try { savedScope = localStorage.getItem(_engHistScopeKey()) === 'all' ? 'all' : 'mine'; } catch (e) {}
   window._engHist = {
     category,
     viewCategory: category,
     from: prev.category === category && prev.from ? prev.from : new Date(Date.now() - 180 * 864e5).toISOString().slice(0, 10),
     to: '',
     group: 'client',     // Client is the default grouping in every category
-    scope: 'mine',       // default to the current user's own engagements
+    scope: savedScope,
     rows: [], clients: [], deals: [], persons: [], capHit: false,
   };
+  _engHistRenderScopeBar();
   try {
     await _engHistLoad();
     _engHistShell();
@@ -11533,6 +11538,27 @@ async function renderEngagementHistory(category) {
   } catch (e) {
     if (body) body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:24px;color:var(--red);">Could not load engagement history: ${cEsc(e.message)}</div></td></tr>`;
   }
+}
+
+// Own/All scope pills in the topbar (same spot + button style as the leads and
+// opportunities pages). The choice is remembered per user across sessions.
+function _engHistScopeKey() { return 'focus_eh_scope:' + ((currentUser && currentUser.personId) || ''); }
+
+function _engHistRenderScopeBar() {
+  const bar = document.getElementById('view-filter-bar');
+  const st = window._engHist;
+  if (!bar || !st) return;
+  bar.innerHTML = [['mine', 'Show Own'], ['all', 'Show All']].map(([k, l]) =>
+    `<button class="btn btn-sm ${st.scope === k ? 'btn-primary' : 'btn-secondary'}"
+       onclick="setEngHistScope('${k}')">${l}</button>`).join('');
+}
+
+function setEngHistScope(v) {
+  const st = window._engHist; if (!st) return;
+  st.scope = (v === 'all') ? 'all' : 'mine';
+  try { localStorage.setItem(_engHistScopeKey(), st.scope); } catch (e) {}
+  _engHistRenderScopeBar();
+  _engHistApply();
 }
 
 // Reload triggered by date OR category change (needs a fresh server query).
@@ -11628,10 +11654,6 @@ function _engHistShell() {
   const bar = `
     <div style="padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-bottom:14px;">
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
-        <div>${lbl('Scope')}
-          <select id="eh-scope" class="form-control" style="height:34px;" onchange="window._engHist.scope=this.value;_engHistApply()">
-            ${opts([['mine','My engagements'],['all','All']], st.scope)}
-          </select></div>
         <div>${lbl('Group by')}
           <select id="eh-group" class="form-control" style="height:34px;" onchange="window._engHist.group=this.value;_engHistApply()">
             ${opts([['client','Client'],['deal','Deal / Lead'],['person','Person'],['none','Timeline']], st.group)}
@@ -11675,7 +11697,7 @@ function _engHistApply() {
   if (!st || !out) return;
 
   const q = (document.getElementById('eh-search')?.value || '').trim().toLowerCase();
-  const scope = document.getElementById('eh-scope')?.value || st.scope || 'mine';
+  const scope = st.scope || 'mine';   // driven by the topbar Own/All pills
   const client = document.getElementById('eh-client')?.value || '';
   const dealKey = document.getElementById('eh-deal')?.value || '';
   const person = document.getElementById('eh-person')?.value || '';
