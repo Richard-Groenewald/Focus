@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.80 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.80 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2296,6 +2296,17 @@ const PAGES = {
     fields: [],
   },
 
+  // Role × widget matrix controlling what each role's dashboard shows.
+  // Persisted as JSON in settings.dashboard_role_widgets.
+  dashboard_admin: {
+    title: 'Dashboards',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
+
   people: {
     title: 'People',
     table: 'people',
@@ -2983,6 +2994,7 @@ async function loadTable(page) {
     if (page === 'sales_campaigns') { await renderSalesCampaignsPage(); return; }
     if (page === 'campaign_help') { renderCampaignHelp(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
+    if (page === 'dashboard_admin') { await renderDashboardAdmin(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
@@ -4188,6 +4200,8 @@ const MENU = [
             icon: '<rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
           { page: 'bug_reports', label: 'Bug Reports', permission: 'manage_settings',
             icon: '<ellipse cx="8" cy="9" rx="4" ry="5"/><path d="M4 9H1.6M12 9h2.4M4.6 6 2.8 4.6M11.4 6l1.8-1.4M4.6 12l-1.8 1.4M11.4 12l1.8 1.4M6.4 4.2 5.4 2.4M9.6 4.2l1-1.8" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round"/>' },
+          { page: 'dashboard_admin', label: 'Dashboards', permission: 'manage_settings',
+            icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' },
         ]
       },
       {
@@ -8794,15 +8808,43 @@ const DASH_ROLE_WIDGETS = {
   'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns'],
   'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline'],
   'Operations':    ['contracts'],
-  'EXCO':          ['company'],
-  'Admin':         [],
+  'Executive':     ['company'],   // was 'EXCO' — no such role exists; the live role name is Executive
+  'Admin':         ['bugs'],
   'Read Only':     [],
 };
 
+// Widget catalogue: every category a dashboard can show, in canonical display
+// order. The Admin → Settings → Dashboards matrix is built from this — adding a
+// widget here (+ its loader in renderDashboard) makes it assignable to roles.
+const DASH_WIDGET_CATALOG = {
+  actions:       'Outstanding Actions',
+  leads:         'Leads',
+  opportunities: 'Opportunities',
+  pipeline:      'Pipeline',
+  campaigns:     'Campaigns',
+  contracts:     'Active Contracts',
+  company:       'Company Overview',
+  bugs:          'Bugs',
+};
+
+// Role→widget config saved by the Dashboards admin page (settings JSON, keyed by
+// role name). A role with no saved entry falls back to the hardcoded defaults.
+function _dashRoleWidgetsConfig() {
+  try {
+    const raw = (typeof appSettings !== 'undefined') && appSettings['dashboard_role_widgets'];
+    if (raw) { const o = JSON.parse(raw); if (o && typeof o === 'object') return o; }
+  } catch (e) { console.warn('Bad dashboard_role_widgets JSON — using defaults'); }
+  return null;
+}
+
 function _dashWidgetsForUser() {
+  const cfg = _dashRoleWidgetsConfig();
   const roles = (currentUser?.roles || []).map(r => r.name);
   const out = [];
-  for (const rn of roles) for (const w of (DASH_ROLE_WIDGETS[rn] || [])) if (!out.includes(w)) out.push(w);
+  for (const rn of roles) {
+    const list = (cfg && Array.isArray(cfg[rn])) ? cfg[rn] : (DASH_ROLE_WIDGETS[rn] || []);
+    for (const w of list) if (DASH_WIDGET_CATALOG[w] && !out.includes(w)) out.push(w);
+  }
   return out;
 }
 // Managers see their team/branch; everyone else sees only their own records.
@@ -8859,7 +8901,7 @@ async function renderDashboard() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
   const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
-                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany };
+                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany, bugs: _dashBugs };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
     if (!el) return;
@@ -8984,6 +9026,103 @@ async function _dashContracts() {
 }
 async function _dashCompany() {
   return _dashCard('Company Overview', null, [['', '—']], 'Company-wide overview coming soon', 'revenue_pipeline', 'Pipeline');
+}
+
+// Bug reports snapshot (fed by the floating bug reporter). Not user-scoped —
+// bugs are one shared queue. The triage deep-link only shows for users who can
+// actually open Admin → Settings → Bug Reports.
+async function _dashBugs() {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const reports = await apiGet('bug_reports', 'select=id,severity,status,description,page,created_at&order=created_at.desc&limit=500');
+  const isOpen = r => r.status === 'New' || r.status === 'Acknowledged';
+  const open = reports.filter(isOpen);
+  const blocking = open.filter(r => r.severity === 'Blocking').length;
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString();
+  const newThisWeek = reports.filter(r => r.created_at >= weekAgo).length;
+  const sevStyle = { 'Blocking': 'background:#FEE2E2;color:#991B1B;', 'Time Wasting': 'background:#FFEDD5;color:#9A3412;',
+                     'Annoying': 'background:#FEF3C7;color:#92400E;', 'Low': 'background:#F1F5F9;color:#475569;' };
+  const list = open.slice(0, 5).map(r => `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--border);font-size:12px;">
+      <div style="min-width:0;">
+        <div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.description || '')}</div>
+        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.page || '—')} · ${String(r.created_at).slice(0, 10)}</div>
+      </div>
+      <span style="flex-shrink:0;font-size:10px;font-weight:700;padding:1px 7px;border-radius:10px;${sevStyle[r.severity] || sevStyle.Low}">${esc(r.severity)}</span>
+    </div>`).join('');
+  const sub = open.length
+    ? `<div>${list}</div>${open.length > 5 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${open.length - 5} more open</div>` : ''}`
+    : `<div style="color:var(--text3);font-size:12px;">No open bugs — all clear.</div>`;
+  return _dashCard('Bugs', 'all', [
+    ['Open', open.length, open.length > 0 ? 'red' : null],
+    ['Blocking', blocking, blocking > 0 ? 'red' : null],
+    ['New ≤ 7 days', newThisWeek],
+  ], sub, can('manage_settings') ? 'bug_reports' : null, 'Triage');
+}
+
+// ── Dashboards admin (Admin → Settings → Dashboards) ────────────────────────
+// Role × widget matrix: tick which dashboard categories each role sees. Saved
+// as JSON in settings.dashboard_role_widgets (keyed by role NAME, matching the
+// DASH_ROLE_WIDGETS defaults, which apply to any role without a saved row).
+async function renderDashboardAdmin() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '';
+  body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--text3);">Loading…</td></tr>';
+  await loadAppSettings();
+  if (!allData['roles']) { try { allData['roles'] = await apiGet('roles', 'select=*&order=name.asc'); } catch (e) { allData['roles'] = []; } }
+  const roles = allData['roles'];
+  const cfg = _dashRoleWidgetsConfig() || {};
+  const effective = rn => Array.isArray(cfg[rn]) ? cfg[rn] : (DASH_ROLE_WIDGETS[rn] || []);
+  const keys = Object.keys(DASH_WIDGET_CATALOG);
+  const rows = roles.map(r => `
+    <tr style="border-top:1px solid var(--border);">
+      <td style="padding:10px 14px;font-weight:600;white-space:nowrap;">${cEsc(r.name)}</td>
+      ${keys.map(k => `<td style="padding:10px 12px;text-align:center;">
+        <input type="checkbox" class="dash-adm-cb" data-role="${cEsc(r.name)}" data-widget="${k}" ${effective(r.name).includes(k) ? 'checked' : ''} style="cursor:pointer;">
+      </td>`).join('')}
+    </tr>`).join('');
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:2px 0 24px;max-width:1000px;">
+      <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">
+        Tick the categories each role sees on its dashboard. A user with several roles sees the union of their roles' categories.
+        Widgets appear in the column order below; changes apply the next time a user opens their dashboard.
+      </div>
+      <div class="card" style="padding:0;overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:var(--bg);">
+            <th style="padding:10px 14px;text-align:left;">Role</th>
+            ${keys.map(k => `<th style="padding:10px 12px;text-align:center;white-space:nowrap;font-size:12px;">${DASH_WIDGET_CATALOG[k]}</th>`).join('')}
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn btn-primary" onclick="saveDashboardAdmin()">Save dashboard configuration</button>
+      </div>
+    </div></td></tr>`;
+}
+
+async function saveDashboardAdmin() {
+  const cfg = {};
+  document.querySelectorAll('.dash-adm-cb').forEach(cb => {
+    const rn = cb.dataset.role;
+    if (!cfg[rn]) cfg[rn] = [];
+    if (cb.checked) cfg[rn].push(cb.dataset.widget);
+  });
+  const json = JSON.stringify(cfg);
+  startBusy('Saving dashboard configuration…');
+  try {
+    // Upsert: the settings row may not exist yet on a given environment.
+    const res = await api('settings', 'PATCH', { value: json, updated_at: new Date().toISOString() }, 'key=eq.dashboard_role_widgets&select=key');
+    if (!res || !res.length) await api('settings', 'POST', { key: 'dashboard_role_widgets', value: json }, '');
+    appSettings['dashboard_role_widgets'] = json;
+    showStatus('Dashboard configuration saved');
+  } catch (e) {
+    showStatus('Could not save: ' + e.message, 'error');
+  } finally {
+    stopBusy();
+  }
 }
 
 const RPP = (function () {
