@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.82 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.82 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -16999,6 +16999,19 @@ async function saveLead(opts) {
     return false;
   }
   clearLeadFieldErrors();
+
+  // Site typeahead: text typed but never committed (no Use / Add-new click) must
+  // still be captured — otherwise the lead saves siteless while the typed name sits
+  // visibly in the box, looking captured (bit lead 4042 on prod). Commit it as the
+  // new-site name, EXCEPT while the user is still focused there mid-type — the
+  // 1.5s autosave would otherwise yank the input away under their cursor.
+  const siteSearch = document.getElementById('lead-site-search');
+  if (siteSearch && siteSearch.value.trim()
+      && document.activeElement !== siteSearch
+      && !document.getElementById('lead-site-id').value
+      && !document.getElementById('lead-site-name').value) {
+    chooseNewLeadSite();
+  }
 
   const sourceId  = document.getElementById('lead-source-id').value;
   const descInput = document.getElementById('lead-description').value.trim();
