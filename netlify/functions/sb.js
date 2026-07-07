@@ -20,21 +20,32 @@ exports.handler = async (event) => {
   const path = event.path.replace('/.netlify/functions/sb', '/rest/v1');
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   return new Promise(resolve => {
-    const req = https.request({
-      hostname: SB, port: 443, path: path + qs, method: event.httpMethod, agent: sbAgent,
-      // x-actor-id: the app's current user, forwarded so the DB audit trigger can
-      // read it from PostgREST's request.headers GUC (see sql/add_audit_log.sql).
-      headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Prefer': event.headers['prefer'] || '', 'X-Actor-Id': event.headers['x-actor-id'] || '' }
-    }, res => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => resolve({
-        statusCode: res.statusCode,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type,Prefer', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' },
-        body: d
-      }));
-    });
-    req.on('error', e => resolve({ statusCode: 500, body: JSON.stringify({ error: e.message }) }));
-    if (event.body) req.write(event.body);
-    req.end();
+    const doReq = (attempt) => {
+      const req = https.request({
+        hostname: SB, port: 443, path: path + qs, method: event.httpMethod, agent: sbAgent,
+        // x-actor-id: the app's current user, forwarded so the DB audit trigger can
+        // read it from PostgREST's request.headers GUC (see sql/add_audit_log.sql).
+        headers: { 'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'Prefer': event.headers['prefer'] || '', 'X-Actor-Id': event.headers['x-actor-id'] || '' }
+      }, res => {
+        let d = ''; res.on('data', c => d += c);
+        res.on('end', () => resolve({
+          statusCode: res.statusCode,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type,Prefer', 'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS' },
+          body: d
+        }));
+      });
+      req.on('error', e => {
+        // Stale keep-alive socket: Supabase's LB closes idle connections, and a
+        // warm invocation that reuses one gets ECONNRESET / "socket hang up"
+        // before the request was processed. Retry ONCE on a fresh socket —
+        // only for reused-socket connection errors, so real outages still fail.
+        const stale = req.reusedSocket && (e.code === 'ECONNRESET' || /socket hang up/i.test(e.message));
+        if (attempt === 0 && stale) return doReq(1);
+        resolve({ statusCode: 500, body: JSON.stringify({ error: e.message }) });
+      });
+      if (event.body) req.write(event.body);
+      req.end();
+    };
+    doReq(0);
   });
 };
