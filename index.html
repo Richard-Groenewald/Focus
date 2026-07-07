@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.78 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.78 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -13218,6 +13218,24 @@ function populateLeadForm() {
       const prim = (allData['sites'] || []).find(s => +s.organisation_id === +leadData.target_org_id && s.is_primary)
                || (allData['sites'] || []).find(s => +s.organisation_id === +leadData.target_org_id);
       if (prim) selectLeadSite(+prim.id);
+      else {
+        // Org on record but it has no sites row: restore the org select anyway —
+        // clearLeadSiteField() above wiped it, and an empty input round-trips as
+        // target_org_id NULL on the next autosave.
+        document.getElementById('lead-target-org-id').value = leadData.target_org_id;
+        const og = document.getElementById('lead-target-org-group');
+        if (og) og.style.display = '';
+        onLeadTargetOrgChange();
+      }
+    } else if ((leadData.target_org_name || '').trim()) {
+      // Free-text new-org lead with no site: restore the typed name into the input.
+      // Leaving it empty made the next autosave (typically the first qualification-dot
+      // click) write target_org_name NULL — the lead's headline vanished everywhere.
+      document.getElementById('lead-target-org-name').value = leadData.target_org_name;
+      const og = document.getElementById('lead-target-org-group');
+      if (og) og.style.display = '';
+      onLeadTargetOrgNameInput();
+      confirmLeadTargetOrgNew();
     }
   } finally { window._leadPopulating = false; }
   // Contacts: load the one unified list and render it (with existing/affiliated/new badges).
