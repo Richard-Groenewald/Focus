@@ -540,7 +540,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -574,7 +574,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8433,15 +8433,36 @@ window.addEventListener('appinstalled', () => {
   _pwaDeferredPrompt = null;
   const done = document.getElementById('ig-installed'); if (done) done.style.display = '';
   const quick = document.getElementById('ig-quick');    if (quick) quick.style.display = 'none';
+  _pwaMarkInstalled();   // the login button flips to an "installed" note straight away
 });
 function _pwaIsStandalone() {
   return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || (window.matchMedia && window.matchMedia('(display-mode: window-controls-overlay)').matches)
       || window.navigator.standalone === true;   // iOS Safari
 }
-// Already running as the installed app → the login button is pointless; hide it.
-document.addEventListener('DOMContentLoaded', () => {
-  if (_pwaIsStandalone()) { const w = document.getElementById('pwa-install-wrap'); if (w) w.style.display = 'none'; }
-});
+// Replace the login install button with a quiet "already installed" note.
+function _pwaMarkInstalled() {
+  const w = document.getElementById('pwa-install-wrap');
+  if (w) w.innerHTML = '<div style="font-size:11px;font-weight:700;color:#166534;">✓ Focus is installed on this device — open it from your Start menu / home screen</div>';
+}
+// The install offer must vanish once the app is installed:
+//  • running AS the installed app (standalone window) → hide the whole block;
+//  • installed but currently viewed in a normal browser tab → swap the button
+//    for the "installed" note (Chromium: getInstalledRelatedApps + manifest
+//    related_applications self-entries).
+function _pwaRefreshInstallUi() {
+  const w = document.getElementById('pwa-install-wrap');
+  if (!w) return;
+  if (_pwaIsStandalone()) { w.style.display = 'none'; return; }
+  if (navigator.getInstalledRelatedApps) {
+    navigator.getInstalledRelatedApps()
+      .then(apps => { if (apps && apps.length) _pwaMarkInstalled(); })
+      .catch(() => {});
+  }
+}
+_pwaRefreshInstallUi();   // immediately — the login markup sits above this script
+document.addEventListener('DOMContentLoaded', _pwaRefreshInstallUi);
+try { window.matchMedia('(display-mode: standalone)').addEventListener('change', _pwaRefreshInstallUi); } catch (e) {}
 
 async function installFocusNow() {
   if (!_pwaDeferredPrompt) return;
@@ -8518,7 +8539,7 @@ function openInstallGuide() {
           same login, same data, and updates arrive automatically. Nothing is stored on your device.
         </div>
 
-        <div id="ig-installed" style="display:none;background:#DCFCE7;color:#166534;font-size:13px;font-weight:600;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+        <div id="ig-installed" style="display:${_pwaIsStandalone() ? '' : 'none'};background:#DCFCE7;color:#166534;font-size:13px;font-weight:600;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
           ✓ Focus is installed — find it as described under “Where to find it” below.
         </div>
 
