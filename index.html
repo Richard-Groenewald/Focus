@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1105,9 +1105,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
                 <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()" onblur="onLeadContactNameBlur()" onkeydown="if(event.key==='Enter'){event.preventDefault();onLeadContactNameBlur();}">
                 <input type="text" id="lead-contact-title" class="form-control" placeholder="Job title (optional)">
                 <input type="email" id="lead-contact-email" class="form-control" placeholder="Email" onblur="validateLeadEmail(this)">
-                <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Phone">
+                <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Cellphone">
+                <input type="tel" id="lead-contact-phone2" class="form-control" placeholder="Landline (optional)">
               </div>
-              <div id="lead-contact-entry-hint" style="font-size:11px;color:var(--text3);margin-top:3px;">First &amp; last name required. The primary contact also needs an email or phone.</div>
+              <div id="lead-contact-entry-hint" style="font-size:11px;color:var(--text3);margin-top:3px;">First &amp; last name required. The primary contact also needs an email or a phone number.</div>
               <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">
                 <button class="btn btn-ghost btn-sm" onclick="hideLeadContactEntry()">Cancel</button>
                 <button class="btn btn-primary btn-sm" onclick="addLeadContactEntry()">Add contact</button>
@@ -7610,14 +7611,29 @@ async function displayOwner() {
 // ── Opportunity Contacts ──────────────────────────────────
 let oppContacts = [];
 
+// Fetch any person ids missing from the session cache and merge them in. The
+// cache is warmed at login, so people created since (another user, another tab,
+// an inline "+ New") would otherwise render as "Unknown" / "#id" (bug report #4).
+async function ensurePeopleInCache(ids) {
+  const cache = allData['people'] || (allData['people'] = []);
+  const missing = [...new Set((ids || []).filter(Boolean).map(Number))]
+    .filter(id => !cache.some(p => +p.id === id));
+  if (!missing.length) return;
+  try {
+    const got = await apiGet('people', `id=in.(${missing.join(',')})&select=*`);
+    got.forEach(p => { if (!cache.some(x => +x.id === +p.id)) cache.push(p); });
+  } catch (e) { /* best-effort — the render falls back gracefully */ }
+}
+
 async function loadOppContacts(dealId) {
   oppContacts = [];
   if (!dealId) { renderOppContacts(); return; }
   try {
     const contacts = await apiGet('deal_contacts', `deal_id=eq.${dealId}&select=*`);
-    const people = allData['people'] || await apiGet('people', 'select=*');
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+    await ensurePeopleInCache(contacts.map(c => c.person_id));   // contacts added since login
+    const people = allData['people'];
     const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'select=*');
-    allData['people'] = people;
     allData['dmu_roles'] = dmuRoles;
     // Derive each contact's job title from their open affiliation at this deal's org
     // (title lives on the affiliation now, not on the person record).
@@ -12051,6 +12067,7 @@ let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
+  window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
   _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
   resetLeadForm();
@@ -12077,6 +12094,10 @@ async function openLeadForm(id) {
   try {
     const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
     leadData = rows[0] || { id };
+    // Description threading is decided ONCE per open: an existing description makes
+    // this session append-only (add-a-note); a blank one stays a normal editable box
+    // that becomes the thread's "Original". See leadIsAppendMode.
+    window._leadDescStartAppend = !!((leadData.description || '').trim());
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     resetLeadForm();
     await initLeadForm();
@@ -12176,7 +12197,14 @@ let _leadAutoSaveInFlight = false;
 // has CLOSED — i.e. past New AND no longer in the editable grace. Through New and the
 // grace window the description is a single freely-editable field that just overwrites
 // leads.description; it bakes in as the ORIGINAL exactly once, when the window closes.
-function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New' && !leadInEditGrace(leadData)); }
+// Append mode = the description threads: the box adds a note to lead_description_log
+// and the original + earlier notes show below. It switches on when the form OPENS on
+// a lead that already has a saved description — NOT (as before) only once the lead
+// was Working past its edit grace. The old rule let a lead sit in 'New' for days
+// while every "note" silently overwrote the description into one merged blob (bug
+// report #10). Within the session that first writes the description it stays freely
+// editable, so typo fixes don't spawn thread entries; from the next open it's history.
+function leadIsAppendMode() { return !!(leadData.id && window._leadDescStartAppend); }
 
 // (leadObligatoryFilled removed 2026-07-05: capture-always — persistence never
 // gates on completeness; the status engine gates progression instead.)
@@ -13039,7 +13067,8 @@ async function loadLeadContacts(leadId) {
   leadContacts = Array.isArray(arr) ? arr.map(c => ({
     cid: c.cid || null,
     person_id: c.person_id || null, name: c.name || '', job_title: c.job_title || null,
-    email: c.email || null, phone: c.phone || null, is_primary: !!c.is_primary, moved: c.moved == null ? null : !!c.moved,
+    email: c.email || null, phone: c.phone || null, phone2: c.phone2 || null,
+    is_primary: !!c.is_primary, moved: c.moved == null ? null : !!c.moved,
   })) : [];
   // Every contact carries a stable local id (cid) so engagements can reference a
   // provisional contact. Backfill any that predate cids, and persist once.
@@ -13063,11 +13092,11 @@ function _resolveLeadContact(c) {
     return {
       name:  [p.first_name, p.last_name].filter(Boolean).join(' ') || c.name || 'Contact',
       title: _personJobTitleAtOrg(c.person_id, orgId) || c.job_title || '',
-      phone: p.phone || c.phone || '', email: p.email || c.email || '',
+      phone: p.phone || c.phone || '', phone2: c.phone2 || '', email: p.email || c.email || '',
       kind:  (orgId && _isPersonAtOrg(c.person_id, orgId)) ? 'affiliated' : 'existing',
     };
   }
-  return { name: c.name || 'Contact', title: c.job_title || '', phone: c.phone || '', email: c.email || '', kind: 'new' };
+  return { name: c.name || 'Contact', title: c.job_title || '', phone: c.phone || '', phone2: c.phone2 || '', email: c.email || '', kind: 'new' };
 }
 
 function _leadKindBadge(kind, orgName) {
@@ -13090,7 +13119,7 @@ function _leadContactsPatch() {
     ? { target_person_id: null, target_person_name: null, target_person_title: null, target_person_email: null, target_person_phone: null }
     : primary.person_id
       ? { target_person_id: +primary.person_id, target_person_name: null, target_person_title: null, target_person_email: null, target_person_phone: null }
-      : { target_person_id: null, target_person_name: primary.name || null, target_person_title: primary.job_title || null, target_person_email: primary.email || null, target_person_phone: primary.phone || null };
+      : { target_person_id: null, target_person_name: primary.name || null, target_person_title: primary.job_title || null, target_person_email: primary.email || null, target_person_phone: primary.phone || primary.phone2 || null };
   return Object.assign(cols, { contacts: leadContacts, additional_contacts: [] });
 }
 
@@ -13115,7 +13144,7 @@ async function _persistLeadContacts() {
 
 function _clearLeadContactEntry() {
   window._leadContactNewConfirmed = null;
-  ['lead-contact-name', 'lead-contact-title', 'lead-contact-email', 'lead-contact-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  ['lead-contact-name', 'lead-contact-title', 'lead-contact-email', 'lead-contact-phone', 'lead-contact-phone2'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
 }
 
 function onLeadContactNameInput() {
@@ -13192,7 +13221,7 @@ function renderLeadContacts() {
       body = `<div style="padding:2px 10px 8px;border-top:1px solid var(--border);">
           <div style="display:flex;justify-content:space-between;gap:10px;">
             <div style="flex:1;min-width:0;">
-              ${line(r.title)}${line(r.phone)}${line(r.email)}
+              ${line(r.title)}${line(r.phone)}${r.phone2 ? line(r.phone2 + ' (landline)') : ''}${line(r.email)}
               <div style="margin-top:8px;">${_leadKindBadge(r.kind, orgName)}</div>
             </div>
             ${btnCol}
@@ -13225,16 +13254,17 @@ async function addLeadContactEntry() {
   const title = (document.getElementById('lead-contact-title')?.value || '').trim();
   const email = (document.getElementById('lead-contact-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-phone')?.value || '').trim();
+  const phone2 = (document.getElementById('lead-contact-phone2')?.value || '').trim();
   if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
   // The blur lookup may have just opened the match modal — let the user resolve it.
   if ((document.getElementById('modal-root')?.innerHTML || '').trim()) return;
   const isPrimary = leadContacts.length === 0;
-  if (isPrimary && !email && !phone) { showStatus('The primary contact needs an email or phone', 'error'); return; }
+  if (isPrimary && !email && !phone && !phone2) { showStatus('The primary contact needs an email or phone', 'error'); return; }
   if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) {} }
   // Already checked (on blur) and confirmed new → add straight away.
   if (window._leadContactNewConfirmed === name.toLowerCase()) {
-    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary);
+    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary);
     return;
   }
   // Otherwise run the check now (e.g. added without leaving the name field).
@@ -13243,10 +13273,10 @@ async function addLeadContactEntry() {
     openLeadPersonMatchModal({
       name, exact, shortlist, title: 'Is this someone we already know?', warnDup: true,
       onUse: (pid) => _commitLeadContact({ person_id: +pid, job_title: title }, isPrimary),
-      onNew: () => _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary),
+      onNew: () => _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary),
     });
   } else {
-    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary);
+    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary);
   }
 }
 
@@ -13263,7 +13293,7 @@ async function _commitLeadContact(base, isPrimary) {
   let entry;
   if (base.person_id) {
     const p = (allData['people'] || []).find(x => +x.id === +base.person_id) || {};
-    entry = { person_id: +base.person_id, name: [p.first_name, p.last_name].filter(Boolean).join(' '), job_title: base.job_title || null, email: p.email || null, phone: p.phone || null, is_primary: isPrimary, moved: null };
+    entry = { person_id: +base.person_id, name: [p.first_name, p.last_name].filter(Boolean).join(' '), job_title: base.job_title || null, email: p.email || null, phone: p.phone || null, phone2: null, is_primary: isPrimary, moved: null };
     // Existing person not affiliated to the chosen org → ask if they've moved here.
     const orgId = _leadTargetOrgId();
     if (orgId && !_isPersonAtOrg(base.person_id, orgId)) {
@@ -13274,7 +13304,7 @@ async function _commitLeadContact(base, isPrimary) {
       }
     }
   } else {
-    entry = { person_id: null, name: base.name, job_title: base.job_title || null, email: base.email || null, phone: base.phone || null, is_primary: isPrimary, moved: null };
+    entry = { person_id: null, name: base.name, job_title: base.job_title || null, email: base.email || null, phone: base.phone || null, phone2: base.phone2 || null, is_primary: isPrimary, moved: null };
   }
   entry.cid = _nextLeadContactCid();
   leadContacts.push(entry);
@@ -13301,7 +13331,7 @@ async function makeLeadContactPrimary(idx) {
   if (!c) return;
   // The primary must be reachable — require a valid email or phone.
   const r = _resolveLeadContact(c);
-  if (!r.email && !r.phone) {
+  if (!r.email && !r.phone && !r.phone2) {
     showStatus('The primary contact needs an email or phone — add one before making this contact primary', 'error');
     return;
   }
@@ -13338,9 +13368,11 @@ function editLeadContact(i) {
           <div class="form-row">
             <div class="form-group"><label class="form-label">Email</label>
               <input id="elc-email" type="email" class="form-control" value="${esc(r.email)}" ${ro} onblur="validateLeadEmail(this)"></div>
-            <div class="form-group"><label class="form-label">Phone</label>
+            <div class="form-group"><label class="form-label">Cellphone</label>
               <input id="elc-phone" type="tel" class="form-control" value="${esc(r.phone)}" ${ro}></div>
           </div>
+          <div class="form-group"><label class="form-label">Landline <span style="font-weight:400;color:var(--text3);font-size:11px;">— optional</span></label>
+            <input id="elc-phone2" type="tel" class="form-control" value="${esc(c.phone2 || '')}"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -13357,9 +13389,10 @@ async function saveLeadContactEdit(i) {
     const name = val('elc-name');
     if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
     if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
-    if (c.is_primary && !val('elc-email') && !val('elc-phone')) { showStatus('The primary contact needs an email or phone', 'error'); return; }
+    if (c.is_primary && !val('elc-email') && !val('elc-phone') && !val('elc-phone2')) { showStatus('The primary contact needs an email or phone', 'error'); return; }
     c.name = name; c.email = val('elc-email') || null; c.phone = val('elc-phone') || null;
   }
+  c.phone2 = val('elc-phone2') || null;   // landline lives on the contact record for existing people too
   c.job_title = val('elc-title') || null;
   closeModal();
   startBusy('Saving…');
@@ -13368,7 +13401,7 @@ async function saveLeadContactEdit(i) {
   finally { stopBusy(); }
 }
 
-// ── Description thread (original retained; updates appended once past New) ─────
+// ── Description thread (original retained; updates appended from the next open) ─
 async function loadLeadDescriptionLog(leadId) {
   if (!leadId) { leadDescriptionLog = []; return; }
   try { leadDescriptionLog = await apiGet('lead_description_log', `lead_id=eq.${leadId}&select=*&order=created_at.desc,id.desc`); }
@@ -13395,12 +13428,13 @@ function renderLeadDescriptionHistory() {
   hist.innerHTML = html || '<div style="font-size:12px;color:var(--text3);">No description yet.</div>';
 }
 
-// New → editable description; past New → "Add to description" with the thread shown.
+// No description yet → editable box (writes the Original); description exists at
+// open → "Add to description" with the thread shown below.
 function applyLeadDescriptionMode() {
   const label = document.getElementById('lead-description-label');
   const ta    = document.getElementById('lead-description');
   const hist  = document.getElementById('lead-description-history');
-  const appendMode = leadIsAppendMode();   // only once the edit window has closed
+  const appendMode = leadIsAppendMode();   // decided once per form open
   if (appendMode) {
     if (label) label.innerHTML = 'Add to description';
     if (ta) { ta.value = ''; ta.placeholder = 'Add an update — the original and earlier notes are kept below.'; }
@@ -16367,7 +16401,8 @@ async function commitPromotion(s) {
           const last  = parts.join(' ') || null;
           const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
           const cp = await api('people', 'POST', {
-            first_name: first, last_name: last, email: c.email || null, phone: c.phone || null, initials,
+            // people has a single phone column — prefer the cell, fall back to landline.
+            first_name: first, last_name: last, email: c.email || null, phone: c.phone || c.phone2 || null, initials,
           }, 'select=*');
           cpid = cp[0].id;
         }
@@ -17119,6 +17154,7 @@ async function saveLead(opts) {
       job_title: (document.getElementById('lead-contact-title')?.value || '').trim() || null,
       email:     (document.getElementById('lead-contact-email')?.value || '').trim() || null,
       phone:     (document.getElementById('lead-contact-phone')?.value || '').trim() || null,
+      phone2:    (document.getElementById('lead-contact-phone2')?.value || '').trim() || null,
       is_primary: leadContacts.length === 0, moved: null,
     });
     hideLeadContactEntry();
@@ -17127,9 +17163,9 @@ async function saveLead(opts) {
 
   const sourceId  = document.getElementById('lead-source-id').value;
   const descInput = document.getElementById('lead-description').value.trim();
-  // Only once the edit window has closed does the description box become append-only;
-  // through New + the grace window it's a single field whose text overwrites
-  // leads.description. New entries (append mode) go to lead_description_log instead.
+  // Description threading: in the session that first writes the description the box
+  // overwrites leads.description (the "Original"); from the next open the box is
+  // append-only and entries go to lead_description_log (see leadIsAppendMode).
   const appendMode  = leadIsAppendMode();
   const description = appendMode ? (leadData.description || '') : descInput;
 
@@ -18324,7 +18360,7 @@ function scUseExistingOrg(id) {
   const matchEl = document.getElementById('sc-org-matches'); if (matchEl) matchEl.innerHTML = '';
   scToggleNewOrg(false); _scRenderOrgChips();
 }
-function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-person-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); if (i) i.value=''; if (l) l.value=''; if (i) i.focus(); } }
+function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-person-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); const g = document.getElementById('sc-new-person-org'); if (i) i.value=''; if (l) l.value=''; if (g) g.value=''; if (i) i.focus(); } }
 async function scCreatePerson(force) {
   const first = (document.getElementById('sc-new-person-first').value || '').trim();
   const last  = (document.getElementById('sc-new-person-last').value || '').trim();
@@ -18354,6 +18390,19 @@ async function scCreatePerson(force) {
     const res = await api('people', 'POST', { first_name: first, last_name: last || null }, 'select=*');
     const person = res[0]; if (!person) throw new Error('No record returned');
     (allData['people'] = allData['people'] || []).push(person);
+    // Affiliate to the chosen organisation (optional). Without an affiliation the
+    // new person exists but never appears in any org's contact lists (bug report #4).
+    const affOrgId = +(document.getElementById('sc-new-person-org')?.value) || 0;
+    if (affOrgId) {
+      try {
+        await api('person_organisation_roles', 'POST', {
+          person_id: person.id, org_id: affOrgId, role_type: 'Contact', is_primary: false,
+          start_date: new Date().toISOString().slice(0, 10),
+          created_by: currentUser?.personId || null,
+        }, '');
+        if (allData['person_organisation_roles']) allData['person_organisation_roles'] = null;   // stale
+      } catch (e) { console.warn('Could not affiliate new person:', e.message); }
+    }
     if (!_scPersonIds.includes(+person.id)) _scPersonIds.push(+person.id);
     const sel = document.getElementById('sc-person-add');
     if (sel) { const o = document.createElement('option'); o.value = person.id; o.textContent = [person.first_name, person.last_name].filter(Boolean).join(' '); sel.appendChild(o); }
@@ -18505,9 +18554,15 @@ async function renderSalesCampaignModal() {
               <button type="button" class="btn btn-secondary" onclick="scAddPerson()">Add</button>
               <button type="button" class="btn btn-ghost" onclick="scToggleNewPerson(true)">+ New</button>
             </div>
-            <div id="sc-person-new" style="display:none;gap:8px;margin-top:8px;">
-              <input type="text" id="sc-new-person-first" class="form-control" placeholder="First name" style="flex:1;">
-              <input type="text" id="sc-new-person-last" class="form-control" placeholder="Last name" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreatePerson();}">
+            <div id="sc-person-new" style="display:none;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              <input type="text" id="sc-new-person-first" class="form-control" placeholder="First name" style="flex:1;min-width:120px;">
+              <input type="text" id="sc-new-person-last" class="form-control" placeholder="Last name" style="flex:1;min-width:120px;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreatePerson();}">
+              <!-- Optional affiliation: without it the new person belongs to no org and
+                   never surfaces in org-scoped contact pickers (bug report #4). -->
+              <select id="sc-new-person-org" class="form-control" style="flex:1.4;min-width:160px;">
+                <option value="">— organisation (optional) —</option>
+                ${orgs.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}
+              </select>
               <button type="button" class="btn btn-primary" onclick="scCreatePerson()">Create &amp; add</button>
               <button type="button" class="btn btn-secondary" onclick="scToggleNewPerson(false)">Cancel</button>
             </div>
