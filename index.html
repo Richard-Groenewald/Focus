@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.83 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.83 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1105,9 +1105,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
                 <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()" onblur="onLeadContactNameBlur()" onkeydown="if(event.key==='Enter'){event.preventDefault();onLeadContactNameBlur();}">
                 <input type="text" id="lead-contact-title" class="form-control" placeholder="Job title (optional)">
                 <input type="email" id="lead-contact-email" class="form-control" placeholder="Email" onblur="validateLeadEmail(this)">
-                <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Phone">
+                <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Cellphone">
+                <input type="tel" id="lead-contact-phone2" class="form-control" placeholder="Landline (optional)">
               </div>
-              <div id="lead-contact-entry-hint" style="font-size:11px;color:var(--text3);margin-top:3px;">First &amp; last name required. The primary contact also needs an email or phone.</div>
+              <div id="lead-contact-entry-hint" style="font-size:11px;color:var(--text3);margin-top:3px;">First &amp; last name required. The primary contact also needs an email or a phone number.</div>
               <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px;">
                 <button class="btn btn-ghost btn-sm" onclick="hideLeadContactEntry()">Cancel</button>
                 <button class="btn btn-primary btn-sm" onclick="addLeadContactEntry()">Add contact</button>
@@ -1318,6 +1319,37 @@ function setBuildStamps() {
   const t = buildStampText();
   document.querySelectorAll('.build-stamp').forEach(el => el.textContent = t);
 }
+// ── Version freshness check ───────────────────────────────────────────────────
+// The Netlify build writes the deployed version to /version.txt (netlify.toml).
+// Poll it and compare to THIS bundle's version; when a newer deploy is live,
+// show a click-to-refresh banner. Never auto-reloads (could interrupt an edit).
+// Silent when version.txt is missing (local dev / deploys before this feature).
+let _verBannerShown = false;
+async function checkAppVersion() {
+  try {
+    const stampEl = document.querySelector('.build-stamp');
+    const local = (((stampEl && stampEl.parentElement.textContent) || '').match(/v(\d+\.\d+\.\d+)/) || [])[1];
+    if (!local) return;
+    const r = await fetch('/version.txt?_=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return;
+    const remote = (await r.text()).trim().replace(/^v/, '');
+    if (!/^\d+\.\d+\.\d+$/.test(remote)) return;
+    if (remote !== local && !_verBannerShown) {
+      _verBannerShown = true;
+      const div = document.createElement('div');
+      div.id = 'version-banner';
+      div.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:var(--navy);color:white;text-align:center;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,0.25);';
+      div.textContent = `A newer version of Focus is available (v${remote} — you are on v${local}). Click here to refresh.`;
+      div.onclick = () => location.reload();
+      document.body.appendChild(div);
+    }
+  } catch (e) { /* offline or no version.txt — stay quiet */ }
+}
+// Shortly after load, every 15 minutes, and whenever the tab regains focus —
+// the common stale case is a tab left open across a deploy.
+setTimeout(checkAppVersion, 5000);
+setInterval(checkAppVersion, 15 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkAppVersion(); });
 // ENVIRONMENT label ("Production"/"Development") is authoritative to the DATA SOURCE:
 // it comes from the `environment` row in the connected database's `settings` table,
 // NOT from the code or hostname. Shown above the version.
@@ -7579,14 +7611,29 @@ async function displayOwner() {
 // ── Opportunity Contacts ──────────────────────────────────
 let oppContacts = [];
 
+// Fetch any person ids missing from the session cache and merge them in. The
+// cache is warmed at login, so people created since (another user, another tab,
+// an inline "+ New") would otherwise render as "Unknown" / "#id" (bug report #4).
+async function ensurePeopleInCache(ids) {
+  const cache = allData['people'] || (allData['people'] = []);
+  const missing = [...new Set((ids || []).filter(Boolean).map(Number))]
+    .filter(id => !cache.some(p => +p.id === id));
+  if (!missing.length) return;
+  try {
+    const got = await apiGet('people', `id=in.(${missing.join(',')})&select=*`);
+    got.forEach(p => { if (!cache.some(x => +x.id === +p.id)) cache.push(p); });
+  } catch (e) { /* best-effort — the render falls back gracefully */ }
+}
+
 async function loadOppContacts(dealId) {
   oppContacts = [];
   if (!dealId) { renderOppContacts(); return; }
   try {
     const contacts = await apiGet('deal_contacts', `deal_id=eq.${dealId}&select=*`);
-    const people = allData['people'] || await apiGet('people', 'select=*');
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+    await ensurePeopleInCache(contacts.map(c => c.person_id));   // contacts added since login
+    const people = allData['people'];
     const dmuRoles = allData['dmu_roles'] || await apiGet('dmu_roles', 'select=*');
-    allData['people'] = people;
     allData['dmu_roles'] = dmuRoles;
     // Derive each contact's job title from their open affiliation at this deal's org
     // (title lives on the affiliation now, not on the person record).
@@ -12020,6 +12067,7 @@ let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
+  window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
   _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
   resetLeadForm();
@@ -12046,6 +12094,10 @@ async function openLeadForm(id) {
   try {
     const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
     leadData = rows[0] || { id };
+    // Description threading is decided ONCE per open: an existing description makes
+    // this session append-only (add-a-note); a blank one stays a normal editable box
+    // that becomes the thread's "Original". See leadIsAppendMode.
+    window._leadDescStartAppend = !!((leadData.description || '').trim());
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     resetLeadForm();
     await initLeadForm();
@@ -12145,7 +12197,14 @@ let _leadAutoSaveInFlight = false;
 // has CLOSED — i.e. past New AND no longer in the editable grace. Through New and the
 // grace window the description is a single freely-editable field that just overwrites
 // leads.description; it bakes in as the ORIGINAL exactly once, when the window closes.
-function leadIsAppendMode() { return !!(leadData.id && leadData.status && leadData.status !== 'New' && !leadInEditGrace(leadData)); }
+// Append mode = the description threads: the box adds a note to lead_description_log
+// and the original + earlier notes show below. It switches on when the form OPENS on
+// a lead that already has a saved description — NOT (as before) only once the lead
+// was Working past its edit grace. The old rule let a lead sit in 'New' for days
+// while every "note" silently overwrote the description into one merged blob (bug
+// report #10). Within the session that first writes the description it stays freely
+// editable, so typo fixes don't spawn thread entries; from the next open it's history.
+function leadIsAppendMode() { return !!(leadData.id && window._leadDescStartAppend); }
 
 // (leadObligatoryFilled removed 2026-07-05: capture-always — persistence never
 // gates on completeness; the status engine gates progression instead.)
@@ -12510,7 +12569,13 @@ async function revertLead() {
   if (leadReadOnly) return;
   const snap = window._leadRevert;
   if (!snap) { closeLeadPage({ force: true }); return; }
-  if (!await confirmDialog({title:'Revert changes', message:'Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.', confirmLabel:'Revert', danger:true})) return;
+  // A lead created THIS session has no baseline to restore — reverting deletes it
+  // outright. Say so explicitly (bug report #2: a just-created lead "disappeared").
+  const createdThisSession = !(snap.lead && snap.lead.id);
+  const confirmed = await confirmDialog(createdThisSession
+    ? {title:'Delete this lead?', message:'This lead was created in this session, so there is no earlier state to revert to — reverting will DELETE the whole lead, including its contacts, engagements and notes. This cannot be undone.', confirmLabel:'Delete lead', danger:true}
+    : {title:'Revert changes', message:'Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.', confirmLabel:'Revert', danger:true});
+  if (!confirmed) return;
   startBusy('Reverting…');
   try {
     const id = snap.lead && snap.lead.id;
@@ -12541,6 +12606,9 @@ async function revertLead() {
 function markLeadDirty(e) {
   if (leadReadOnly) return;
   leadFormDirty = true;
+  // Monotonic edit counter: lets an in-flight save detect that newer edits arrived
+  // while it was on the wire, so its completion must not clear the dirty flag.
+  window._leadEditSeq = (window._leadEditSeq || 0) + 1;
   // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
   // indicator shown is "Saved" after a successful save (below).
   setLeadSaveIndicator('');
@@ -12553,7 +12621,10 @@ function markLeadDirty(e) {
 
 async function leadAutoSaveNow() {
   clearTimeout(_leadAutoSaveTimer);
-  if (leadReadOnly || _leadAutoSaveInFlight || !leadFormDirty) return;
+  if (leadReadOnly || !leadFormDirty) return;
+  // A save is already on the wire: don't drop this tick — retry shortly, so edits
+  // made during the in-flight save (e.g. rapid qualification-dot clicks) persist.
+  if (_leadAutoSaveInFlight) { _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 800); return; }
   // Capture-always: NO completeness gate here. Filled fields (qualification dots,
   // red flags, comments…) persist immediately; the status engine — not the save
   // path — decides whether the lead is ready to progress to Working.
@@ -12563,8 +12634,9 @@ async function leadAutoSaveNow() {
   try { ok = await saveLead({ keepOpen: true, silent: true }); } catch (e) { ok = false; }
   _leadAutoSaveInFlight = false;
   // A typed-but-uncommitted description note stays pending until an explicit Save.
+  // OR-ed with the current flag: saveLead leaves it true when edits landed mid-flight.
   const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
-  if (ok) { leadFormDirty = pendingNote; setLeadSaveIndicator('saved'); }
+  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator('saved'); }
   else setLeadSaveIndicator('');
 }
 
@@ -12613,8 +12685,10 @@ async function closeLeadPage(opts) {
 
 // ── Lead Qualification multi-selects (Red Flags + Strategic Decisions) ──
 // Selections are kept in window state and synced to junction tables on save.
+// _leadQualSelDirty marks in-memory changes; the sync no-ops while it's false.
 window._leadRedFlags = [];
 window._leadStrategicDecisions = [];
+window._leadQualSelDirty = false;
 
 async function loadLeadQualificationLookups() {
   const [redFlags, decisions] = await Promise.all([
@@ -12628,6 +12702,7 @@ async function loadLeadQualificationLookups() {
 }
 
 async function loadLeadQualificationSelections(leadId) {
+  window._leadQualSelDirty = false;   // freshly loaded = in sync with the DB
   if (!leadId) {
     window._leadRedFlags = [];
     window._leadStrategicDecisions = [];
@@ -12690,6 +12765,7 @@ function addLeadRedFlag() {
   const item = (allData['red_flags'] || []).find(x => +x.id === id);
   if (!item) return;
   window._leadRedFlags.push({ id, name: item.name, comment: '' });
+  window._leadQualSelDirty = true;
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   sel.value = '';
@@ -12703,6 +12779,7 @@ function addLeadStrategicDecision() {
   const item = (allData['strategic_decisions'] || []).find(x => +x.id === id);
   if (!item) return;
   window._leadStrategicDecisions.push({ id, name: item.name, comment: '' });
+  window._leadQualSelDirty = true;
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   sel.value = '';
@@ -12711,6 +12788,7 @@ function addLeadStrategicDecision() {
 
 function removeLeadRedFlag(id) {
   window._leadRedFlags = window._leadRedFlags.filter(x => +x.id !== +id);
+  window._leadQualSelDirty = true;
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   markLeadDirty();
@@ -12718,6 +12796,7 @@ function removeLeadRedFlag(id) {
 
 function removeLeadStrategicDecision(id) {
   window._leadStrategicDecisions = window._leadStrategicDecisions.filter(x => +x.id !== +id);
+  window._leadQualSelDirty = true;
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   markLeadDirty();
@@ -12727,12 +12806,12 @@ function removeLeadStrategicDecision(id) {
 function setLeadRedFlagComment(id, val) {
   if (leadReadOnly) return;
   const x = (window._leadRedFlags || []).find(f => +f.id === +id);
-  if (x) x.comment = val;
+  if (x) { x.comment = val; window._leadQualSelDirty = true; }
 }
 function setLeadStrategicDecisionComment(id, val) {
   if (leadReadOnly) return;
   const x = (window._leadStrategicDecisions || []).find(f => +f.id === +id);
-  if (x) x.comment = val;
+  if (x) { x.comment = val; window._leadQualSelDirty = true; }
 }
 
 function renderLeadRedFlags() {
@@ -12777,15 +12856,30 @@ function renderLeadStrategicDecisions() {
 
 async function saveLeadQualificationSelections(leadId) {
   if (!leadId) return;
+  // Skip when untouched: this DELETE-then-INSERT sync used to run on EVERY save —
+  // including each 1.5s autosave tick — adding two serial ~600ms round-trips per
+  // save whether or not any flag/decision changed (bug report #9, slow saves).
+  if (!window._leadQualSelDirty) return;
   try {
-    await api('lead_red_flags',           'DELETE', null, `lead_id=eq.${leadId}`);
-    await api('lead_strategic_decisions', 'DELETE', null, `lead_id=eq.${leadId}`);
-    for (const x of window._leadRedFlags) {
-      try { await api('lead_red_flags', 'POST', { lead_id: leadId, red_flag_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
-    }
-    for (const x of window._leadStrategicDecisions) {
-      try { await api('lead_strategic_decisions', 'POST', { lead_id: leadId, strategic_decision_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
-    }
+    // The two tables are independent — sync them in parallel (order matters only
+    // within a table: its DELETE must precede its INSERTs).
+    await Promise.all([
+      (async () => {
+        await api('lead_red_flags', 'DELETE', null, `lead_id=eq.${leadId}`);
+        if (window._leadRedFlags.length) {
+          await api('lead_red_flags', 'POST',
+            window._leadRedFlags.map(x => ({ lead_id: leadId, red_flag_id: x.id, comment: x.comment || null })), '');
+        }
+      })(),
+      (async () => {
+        await api('lead_strategic_decisions', 'DELETE', null, `lead_id=eq.${leadId}`);
+        if (window._leadStrategicDecisions.length) {
+          await api('lead_strategic_decisions', 'POST',
+            window._leadStrategicDecisions.map(x => ({ lead_id: leadId, strategic_decision_id: x.id, comment: x.comment || null })), '');
+        }
+      })(),
+    ]);
+    window._leadQualSelDirty = false;   // synced; stay quiet until the next change
   } catch(e) {
     console.warn('Failed to save lead qualification selections:', e.message);
   }
@@ -12973,7 +13067,8 @@ async function loadLeadContacts(leadId) {
   leadContacts = Array.isArray(arr) ? arr.map(c => ({
     cid: c.cid || null,
     person_id: c.person_id || null, name: c.name || '', job_title: c.job_title || null,
-    email: c.email || null, phone: c.phone || null, is_primary: !!c.is_primary, moved: c.moved == null ? null : !!c.moved,
+    email: c.email || null, phone: c.phone || null, phone2: c.phone2 || null,
+    is_primary: !!c.is_primary, moved: c.moved == null ? null : !!c.moved,
   })) : [];
   // Every contact carries a stable local id (cid) so engagements can reference a
   // provisional contact. Backfill any that predate cids, and persist once.
@@ -12997,11 +13092,11 @@ function _resolveLeadContact(c) {
     return {
       name:  [p.first_name, p.last_name].filter(Boolean).join(' ') || c.name || 'Contact',
       title: _personJobTitleAtOrg(c.person_id, orgId) || c.job_title || '',
-      phone: p.phone || c.phone || '', email: p.email || c.email || '',
+      phone: p.phone || c.phone || '', phone2: c.phone2 || '', email: p.email || c.email || '',
       kind:  (orgId && _isPersonAtOrg(c.person_id, orgId)) ? 'affiliated' : 'existing',
     };
   }
-  return { name: c.name || 'Contact', title: c.job_title || '', phone: c.phone || '', email: c.email || '', kind: 'new' };
+  return { name: c.name || 'Contact', title: c.job_title || '', phone: c.phone || '', phone2: c.phone2 || '', email: c.email || '', kind: 'new' };
 }
 
 function _leadKindBadge(kind, orgName) {
@@ -13024,7 +13119,7 @@ function _leadContactsPatch() {
     ? { target_person_id: null, target_person_name: null, target_person_title: null, target_person_email: null, target_person_phone: null }
     : primary.person_id
       ? { target_person_id: +primary.person_id, target_person_name: null, target_person_title: null, target_person_email: null, target_person_phone: null }
-      : { target_person_id: null, target_person_name: primary.name || null, target_person_title: primary.job_title || null, target_person_email: primary.email || null, target_person_phone: primary.phone || null };
+      : { target_person_id: null, target_person_name: primary.name || null, target_person_title: primary.job_title || null, target_person_email: primary.email || null, target_person_phone: primary.phone || primary.phone2 || null };
   return Object.assign(cols, { contacts: leadContacts, additional_contacts: [] });
 }
 
@@ -13049,7 +13144,7 @@ async function _persistLeadContacts() {
 
 function _clearLeadContactEntry() {
   window._leadContactNewConfirmed = null;
-  ['lead-contact-name', 'lead-contact-title', 'lead-contact-email', 'lead-contact-phone'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
+  ['lead-contact-name', 'lead-contact-title', 'lead-contact-email', 'lead-contact-phone', 'lead-contact-phone2'].forEach(id => { const e = document.getElementById(id); if (e) e.value = ''; });
 }
 
 function onLeadContactNameInput() {
@@ -13126,7 +13221,7 @@ function renderLeadContacts() {
       body = `<div style="padding:2px 10px 8px;border-top:1px solid var(--border);">
           <div style="display:flex;justify-content:space-between;gap:10px;">
             <div style="flex:1;min-width:0;">
-              ${line(r.title)}${line(r.phone)}${line(r.email)}
+              ${line(r.title)}${line(r.phone)}${r.phone2 ? line(r.phone2 + ' (landline)') : ''}${line(r.email)}
               <div style="margin-top:8px;">${_leadKindBadge(r.kind, orgName)}</div>
             </div>
             ${btnCol}
@@ -13159,16 +13254,17 @@ async function addLeadContactEntry() {
   const title = (document.getElementById('lead-contact-title')?.value || '').trim();
   const email = (document.getElementById('lead-contact-email')?.value || '').trim();
   const phone = (document.getElementById('lead-contact-phone')?.value || '').trim();
+  const phone2 = (document.getElementById('lead-contact-phone2')?.value || '').trim();
   if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
   if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
   // The blur lookup may have just opened the match modal — let the user resolve it.
   if ((document.getElementById('modal-root')?.innerHTML || '').trim()) return;
   const isPrimary = leadContacts.length === 0;
-  if (isPrimary && !email && !phone) { showStatus('The primary contact needs an email or phone', 'error'); return; }
+  if (isPrimary && !email && !phone && !phone2) { showStatus('The primary contact needs an email or phone', 'error'); return; }
   if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) {} }
   // Already checked (on blur) and confirmed new → add straight away.
   if (window._leadContactNewConfirmed === name.toLowerCase()) {
-    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary);
+    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary);
     return;
   }
   // Otherwise run the check now (e.g. added without leaving the name field).
@@ -13177,20 +13273,27 @@ async function addLeadContactEntry() {
     openLeadPersonMatchModal({
       name, exact, shortlist, title: 'Is this someone we already know?', warnDup: true,
       onUse: (pid) => _commitLeadContact({ person_id: +pid, job_title: title }, isPrimary),
-      onNew: () => _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary),
+      onNew: () => _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary),
     });
   } else {
-    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone }, isPrimary);
+    await _commitLeadContact({ person_id: null, name, job_title: title, email, phone, phone2 }, isPrimary);
   }
 }
 
 async function _commitLeadContact(base, isPrimary) {
   // A brand-new lead must exist before contacts can be persisted against it.
-  if (!leadData.id) { const ok = await saveLead({ keepOpen: true }); if (!ok || !leadData.id) return; }
+  // The flag stops saveLead's capture-always sweep from ALSO committing the still-
+  // filled entry box during this save — that would duplicate the contact.
+  if (!leadData.id) {
+    window._leadContactCommitting = true;
+    let ok = false;
+    try { ok = await saveLead({ keepOpen: true }); } finally { window._leadContactCommitting = false; }
+    if (!ok || !leadData.id) return;
+  }
   let entry;
   if (base.person_id) {
     const p = (allData['people'] || []).find(x => +x.id === +base.person_id) || {};
-    entry = { person_id: +base.person_id, name: [p.first_name, p.last_name].filter(Boolean).join(' '), job_title: base.job_title || null, email: p.email || null, phone: p.phone || null, is_primary: isPrimary, moved: null };
+    entry = { person_id: +base.person_id, name: [p.first_name, p.last_name].filter(Boolean).join(' '), job_title: base.job_title || null, email: p.email || null, phone: p.phone || null, phone2: null, is_primary: isPrimary, moved: null };
     // Existing person not affiliated to the chosen org → ask if they've moved here.
     const orgId = _leadTargetOrgId();
     if (orgId && !_isPersonAtOrg(base.person_id, orgId)) {
@@ -13201,7 +13304,7 @@ async function _commitLeadContact(base, isPrimary) {
       }
     }
   } else {
-    entry = { person_id: null, name: base.name, job_title: base.job_title || null, email: base.email || null, phone: base.phone || null, is_primary: isPrimary, moved: null };
+    entry = { person_id: null, name: base.name, job_title: base.job_title || null, email: base.email || null, phone: base.phone || null, phone2: base.phone2 || null, is_primary: isPrimary, moved: null };
   }
   entry.cid = _nextLeadContactCid();
   leadContacts.push(entry);
@@ -13228,7 +13331,7 @@ async function makeLeadContactPrimary(idx) {
   if (!c) return;
   // The primary must be reachable — require a valid email or phone.
   const r = _resolveLeadContact(c);
-  if (!r.email && !r.phone) {
+  if (!r.email && !r.phone && !r.phone2) {
     showStatus('The primary contact needs an email or phone — add one before making this contact primary', 'error');
     return;
   }
@@ -13265,9 +13368,11 @@ function editLeadContact(i) {
           <div class="form-row">
             <div class="form-group"><label class="form-label">Email</label>
               <input id="elc-email" type="email" class="form-control" value="${esc(r.email)}" ${ro} onblur="validateLeadEmail(this)"></div>
-            <div class="form-group"><label class="form-label">Phone</label>
+            <div class="form-group"><label class="form-label">Cellphone</label>
               <input id="elc-phone" type="tel" class="form-control" value="${esc(r.phone)}" ${ro}></div>
           </div>
+          <div class="form-group"><label class="form-label">Landline <span style="font-weight:400;color:var(--text3);font-size:11px;">— optional</span></label>
+            <input id="elc-phone2" type="tel" class="form-control" value="${esc(c.phone2 || '')}"></div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -13284,9 +13389,10 @@ async function saveLeadContactEdit(i) {
     const name = val('elc-name');
     if (!name) { showStatus('Enter the contact’s name', 'error'); return; }
     if (!leadNameHasTwoParts(name)) { showStatus('Enter both a first and last name', 'error'); return; }
-    if (c.is_primary && !val('elc-email') && !val('elc-phone')) { showStatus('The primary contact needs an email or phone', 'error'); return; }
+    if (c.is_primary && !val('elc-email') && !val('elc-phone') && !val('elc-phone2')) { showStatus('The primary contact needs an email or phone', 'error'); return; }
     c.name = name; c.email = val('elc-email') || null; c.phone = val('elc-phone') || null;
   }
+  c.phone2 = val('elc-phone2') || null;   // landline lives on the contact record for existing people too
   c.job_title = val('elc-title') || null;
   closeModal();
   startBusy('Saving…');
@@ -13295,7 +13401,7 @@ async function saveLeadContactEdit(i) {
   finally { stopBusy(); }
 }
 
-// ── Description thread (original retained; updates appended once past New) ─────
+// ── Description thread (original retained; updates appended from the next open) ─
 async function loadLeadDescriptionLog(leadId) {
   if (!leadId) { leadDescriptionLog = []; return; }
   try { leadDescriptionLog = await apiGet('lead_description_log', `lead_id=eq.${leadId}&select=*&order=created_at.desc,id.desc`); }
@@ -13322,12 +13428,13 @@ function renderLeadDescriptionHistory() {
   hist.innerHTML = html || '<div style="font-size:12px;color:var(--text3);">No description yet.</div>';
 }
 
-// New → editable description; past New → "Add to description" with the thread shown.
+// No description yet → editable box (writes the Original); description exists at
+// open → "Add to description" with the thread shown below.
 function applyLeadDescriptionMode() {
   const label = document.getElementById('lead-description-label');
   const ta    = document.getElementById('lead-description');
   const hist  = document.getElementById('lead-description-history');
-  const appendMode = leadIsAppendMode();   // only once the edit window has closed
+  const appendMode = leadIsAppendMode();   // decided once per form open
   if (appendMode) {
     if (label) label.innerHTML = 'Add to description';
     if (ta) { ta.value = ''; ta.placeholder = 'Add an update — the original and earlier notes are kept below.'; }
@@ -13626,6 +13733,14 @@ function chooseNewLeadSite() {
   _showLeadSiteChosen(name, null, true);
   const orgGroup = document.getElementById('lead-target-org-group');
   if (orgGroup) orgGroup.style.display = '';
+  // Normalise the sub-picker's INNER state. A previous session may have left the
+  // dropdown hidden behind the chosen chip or the "New organisation name" input
+  // display:none — the group then reads "create a new one below" with no field
+  // below (bug report #3). A locked org (past New) re-renders as its frozen chip.
+  const orgLocked = !!(leadData && leadData.id) && (leadData.status || 'New') !== 'New'
+    && typeof leadInEditGrace === 'function' && !leadInEditGrace(leadData);
+  if (orgLocked && typeof applyLeadTargetOrgLock === 'function') applyLeadTargetOrgLock(true);
+  else onLeadTargetOrgChange();
   renderLeadContacts();
   if (!window._leadPopulating) markLeadDirty();
 }
@@ -13652,14 +13767,18 @@ function _showLeadSiteChosen(label, orgNm, isNew) {
   }
 }
 
-// Drop back to the typeahead to re-pick.
+// Drop back to the typeahead to re-pick. The organisation selection is KEPT —
+// renaming/re-picking a site must not force the user to re-allocate the org
+// (bug report #3); picking a different existing site re-derives it anyway.
 function changeLeadSite() {
-  clearLeadSiteField();
+  clearLeadSiteField({ keepOrg: true });
   document.getElementById('lead-site-search')?.focus();
 }
 
 // Full reset of the site field (init / reset form / Change).
-function clearLeadSiteField() {
+// opts.keepOrg: retain the organisation values (site Change flow) instead of wiping them.
+function clearLeadSiteField(opts) {
+  opts = opts || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('lead-site-id', ''); set('lead-site-name', ''); set('lead-site-search', '');
   const matchEl  = document.getElementById('lead-site-matches');
@@ -13672,7 +13791,13 @@ function clearLeadSiteField() {
   if (chosen)   chosen.style.display = 'none';
   if (derived)  derived.style.display = 'none';
   if (orgGroup) orgGroup.style.display = 'none';
-  set('lead-target-org-id', ''); set('lead-target-org-name', '');
+  if (!opts.keepOrg) {
+    set('lead-target-org-id', ''); set('lead-target-org-name', '');
+    // Values were wiped programmatically (no change event), so reset the picker's
+    // inner display too — otherwise the "New organisation name" input can stay
+    // hidden from an earlier locked-in choice (bug report #3).
+    if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
+  }
   renderLeadContacts();
 }
 
@@ -16276,7 +16401,8 @@ async function commitPromotion(s) {
           const last  = parts.join(' ') || null;
           const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
           const cp = await api('people', 'POST', {
-            first_name: first, last_name: last, email: c.email || null, phone: c.phone || null, initials,
+            // people has a single phone column — prefer the cell, fall back to landline.
+            first_name: first, last_name: last, email: c.email || null, phone: c.phone || c.phone2 || null, initials,
           }, 'select=*');
           cpid = cp[0].id;
         }
@@ -17013,11 +17139,33 @@ async function saveLead(opts) {
     chooseNewLeadSite();
   }
 
+  // Contact entry box: same capture-always rule. Details typed but never committed
+  // via the "Add contact" button must still persist (bug report #6 — a PA's details
+  // were typed, looked captured, and silently evaporated on save). Commit them as a
+  // provisional contact, EXCEPT while the user is still typing in the box (autosave
+  // firing mid-entry) or a person-match modal is awaiting their decision.
+  const ctEntryName = (document.getElementById('lead-contact-name')?.value || '').trim();
+  const ctEntryFocused = ['lead-contact-name','lead-contact-title','lead-contact-email','lead-contact-phone']
+    .includes(document.activeElement && document.activeElement.id);
+  if (ctEntryName && !ctEntryFocused && !window._leadContactCommitting
+      && !(document.getElementById('modal-root')?.innerHTML || '').trim()) {
+    leadContacts.push({
+      cid: _nextLeadContactCid(), person_id: null, name: ctEntryName,
+      job_title: (document.getElementById('lead-contact-title')?.value || '').trim() || null,
+      email:     (document.getElementById('lead-contact-email')?.value || '').trim() || null,
+      phone:     (document.getElementById('lead-contact-phone')?.value || '').trim() || null,
+      phone2:    (document.getElementById('lead-contact-phone2')?.value || '').trim() || null,
+      is_primary: leadContacts.length === 0, moved: null,
+    });
+    hideLeadContactEntry();
+    renderLeadContacts();
+  }
+
   const sourceId  = document.getElementById('lead-source-id').value;
   const descInput = document.getElementById('lead-description').value.trim();
-  // Only once the edit window has closed does the description box become append-only;
-  // through New + the grace window it's a single field whose text overwrites
-  // leads.description. New entries (append mode) go to lead_description_log instead.
+  // Description threading: in the session that first writes the description the box
+  // overwrites leads.description (the "Original"); from the next open the box is
+  // append-only and entries go to lead_description_log (see leadIsAppendMode).
   const appendMode  = leadIsAppendMode();
   const description = appendMode ? (leadData.description || '') : descInput;
 
@@ -17139,6 +17287,12 @@ async function saveLead(opts) {
   if (status === 'Qualified' && !leadData.peer_review_status) payload.peer_review_status = 'Pending';
 
   if (!opts.silent) startBusy('Saving lead…');   // autosave is fully silent — no busy overlay
+  // Lost-update guard (bug report #5): while this request is on the wire the user
+  // can keep clicking qualification dots / typing rating comments — those live on
+  // leadData, and blindly adopting the response row would silently revert them.
+  // Snapshot the outgoing object + edit counter so newer edits can be re-applied.
+  const editSeqAtSend = window._leadEditSeq || 0;
+  const preSave = leadData;
   try {
     if (leadData.id) {
       const result = await api('leads', 'PATCH', payload, 'id=eq.' + leadData.id + '&select=*');
@@ -17150,7 +17304,20 @@ async function saveLead(opts) {
       leadData = result[0];
       if (!opts.silent) showStatus('Lead created');
     }
-    leadFormDirty = false;
+    // Re-apply edits that arrived mid-flight: anywhere the live object now differs
+    // from what was SENT, the user changed it during the request — keep their value.
+    let midFlightEdits = false;
+    ['fit','access','capacity','trigger_score'].forEach(k => {
+      if ((+preSave[k] || 0) !== (+payload[k] || 0)) { leadData[k] = +preSave[k] || 0; midFlightEdits = true; }
+    });
+    ['fit_comment','access_comment','capacity_comment','trigger_comment'].forEach(k => {
+      const local = (preSave[k] == null ? '' : String(preSave[k])).trim() || null;
+      if (local !== (payload[k] || null)) { leadData[k] = preSave[k]; midFlightEdits = true; }
+    });
+    // Clear the dirty flag only if nothing changed while we were saving; otherwise
+    // leave it set and let the (rescheduled) autosave persist the newer edits.
+    leadFormDirty = midFlightEdits || (window._leadEditSeq || 0) !== editSeqAtSend;
+    if (leadFormDirty) { clearTimeout(_leadAutoSaveTimer); _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1200); }
     if (!opts.silent) setLeadSaveIndicator('saved');   // explicit saves confirm with "Saved"
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
@@ -18193,7 +18360,7 @@ function scUseExistingOrg(id) {
   const matchEl = document.getElementById('sc-org-matches'); if (matchEl) matchEl.innerHTML = '';
   scToggleNewOrg(false); _scRenderOrgChips();
 }
-function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-person-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); if (i) i.value=''; if (l) l.value=''; if (i) i.focus(); } }
+function scToggleNewPerson(show) { const el = document.getElementById('sc-person-new'); if (el) el.style.display = show ? 'flex' : 'none'; const m = document.getElementById('sc-person-matches'); if (m) m.innerHTML = ''; if (show) { const i = document.getElementById('sc-new-person-first'); const l = document.getElementById('sc-new-person-last'); const g = document.getElementById('sc-new-person-org'); if (i) i.value=''; if (l) l.value=''; if (g) g.value=''; if (i) i.focus(); } }
 async function scCreatePerson(force) {
   const first = (document.getElementById('sc-new-person-first').value || '').trim();
   const last  = (document.getElementById('sc-new-person-last').value || '').trim();
@@ -18223,6 +18390,19 @@ async function scCreatePerson(force) {
     const res = await api('people', 'POST', { first_name: first, last_name: last || null }, 'select=*');
     const person = res[0]; if (!person) throw new Error('No record returned');
     (allData['people'] = allData['people'] || []).push(person);
+    // Affiliate to the chosen organisation (optional). Without an affiliation the
+    // new person exists but never appears in any org's contact lists (bug report #4).
+    const affOrgId = +(document.getElementById('sc-new-person-org')?.value) || 0;
+    if (affOrgId) {
+      try {
+        await api('person_organisation_roles', 'POST', {
+          person_id: person.id, org_id: affOrgId, role_type: 'Contact', is_primary: false,
+          start_date: new Date().toISOString().slice(0, 10),
+          created_by: currentUser?.personId || null,
+        }, '');
+        if (allData['person_organisation_roles']) allData['person_organisation_roles'] = null;   // stale
+      } catch (e) { console.warn('Could not affiliate new person:', e.message); }
+    }
     if (!_scPersonIds.includes(+person.id)) _scPersonIds.push(+person.id);
     const sel = document.getElementById('sc-person-add');
     if (sel) { const o = document.createElement('option'); o.value = person.id; o.textContent = [person.first_name, person.last_name].filter(Boolean).join(' '); sel.appendChild(o); }
@@ -18374,9 +18554,15 @@ async function renderSalesCampaignModal() {
               <button type="button" class="btn btn-secondary" onclick="scAddPerson()">Add</button>
               <button type="button" class="btn btn-ghost" onclick="scToggleNewPerson(true)">+ New</button>
             </div>
-            <div id="sc-person-new" style="display:none;gap:8px;margin-top:8px;">
-              <input type="text" id="sc-new-person-first" class="form-control" placeholder="First name" style="flex:1;">
-              <input type="text" id="sc-new-person-last" class="form-control" placeholder="Last name" style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreatePerson();}">
+            <div id="sc-person-new" style="display:none;flex-wrap:wrap;gap:8px;margin-top:8px;">
+              <input type="text" id="sc-new-person-first" class="form-control" placeholder="First name" style="flex:1;min-width:120px;">
+              <input type="text" id="sc-new-person-last" class="form-control" placeholder="Last name" style="flex:1;min-width:120px;" onkeydown="if(event.key==='Enter'){event.preventDefault();scCreatePerson();}">
+              <!-- Optional affiliation: without it the new person belongs to no org and
+                   never surfaces in org-scoped contact pickers (bug report #4). -->
+              <select id="sc-new-person-org" class="form-control" style="flex:1.4;min-width:160px;">
+                <option value="">— organisation (optional) —</option>
+                ${orgs.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}
+              </select>
               <button type="button" class="btn btn-primary" onclick="scCreatePerson()">Create &amp; add</button>
               <button type="button" class="btn btn-secondary" onclick="scToggleNewPerson(false)">Cancel</button>
             </div>
