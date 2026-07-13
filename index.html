@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Focus — Business Information Management</title>
+<!-- PWA: lets Chrome/Edge offer "Install Focus" — the app then runs in its own
+     window with no browser back-button / address-bar chrome. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#003057">
+<link rel="icon" type="image/png" sizes="48x48" href="/icons/favicon-48.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Focus">
 <style>
 /* ── Variables ─────────────────────────────────────────── */
 :root {
@@ -531,8 +540,13 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
+    <!-- PWA install: hidden automatically when already running as the installed app -->
+    <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
+      <button class="btn btn-secondary" style="width:100%;justify-content:center;padding:9px;" onclick="openInstallGuide()">⤓ &nbsp;Install Focus as an app</button>
+      <div style="font-size:10px;color:var(--text3);margin-top:5px;">Runs in its own window — no browser bars</div>
+    </div>
   </div>
 </div>
 
@@ -560,7 +574,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8403,6 +8417,145 @@ async function loadLoginUsers() {
   } catch(e) {
     document.getElementById('login-user').innerHTML = '<option value="">Error loading users</option>';
   }
+}
+
+// ── PWA install (login page) ──────────────────────────────────────────────────
+// Chrome/Edge fire beforeinstallprompt when the app is installable; stash it so
+// the guide can offer a real one-click install. Safari/iOS never fires it — the
+// guide falls back to per-platform manual steps.
+let _pwaDeferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _pwaDeferredPrompt = e;
+  const quick = document.getElementById('ig-quick'); if (quick) quick.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+  _pwaDeferredPrompt = null;
+  const done = document.getElementById('ig-installed'); if (done) done.style.display = '';
+  const quick = document.getElementById('ig-quick');    if (quick) quick.style.display = 'none';
+});
+function _pwaIsStandalone() {
+  return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)
+      || window.navigator.standalone === true;   // iOS Safari
+}
+// Already running as the installed app → the login button is pointless; hide it.
+document.addEventListener('DOMContentLoaded', () => {
+  if (_pwaIsStandalone()) { const w = document.getElementById('pwa-install-wrap'); if (w) w.style.display = 'none'; }
+});
+
+async function installFocusNow() {
+  if (!_pwaDeferredPrompt) return;
+  const p = _pwaDeferredPrompt;
+  _pwaDeferredPrompt = null;
+  const quick = document.getElementById('ig-quick'); if (quick) quick.style.display = 'none';
+  try { p.prompt(); await p.userChoice; } catch (e) { /* user dismissed */ }
+}
+
+function closeInstallGuide() {
+  document.getElementById('install-guide')?.remove();
+}
+
+function openInstallGuide() {
+  closeInstallGuide();
+  const ua = navigator.userAgent || '';
+  const isIOS     = /iPhone|iPad|iPod/i.test(ua);
+  const isAndroid = /Android/i.test(ua);
+  const isMac     = !isIOS && /Macintosh/i.test(ua);
+  const isWindows = /Windows/i.test(ua);
+  const yours = '<span style="font-size:10px;font-weight:800;letter-spacing:0.05em;background:var(--red);color:#fff;border-radius:999px;padding:2px 8px;margin-left:8px;vertical-align:2px;">YOUR DEVICE</span>';
+
+  const sec = (title, tag, stepsHtml) => `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:#fff;">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);margin-bottom:8px;">${title}${tag ? yours : ''}</div>
+      ${stepsHtml}
+    </div>`;
+  const steps = (arr) => '<ol style="margin:0;padding-left:20px;font-size:13px;color:var(--text2);line-height:1.7;">'
+    + arr.map(s => `<li>${s}</li>`).join('') + '</ol>';
+
+  const secWindows = sec('Windows — Chrome or Edge', isWindows, steps([
+    'Open Focus in <b>Chrome</b> or <b>Microsoft Edge</b> (this page).',
+    'Look at the right-hand end of the <b>address bar</b> — click the small <b>install icon</b> (a screen with a ↓ arrow in Chrome; ⊞ “App available” in Edge).',
+    'No icon? In Chrome open the <b>⋮ menu → Cast, save and share → Install page as app…</b>. In Edge open <b>⋯ menu → Apps → Install Focus</b>.',
+    'Click <b>Install</b> in the little dialog that appears.',
+    'Focus opens immediately in its own clean window — no back button, no address bar.',
+  ]));
+  const secAndroid = sec('Android phone or tablet — Chrome', isAndroid, steps([
+    'Open Focus in <b>Chrome</b> on the phone.',
+    'Tap the <b>⋮ menu</b> (top-right).',
+    'Tap <b>Add to Home screen</b> (on newer versions: <b>Install app</b>).',
+    'Confirm with <b>Install / Add</b>.',
+  ]));
+  const secIOS = sec('iPhone or iPad — Safari', isIOS, steps([
+    'Open Focus in <b>Safari</b> (this only works from Safari, not Chrome on iPhone).',
+    'Tap the <b>Share</b> button — the square with an ↑ arrow at the bottom of the screen.',
+    'Scroll down the share sheet and tap <b>Add to Home Screen</b>.',
+    'Tap <b>Add</b> (top-right).',
+  ]));
+  const secMac = sec('Mac — Chrome, Edge or Safari', isMac, steps([
+    'In <b>Chrome/Edge</b>: click the <b>install icon</b> at the right of the address bar, or menu → <b>Install Focus</b>.',
+    'In <b>Safari</b> (macOS Sonoma or newer): <b>File → Add to Dock…</b>.',
+    'Confirm — Focus opens in its own window.',
+  ]));
+  // The visitor's own platform first, the rest after.
+  const ordered = [
+    [isWindows, secWindows], [isAndroid, secAndroid], [isIOS, secIOS], [isMac, secMac],
+  ].sort((a, b) => (b[0] ? 1 : 0) - (a[0] ? 1 : 0)).map(x => x[1]).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'install-guide';
+  overlay.innerHTML = `
+  <div style="position:fixed;inset:0;z-index:100001;background:rgba(0,48,87,0.55);display:flex;align-items:center;justify-content:center;padding:18px;" onclick="if(event.target===this)closeInstallGuide()">
+    <div style="background:var(--bg2);border-radius:14px;box-shadow:var(--shadow-lg);width:640px;max-width:96vw;max-height:92vh;display:flex;flex-direction:column;overflow:hidden;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 20px;border-bottom:1px solid var(--border);background:var(--navy);">
+        <div style="font-size:16px;font-weight:800;color:#fff;">Install Focus as an app</div>
+        <button onclick="closeInstallGuide()" style="background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <div style="padding:18px 20px;overflow-y:auto;">
+
+        <div style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:14px;">
+          Installing puts Focus in <b>its own window</b> — no browser back button, no address bar, no tabs —
+          with its own icon so it starts like any other program. It is still the same live system:
+          same login, same data, and updates arrive automatically. Nothing is stored on your device.
+        </div>
+
+        <div id="ig-installed" style="display:none;background:#DCFCE7;color:#166534;font-size:13px;font-weight:600;border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+          ✓ Focus is installed — find it as described under “Where to find it” below.
+        </div>
+
+        <div id="ig-quick" style="display:${_pwaDeferredPrompt ? '' : 'none'};margin-bottom:14px;">
+          <button class="btn btn-primary" style="width:100%;justify-content:center;padding:12px;font-size:14px;" onclick="installFocusNow()">⤓ &nbsp;Install now — one click</button>
+          <div style="font-size:11px;color:var(--text3);margin-top:5px;text-align:center;">Your browser supports direct install. Otherwise follow the steps for your device below.</div>
+        </div>
+
+        <div style="font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text3);margin:4px 0 8px;">How to install</div>
+        ${ordered}
+
+        <div style="font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text3);margin:16px 0 8px;">Where to find it after installing</div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;background:#fff;">
+          <ul style="margin:0;padding-left:20px;font-size:13px;color:var(--text2);line-height:1.8;">
+            <li><b>Windows:</b> Start menu → type “<b>Focus</b>”. Right-click the icon → <b>Pin to taskbar</b> to keep it one click away. It also appears in the list of installed apps.</li>
+            <li><b>Android:</b> the <b>Focus icon</b> (red Xone mark) appears on your home screen and in the app drawer.</li>
+            <li><b>iPhone / iPad:</b> the <b>Focus icon</b> appears on your home screen like any other app.</li>
+            <li><b>Mac:</b> in <b>Launchpad</b> and the Applications list; drag it to the Dock to pin it.</li>
+          </ul>
+        </div>
+
+        <div style="font-size:11px;font-weight:800;letter-spacing:0.05em;text-transform:uppercase;color:var(--text3);margin:16px 0 8px;">Good to know</div>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;background:#fff;">
+          <ul style="margin:0;padding-left:20px;font-size:13px;color:var(--text2);line-height:1.8;">
+            <li><b>Updates are automatic</b> — the app is the live system, so every new Focus release is there the next time you open it. A banner prompts a refresh if a newer version ships while it's open.</li>
+            <li><b>Same login, same data</b> — installing changes nothing about your account or permissions.</li>
+            <li><b>To uninstall:</b> Windows — Start menu → right-click Focus → Uninstall. Android/iPhone — long-press the icon → Remove/Uninstall. It never leaves data behind.</li>
+          </ul>
+        </div>
+
+      </div>
+      <div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;">
+        <button class="btn btn-secondary" onclick="closeInstallGuide()">Close</button>
+      </div>
+    </div>
+  </div>`;
+  document.body.appendChild(overlay);
 }
 
 async function doLogin() {
