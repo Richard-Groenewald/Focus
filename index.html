@@ -531,7 +531,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.84 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
   </div>
 </div>
@@ -560,7 +560,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.84 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12541,7 +12541,13 @@ async function revertLead() {
   if (leadReadOnly) return;
   const snap = window._leadRevert;
   if (!snap) { closeLeadPage({ force: true }); return; }
-  if (!await confirmDialog({title:'Revert changes', message:'Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.', confirmLabel:'Revert', danger:true})) return;
+  // A lead created THIS session has no baseline to restore — reverting deletes it
+  // outright. Say so explicitly (bug report #2: a just-created lead "disappeared").
+  const createdThisSession = !(snap.lead && snap.lead.id);
+  const confirmed = await confirmDialog(createdThisSession
+    ? {title:'Delete this lead?', message:'This lead was created in this session, so there is no earlier state to revert to — reverting will DELETE the whole lead, including its contacts, engagements and notes. This cannot be undone.', confirmLabel:'Delete lead', danger:true}
+    : {title:'Revert changes', message:'Revert every change made since you opened this lead? This also removes contacts, engagements and notes added during this session.', confirmLabel:'Revert', danger:true});
+  if (!confirmed) return;
   startBusy('Reverting…');
   try {
     const id = snap.lead && snap.lead.id;
@@ -12572,6 +12578,9 @@ async function revertLead() {
 function markLeadDirty(e) {
   if (leadReadOnly) return;
   leadFormDirty = true;
+  // Monotonic edit counter: lets an in-flight save detect that newer edits arrived
+  // while it was on the wire, so its completion must not clear the dirty flag.
+  window._leadEditSeq = (window._leadEditSeq || 0) + 1;
   // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
   // indicator shown is "Saved" after a successful save (below).
   setLeadSaveIndicator('');
@@ -12584,7 +12593,10 @@ function markLeadDirty(e) {
 
 async function leadAutoSaveNow() {
   clearTimeout(_leadAutoSaveTimer);
-  if (leadReadOnly || _leadAutoSaveInFlight || !leadFormDirty) return;
+  if (leadReadOnly || !leadFormDirty) return;
+  // A save is already on the wire: don't drop this tick — retry shortly, so edits
+  // made during the in-flight save (e.g. rapid qualification-dot clicks) persist.
+  if (_leadAutoSaveInFlight) { _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 800); return; }
   // Capture-always: NO completeness gate here. Filled fields (qualification dots,
   // red flags, comments…) persist immediately; the status engine — not the save
   // path — decides whether the lead is ready to progress to Working.
@@ -12594,8 +12606,9 @@ async function leadAutoSaveNow() {
   try { ok = await saveLead({ keepOpen: true, silent: true }); } catch (e) { ok = false; }
   _leadAutoSaveInFlight = false;
   // A typed-but-uncommitted description note stays pending until an explicit Save.
+  // OR-ed with the current flag: saveLead leaves it true when edits landed mid-flight.
   const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
-  if (ok) { leadFormDirty = pendingNote; setLeadSaveIndicator('saved'); }
+  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator('saved'); }
   else setLeadSaveIndicator('');
 }
 
@@ -12644,8 +12657,10 @@ async function closeLeadPage(opts) {
 
 // ── Lead Qualification multi-selects (Red Flags + Strategic Decisions) ──
 // Selections are kept in window state and synced to junction tables on save.
+// _leadQualSelDirty marks in-memory changes; the sync no-ops while it's false.
 window._leadRedFlags = [];
 window._leadStrategicDecisions = [];
+window._leadQualSelDirty = false;
 
 async function loadLeadQualificationLookups() {
   const [redFlags, decisions] = await Promise.all([
@@ -12659,6 +12674,7 @@ async function loadLeadQualificationLookups() {
 }
 
 async function loadLeadQualificationSelections(leadId) {
+  window._leadQualSelDirty = false;   // freshly loaded = in sync with the DB
   if (!leadId) {
     window._leadRedFlags = [];
     window._leadStrategicDecisions = [];
@@ -12721,6 +12737,7 @@ function addLeadRedFlag() {
   const item = (allData['red_flags'] || []).find(x => +x.id === id);
   if (!item) return;
   window._leadRedFlags.push({ id, name: item.name, comment: '' });
+  window._leadQualSelDirty = true;
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   sel.value = '';
@@ -12734,6 +12751,7 @@ function addLeadStrategicDecision() {
   const item = (allData['strategic_decisions'] || []).find(x => +x.id === id);
   if (!item) return;
   window._leadStrategicDecisions.push({ id, name: item.name, comment: '' });
+  window._leadQualSelDirty = true;
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   sel.value = '';
@@ -12742,6 +12760,7 @@ function addLeadStrategicDecision() {
 
 function removeLeadRedFlag(id) {
   window._leadRedFlags = window._leadRedFlags.filter(x => +x.id !== +id);
+  window._leadQualSelDirty = true;
   renderLeadRedFlags();
   refreshLeadRedFlagPool();
   markLeadDirty();
@@ -12749,6 +12768,7 @@ function removeLeadRedFlag(id) {
 
 function removeLeadStrategicDecision(id) {
   window._leadStrategicDecisions = window._leadStrategicDecisions.filter(x => +x.id !== +id);
+  window._leadQualSelDirty = true;
   renderLeadStrategicDecisions();
   refreshLeadStrategicDecisionPool();
   markLeadDirty();
@@ -12758,12 +12778,12 @@ function removeLeadStrategicDecision(id) {
 function setLeadRedFlagComment(id, val) {
   if (leadReadOnly) return;
   const x = (window._leadRedFlags || []).find(f => +f.id === +id);
-  if (x) x.comment = val;
+  if (x) { x.comment = val; window._leadQualSelDirty = true; }
 }
 function setLeadStrategicDecisionComment(id, val) {
   if (leadReadOnly) return;
   const x = (window._leadStrategicDecisions || []).find(f => +f.id === +id);
-  if (x) x.comment = val;
+  if (x) { x.comment = val; window._leadQualSelDirty = true; }
 }
 
 function renderLeadRedFlags() {
@@ -12808,15 +12828,30 @@ function renderLeadStrategicDecisions() {
 
 async function saveLeadQualificationSelections(leadId) {
   if (!leadId) return;
+  // Skip when untouched: this DELETE-then-INSERT sync used to run on EVERY save —
+  // including each 1.5s autosave tick — adding two serial ~600ms round-trips per
+  // save whether or not any flag/decision changed (bug report #9, slow saves).
+  if (!window._leadQualSelDirty) return;
   try {
-    await api('lead_red_flags',           'DELETE', null, `lead_id=eq.${leadId}`);
-    await api('lead_strategic_decisions', 'DELETE', null, `lead_id=eq.${leadId}`);
-    for (const x of window._leadRedFlags) {
-      try { await api('lead_red_flags', 'POST', { lead_id: leadId, red_flag_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
-    }
-    for (const x of window._leadStrategicDecisions) {
-      try { await api('lead_strategic_decisions', 'POST', { lead_id: leadId, strategic_decision_id: x.id, comment: x.comment || null }, ''); } catch(e) {}
-    }
+    // The two tables are independent — sync them in parallel (order matters only
+    // within a table: its DELETE must precede its INSERTs).
+    await Promise.all([
+      (async () => {
+        await api('lead_red_flags', 'DELETE', null, `lead_id=eq.${leadId}`);
+        if (window._leadRedFlags.length) {
+          await api('lead_red_flags', 'POST',
+            window._leadRedFlags.map(x => ({ lead_id: leadId, red_flag_id: x.id, comment: x.comment || null })), '');
+        }
+      })(),
+      (async () => {
+        await api('lead_strategic_decisions', 'DELETE', null, `lead_id=eq.${leadId}`);
+        if (window._leadStrategicDecisions.length) {
+          await api('lead_strategic_decisions', 'POST',
+            window._leadStrategicDecisions.map(x => ({ lead_id: leadId, strategic_decision_id: x.id, comment: x.comment || null })), '');
+        }
+      })(),
+    ]);
+    window._leadQualSelDirty = false;   // synced; stay quiet until the next change
   } catch(e) {
     console.warn('Failed to save lead qualification selections:', e.message);
   }
@@ -13217,7 +13252,14 @@ async function addLeadContactEntry() {
 
 async function _commitLeadContact(base, isPrimary) {
   // A brand-new lead must exist before contacts can be persisted against it.
-  if (!leadData.id) { const ok = await saveLead({ keepOpen: true }); if (!ok || !leadData.id) return; }
+  // The flag stops saveLead's capture-always sweep from ALSO committing the still-
+  // filled entry box during this save — that would duplicate the contact.
+  if (!leadData.id) {
+    window._leadContactCommitting = true;
+    let ok = false;
+    try { ok = await saveLead({ keepOpen: true }); } finally { window._leadContactCommitting = false; }
+    if (!ok || !leadData.id) return;
+  }
   let entry;
   if (base.person_id) {
     const p = (allData['people'] || []).find(x => +x.id === +base.person_id) || {};
@@ -13657,6 +13699,14 @@ function chooseNewLeadSite() {
   _showLeadSiteChosen(name, null, true);
   const orgGroup = document.getElementById('lead-target-org-group');
   if (orgGroup) orgGroup.style.display = '';
+  // Normalise the sub-picker's INNER state. A previous session may have left the
+  // dropdown hidden behind the chosen chip or the "New organisation name" input
+  // display:none — the group then reads "create a new one below" with no field
+  // below (bug report #3). A locked org (past New) re-renders as its frozen chip.
+  const orgLocked = !!(leadData && leadData.id) && (leadData.status || 'New') !== 'New'
+    && typeof leadInEditGrace === 'function' && !leadInEditGrace(leadData);
+  if (orgLocked && typeof applyLeadTargetOrgLock === 'function') applyLeadTargetOrgLock(true);
+  else onLeadTargetOrgChange();
   renderLeadContacts();
   if (!window._leadPopulating) markLeadDirty();
 }
@@ -13683,14 +13733,18 @@ function _showLeadSiteChosen(label, orgNm, isNew) {
   }
 }
 
-// Drop back to the typeahead to re-pick.
+// Drop back to the typeahead to re-pick. The organisation selection is KEPT —
+// renaming/re-picking a site must not force the user to re-allocate the org
+// (bug report #3); picking a different existing site re-derives it anyway.
 function changeLeadSite() {
-  clearLeadSiteField();
+  clearLeadSiteField({ keepOrg: true });
   document.getElementById('lead-site-search')?.focus();
 }
 
 // Full reset of the site field (init / reset form / Change).
-function clearLeadSiteField() {
+// opts.keepOrg: retain the organisation values (site Change flow) instead of wiping them.
+function clearLeadSiteField(opts) {
+  opts = opts || {};
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
   set('lead-site-id', ''); set('lead-site-name', ''); set('lead-site-search', '');
   const matchEl  = document.getElementById('lead-site-matches');
@@ -13703,7 +13757,13 @@ function clearLeadSiteField() {
   if (chosen)   chosen.style.display = 'none';
   if (derived)  derived.style.display = 'none';
   if (orgGroup) orgGroup.style.display = 'none';
-  set('lead-target-org-id', ''); set('lead-target-org-name', '');
+  if (!opts.keepOrg) {
+    set('lead-target-org-id', ''); set('lead-target-org-name', '');
+    // Values were wiped programmatically (no change event), so reset the picker's
+    // inner display too — otherwise the "New organisation name" input can stay
+    // hidden from an earlier locked-in choice (bug report #3).
+    if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
+  }
   renderLeadContacts();
 }
 
@@ -17044,6 +17104,27 @@ async function saveLead(opts) {
     chooseNewLeadSite();
   }
 
+  // Contact entry box: same capture-always rule. Details typed but never committed
+  // via the "Add contact" button must still persist (bug report #6 — a PA's details
+  // were typed, looked captured, and silently evaporated on save). Commit them as a
+  // provisional contact, EXCEPT while the user is still typing in the box (autosave
+  // firing mid-entry) or a person-match modal is awaiting their decision.
+  const ctEntryName = (document.getElementById('lead-contact-name')?.value || '').trim();
+  const ctEntryFocused = ['lead-contact-name','lead-contact-title','lead-contact-email','lead-contact-phone']
+    .includes(document.activeElement && document.activeElement.id);
+  if (ctEntryName && !ctEntryFocused && !window._leadContactCommitting
+      && !(document.getElementById('modal-root')?.innerHTML || '').trim()) {
+    leadContacts.push({
+      cid: _nextLeadContactCid(), person_id: null, name: ctEntryName,
+      job_title: (document.getElementById('lead-contact-title')?.value || '').trim() || null,
+      email:     (document.getElementById('lead-contact-email')?.value || '').trim() || null,
+      phone:     (document.getElementById('lead-contact-phone')?.value || '').trim() || null,
+      is_primary: leadContacts.length === 0, moved: null,
+    });
+    hideLeadContactEntry();
+    renderLeadContacts();
+  }
+
   const sourceId  = document.getElementById('lead-source-id').value;
   const descInput = document.getElementById('lead-description').value.trim();
   // Only once the edit window has closed does the description box become append-only;
@@ -17170,6 +17251,12 @@ async function saveLead(opts) {
   if (status === 'Qualified' && !leadData.peer_review_status) payload.peer_review_status = 'Pending';
 
   if (!opts.silent) startBusy('Saving lead…');   // autosave is fully silent — no busy overlay
+  // Lost-update guard (bug report #5): while this request is on the wire the user
+  // can keep clicking qualification dots / typing rating comments — those live on
+  // leadData, and blindly adopting the response row would silently revert them.
+  // Snapshot the outgoing object + edit counter so newer edits can be re-applied.
+  const editSeqAtSend = window._leadEditSeq || 0;
+  const preSave = leadData;
   try {
     if (leadData.id) {
       const result = await api('leads', 'PATCH', payload, 'id=eq.' + leadData.id + '&select=*');
@@ -17181,7 +17268,20 @@ async function saveLead(opts) {
       leadData = result[0];
       if (!opts.silent) showStatus('Lead created');
     }
-    leadFormDirty = false;
+    // Re-apply edits that arrived mid-flight: anywhere the live object now differs
+    // from what was SENT, the user changed it during the request — keep their value.
+    let midFlightEdits = false;
+    ['fit','access','capacity','trigger_score'].forEach(k => {
+      if ((+preSave[k] || 0) !== (+payload[k] || 0)) { leadData[k] = +preSave[k] || 0; midFlightEdits = true; }
+    });
+    ['fit_comment','access_comment','capacity_comment','trigger_comment'].forEach(k => {
+      const local = (preSave[k] == null ? '' : String(preSave[k])).trim() || null;
+      if (local !== (payload[k] || null)) { leadData[k] = preSave[k]; midFlightEdits = true; }
+    });
+    // Clear the dirty flag only if nothing changed while we were saving; otherwise
+    // leave it set and let the (rescheduled) autosave persist the newer edits.
+    leadFormDirty = midFlightEdits || (window._leadEditSeq || 0) !== editSeqAtSend;
+    if (leadFormDirty) { clearTimeout(_leadAutoSaveTimer); _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1200); }
     if (!opts.silent) setLeadSaveIndicator('saved');   // explicit saves confirm with "Saved"
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
