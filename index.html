@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -18796,7 +18796,7 @@ async function renderSalesCampaignModal() {
           <div class="form-group">
             <label class="form-label">Market Segment <span style="font-weight:400;color:var(--text3);font-size:11px;">— pick one or more sectors</span></label>
             <div style="display:flex;gap:8px;">
-              <select id="sc-sector-add" class="form-control" style="flex:1;">
+              <select id="sc-sector-add" class="form-control" style="flex:1;" onchange="scAddSector()">
                 <option value="">— pick a sector —</option>
                 ${sectors.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}
               </select>
@@ -18816,7 +18816,7 @@ async function renderSalesCampaignModal() {
           <div class="form-group">
             <label class="form-label">Participants — Organisations</label>
             <div style="display:flex;gap:8px;">
-              <select id="sc-org-add" class="form-control" style="flex:1;">
+              <select id="sc-org-add" class="form-control" style="flex:1;" onchange="scAddOrg()">
                 <option value="">— pick an organisation —</option>
                 ${orgs.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('')}
               </select>
@@ -18835,7 +18835,7 @@ async function renderSalesCampaignModal() {
           <div class="form-group">
             <label class="form-label">Participants — People</label>
             <div style="display:flex;gap:8px;">
-              <select id="sc-person-add" class="form-control" style="flex:1;">
+              <select id="sc-person-add" class="form-control" style="flex:1;" onchange="scAddPerson()">
                 <option value="">— pick a person —</option>
                 ${people.map(p => `<option value="${p.id}">${esc([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
               </select>
@@ -18893,6 +18893,10 @@ async function renderSalesCampaignModal() {
 async function saveSalesCampaign() {
   const name = document.getElementById('sc-name').value.trim();
   if (!name) { showStatus('Title is required', 'error'); return; }
+  // Sweep any picker selection that was never explicitly "Add"-ed into its chip
+  // list — a sector picked in the dropdown and left there used to be silently
+  // discarded on Update ("sector doesn't save", 2026-07-17).
+  scAddSector(); scAddOrg(); scAddPerson();
   const payload = {
     name,
     purpose: document.getElementById('sc-purpose').value.trim() || null,
