@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6602,6 +6602,7 @@ async function openDealEngagementModal() {
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
   await loadLiLookups();
   await _liLoadPeople();
+  await _liInitStreamSection();
 }
 
 async function loadEngagements(dealId) {
@@ -8956,8 +8957,25 @@ async function renderDashboard() {
 async function _dashActions() {
   const scope = _dashScope();
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const acts = await apiGet('engagements',
-    'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
+  let acts;
+  try {
+    acts = await apiGet('engagements',
+      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type,stream_id,engagement_date');
+    // One row per open STREAM: within a stream only the newest open action is
+    // the real obligation (older ones are legacy pile-up awaiting supersede).
+    const latestByStream = new Map();
+    for (const a of acts) {
+      const k = String(a.stream_id || ('e' + a.id));
+      const cur = latestByStream.get(k);
+      if (!cur || String(a.engagement_date || '') > String(cur.engagement_date || '')
+          || (a.engagement_date === cur.engagement_date && +a.id > +cur.id)) latestByStream.set(k, a);
+    }
+    acts = [...latestByStream.values()];
+  } catch (e) {
+    // Pre-migration DB (no stream columns yet) — original per-engagement view.
+    acts = await apiGet('engagements',
+      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
+  }
   const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description');
   const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
@@ -11349,6 +11367,7 @@ async function cockpitQuickLogTouch(leadId) {
     await loadLiLookups();
     await maybeApplyCadencePrefill();
     await _liLoadPeople();
+    await _liInitStreamSection();
   } catch (e) {
     showStatus('Could not open quick log: ' + e.message, 'error');
   }
@@ -11777,6 +11796,18 @@ async function _engHistLoad() {
   const leadsById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const subsById  = Object.fromEntries(subs.map(s => [+s.id, s]));
 
+  // Stream labels: roots inside the window carry their own label; roots outside
+  // it are fetched in chunks (URL-length safe). Pre-migration DBs skip cleanly.
+  const streamLabelById = {};
+  engs.forEach(e => { if (+e.id === +(e.stream_id || e.id) && e.stream_label) streamLabelById[+e.id] = e.stream_label; });
+  const missingRoots = [...new Set(engs.map(e => +(e.stream_id || e.id)))].filter(id => !streamLabelById[id]);
+  for (let i = 0; i < missingRoots.length; i += 150) {
+    try {
+      (await apiGet('engagements', `id=in.(${missingRoots.slice(i, i + 150).join(',')})&select=id,stream_label`))
+        .forEach(r => { if (r.stream_label) streamLabelById[+r.id] = r.stream_label; });
+    } catch (e) { break; }
+  }
+
   const peopleByEng = {};
   engPeople.forEach(r => { (peopleByEng[+r.engagement_id] = peopleByEng[+r.engagement_id] || []).push(+r.person_id); });
   const personIds = new Set(engPeople.map(r => +r.person_id));
@@ -11804,8 +11835,11 @@ async function _engHistLoad() {
       else if (lead && lead.target_person_name) persons = [lead.target_person_name];
     }
     const ownerId = isLead ? (lead && lead.owner_id) : (deal && deal.owner_id);
+    const streamRoot = +(e.stream_id || e.id);
     return {
       e, cat, lost, isLead,
+      streamRoot,
+      streamLabel: streamLabelById[streamRoot] || ('Stream #' + streamRoot),
       persons,
       clientName: isLead ? (oName(lead && lead.target_org_id) || (lead && lead.target_org_name) || '—') : (oName(deal && deal.org_id) || '—'),
       parentLabel: isLead ? ((lead && (lead.target_org_name || lead.description)) || ('Lead #' + e.lead_id)) : ((deal && deal.name) || ('Deal #' + e.deal_id)),
@@ -11835,7 +11869,7 @@ function _engHistShell() {
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
         <div>${lbl('Group by')}
           <select id="eh-group" class="form-control" style="height:34px;" onchange="window._engHist.group=this.value;_engHistApply()">
-            ${opts([['client','Client'],['deal','Deal / Lead'],['person','Person'],['none','Timeline']], st.group)}
+            ${opts([['client','Client'],['deal','Deal / Lead'],['stream','Stream'],['person','Person'],['none','Timeline']], st.group)}
           </select></div>
         <div>${lbl('Category')}
           <select id="eh-category" class="form-control" style="height:34px;" onchange="_engHistReload()">
@@ -11907,6 +11941,7 @@ function _engHistApply() {
   rows.forEach(r => {
     if (st.group === 'client')      addTo('c:' + r.clientName, r.clientName, r);
     else if (st.group === 'deal')   addTo(r.parentKind + ':' + r.parentId, r.parentLabel, r);
+    else if (st.group === 'stream') addTo('s:' + r.streamRoot, r.streamLabel + ' — ' + r.parentLabel, r);
     else if (st.group === 'person') {
       const list = r.persons.length ? r.persons : ['(no contact recorded)'];
       list.forEach(nm => addTo('p:' + nm, nm, r));
@@ -16487,6 +16522,17 @@ async function commitPromotion(s) {
           }
         });
         if (epRows.length) { try { await api('engagement_people', 'POST', epRows, ''); } catch (e) { /* ignore dup */ } }
+        // Each copy starts its own deal-side stream (the Promotion engagement
+        // below takes the plain 'Sales' label, so copies number from #2).
+        for (let ci = 0; ci < created.length; ci++) {
+          const cId = created[ci] && created[ci].id;
+          if (cId) {
+            try {
+              await api('engagements', 'PATCH',
+                { stream_id: cId, stream_label: 'Sales #' + (ci + 2) }, 'id=eq.' + cId);
+            } catch (e) { /* pre-migration DB — non-fatal */ }
+          }
+        }
         // Close every lead original with the explanatory note in one PATCH.
         await api('engagements', 'PATCH', {
           next_action_done:            true,
@@ -16508,7 +16554,7 @@ async function commitPromotion(s) {
       } catch { allData['_activity_types_opps'] = []; }
     }
     const promotionType = (allData['_activity_types_opps'] || []).find(t => t.name === 'Promotion');
-    await api('engagements', 'POST', {
+    const promoEng = await api('engagements', 'POST', {
       deal_id:          dealId,
       engagement_date:  new Date().toISOString().slice(0,10),
       engagement_type:  promotionType ? promotionType.name : 'Promotion',
@@ -16520,7 +16566,13 @@ async function commitPromotion(s) {
       next_action_date: s.q4.nextActionDate || null,
       next_action_done: false,
       created_by:       currentUser?.personId || null,
-    }, '');
+    }, 'select=*');
+    // The promotion obligation opens the deal's primary 'Sales' stream.
+    const promoEngId = promoEng && promoEng[0] ? promoEng[0].id : null;
+    if (promoEngId) {
+      try { await api('engagements', 'PATCH', { stream_id: promoEngId, stream_label: 'Sales' }, 'id=eq.' + promoEngId); }
+      catch (e) { /* pre-migration DB — non-fatal */ }
+    }
 
     // === 8.5. Referrer: create the deferred referral contact =====
     // A lead sourced via Referral may carry a typed referrer + contact detail
@@ -17510,6 +17562,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
           ${relatedRecordLink}
           <div id="li-cadence-hint"></div>
           ${relatedNote}
+          <div class="form-group" id="li-stream-wrap" style="display:none;"></div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Date</label>
@@ -17574,6 +17627,7 @@ async function openLeadInteractionView(interactionId, locked = false) {
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('view', i, locked);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
+  window._liStream = null;            // stream choice only applies when logging NEW
   await loadLiLookups();
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
@@ -17589,6 +17643,7 @@ async function openEditLeadInteractionModal(interactionId) {
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('edit', i);
   window._liEditing = i;
   window._liQuickLogContext = null;   // edited from the full form → reload the form on save
+  window._liStream = null;            // stream choice only applies when logging NEW
   await loadLiLookups();
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', i);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     i);
@@ -17625,6 +17680,7 @@ async function openEngagement(engId) {
   window._engStandalone = true;
   window._liEditing = eng;
   window._liQuickLogContext = null;
+  window._liStream = null;            // stream choice only applies when logging NEW
   const editable = !engagementIsLocked(eng);
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
   await loadLiLookups();
@@ -17651,6 +17707,7 @@ async function openLeadInteractionModal() {
   await loadLiLookups();
   await maybeApplyCadencePrefill();
   await _liLoadPeople();
+  await _liInitStreamSection();
 }
 
 // Initiate a NEW interaction that references an existing one (the chain parent).
@@ -17665,6 +17722,7 @@ async function openLeadInteractionRelated(parentId) {
   await loadLiLookups();
   await maybeApplyCadencePrefill();
   await _liLoadPeople();
+  await _liInitStreamSection();
 }
 
 // Populate Type and Next Action dropdowns, scoped to the engagement's parent:
@@ -17965,6 +18023,7 @@ function _liSnapshotForm() {
     standalone: !!window._engStandalone,
     relatedTo: window._liRelatedTo || null,
     quickLog: window._liQuickLogContext || null,
+    stream: window._liStream || null,
     date: v('li-date'), type: v('li-type'), notes: v('li-notes'),
     nextAction: v('li-next-action'), nextDate: v('li-next-date'),
     actionDetails: v('li-action-details'),
@@ -18000,6 +18059,8 @@ async function _liRestoreForm(snap) {
   if (noteWrap) noteWrap.style.display = snap.nextDone ? 'block' : 'none';
   set('li-completion-note-input', snap.completionNote);
   await _liLoadPeople(true);   // keep current selections; rebuild only the pool
+  window._liStream = snap.stream || null;
+  _liRenderStreamSection();    // stream data lives in state — no refetch needed
 }
 
 // Cancel/close handler for the child modals: back to the engagement form when we
@@ -18008,6 +18069,118 @@ async function _liChildCancel() {
   const snap = window._liChildSnap;
   window._liChildSnap = null;
   if (snap) await _liRestoreForm(snap); else closeModal();
+}
+
+// ── Engagement streams ───────────────────────────────────────────────────────
+// A stream is a thread of engagements pursuing one objective on a lead/deal.
+// Stream identity = id of its root engagement (stream_id on every member);
+// the root row carries the editable stream_label. Invariant kept by the app:
+// a stream has at most ONE open next action — logging a continuation
+// supersedes (auto-completes) the previous one, visibly pre-ticked.
+// window._liStream: null in edit/view mode, else
+//   { mode:'continue'|'new', streams:[{rootId,label,latestDate,latestEngId,open}],
+//     selectedRoot, label, supersedeTicked }
+async function _liInitStreamSection() {
+  const wrap = document.getElementById('li-stream-wrap');
+  if (!wrap) return;
+  const parent = window._engParent;
+  if (!parent || !parent.id) { window._liStream = null; wrap.style.display = 'none'; return; }
+  let rows = [];
+  try {
+    const filter = parent.kind === 'deal' ? `deal_id=eq.${parent.id}` : `lead_id=eq.${parent.id}`;
+    rows = await apiGet('engagements',
+      `${filter}&select=id,stream_id,stream_label,engagement_date,next_action,next_action_date,next_action_done&order=engagement_date.desc,id.desc&limit=1000`);
+  } catch (e) { /* pre-migration DB: hide the section rather than break logging */ window._liStream = null; wrap.style.display = 'none'; return; }
+  const byRoot = new Map();
+  rows.forEach(r => {
+    const root = +(r.stream_id || r.id);
+    const s = byRoot.get(root) || { rootId: root, label: null, latestDate: r.engagement_date, latestEngId: +r.id, open: null };
+    if (+r.id === root && r.stream_label) s.label = r.stream_label;
+    // rows arrive newest-first, so the first open action seen is the stream's current one
+    if (!s.open && r.next_action && !r.next_action_done) s.open = { engId: +r.id, action: r.next_action, due: r.next_action_date || null };
+    byRoot.set(root, s);
+  });
+  const streams = [...byRoot.values()];
+  streams.forEach(s => { if (!s.label) s.label = 'Stream #' + s.rootId; });
+  streams.sort((a, b) => String(b.latestDate || '').localeCompare(String(a.latestDate || '')) || b.rootId - a.rootId);
+  const firstOpen = streams.find(s => s.open) || streams[0] || null;
+  window._liStream = {
+    mode: streams.length ? 'continue' : 'new',
+    streams,
+    selectedRoot: firstOpen ? firstOpen.rootId : null,
+    label: '',
+    supersedeTicked: true,
+  };
+  // "+ Related engagement" pre-binds the continuation to that engagement's stream.
+  if (window._liRelatedTo) {
+    const rel = rows.find(r => +r.id === +window._liRelatedTo);
+    if (rel) { window._liStream.mode = 'continue'; window._liStream.selectedRoot = +(rel.stream_id || rel.id); }
+  }
+  _liRenderStreamSection();
+}
+
+function _liRenderStreamSection() {
+  const wrap = document.getElementById('li-stream-wrap');
+  const st = window._liStream;
+  if (!wrap) return;
+  if (!st) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  const hasStreams = st.streams.length > 0;
+  if (!hasStreams) st.mode = 'new';
+  const sel = st.streams.find(s => s.rootId === st.selectedRoot) || null;
+  const labelVal = st.mode === 'new'
+    ? (st.label || _liAutoStreamLabel())
+    : (sel ? sel.label : '');
+  st.label = labelVal;
+  const opts = st.streams.map(s => {
+    const openTxt = s.open ? ` — open: ${s.open.action}${s.open.due ? ' · due ' + s.open.due : ''}` : ' — no open action';
+    return `<option value="${s.rootId}" ${s.rootId === st.selectedRoot ? 'selected' : ''}>${cEsc(s.label + openTxt)}</option>`;
+  }).join('');
+  const supersede = (st.mode === 'continue' && sel && sel.open) ? `
+    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text2);margin-top:8px;cursor:pointer;">
+      <input type="checkbox" id="li-stream-supersede" ${st.supersedeTicked ? 'checked' : ''} style="margin-top:2px;"
+        onchange="window._liStream.supersedeTicked=this.checked">
+      <span>Actioning: <strong>${cEsc(sel.open.action)}</strong>${sel.open.due ? ' — due ' + sel.open.due : ''}<br>
+      <span style="color:var(--text3);">Will be marked complete (superseded by this engagement). Untick to keep it open.</span></span>
+    </label>` : '';
+  wrap.innerHTML = `
+    <label class="form-label">Stream</label>
+    <div style="display:flex;gap:14px;margin-bottom:6px;font-size:13px;">
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;${hasStreams ? '' : 'opacity:.5;'}">
+        <input type="radio" name="li-stream-mode" value="continue" ${st.mode === 'continue' ? 'checked' : ''} ${hasStreams ? '' : 'disabled'}
+          onchange="window._liStream.mode='continue';_liRenderStreamSection()"> Continue existing
+      </label>
+      <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+        <input type="radio" name="li-stream-mode" value="new" ${st.mode === 'new' ? 'checked' : ''}
+          onchange="window._liStream.mode='new';window._liStream.label='';_liRenderStreamSection()"> Start new stream
+      </label>
+    </div>
+    ${st.mode === 'continue' ? `
+      <select id="li-stream-pick" class="form-control" style="margin-bottom:6px;"
+        onchange="window._liStream.selectedRoot=+this.value;window._liStream.supersedeTicked=true;_liRenderStreamSection()">${opts}</select>` : ''}
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;color:var(--text3);white-space:nowrap;">Label</span>
+      <input type="text" id="li-stream-label" class="form-control" style="height:30px;font-size:12px;" value="${cEsc(labelVal)}"
+        oninput="window._liStream.label=this.value">
+    </div>
+    ${supersede}`;
+}
+
+// Default label for a NEW stream, derived from the parent's category (same rule
+// as the Engagement History view), de-duplicated against existing stream labels.
+function _liAutoStreamLabel() {
+  const p = window._engParent;
+  let base = 'Sales';
+  if (p && p.kind === 'lead') base = 'Outreach';
+  else if (p && p.kind === 'deal' && typeof oppData !== 'undefined' && oppData && +oppData.id === +p.id) {
+    const sub = (allData['service_sub'] || []).find(s => +s.id === +oppData.service_sub_id);
+    base = _engHistCat(oppData.stage_id, sub).cat;
+  }
+  const labels = new Set(((window._liStream && window._liStream.streams) || []).map(s => s.label));
+  if (!labels.has(base)) return base;
+  let n = 2;
+  while (labels.has(base + ' #' + n)) n++;
+  return base + ' #' + n;
 }
 
 async function saveLeadInteraction(editId) {
@@ -18055,6 +18228,10 @@ async function saveLeadInteraction(editId) {
     let engId = editId;
     const par = window._engParent || {};
     const isDealEng = !!(par.kind === 'deal' && par.id);
+    // Stream choice (new engagements only; edit/view leave streams untouched).
+    const sst = (!editId && window._liStream) ? window._liStream : null;
+    const contStream = (sst && sst.mode === 'continue')
+      ? (sst.streams.find(s => s.rootId === sst.selectedRoot) || null) : null;
     if (editId) {
       await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
@@ -18064,6 +18241,11 @@ async function saveLeadInteraction(editId) {
         ? { deal_id: +par.id }
         : { lead_id: (par.kind === 'lead' && par.id) ? +par.id : leadData.id,
             related_interaction_id: window._liRelatedTo || null };
+      if (contStream) {
+        target.stream_id = contStream.rootId;
+        // Fine-grained chain link to the engagement being continued.
+        if (!target.related_interaction_id) target.related_interaction_id = contStream.latestEngId || null;
+      }
       const res = await api('engagements', 'POST', {
         ...payload,
         ...target,
@@ -18072,6 +18254,31 @@ async function saveLeadInteraction(editId) {
       engId = res && res[0] ? res[0].id : null;
       window._liRelatedTo = null;
       showStatus('Engagement logged');
+    }
+    // Stream bookkeeping (best-effort — never fail the save over it):
+    // new stream → the engagement becomes its own root and carries the label;
+    // continuation → optional root rename + supersede of the previous open action.
+    if (engId && sst) {
+      try {
+        if (contStream) {
+          const newLabel = (sst.label || '').trim();
+          if (newLabel && newLabel !== contStream.label) {
+            await api('engagements', 'PATCH', { stream_label: newLabel }, 'id=eq.' + contStream.rootId);
+          }
+          if (contStream.open && sst.supersedeTicked && +contStream.open.engId !== +engId) {
+            await api('engagements', 'PATCH', {
+              next_action_done: true,
+              next_action_completed_at: new Date().toISOString(),
+              next_action_completion_note: 'Superseded by engagement of ' + date,
+            }, 'id=eq.' + contStream.open.engId);
+          }
+        } else {
+          await api('engagements', 'PATCH', {
+            stream_id: engId,
+            stream_label: (sst.label || '').trim() || _liAutoStreamLabel(),
+          }, 'id=eq.' + engId);
+        }
+      } catch (e) { console.warn('Stream bookkeeping failed:', e.message); }
     }
     // Sync People Involved → engagement_people (replace-all on edit). Best-effort:
     // never fail the whole save if a person link can't be written.
