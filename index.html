@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8976,7 +8976,7 @@ async function _dashActions() {
     acts = await apiGet('engagements',
       'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
   }
-  const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description');
+  const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description,site_id,site_name,sites(name)');
   const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
@@ -8988,7 +8988,7 @@ async function _dashActions() {
     if (a.lead_id != null) { parent = leadById[+a.lead_id]; kind = 'lead'; }
     else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
     if (!parent || !_dashInScope(parent, scope)) continue;
-    const label = kind === 'lead' ? (parent.target_org_name || parent.description || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
+    const label = kind === 'lead' ? (leadEngLabel(parent) || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
     rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
   }
   rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
@@ -10173,6 +10173,15 @@ function leadSiteLabel(l) {
     if (s && s.name) return s.name;
   }
   return (l.site_name || '').trim();
+}
+
+// Lead display label outside the leads page (engagement modal, dashboard,
+// history, contacts admin) — site-first like the leads list: embedded
+// sites(name) from the fetch, else leadSiteLabel, else the organisation, else
+// the description. Returns '' so callers can fall back to 'Lead #id'.
+function leadEngLabel(l) {
+  if (!l) return '';
+  return (l.sites && l.sites.name) || leadSiteLabel(l) || l.target_org_name || l.description || '';
 }
 
 // ── Leads Page ────────────────────────────────────────────
@@ -11787,7 +11796,7 @@ async function _engHistLoad() {
   const engIds  = engs.map(e => +e.id);
   const [deals, leads, engPeople, subs] = await Promise.all([
     dealIds.length ? apiGet('deals',  `id=in.(${dealIds.join(',')})&select=id,name,org_id,stage_id,service_sub_id,owner_id`) : [],
-    leadIds.length ? apiGet('leads',  `id=in.(${leadIds.join(',')})&select=id,target_org_id,target_org_name,target_person_id,target_person_name,description,owner_id`) : [],
+    leadIds.length ? apiGet('leads',  `id=in.(${leadIds.join(',')})&select=id,target_org_id,target_org_name,target_person_id,target_person_name,description,owner_id,site_id,site_name,sites(name)`) : [],
     engIds.length  ? apiGet('engagement_people', `engagement_id=in.(${engIds.join(',')})&select=engagement_id,person_id`) : [],
     allData['service_sub'] || apiGet('service_sub', 'select=id,name,major_id,is_recurring'),
   ]);
@@ -11842,7 +11851,7 @@ async function _engHistLoad() {
       streamLabel: streamLabelById[streamRoot] || ('Stream #' + streamRoot),
       persons,
       clientName: isLead ? (oName(lead && lead.target_org_id) || (lead && lead.target_org_name) || '—') : (oName(deal && deal.org_id) || '—'),
-      parentLabel: isLead ? ((lead && (lead.target_org_name || lead.description)) || ('Lead #' + e.lead_id)) : ((deal && deal.name) || ('Deal #' + e.deal_id)),
+      parentLabel: isLead ? (leadEngLabel(lead) || ('Lead #' + e.lead_id)) : ((deal && deal.name) || ('Deal #' + e.deal_id)),
       parentKind: isLead ? 'lead' : 'deal',
       parentId: isLead ? +e.lead_id : +e.deal_id,
       ownerId, ownerName: ownerId ? pName(ownerId) : '—',
@@ -17656,7 +17665,7 @@ async function openEditLeadInteractionModal(interactionId) {
 function _setLeadEngParent() {
   window._engStandalone = false;
   window._engParent = (typeof leadData !== 'undefined' && leadData && leadData.id)
-    ? { kind: 'lead', id: +leadData.id, label: leadData.target_org_name || leadData.description || ('Lead #' + leadData.id) }
+    ? { kind: 'lead', id: +leadData.id, label: leadEngLabel(leadData) || ('Lead #' + leadData.id) }
     : null;
 }
 
@@ -17670,8 +17679,8 @@ async function openEngagement(engId) {
   if (!eng) { showStatus('Engagement not found', 'error'); return; }
   let parent = null;
   if (eng.lead_id != null) {
-    const l = (await apiGet('leads', `id=eq.${eng.lead_id}&select=id,target_org_name,description`))[0];
-    parent = { kind: 'lead', id: +eng.lead_id, label: l ? (l.target_org_name || l.description || ('Lead #' + l.id)) : ('Lead #' + eng.lead_id) };
+    const l = (await apiGet('leads', `id=eq.${eng.lead_id}&select=id,target_org_name,description,site_id,site_name,sites(name)`))[0];
+    parent = { kind: 'lead', id: +eng.lead_id, label: (l && leadEngLabel(l)) || ('Lead #' + eng.lead_id) };
   } else if (eng.deal_id != null) {
     const d = (await apiGet('deals', `id=eq.${eng.deal_id}&select=id,name`))[0];
     parent = { kind: 'deal', id: +eng.deal_id, label: d ? (d.name || ('Deal #' + d.id)) : ('Deal #' + eng.deal_id) };
@@ -19372,7 +19381,7 @@ async function renderAllOppContacts() {
       allData['people'] || apiGet('people', 'select=*'),
       allData['organisations'] || apiGet('organisations', 'select=*'),
       apiGet('deals', 'select=id,name,org_id'),
-      apiGet('leads', 'select=id,description,target_org_id,target_org_name'),
+      apiGet('leads', 'select=id,description,target_org_id,target_org_name,site_id,site_name,sites(name)'),
       allData['dmu_roles'] || apiGet('dmu_roles', 'select=*'),
     ]);
     allData['people'] = people;
@@ -19393,7 +19402,7 @@ async function renderAllOppContacts() {
     const ctxName = (c) => {
       if (c.deal_id) return deals.find(x => +x.id === +c.deal_id)?.name || '';
       const l = leads.find(x => +x.id === +c.lead_id);
-      return l ? ('Lead: ' + String(l.description || ('#' + l.id)).slice(0, 40)) : '';
+      return l ? ('Lead: ' + String(leadEngLabel(l) || ('#' + l.id)).slice(0, 40)) : '';
     };
     const orgName  = (c) => {
       if (c.deal_id) { const d = deals.find(x => +x.id === +c.deal_id); return d ? (orgs.find(x => +x.id === +d.org_id)?.name || '') : ''; }
