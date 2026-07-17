@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -797,7 +797,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <!-- Engagement Tab -->
     <div class="opp-tab-content" id="opp-tab-engagement">
       <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
-        <button class="btn btn-primary btn-sm" id="opp-log-engagement-btn" onclick="openEngagementModal()">+ Log Engagement</button>
+        <button class="btn btn-primary btn-sm" id="opp-log-engagement-btn" onclick="openDealEngagementModal()">+ Log Engagement</button>
       </div>
       <div id="engagement-list">
         <div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>
@@ -4461,7 +4461,7 @@ async function openNewOpportunity() {
   dealAdminMode = false;
   oppCollaborators = [];
   oppContacts = [];
-  if (window._engPeople) window._engPeople = [];
+  if (window._liPeople) window._liPeople = [];
 
   // Reset all form fields
   const fields = ['opp-name','opp-notes','opp-ext-notes','opp-margin-pct',
@@ -6588,230 +6588,20 @@ function addCollaboratorRow() {
   list.appendChild(div);
 }
 
-async function openEngagementModal(mode = 'new') {
-  // Build people pool: collaborators + client affiliates, deduplicated
-  const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
-  let clientPeople = [];
-  if (orgId) {
-    const affiliations = await apiGet('person_organisation_roles', `org_id=eq.${orgId}&select=person_id`);
-    const ids = affiliations.map(a => a.person_id);
-    if (ids.length) clientPeople = await apiGet('people', `id=in.(${ids.join(',')})&select=*`);
-  }
-  const collabPeople = oppCollaborators.map(c => ({ id: c.personId, _name: c.name }));
-  const selectedIds = new Set((window._engPeople || []).map(p => String(p.id)));
-  const seen = new Set();
-  const pool = [...collabPeople, ...clientPeople].filter(p => {
-    if (seen.has(+p.id)) return false;
-    if (selectedIds.has(String(p.id))) return false;
-    seen.add(+p.id);
-    return true;
-  });
-
-  const title = mode === 'edit' ? 'Edit Engagement' : mode === 'view' ? 'View Engagement' : 'Log Engagement';
-
-  const html = `
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:560px;">
-        <div class="modal-header">
-          <div class="modal-title">${title}</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Date</label>
-              <input type="date" id="eng-date" class="form-control" value="${new Date().toISOString().slice(0,10)}">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Type</label>
-              <select id="eng-type" class="form-control">
-                <option value="">— select —</option>
-              </select>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">People Involved</label>
-            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;" id="eng-people-selected"></div>
-            <div style="display:flex;gap:8px;">
-              <select id="eng-person-pool" class="form-control" style="flex:1;">
-                <option value="">— add person —</option>
-                ${pool.map(p => `<option value="${p.id}">${p._name || [p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
-              </select>
-              <button class="btn btn-secondary btn-sm" onclick="addEngPerson()">Add</button>
-              <button class="btn btn-ghost btn-sm" onclick="openCreateCollaboratorModal(true)">New</button>
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Engagement Details</label>
-            <textarea id="eng-notes" class="form-control" rows="3"></textarea>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Next Action</label>
-              <select id="eng-next-action" class="form-control">
-                <option value="">— select —</option>
-              </select>
-            </div>
-            <div class="form-group">
-              <label class="form-label">Due Date</label>
-              <input type="date" id="eng-next-date" class="form-control">
-            </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Action Details</label>
-            <textarea id="eng-action-details" class="form-control" rows="2" placeholder="More on what happens next..."></textarea>
-          </div>
-          <div class="form-group" style="margin-top:-4px;">
-            <label style="display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);cursor:pointer;flex-wrap:wrap;">
-              <input type="checkbox" id="eng-next-done" style="margin:0;" onchange="document.getElementById('eng-completion-note-wrap').style.display=this.checked?'block':'none'">
-              <span>Next action completed</span>
-              <span id="eng-completed-at-inline" style="font-size:12px;color:var(--text3);font-weight:600;"></span>
-            </label>
-          </div>
-          <div class="form-group" id="eng-completion-note-wrap" style="display:none;margin-top:6px;">
-            <label class="form-label">Completion Note</label>
-            <textarea id="eng-completion-note-input" class="form-control" rows="2" placeholder="What did you do?"></textarea>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="saveEngagement(null)">Save</button>
-        </div>
-      </div>
-    </div>`;
-  document.getElementById('modal-root').innerHTML = html;
-  window._engPeople = [];
-  if (mode === 'new') window._engEditing = null;
-
-  // Populate Type and Next Action dropdowns from lookup tables, scoped to opportunities.
-  await Promise.all([
-    loadFilteredLookup('activity_types', 'applies_to_opportunities=eq.true', 'eng-type'),
-    loadFilteredLookup('next_actions',   'applies_to_opportunities=eq.true', 'eng-next-action'),
-  ]);
-}
-
-function addEngPerson() {
-  const sel = document.getElementById('eng-person-pool');
-  const id = sel.value;
-  const name = sel.options[sel.selectedIndex]?.text;
-  if (!id || window._engPeople.find(p => p.id === id)) return;
-  window._engPeople.push({ id, name });
-  // Remove from dropdown
-  sel.options[sel.selectedIndex].remove();
-  sel.value = '';
-  renderEngPeople();
-}
-
-function removeEngPerson(id) {
-  const person = window._engPeople.find(p => p.id === id);
-  window._engPeople = window._engPeople.filter(p => p.id !== id);
-  // Add back to dropdown
-  if (person) {
-    const sel = document.getElementById('eng-person-pool');
-    if (sel) {
-      const opt = document.createElement('option');
-      opt.value = person.id;
-      opt.textContent = person.name;
-      sel.appendChild(opt);
-    }
-  }
-  renderEngPeople();
-}
-
-function renderEngPeople() {
-  const el = document.getElementById('eng-people-selected');
-  if (!el) return;
-  el.innerHTML = (window._engPeople || []).map(p =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:var(--navy);color:white;font-size:12px;padding:3px 8px;border-radius:999px;">
-      ${p.name}
-      <button onclick="removeEngPerson('${p.id}')" style="background:none;border:none;color:white;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;">×</button>
-    </span>`
-  ).join('');
-}
-
-async function saveEngagement(editId) {
-  const date = document.getElementById('eng-date').value;
-  const typeSel = document.getElementById('eng-type');
-  const typeVal = typeSel?.value || '';
-  const activityTypeId = typeVal && typeVal !== '__legacy__' && !isNaN(+typeVal) ? +typeVal : null;
-  const type = typeVal ? (typeSel.options[typeSel.selectedIndex]?.textContent || '').trim() : '';
-  const notes = document.getElementById('eng-notes').value;
-  const naSel = document.getElementById('eng-next-action');
-  const naVal = naSel?.value || '';
-  const nextActionId = naVal && naVal !== '__legacy__' && !isNaN(+naVal) ? +naVal : null;
-  const nextActionText = naVal
-    ? (naSel.options[naSel.selectedIndex]?.textContent || '').trim()
-    : '';
-  const actionDetails = document.getElementById('eng-action-details')?.value || '';
-  const nextDate = document.getElementById('eng-next-date').value;
-  const nextDone = document.getElementById('eng-next-done')?.checked || false;
-  const completionNoteInput = (document.getElementById('eng-completion-note-input')?.value || '').trim();
-  const people = window._engPeople || [];
-
-  if (!date) { showStatus('Date is required', 'error'); return; }
-
-  // Completion bookkeeping: stamp now if newly ticked, preserve existing timestamp if
-  // it stays ticked, clear both fields if unticked. Note text comes from the input.
-  const prev = window._engEditing;
-  const completedAt = nextDone
-    ? (prev?.next_action_completed_at || new Date().toISOString())
-    : null;
-  const completionNote = nextDone ? (completionNoteInput || null) : null;
-
-  try {
-    let engId = editId;
-    if (editId) {
-      // Update existing
-      await api('engagements', 'PATCH', {
-        engagement_date: date,
-        engagement_type: type || null,
-        activity_type_id: activityTypeId,
-        notes,
-        next_action: nextActionText || null,
-        next_action_id: nextActionId,
-        action_details: actionDetails || null,
-        next_action_date: nextDate || null,
-        next_action_done: nextDone,
-        next_action_completed_at: completedAt,
-        next_action_completion_note: completionNote,
-      }, 'id=eq.' + editId);
-      // Remove old people and re-add
-      await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + editId);
-    } else {
-      // Create new
-      const result = await api('engagements', 'POST', {
-        deal_id: oppData.id,
-        engagement_date: date,
-        engagement_type: type || null,
-        activity_type_id: activityTypeId,
-        notes,
-        next_action: nextActionText || null,
-        next_action_id: nextActionId,
-        action_details: actionDetails || null,
-        next_action_date: nextDate || null,
-        next_action_done: nextDone,
-        next_action_completed_at: completedAt,
-        next_action_completion_note: completionNote,
-        created_by: currentUser?.personId || null,
-      }, 'select=*');
-      engId = result[0].id;
-    }
-
-    // Save people
-    for (const p of people) {
-      try {
-        await api('engagement_people', 'POST', {
-          engagement_id: engId, person_id: +p.id,
-        }, '');
-      } catch(e) { /* ignore duplicate */ }
-    }
-
-    closeModal();
-    showStatus(editId ? 'Engagement updated' : 'Engagement logged');
-    await loadEngagements(oppData.id);
-  } catch(e) {
-    showStatus('Failed: ' + e.message, 'error');
-  }
+// ── Deal engagements use the SHARED engagement stack (li-* modal) ────────────
+// One modal + save path for lead, deal and standalone engagements:
+// renderLeadInteractionModalHtml + saveLeadInteraction, routed by window._engParent.
+// This opener logs a NEW engagement on the open opportunity.
+async function openDealEngagementModal() {
+  if (!oppData || !oppData.id) { showStatus('Save the opportunity before logging engagements', 'error'); return; }
+  window._engParent = { kind: 'deal', id: +oppData.id, label: oppData.name || ('Deal #' + oppData.id) };
+  window._engStandalone = false;
+  window._liEditing = null;
+  window._liRelatedTo = null;
+  window._liQuickLogContext = null;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
+  await loadLiLookups();
+  await _liLoadPeople();
 }
 
 async function loadEngagements(dealId) {
@@ -6869,7 +6659,7 @@ async function loadEngagements(dealId) {
 
       const borderLeft = isEditable ? '3px solid var(--red)' : '3px solid var(--border)';
 
-      return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openEngagementRow(${e.id})">
+      return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openEngagement(${e.id})">
         <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date}<div style="margin-top:3px;font-weight:400;">${cdChip}</div></td>
         <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;">${typeCell}</td>
         <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextActionCell}</td>
@@ -6895,62 +6685,14 @@ async function loadEngagements(dealId) {
   }
 }
 
-// Single entry point for clicking an engagement row.
-// Routes to either openEditEngagementModal (within grace) or openViewEngagementModal (locked).
-async function openEngagementRow(engId) {
-  try {
-    const engs = await apiGet('engagements', `id=eq.${engId}&select=created_at`);
-    const eng = engs[0];
-    if (!eng) return;
-    const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
-    const ageMs = Date.now() - new Date(eng.created_at).getTime();
-    const isEditable = ageMs < graceMins * 60 * 1000;
-    if (isEditable) await openEditEngagementModal(engId);
-    else            await openViewEngagementModal(engId);
-  } catch(err) {
-    showStatus('Failed to open engagement: ' + err.message, 'error');
-  }
-}
-
-async function openEditEngagementModal(engId) {
-  const engs = await apiGet('engagements', `id=eq.${engId}&select=*`);
-  const eng = engs[0];
-  if (!eng) return;
-
-  const engPeople = await apiGet('engagement_people', `engagement_id=eq.${engId}&select=*`);
-  const people = allData['people'] || await apiGet('people', 'select=*');
-  allData['people'] = people;
-
-  window._engPeople = engPeople.map(ep => {
-    const p = people.find(x => +x.id === +ep.person_id);
-    return { id: String(ep.person_id), name: p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : 'Unknown' };
-  });
-
-  await openEngagementModal('edit');
-
-  const d = document.getElementById('eng-date'); if (d) d.value = eng.engagement_date;
-  preselectLookup('eng-type',        'activity_type_id', 'engagement_type', eng);
-  preselectLookup('eng-next-action', 'next_action_id',   'next_action',     eng);
-  const n = document.getElementById('eng-notes'); if (n) n.value = eng.notes || '';
-  const ad = document.getElementById('eng-action-details'); if (ad) ad.value = eng.action_details || '';
-  const nd = document.getElementById('eng-next-date'); if (nd) nd.value = eng.next_action_date || '';
-  const ndone = document.getElementById('eng-next-done'); if (ndone) ndone.checked = !!eng.next_action_done;
-  populateCompletionSection(eng);
-  window._engEditing = eng;
-  renderEngPeople();
-
-  const saveBtn = document.querySelector('#modal-root .btn-primary');
-  if (saveBtn) saveBtn.onclick = () => saveEngagement(engId);
-
-  // For an auto-generated Promotion engagement, give the user a quick way to
-  // jump to the source lead — preserves the deal's origin context.
-  _maybeAddViewSourceLeadButton(eng);
-}
-
 // Injects a "View source lead →" button into the engagement modal footer when
-// the engagement's type is "Promotion". Both view and edit modals share this.
+// the engagement's type is "Promotion" (deal engagements only — the auto-logged
+// promotion record). Works in edit and view modes of the shared modal.
 function _maybeAddViewSourceLeadButton(eng) {
   if (!eng || (eng.engagement_type !== 'Promotion')) return;
+  const par = window._engParent;
+  const dealId = (par && par.kind === 'deal' && par.id) ? +par.id : (oppData?.id || null);
+  if (!dealId) return;
   const footer = document.querySelector('#modal-root .modal-footer');
   if (!footer) return;
   // Avoid duplicates if called twice
@@ -6958,7 +6700,7 @@ function _maybeAddViewSourceLeadButton(eng) {
   const btn = document.createElement('button');
   btn.className = 'btn btn-secondary eng-view-source-lead';
   btn.textContent = 'View source lead →';
-  btn.onclick = () => openSourceLeadFromCurrentDeal();
+  btn.onclick = () => openSourceLeadFromCurrentDeal(dealId);
   // Insert at the start of the footer so it sits to the left of Cancel / Save
   footer.insertBefore(btn, footer.firstChild);
 }
@@ -7015,127 +6757,6 @@ function preselectLookup(selectId, idField, textField, record) {
     opt.dataset.legacy = '1';
     sel.appendChild(opt);
     sel.value = '__legacy__';
-  }
-}
-
-// Populate the completion timestamp inline next to the checkbox label, and show the
-// editable completion note field below when the engagement is marked done.
-function populateCompletionSection(eng) {
-  const inlineEl = document.getElementById('eng-completed-at-inline');
-  const noteWrap = document.getElementById('eng-completion-note-wrap');
-  const noteInput = document.getElementById('eng-completion-note-input');
-  if (inlineEl) inlineEl.textContent = '';
-  if (noteWrap) noteWrap.style.display = 'none';
-  if (noteInput) noteInput.value = '';
-  if (!eng?.next_action_done) return;
-
-  if (inlineEl && eng.next_action_completed_at) {
-    const ts = new Date(eng.next_action_completed_at);
-    inlineEl.textContent = '— ' + ts.toLocaleString('en-ZA');
-  }
-  if (noteWrap) noteWrap.style.display = 'block';
-  if (noteInput) noteInput.value = eng.next_action_completion_note || '';
-}
-
-// View-only version for locked engagements.
-// Opens the same modal as edit, populates everything, then disables every input,
-// hides the Save button, and shows a small banner at the top.
-async function openViewEngagementModal(engId) {
-  const engs = await apiGet('engagements', `id=eq.${engId}&select=*`);
-  const eng = engs[0];
-  if (!eng) return;
-
-  const engPeople = await apiGet('engagement_people', `engagement_id=eq.${engId}&select=*`);
-  const people = allData['people'] || await apiGet('people', 'select=*');
-  allData['people'] = people;
-
-  window._engPeople = engPeople.map(ep => {
-    const p = people.find(x => +x.id === +ep.person_id);
-    return { id: String(ep.person_id), name: p ? [p.first_name,p.last_name].filter(Boolean).join(' ') : 'Unknown' };
-  });
-
-  await openEngagementModal('view');
-
-  // Populate the form
-  const d = document.getElementById('eng-date'); if (d) d.value = eng.engagement_date;
-  preselectLookup('eng-type',        'activity_type_id', 'engagement_type', eng);
-  preselectLookup('eng-next-action', 'next_action_id',   'next_action',     eng);
-  const n = document.getElementById('eng-notes'); if (n) n.value = eng.notes || '';
-  const ad = document.getElementById('eng-action-details'); if (ad) ad.value = eng.action_details || '';
-  const nd = document.getElementById('eng-next-date'); if (nd) nd.value = eng.next_action_date || '';
-  const ndone = document.getElementById('eng-next-done'); if (ndone) ndone.checked = !!eng.next_action_done;
-  populateCompletionSection(eng);
-  window._engEditing = eng;
-  renderEngPeople();
-
-  // Lock down everything
-  const modalRoot = document.getElementById('modal-root');
-  modalRoot.querySelectorAll('input, select, textarea, button').forEach(el => {
-    // Keep the close (×) button and the Cancel button functional
-    if (el.classList?.contains('modal-close')) return;
-    if (el.classList?.contains('btn-secondary')) return;
-    el.disabled = true;
-  });
-
-  // Hide Save (we use innerHTML find since the Save button doesn't have a stable id)
-  const saveBtn = modalRoot.querySelector('.btn-primary');
-  if (saveBtn) saveBtn.style.display = 'none';
-
-  // Even with the edit window closed, an OPEN next-action task must stay completable
-  // by anyone authorised to work the deal (owner / region-manager / admin /
-  // collaborator). Re-enable only the completion note + a dedicated complete button;
-  // everything else remains locked so the engagement record itself can't be altered.
-  const taskOpen = !!eng.next_action && !eng.next_action_done;
-  const canComplete = taskOpen && (canEditRecord(oppData) || isCurrentUserOppCollaborator());
-  if (canComplete) {
-    const noteWrap = document.getElementById('eng-completion-note-wrap');
-    const noteInput = document.getElementById('eng-completion-note-input');
-    if (noteWrap) noteWrap.style.display = 'block';
-    if (noteInput) noteInput.disabled = false;
-    const footer = modalRoot.querySelector('.modal-footer');
-    if (footer) {
-      const btn = document.createElement('button');
-      btn.className = 'btn btn-primary';
-      btn.textContent = 'Mark Task Complete';
-      btn.onclick = () => completeEngagementTask(eng.id);
-      footer.appendChild(btn);
-    }
-  }
-
-  // Insert a banner at the top of the modal body
-  const body = modalRoot.querySelector('.modal-body');
-  if (body) {
-    const banner = document.createElement('div');
-    if (canComplete) {
-      banner.style.cssText = 'margin:-4px 0 14px;padding:10px 12px;background:#FFFBEB;border:1px solid #FCD34D;border-radius:var(--radius);color:#92400E;font-size:12px;font-weight:600;';
-      banner.textContent = 'Edit window closed — the engagement is locked, but this task is still open. You can mark it complete below.';
-    } else {
-      banner.style.cssText = 'margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;';
-      banner.textContent = 'View only — edit window has closed.';
-    }
-    body.insertBefore(banner, body.firstChild);
-  }
-
-  // Promotion engagements get an extra "View source lead →" button so the user
-  // can jump back to the lead that became this deal. Works in view-mode too.
-  _maybeAddViewSourceLeadButton(eng);
-}
-
-// Complete an engagement's open next-action task after the edit window has closed.
-// Writes only the completion fields — the rest of the locked engagement is untouched.
-async function completeEngagementTask(engId) {
-  try {
-    const note = (document.getElementById('eng-completion-note-input')?.value || '').trim();
-    await api('engagements', 'PATCH', {
-      next_action_done: true,
-      next_action_completed_at: new Date().toISOString(),
-      next_action_completion_note: note || null,
-    }, 'id=eq.' + engId);
-    showStatus('Task marked complete');
-    closeModal();
-    if (oppData?.id) await loadEngagements(oppData.id);
-  } catch(e) {
-    showStatus('Failed to complete task: ' + e.message, 'error');
   }
 }
 
@@ -8396,12 +8017,13 @@ async function confirmAddCollaborator() {
 }
 
 async function openCreateCollaboratorModal(forEngagement) {
+  const cancelFn = forEngagement ? '_liChildCancel()' : 'closeModal()';
   const html = `
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)${cancelFn}">
       <div class="modal" style="width:540px;">
         <div class="modal-header">
           <div class="modal-title">Create New ${forEngagement ? 'Engagement Contact' : 'Collaborator'}</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
+          <button class="modal-close" onclick="${cancelFn}">×</button>
         </div>
         <div class="modal-body">
           <div class="form-row">
@@ -8449,7 +8071,7 @@ async function openCreateCollaboratorModal(forEngagement) {
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-secondary" onclick="${cancelFn}">Cancel</button>
           <button class="btn btn-primary" onclick="saveNewCollaborator(${forEngagement ? 'true' : 'false'})">Create & Add</button>
         </div>
       </div>
@@ -8485,6 +8107,18 @@ function useExistingPerson(personId, name) {
   if (!name) {
     const _p = (allData['people'] || []).find(x => +x.id === +personId);
     name = [_p?.first_name, _p?.last_name].filter(Boolean).join(' ') || ('Person #' + personId);
+  }
+  // Came from the engagement form's create-person child modal: add to the
+  // engagement's People Involved and rebuild the engagement modal instead.
+  if (window._liChildSnap) {
+    window._liPeople = window._liPeople || [];
+    if (!window._liPeople.some(p => p.key === 'p' + personId)) {
+      window._liPeople.push({ key: 'p' + personId, cid: null, person_id: +personId, name });
+    }
+    const snap = window._liChildSnap; window._liChildSnap = null;
+    _liRestoreForm(snap);
+    showStatus(name + ' added to engagement');
+    return;
   }
   const role = document.getElementById('new-collab-role')?.value || 'Collaborator';
   oppCollaborators.push({ personId, name, role, isOwner: false, isNew: true });
@@ -8530,13 +8164,15 @@ async function saveNewCollaborator(forEngagement) {
 
     const name = [first, last].join(' ');
     if (forEngagement === 'true' || forEngagement === true) {
-      // Add to engagement people and reopen engagement modal
-      if (!window._engPeople) window._engPeople = [];
-      window._engPeople.push({ id: String(person.id), name });
+      // Add to the shared engagement form's People Involved, then rebuild the
+      // engagement modal with fields + selections restored from the snapshot.
+      window._liPeople = window._liPeople || [];
+      if (!window._liPeople.some(p => p.key === 'p' + person.id)) {
+        window._liPeople.push({ key: 'p' + person.id, cid: null, person_id: +person.id, name });
+      }
+      const snap = window._liChildSnap; window._liChildSnap = null;
+      await _liRestoreForm(snap);
       showStatus(name + ' created and added to engagement');
-      await openEngagementModal();
-      // Restore engagement people
-      renderEngPeople();
     } else {
       oppCollaborators.push({ personId: person.id, name, role, isOwner: false, isNew: true });
       renderCollaborators();
@@ -10791,8 +10427,8 @@ function _updateLeadBackButtonForDealContext() {
 
 // Resolve the source lead for a given deal (the lead whose promote created
 // this deal) and open it in deal-context mode.
-async function openSourceLeadFromCurrentDeal() {
-  const dealId = oppData?.id;
+async function openSourceLeadFromCurrentDeal(dealIdArg) {
+  const dealId = dealIdArg || oppData?.id;
   if (!dealId) { showStatus('No active deal', 'error'); return; }
   try {
     const rows = await apiGet('leads', `promoted_deal_id=eq.${dealId}&select=id&limit=1`);
@@ -17388,6 +17024,14 @@ function engagementEditMinutes() {
   if (String(v) === 'indefinite') return Infinity;
   return +v || 60;
 }
+// Central lock rule for an engagement record. Time elapsed is the only factor
+// today; stage- or role-dependent rules slot in here later without touching the
+// callers (row routers + the standalone opener all route edit/view through this).
+function engagementIsLocked(eng) {
+  if (!eng || !eng.created_at) return false;
+  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
+  return (Date.now() - new Date(eng.created_at).getTime()) >= graceMins * 60000;
+}
 function fmtCountdown(ms) {
   if (ms <= 0) return '0:00';
   const t = Math.ceil(ms / 1000);
@@ -17799,11 +17443,8 @@ function openLeadInteractionRow(interactionId) {
   // On a read-only lead (Promoted / Dead / non-owner) engagements are managed on
   // the opportunity — open fully locked so nothing can be edited or completed here.
   if (leadReadOnly) { openLeadInteractionView(interactionId, true); return; }
-  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
-  const ageMs = Date.now() - new Date(i.created_at).getTime();
-  const isEditable = ageMs < graceMins * 60 * 1000;
-  if (isEditable) openEditLeadInteractionModal(interactionId);
-  else            openLeadInteractionView(interactionId);
+  if (!engagementIsLocked(i)) openEditLeadInteractionModal(interactionId);
+  else                        openLeadInteractionView(interactionId);
 }
 
 // Shared HTML renderer for the lead interaction modal in any mode.
@@ -17836,7 +17477,8 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
   const relatedNote = relatedParent
     ? `<div style="margin:-4px 0 12px;padding:8px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);">↳ Related to: <strong>${(relatedParent.engagement_date || '')}${relatedParent.engagement_type ? ' · ' + String(relatedParent.engagement_type).replace(/</g,'&lt;') : ''}</strong></div>`
     : '';
-  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked && !window._engStandalone)
+  const relatedBtn = (mode !== 'new' && i.id && !fullyLocked && !window._engStandalone
+      && !(window._engParent && window._engParent.kind === 'deal'))
     ? `<button class="btn btn-secondary" onclick="openLeadInteractionRelated(${i.id})" style="margin-right:auto;">+ Related engagement</button>`
     : '';
   // Clickable reference to the parent record (lead/opportunity; future project /
@@ -17881,7 +17523,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">People Involved <span style="font-weight:400;color:var(--text3);font-size:11px;">— client contacts in this engagement</span></label>
+            <label class="form-label">People Involved <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${(window._engParent && window._engParent.kind === 'deal') ? 'client contacts & collaborators' : 'client contacts'} in this engagement</span></label>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;" id="li-people-selected"></div>
             ${(isView || fullyLocked) ? '' : `<div style="display:flex;gap:8px;">
               <select id="li-person-pool" class="form-control" style="flex:1;" onchange="addLiPerson()"><option value="">— add a contact —</option></select>
@@ -17983,14 +17625,15 @@ async function openEngagement(engId) {
   window._engStandalone = true;
   window._liEditing = eng;
   window._liQuickLogContext = null;
-  const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
-  const editable = eng.created_at && (Date.now() - new Date(eng.created_at).getTime()) < graceMins * 60000;
+  const editable = !engagementIsLocked(eng);
   document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml(editable ? 'edit' : 'view', eng, false);
   await loadLiLookups();
   preselectLookup('li-type',        'activity_type_id', 'engagement_type', eng);
   preselectLookup('li-next-action', 'next_action_id',   'next_action',     eng);
   populateLiCompletionSection(eng);
   await _liLoadPeople();
+  // Auto-generated Promotion engagements on a deal link back to their source lead.
+  _maybeAddViewSourceLeadButton(eng);
 }
 
 async function openLeadInteractionModal() {
@@ -18024,11 +17667,14 @@ async function openLeadInteractionRelated(parentId) {
   await _liLoadPeople();
 }
 
-// Populate Type and Next Action dropdowns scoped to leads.
+// Populate Type and Next Action dropdowns, scoped to the engagement's parent:
+// deal engagements get the opportunity lists, lead engagements the lead lists.
 async function loadLiLookups() {
+  const isDeal = !!(window._engParent && window._engParent.kind === 'deal');
+  const flag = isDeal ? 'applies_to_opportunities=eq.true' : 'applies_to_leads=eq.true';
   await Promise.all([
-    loadFilteredLookup('activity_types', 'applies_to_leads=eq.true', 'li-type'),
-    loadFilteredLookup('next_actions',   'applies_to_leads=eq.true', 'li-next-action'),
+    loadFilteredLookup('activity_types', flag, 'li-type'),
+    loadFilteredLookup('next_actions',   flag, 'li-next-action'),
   ]);
 }
 
@@ -18126,7 +17772,15 @@ function populateLiCompletionSection(i) {
 function addLiPerson() {
   const sel = document.getElementById('li-person-pool'); if (!sel) return;
   const val = sel.value; if (!val) return;
-  if (val === '__new__') { sel.value = ''; createLeadContactForEngagement(); return; }
+  if (val === '__new__') {
+    sel.value = '';
+    // Snapshot the half-filled engagement form BEFORE the child modal replaces it
+    // in #modal-root; restored on the child's save or cancel.
+    window._liChildSnap = _liSnapshotForm();
+    if (window._engParent && window._engParent.kind === 'deal') openCreateCollaboratorModal(true);
+    else createLeadContactForEngagement();
+    return;
+  }
   const name = sel.options[sel.selectedIndex]?.text;
   window._liPeople = window._liPeople || [];
   if (window._liPeople.some(p => p.key === val)) return;
@@ -18151,9 +17805,11 @@ function renderLiPeople() {
 }
 
 // Loads the engagement's already-linked people (edit/view) and builds the add pool.
-async function _liLoadPeople() {
+// preserveSelections: keep window._liPeople as-is (used when rebuilding the modal
+// after a create-new-person child modal) — only the pool dropdown is refreshed.
+async function _liLoadPeople(preserveSelections) {
   if (!document.getElementById('li-people-selected')) return;
-  window._liPeople = [];
+  if (!preserveSelections) window._liPeople = [];
   const allPeople = allData['people'] || [];
   const nameOf = p => [p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + p.id);
   const resolveNames = async (ids) => {
@@ -18179,7 +17835,7 @@ async function _liLoadPeople() {
   }
 
   // 1) Already-linked people for an existing engagement.
-  if (engId) {
+  if (engId && !preserveSelections) {
     if (isLead) {
       // Provisional refs stored on the engagement (contacts jsonb).
       try {
@@ -18208,16 +17864,28 @@ async function _liLoadPeople() {
         .map(c => `<option value="${keyOf(c)}">${cEsc(c.name || 'Contact')}</option>`).join('')
         + '<option value="__new__">＋ Create new contact…</option>';
     } else if (parent && parent.kind === 'deal') {
+      // Deal pool: client-org affiliates + deal collaborators (persisted and, when
+      // the opp form for this deal is open, in-memory not-yet-saved ones too).
       const cand = new Map();
       try {
-        const deal = (await apiGet('deals', `id=eq.${parent.id}&select=org_id`))[0] || {};
+        const [dealRows, collabs] = await Promise.all([
+          apiGet('deals', `id=eq.${parent.id}&select=org_id`),
+          apiGet('deal_collaborators', `deal_id=eq.${parent.id}&select=person_id`),
+        ]);
+        const deal = dealRows[0] || {};
+        const ids = collabs.map(c => +c.person_id);
         if (deal.org_id) {
           const links = await apiGet('person_organisation_roles', `org_id=eq.${deal.org_id}&select=person_id`);
-          (await resolveNames(links.map(l => +l.person_id))).forEach(x => cand.set(+x.id, x.name));
+          links.forEach(l => ids.push(+l.person_id));
         }
+        if (typeof oppData !== 'undefined' && oppData && +oppData.id === +parent.id) {
+          (oppCollaborators || []).forEach(c => { if (c.personId) ids.push(+c.personId); });
+        }
+        (await resolveNames(ids)).forEach(x => cand.set(+x.id, x.name));
       } catch (e) { /* best-effort */ }
       optionsHtml = [...cand.entries()].filter(([id]) => !selectedKeys.has('p' + id))
-        .map(([id, name]) => `<option value="p${id}">${cEsc(name)}</option>`).join('');
+        .map(([id, name]) => `<option value="p${id}">${cEsc(name)}</option>`).join('')
+        + '<option value="__new__">＋ Create new person…</option>';
     }
     sel.innerHTML = '<option value="">— add a contact —</option>' + optionsHtml;
   }
@@ -18231,9 +17899,9 @@ function createLeadContactForEngagement() {
   if (!parent || parent.kind !== 'lead') { showStatus('Contacts can only be created on a lead engagement', 'error'); return; }
   const esc = s => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   document.getElementById('modal-root').innerHTML = `
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)_liChildCancel()">
       <div class="modal" style="width:440px;max-width:95vw;">
-        <div class="modal-header"><div class="modal-title">New contact</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-header"><div class="modal-title">New contact</div><button class="modal-close" onclick="_liChildCancel()">×</button></div>
         <div class="modal-body">
           <div class="form-group"><label class="form-label">First and last name</label>
             <input id="nlc-name" class="form-control" placeholder="First and last name"></div>
@@ -18248,7 +17916,7 @@ function createLeadContactForEngagement() {
           <div style="font-size:11px;color:var(--text3);">Added to this lead’s contacts. It becomes a real person on promotion.</div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-secondary" onclick="_liChildCancel()">Cancel</button>
           <button class="btn btn-primary" onclick="saveNewLeadContactForEngagement()">Add</button>
         </div>
       </div>
@@ -18271,32 +17939,75 @@ async function saveNewLeadContactForEngagement() {
     list.push(entry);
     await api('leads', 'PATCH', { contacts: list, updated_at: new Date().toISOString() }, 'id=eq.' + parent.id);
     if (typeof leadData !== 'undefined' && leadData && +leadData.id === +parent.id) { leadData.contacts = list; loadLeadContacts(leadData.id).then(() => renderLeadContacts()); }
-    // Select the new contact as involved; refresh the pool WITHOUT reloading (which
-    // would drop unsaved selections on a new engagement).
+    // Select the new contact as involved, then rebuild the engagement modal with
+    // all prior selections and field values restored from the snapshot.
     window._liLeadContacts = list;
     window._liPeople = window._liPeople || [];
     window._liPeople.push({ key: 'c' + cid, cid, person_id: null, name });
-    closeModal();
-    _liRefreshPool();
-    renderLiPeople();
+    const snap = window._liChildSnap; window._liChildSnap = null;
+    await _liRestoreForm(snap);
     showStatus('Contact added');
   } catch (e) { showStatus('Could not add contact: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
 
-// Rebuild the lead engagement's add-dropdown from the cached lead contacts,
-// excluding those already selected. (Used after create-new so selections stick.)
-function _liRefreshPool() {
-  const sel = document.getElementById('li-person-pool'); if (!sel) return;
-  const parent = window._engParent || null;
-  if (!(parent && parent.kind === 'lead')) return;
-  const keyOf = c => c.person_id ? ('p' + c.person_id) : ('c' + c.cid);
-  const selectedKeys = new Set((window._liPeople || []).map(p => p.key));
-  const opts = (window._liLeadContacts || [])
-    .filter(c => !selectedKeys.has(keyOf(c)))
-    .map(c => `<option value="${keyOf(c)}">${cEsc(c.name || 'Contact')}</option>`).join('')
-    + '<option value="__new__">＋ Create new contact…</option>';
-  sel.innerHTML = '<option value="">— add a contact —</option>' + opts;
+// ── Child-modal snapshot / restore ───────────────────────────────────────────
+// The app has a single #modal-root, so the create-new-person child modals REPLACE
+// the engagement modal. Snapshot the form before opening the child, then rebuild
+// and restore it afterwards. People selections live in window._liPeople (a global
+// that survives the swap) — only field values and context need snapshotting.
+function _liSnapshotForm() {
+  const v = id => document.getElementById(id)?.value || '';
+  return {
+    editing: window._liEditing || null,
+    mode: window._liEditing ? 'edit' : 'new',
+    parent: window._engParent || null,
+    standalone: !!window._engStandalone,
+    relatedTo: window._liRelatedTo || null,
+    quickLog: window._liQuickLogContext || null,
+    date: v('li-date'), type: v('li-type'), notes: v('li-notes'),
+    nextAction: v('li-next-action'), nextDate: v('li-next-date'),
+    actionDetails: v('li-action-details'),
+    nextDone: !!document.getElementById('li-next-done')?.checked,
+    completionNote: v('li-completion-note-input'),
+  };
+}
+
+async function _liRestoreForm(snap) {
+  if (!snap) { closeModal(); return; }
+  window._engParent = snap.parent;
+  window._engStandalone = snap.standalone;
+  window._liEditing = snap.editing;
+  window._liRelatedTo = snap.relatedTo;
+  window._liQuickLogContext = snap.quickLog;
+  window._liChildSnap = null;
+  document.getElementById('modal-root').innerHTML =
+    renderLeadInteractionModalHtml(snap.mode, snap.editing, false);
+  await loadLiLookups();
+  // Re-anchor legacy / out-of-scope lookup options first, then lay the snapshot on top.
+  if (snap.editing) {
+    preselectLookup('li-type',        'activity_type_id', 'engagement_type', snap.editing);
+    preselectLookup('li-next-action', 'next_action_id',   'next_action',     snap.editing);
+    populateLiCompletionSection(snap.editing);
+  }
+  const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
+  set('li-date', snap.date); set('li-type', snap.type); set('li-notes', snap.notes);
+  set('li-next-action', snap.nextAction); set('li-next-date', snap.nextDate);
+  set('li-action-details', snap.actionDetails);
+  const done = document.getElementById('li-next-done');
+  if (done) done.checked = snap.nextDone;
+  const noteWrap = document.getElementById('li-completion-note-wrap');
+  if (noteWrap) noteWrap.style.display = snap.nextDone ? 'block' : 'none';
+  set('li-completion-note-input', snap.completionNote);
+  await _liLoadPeople(true);   // keep current selections; rebuild only the pool
+}
+
+// Cancel/close handler for the child modals: back to the engagement form when we
+// came from one, plain close otherwise.
+async function _liChildCancel() {
+  const snap = window._liChildSnap;
+  window._liChildSnap = null;
+  if (snap) await _liRestoreForm(snap); else closeModal();
 }
 
 async function saveLeadInteraction(editId) {
@@ -18342,14 +18053,20 @@ async function saveLeadInteraction(editId) {
       next_action_completion_note: completionNote,
     };
     let engId = editId;
+    const par = window._engParent || {};
+    const isDealEng = !!(par.kind === 'deal' && par.id);
     if (editId) {
       await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
     } else {
+      // Target exactly one parent: the deal or the lead (engagements CHECK constraint).
+      const target = isDealEng
+        ? { deal_id: +par.id }
+        : { lead_id: (par.kind === 'lead' && par.id) ? +par.id : leadData.id,
+            related_interaction_id: window._liRelatedTo || null };
       const res = await api('engagements', 'POST', {
         ...payload,
-        lead_id: leadData.id,
-        related_interaction_id: window._liRelatedTo || null,
+        ...target,
         created_by: currentUser?.personId || null,
       }, 'select=*');
       engId = res && res[0] ? res[0].id : null;
@@ -18375,11 +18092,18 @@ async function saveLeadInteraction(editId) {
         }
       } catch (e) { /* best-effort */ }
     }
-    // Standalone engagement edit (e.g. opened from the dashboard): no lead form to
-    // reload. Bump last_touch only when the parent is actually a lead, then refresh
-    // the dashboard. Never touches a lead for a deal-attached engagement.
+    // Deal engagement: no lead bookkeeping. Refresh whichever surface it was
+    // opened from — the opp form's engagement list, or the dashboard.
+    if (isDealEng) {
+      window._engStandalone = false;
+      closeModal();
+      if (currentPage === 'dashboard') await renderDashboard();
+      else if (typeof oppData !== 'undefined' && oppData && +oppData.id === +par.id) await loadEngagements(par.id);
+      return;
+    }
+    // Standalone LEAD engagement (e.g. opened from the dashboard): no lead form to
+    // reload. Bump last_touch, then refresh the dashboard.
     if (window._engStandalone) {
-      const par = window._engParent || {};
       if (par.kind === 'lead' && par.id) {
         await api('leads', 'PATCH', { last_touch_date: date, updated_at: new Date().toISOString() }, 'id=eq.' + par.id);
       }
