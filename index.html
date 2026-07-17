@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -888,6 +888,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
       <span id="lead-save-indicator" style="font-size:12px;font-weight:600;"></span>
+      <button type="button" id="lead-stagex-btn" class="btn btn-secondary btn-sm" style="display:none;"></button>
       <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary btn-sm" style="display:none;">Promote →</button>
       <button type="button" id="lead-reject-btn" onclick="openRejectPromotion()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Reject…</button>
       <button type="button" id="lead-decline-btn" onclick="openDeclineModal()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Decline…</button>
@@ -9020,9 +9021,9 @@ async function _dashLeads() {
   const rows = (await apiGet('leads', 'select=id,status,owner_id,branch_id,region_id,next_action_date'))
     .filter(r => _dashInScope(r, scope));
   const today = new Date().toISOString().slice(0, 10);
-  const open = rows.filter(r => ['New', 'Working', 'Qualified'].includes(r.status));
+  const open = rows.filter(r => ['New', 'Working', 'Qualified', LEAD_STAGE_X].includes(r.status));
   const overdue = open.filter(r => r.next_action_date && r.next_action_date < today).length;
-  const sub = ['New', 'Working', 'Qualified'].map(s => `${s}: ${rows.filter(r => r.status === s).length}`).join(' · ');
+  const sub = ['New', 'Working', 'Qualified', LEAD_STAGE_X].map(s => `${s}: ${rows.filter(r => r.status === s).length}`).join(' · ');
   return _dashCard('Leads', scope, [
     ['Open leads', open.length],
     ['Overdue follow-up', overdue, overdue > 0 ? 'red' : null],
@@ -10238,6 +10239,7 @@ async function renderLeadsPage() {
       { key: 'New',       label: 'New',       filter: l => l.status === 'New' },
       { key: 'Working',   label: 'Working',   filter: l => l.status === 'Working' },
       { key: 'Qualified', label: 'Qualified', filter: l => l.status === 'Qualified' },
+      { key: LEAD_STAGE_X, label: LEAD_STAGE_X, filter: l => l.status === LEAD_STAGE_X },
       { key: 'Promoted',  label: 'Promoted',  filter: l => l.status === 'Promoted' },
       { key: 'Dormant',   label: 'Dormant',   filter: l => l.status === 'Dormant' },
       { key: 'Dead',      label: 'Dead',      filter: l => l.status === 'Dead' },
@@ -10355,7 +10357,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   // Pending promotion request: surface a badge so managers can spot it in the list.
   // Standard requests sit at Qualified; special (below-threshold) requests sit at
   // Working, so allow either as long as a request is stamped and not yet actioned.
-  if (l.promotion_requested_at && (l.status === 'Qualified' || l.status === 'Working')) {
+  if (l.promotion_requested_at && (l.status === 'Qualified' || l.status === LEAD_STAGE_X || l.status === 'Working')) {
     const special = l.promotion_request_type === 'special';
     const lbl = special ? '⚠️ special promo' : '⏳ promo';
     const tip = special
@@ -10924,7 +10926,7 @@ function cockpitMissionHeader(c, regions, services, people) {
 function cockpitFunnelStrip(c, targets, leads) {
   const researched = targets.length;
   const worked     = leads.length;
-  const qualified  = leads.filter(l => l.status === 'Qualified' || l.status === 'Promoted').length;
+  const qualified  = leads.filter(l => l.status === 'Qualified' || l.status === LEAD_STAGE_X || l.status === 'Promoted').length;
   const promoted   = leads.filter(l => l.status === 'Promoted').length;
   const estValue   = leads.filter(l => l.status === 'Promoted')
                           .reduce((sum, l) => sum + (+l.est_value || 0), 0);
@@ -10960,7 +10962,7 @@ function cockpitFunnelStrip(c, targets, leads) {
 
 function cockpitTabBar(targets, leads) {
   const active = targets.filter(t => t.status === 'Researching' || t.status === 'Ready').length;
-  const inPlay = leads.filter(l => ['New','Working','Qualified'].includes(l.status)).length;
+  const inPlay = leads.filter(l => ['New','Working','Qualified',LEAD_STAGE_X].includes(l.status)).length;
   const tabs = [
     { key: 'targets', label: 'Target List', badge: active },
     { key: 'work',    label: 'Work Queue',  badge: inPlay },
@@ -11037,7 +11039,7 @@ function cockpitTargetListHtml() {
 // ── Work Queue tab (cadence-derived) ──────────────────────
 function cockpitWorkQueueHtml() {
   const { leads, steps, interactions, people } = cockpitData;
-  const inPlay = leads.filter(l => ['New','Working','Qualified'].includes(l.status));
+  const inPlay = leads.filter(l => ['New','Working','Qualified',LEAD_STAGE_X].includes(l.status));
   if (!inPlay.length) {
     return `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
       No leads in play. Promote targets from the <a href="#" onclick="cockpitSwitchTab('targets');return false;">Target List</a> to start working them.</div>`;
@@ -11201,7 +11203,7 @@ async function cockpitSaveCadence() {
 // ── Results tab ───────────────────────────────────────────
 function cockpitResultsHtml() {
   const { leads, people } = cockpitData;
-  const qualified = leads.filter(l => l.status === 'Qualified');
+  const qualified = leads.filter(l => l.status === 'Qualified' || l.status === LEAD_STAGE_X);
   const promoted  = leads.filter(l => l.status === 'Promoted');
   const dead      = leads.filter(l => l.status === 'Dead');
   const money = v => 'R' + (+v || 0).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
@@ -14456,10 +14458,18 @@ function showModal(html) {
 // One source of truth — used by the lead-form badge, the leads-list row badge,
 // and the leads-page tab headers. Palette is an orange→green progression with
 // red for Dead and slate (off-axis) for Dormant.
+// Placeholder stage between Qualified and Promoted — real name still to be
+// decided. Renaming later = change this string, update the DB status CHECK, and
+// UPDATE existing rows (see sql/add_lead_stage_new_lead_type.sql). The stage is
+// MANUAL: a Qualified lead is moved in/out via the lead-form button; the status
+// engine keeps it sticky until promoted / dead / dormant / moved back.
+const LEAD_STAGE_X = 'New Lead Type';
+
 const LEAD_STATUS_STYLES = {
   'New':       'background:#FFEDD5;color:#9A3412;',   // warm orange — fresh, needs attention
   'Working':   'background:#FEF3C7;color:#92400E;',   // amber — momentum
   'Qualified': 'background:#D9F99D;color:#3F6212;',   // lime — almost there
+  [LEAD_STAGE_X]: 'background:#A7F3D0;color:#065F46;', // emerald — past qualified, pre-promotion
   'Promoted':  'background:#BBF7D0;color:#166534;',   // green — won
   'Dormant':   'background:#E2E8F0;color:#475569;',   // slate — parked, off the axis
   'Dead':      'background:#FECACA;color:#991B1B;',   // red — closed
@@ -14498,8 +14508,24 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (rejectBtn) rejectBtn.style.display = 'none';
+  // Stage-X mover: a Qualified lead can advance into the placeholder stage; a
+  // lead already there can step back to Qualified. Both are plain status writes.
+  const stageXBtn = document.getElementById('lead-stagex-btn');
+  if (stageXBtn) {
+    if (status === 'Qualified' && !!leadData.id && !leadReadOnly) {
+      stageXBtn.style.display = '';
+      stageXBtn.textContent = LEAD_STAGE_X + ' →';
+      stageXBtn.onclick = () => moveLeadToStageX(true);
+    } else if (status === LEAD_STAGE_X && !leadReadOnly) {
+      stageXBtn.style.display = '';
+      stageXBtn.textContent = '← Back to Qualified';
+      stageXBtn.onclick = () => moveLeadToStageX(false);
+    } else {
+      stageXBtn.style.display = 'none';
+    }
+  }
   if (promoteBtn) {
-    const qualified       = (status === 'Qualified' && !leadReadOnly);
+    const qualified       = ((status === 'Qualified' || status === LEAD_STAGE_X) && !leadReadOnly);
     const specialEligible = !qualified && !leadReadOnly && leadSpecialPromotionEligible(leadData);
     const requested       = !!leadData.promotion_requested_at;
     const isSpecialReq    = leadData.promotion_request_type === 'special';
@@ -14612,7 +14638,7 @@ function refreshLeadWorkflowChrome() {
 function updateLeadQualifyNote() {
   const el = document.getElementById('lead-qualify-note');
   if (!el) return;
-  el.style.display = (leadData.status === 'Qualified') ? 'none' : '';
+  el.style.display = (leadData.status === 'Qualified' || leadData.status === LEAD_STAGE_X) ? 'none' : '';
 }
 
 // Tabs-row next-action text. Once a next action + date exist, show them as text to
@@ -14967,6 +14993,21 @@ function leadSourceSummaryHtml() {
 // Refetch the lead row after a derived-status change (red flag tick, promote wizard,
 // decline modal, or any interaction save that the trigger reacts to) so the badge
 // and Next Action display reflect the new server-side state without closing the lead.
+// Advance a Qualified lead into the placeholder stage (forward=true), or move it
+// back to Qualified (forward=false). computeLeadStatus keeps the stage sticky;
+// moving back lets the engine re-derive from the qualification state as usual.
+async function moveLeadToStageX(forward) {
+  if (!leadData?.id) return;
+  const from = leadData.status;
+  if (forward && from !== 'Qualified') { showStatus('Only a Qualified lead can move to ' + LEAD_STAGE_X, 'error'); return; }
+  if (!forward && from !== LEAD_STAGE_X) return;
+  try {
+    await api('leads', 'PATCH', { status: forward ? LEAD_STAGE_X : 'Qualified' }, 'id=eq.' + leadData.id);
+    showStatus(forward ? ('Lead moved to ' + LEAD_STAGE_X) : 'Lead moved back to Qualified');
+    await reloadLeadAfterServerChange();
+  } catch (e) { showStatus('Move failed: ' + e.message, 'error'); }
+}
+
 async function reloadLeadAfterServerChange() {
   if (!leadData?.id) return;
   try {
@@ -15198,11 +15239,11 @@ function startPromoteFlow(mode, requestType, justification) {
   if (!leadData?.id) return;
   if (mode === 'commit') {
     if (!canPromote(leadData)) { showStatus('Only a manager or admin can promote a lead. Use Request promotion instead.', 'error'); return; }
-    if (leadData.status !== 'Qualified') { showStatus('Promote is only available for Qualified leads', 'error'); return; }
+    if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) { showStatus('Promote is only available for Qualified leads', 'error'); return; }
   } else {
     if (requestType === 'special') {
       if (!leadSpecialPromotionEligible(leadData)) { showStatus('This lead does not meet the special promotion-request criteria', 'error'); return; }
-    } else if (leadData.status !== 'Qualified') {
+    } else if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) {
       showStatus('Promotion can only be requested for Qualified leads', 'error'); return;
     }
   }
@@ -16846,7 +16887,7 @@ function updateLeadReadiness() {
   if (!el) return;
   // "Ready to promote" appears only once the lead is actually Qualified (all-green +
   // service category + estimate). Before that, reflect the qualification-dot state.
-  if (leadData.status === 'Qualified') {
+  if (leadData.status === 'Qualified' || leadData.status === LEAD_STAGE_X) {
     if (leadData.promotion_requested_at) {
       // Already flagged for promotion → show who flagged it instead of the nudge.
       const p = (allData['people'] || []).find(x => +x.id === +leadData.promotion_requested_by);
@@ -16930,7 +16971,7 @@ function leadGreenCount(l) {
 // required for the special path (it is for full Qualified). Excludes dead/promoted.
 function leadSpecialPromotionEligible(l) {
   if (!l || !l.id) return false;
-  if (l.status === 'Qualified' || l.status === 'Promoted' || l.status === 'Dead') return false;
+  if (l.status === 'Qualified' || l.status === LEAD_STAGE_X || l.status === 'Promoted' || l.status === 'Dead') return false;
   if (LEAD_GREEN(l)) return false;   // all-strong uses the standard path
   const hasService = l.service_major_id != null && +l.service_major_id > 0;
   return hasService && leadGreenCount(l) >= promotionMinGreen();
@@ -17012,6 +17053,9 @@ function computeLeadStatus(l, ctx) {
   if (l.promoted_at) return 'Promoted';
   if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
   if (l.wake_date) return 'Dormant';
+  // Manual placeholder stage (between Qualified and Promoted) is sticky until
+  // promoted / dead / dormant above, or explicitly moved back to Qualified.
+  if (l.status === LEAD_STAGE_X) return LEAD_STAGE_X;
   const hasEst = l.est_value != null && +l.est_value > 0;
   const hasService = l.service_major_id != null && +l.service_major_id > 0;
   // Qualified needs all-green + an estimate + a service category, and must not be under
