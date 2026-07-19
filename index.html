@@ -551,7 +551,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.7.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.00 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +585,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.7.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.00 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6621,7 +6621,27 @@ async function loadEngagements(dealId) {
     const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const now = Date.now();
 
-    const rows = engs.map(e => {
+    // Group into streams (stream_id = root engagement id; rows from before the
+    // streams migration have none and become singleton streams keyed by their
+    // own id). engs is newest-first, so each group's list stays newest-first.
+    const streamMap = new Map();
+    engs.forEach(e => {
+      const k = +(e.stream_id || e.id);
+      if (!streamMap.has(k)) streamMap.set(k, []);
+      streamMap.get(k).push(e);
+    });
+    const groups = [...streamMap.entries()].map(([rootId, list2]) => {
+      const root = list2.find(e => +e.id === rootId);
+      const open = list2.find(e => e.next_action && !e.next_action_done) || null;
+      const lastClosed = list2.find(e => e.next_action && e.next_action_done) || null;
+      return { rootId, list: list2, latest: list2[0], open, lastClosed,
+               label: (root && root.stream_label) || (list2[0].engagement_type || 'Engagements') };
+    }).sort((a, b) => String(b.latest.engagement_date || '').localeCompare(String(a.latest.engagement_date || '')));
+
+    // Expansion state survives reloads within the session.
+    const expandedSet = (window._dealEngOpenStreams = window._dealEngOpenStreams || new Set());
+
+    const engRowHtml = (e, rootId, shown) => {
       const createdAt = new Date(e.created_at).getTime();
       const ageMs = now - createdAt;
       const gracePeriodMs = graceMins * 60 * 1000;
@@ -6661,20 +6681,45 @@ async function loadEngagements(dealId) {
 
       const borderLeft = isEditable ? '3px solid var(--red)' : '3px solid var(--border)';
 
-      return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openEngagement(${e.id})">
-        <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date}<div style="margin-top:3px;font-weight:400;">${cdChip}</div></td>
+      return `<tr data-stream="${rootId}" style="border-top:1px solid var(--border);cursor:pointer;background:#FBFCFE;display:${shown ? '' : 'none'};" onclick="openEngagement(${e.id})">
+        <td style="padding:10px 8px 10px 26px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date}<div style="margin-top:3px;font-weight:400;">${cdChip}</div></td>
         <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;">${typeCell}</td>
         <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextActionCell}</td>
         <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextDateCell}</td>
         <td style="padding:10px 12px;text-align:right;vertical-align:middle;white-space:nowrap;width:1%;">${completedCell}</td>
       </tr>`;
+    };
+
+    // One collapsed header row per stream; expanding reveals the chain beneath.
+    const esc6 = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+    const rows = groups.map(g => {
+      const shown = expandedSet.has(g.rootId);
+      const openAct = g.open
+        ? esc6(g.open.next_action)
+        : (g.lastClosed ? `<span style="text-decoration:line-through;color:var(--text3);">${esc6(g.lastClosed.next_action)}</span>` : '<span style="color:var(--text3);">—</span>');
+      const openDue = g.open && g.open.next_action_date
+        ? g.open.next_action_date
+        : '<span style="color:var(--text3);">—</span>';
+      let closedCell;
+      if (g.open) closedCell = '<span style="color:var(--text3);">—</span>';
+      else if (g.lastClosed && g.lastClosed.next_action_completed_at) closedCell = `<span style="font-weight:600;">${new Date(g.lastClosed.next_action_completed_at).toLocaleDateString('en-ZA')}</span>`;
+      else if (g.lastClosed) closedCell = '<span style="font-weight:600;color:var(--text3);">✓</span>';
+      else closedCell = '<span style="color:var(--text3);">—</span>';
+      const stateBorder = g.open ? '3px solid var(--red)' : '3px solid var(--border)';
+      return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="toggleDealEngStream(${g.rootId})">
+        <td style="padding:10px 8px 10px 12px;font-weight:700;border-left:${stateBorder};vertical-align:middle;white-space:nowrap;width:1%;"><span id="str-caret-${g.rootId}" style="display:inline-block;width:14px;color:var(--text3);">${shown ? '▾' : '▸'}</span>${g.latest.engagement_date}</td>
+        <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;"><span style="font-weight:700;color:var(--navy);">${esc6(g.label)}</span> <span style="font-size:11px;font-weight:600;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:1px 8px;margin-left:6px;">${g.list.length} engagement${g.list.length !== 1 ? 's' : ''}</span></td>
+        <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${openAct}</td>
+        <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${openDue}</td>
+        <td style="padding:10px 12px;text-align:right;vertical-align:middle;white-space:nowrap;width:1%;">${closedCell}</td>
+      </tr>` + g.list.map(e => engRowHtml(e, g.rootId, shown)).join('');
     }).join('');
 
     list.innerHTML = `
       <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;">
         <thead><tr style="background:var(--bg);text-align:left;">
-          <th style="padding:8px 8px 8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;white-space:nowrap;">Date</th>
-          <th style="padding:8px 12px 8px 4px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Type</th>
+          <th style="padding:8px 8px 8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;white-space:nowrap;">Latest</th>
+          <th style="padding:8px 12px 8px 4px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Stream</th>
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:right;white-space:nowrap;">Next Action</th>
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:right;white-space:nowrap;">Due Date</th>
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:right;white-space:nowrap;">Completed</th>
@@ -6685,6 +6730,17 @@ async function loadEngagements(dealId) {
   } catch(err) {
     list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);">Error: ${err.message}</div>`;
   }
+}
+
+// Expand/collapse one stream group on the deal form's Engagements tab. State
+// lives in window._dealEngOpenStreams so a list reload keeps open groups open.
+function toggleDealEngStream(rootId) {
+  const set = (window._dealEngOpenStreams = window._dealEngOpenStreams || new Set());
+  set.has(+rootId) ? set.delete(+rootId) : set.add(+rootId);
+  const shown = set.has(+rootId);
+  document.querySelectorAll(`#engagement-list tr[data-stream="${rootId}"]`).forEach(tr => { tr.style.display = shown ? '' : 'none'; });
+  const caret = document.getElementById('str-caret-' + rootId);
+  if (caret) caret.textContent = shown ? '▾' : '▸';
 }
 
 // Injects a "View source lead →" button into the engagement modal footer when
