@@ -476,6 +476,9 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pb-post.expanded .pb-post-detail { display:block; }
 .pb-detail-section { margin-bottom:6px; border:1px dashed #ddd; padding:4px 8px; border-radius:3px; background:#fff; }
 .pb-detail-section h4 { margin:0 0 8px; font-size:11px; color:var(--navy); text-transform:uppercase; letter-spacing:0.5px; }
+.pb-detail-section h4.pb-collapse-h { cursor:pointer; user-select:none; display:flex; align-items:center; gap:6px; }
+.pb-detail-section h4.pb-collapse-h:last-child { margin-bottom:0; }
+.pb-detail-twist { color:var(--text3); font-size:10px; width:10px; display:inline-block; }
 .pb-placeholder-text { color:var(--text3); font-style:italic; font-size:12px; padding:18px; text-align:center; background:#f5f5f5; border-radius:3px; }
 .pb-move-row { display:flex; gap:10px; align-items:center; margin-top:10px; padding-top:8px; border-top:1px dashed #e5e5e5; font-size:12px; color:var(--text3); }
 .pb-move-row select { font-family:inherit; font-size:12px; padding:2px 6px; border:1px solid #e5e5e5; }
@@ -551,7 +554,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.01 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.02 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -585,7 +588,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.01 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.02 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5004,6 +5007,7 @@ let pbSandboxMode = false;   // true = builder is hosted on the Proposal Sandbox
 function pbRoot() { return document.getElementById(pbSandboxMode ? 'sandbox-builder-root' : 'proposal-builder-root'); }
 let pbHeadings = [];
 let pbExpandedPosts = new Set();
+let pbDetailToggled = new Set();   // 'postId:section' keys flipped away from their default open/closed state
 let pbPromptShown = {};
 let pbPeopleCollapsed = false;
 let pbAllPostsExpanded = false;
@@ -5063,7 +5067,7 @@ async function loadProposalBuilder() {
   const root = pbRoot();
   if (!root) return;
   if (!oppData || !oppData.id) { root.innerHTML = '<p style="color:var(--text3);">Save the opportunity first to create quotes.</p>'; return; }
-  pbViewMode = 'list'; pbQ = null; pbHeadings = []; pbExpandedPosts = new Set(); pbPromptShown = {};
+  pbViewMode = 'list'; pbQ = null; pbHeadings = []; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
   root.classList.remove('pb-fullscreen');
   root.innerHTML = '<p style="color:var(--text3);">Loading proposals…</p>';
   try {
@@ -5115,7 +5119,7 @@ async function openQuote(id) {
     if (!pbCachedHeadingNames.length) pbCachedHeadingNames = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     pbHeadings = pbGroupPostsByHeading(posts);
     pbEnsureUngrouped();
-    pbViewMode = 'editor'; pbExpandedPosts = new Set(); pbPromptShown = {};
+    pbViewMode = 'editor'; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
     renderQuoteEditor();
   } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
 }
@@ -5271,10 +5275,35 @@ function renderPost(p, h, idx) {
     '</div>';
 }
 
+// Post-detail sections: 'shift' and 'hours' default open (collapsing the shift
+// schedule leaves the hours summary showing; collapsing that is the further
+// step). Allowances / accessories / training default collapsed, always toggleable.
+const PB_DETAIL_DEFAULT_OPEN = { shift: true, hours: true };
+
+function pbDetailOpen(postId, sec) {
+  const open = !!PB_DETAIL_DEFAULT_OPEN[sec];
+  return pbDetailToggled.has(postId + ':' + sec) ? !open : open;
+}
+
+function pbToggleDetail(postId, sec) {
+  const k = postId + ':' + sec;
+  if (pbDetailToggled.has(k)) pbDetailToggled.delete(k); else pbDetailToggled.add(k);
+  renderQuoteEditor();
+}
+
 function renderPostDetail(p, h, others) {
+  const sec = (key, label, body) => {
+    const open = pbDetailOpen(p.id, key);
+    return '<div class="pb-detail-section">' +
+      '<h4 class="pb-collapse-h" onclick="pbToggleDetail(' + p.id + ', \'' + key + '\')"><span class="pb-detail-twist">' + (open ? '▾' : '▸') + '</span>' + label + '</h4>' +
+      (open ? body : '') + '</div>';
+  };
   return '<div class="pb-post-detail" onclick="event.stopPropagation()">' +
-    '<div class="pb-detail-section">' + renderShiftTable(p) + '</div>' +
-    '<div class="pb-detail-section"><h4>Allowances · Accessories · Training</h4><div class="pb-placeholder-text">[ Allowances grid, statutory toggles, accessories (~21 toggles), training (~12 toggles) — to be wired in next round ]</div></div>' +
+    sec('shift', 'Shift schedule', renderShiftTable(p)) +
+    sec('hours', 'Hours summary', renderShiftReadout(p)) +
+    sec('allowances', 'Allowances', '<div class="pb-placeholder-text">[ Allowances grid + statutory toggles — to be wired in next round ]</div>') +
+    sec('accessories', 'Accessories', '<div class="pb-placeholder-text">[ ~21 accessory toggles — to be wired in next round ]</div>') +
+    sec('training', 'Training', '<div class="pb-placeholder-text">[ ~12 training toggles — to be wired in next round ]</div>') +
     (others.length ? '<div class="pb-move-row"><span>Move this post to:</span><select onchange="pbMovePostToHeading(' + p.id + ', this.value)"><option value="">(stay in ' + pbEsc(h.isUngrouped ? 'Ungrouped' : h.name) + ')</option>' +
       others.map(oh => '<option value="' + oh.id + '">' + pbEsc(oh.isUngrouped ? 'Ungrouped' : oh.name) + '</option>').join('') + '</select></div>' : '') +
     '</div>';
@@ -5305,17 +5334,19 @@ function renderShiftTable(p) {
     });
     html += '</tr>';
   }
-  html += '</tbody></table>';
-  // Readout
+  html += '</tbody></table></div>';
+  return html;
+}
+
+function renderShiftReadout(p) {
   const mh = pbTotalMonthlyOfficerHours(p);
   const gn = pbGeneralOfficersNeeded(p);
   const sn = pbSundayBoundOfficers(p);
   const need = pbOfficersNeeded(p);
   const binding = sn > gn && sn > 0;
-  html += '<div class="pb-shift-readout"><div>Monthly officer-hours: <strong>' + mh.toFixed(1) + '</strong>&nbsp;·&nbsp;Officers needed: <strong>' + need.toFixed(2) + '</strong> <span class="cp-muted">(round up to ' + Math.ceil(need) + ')</span></div>' +
+  return '<div class="pb-shift-readout"><div>Monthly officer-hours: <strong>' + mh.toFixed(1) + '</strong>&nbsp;·&nbsp;Officers needed: <strong>' + need.toFixed(2) + '</strong> <span class="cp-muted">(round up to ' + Math.ceil(need) + ')</span></div>' +
     '<div class="cp-muted" style="margin-top:3px;">General: ' + gn.toFixed(2) + ' ÷ ' + PB_HOURS_PER_OFFICER_PER_MONTH + ' hrs/officer/mo (SD6)&nbsp;·&nbsp;Sunday-bound: ' + sn.toFixed(2) + ' ÷ ' + PB_SUNDAY_HRS_PER_OFFICER_PER_MONTH + ' hrs/officer/mo' +
-    (binding ? '<strong style="color:var(--red);">&nbsp;(Sunday cap is binding)</strong>' : '') + '<br>SD6 ceiling: 48 hr/wk ordinary + 10 hr/wk OT; Sunday work ≤ 12 hr/wk</div></div></div>';
-  return html;
+    (binding ? '<strong style="color:var(--red);">&nbsp;(Sunday cap is binding)</strong>' : '') + '<br>SD6 ceiling: 48 hr/wk ordinary + 10 hr/wk OT; Sunday work ≤ 12 hr/wk</div></div>';
 }
 
 // Hidden datalists for name suggestions
@@ -5351,7 +5382,7 @@ async function loadProposalSandbox() {
   pbSandboxMode = true;
   const root = pbRoot();
   if (!root) return;
-  pbViewMode = 'list'; pbQ = null; pbHeadings = []; pbExpandedPosts = new Set(); pbPromptShown = {};
+  pbViewMode = 'list'; pbQ = null; pbHeadings = []; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
   root.classList.remove('pb-fullscreen');
   root.innerHTML = '<p style="color:var(--text3);">Loading sandbox quotes…</p>';
   try {
