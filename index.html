@@ -572,7 +572,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.12 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.13 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -606,7 +606,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.12 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.13 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8975,8 +8975,8 @@ async function renderOpportunitiesPage() {
 // (managers). Fixed per-role for now — user customisation is a later increment.
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
-  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns'],
-  'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline'],
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions'],
+  'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions'],
   'Operations':    ['contracts'],
   'Executive':     ['company'],   // was 'EXCO' — no such role exists; the live role name is Executive
   'Admin':         ['bugs'],
@@ -8994,6 +8994,7 @@ const DASH_WIDGET_CATALOG = {
   campaigns:     'Campaigns',
   contracts:     'Active Contracts',
   company:       'Company Overview',
+  interactions:  'Interactions',
   bugs:          'Bugs',
 };
 
@@ -9071,7 +9072,8 @@ async function renderDashboard() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
   const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
-                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany, bugs: _dashBugs };
+                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany, bugs: _dashBugs,
+                    interactions: _dashInteractions };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
     if (!el) return;
@@ -9141,6 +9143,150 @@ async function _dashActions() {
       <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('Overdue', overdue, overdue > 0 ? 'red' : null)}${kpi('Due ≤ 7 days', dueSoon)}${kpi('Total open', rows.length)}</div>
       ${rows.length ? `<div style="margin-top:10px;">${list}</div>${rows.length > 5 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${rows.length - 5} more</div>` : ''}`
                     : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">Nothing outstanding — you're clear.</div>`}
+    </div></div>`;
+}
+
+// ── Interactions per period ──────────────────────────────────────────────────
+// Activity metric: engagements logged per week/month (12 periods), stacked by
+// category (Outreach / Sales / Contract / Project — same derivation as the
+// stream backfill). Admin settings: interactions_team_scope ('managers' |
+// 'everyone'), interactions_weekly_target (per person per week, '' = off),
+// interactions_count_promotion ('true'/'false').
+const _DASH_INT_CATS = ['Outreach', 'Sales', 'Contract', 'Project'];
+const _DASH_INT_COLORS = { Outreach: '#C3B091', Sales: '#003057', Contract: '#16a34a', Project: '#64748b' };
+
+async function _dashReloadInteractions() {
+  const el = document.getElementById('dash-interactions');
+  if (!el) return;
+  try { el.innerHTML = await _dashInteractions(); }
+  catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load interactions: ${e.message}</div>`; }
+}
+
+async function _dashInteractions() {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const period = window._dashIntPeriod === 'month' ? 'month' : 'week';
+  const teamAllowed = ((appSettings['interactions_team_scope'] || 'managers') === 'everyone') || _dashScope() === 'team';
+  let scope = window._dashIntScope || (teamAllowed ? 'team' : 'own');
+  if (scope === 'team' && !teamAllowed) scope = 'own';
+  const countPromo = (appSettings['interactions_count_promotion'] || 'true') === 'true';
+  const weeklyTarget = Math.max(0, +(appSettings['interactions_weekly_target'] || 0) || 0);
+  const target = period === 'week' ? weeklyTarget : Math.round(weeklyTarget * 52 / 12);
+
+  // 12 period buckets, oldest first. Weeks start Monday.
+  const periods = [];
+  const now = new Date();
+  if (period === 'week') {
+    const mon = new Date(now); mon.setHours(0, 0, 0, 0);
+    mon.setDate(mon.getDate() - ((mon.getDay() + 6) % 7));
+    for (let i = 11; i >= 0; i--) {
+      const s = new Date(mon); s.setDate(s.getDate() - i * 7);
+      const e = new Date(s); e.setDate(e.getDate() + 7);
+      periods.push({ s, e, label: s.getDate() + ' ' + s.toLocaleString('en-ZA', { month: 'short' }) });
+    }
+  } else {
+    for (let i = 11; i >= 0; i--) {
+      const s = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const e = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      periods.push({ s, e, label: s.toLocaleString('en-ZA', { month: 'short' }) + ' ' + String(s.getFullYear()).slice(2) });
+    }
+  }
+  const iso = d => d.toISOString().slice(0, 10);
+  const fromIso = iso(periods[0].s);
+
+  let engs = await apiGetAll('engagements',
+    'engagement_date=gte.' + fromIso + '&select=id,lead_id,deal_id,engagement_date,engagement_type,created_by');
+  if (!countPromo) engs = engs.filter(e => e.engagement_type !== 'Promotion');
+  if (scope === 'own') engs = engs.filter(e => +e.created_by === +currentUser.personId);
+
+  // Category derivation needs stage + recurring flag for deal-side engagements.
+  const dealIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
+  const dealById = {};
+  for (let i = 0; i < dealIds.length; i += 150) {
+    const chunk = dealIds.slice(i, i + 150);
+    (await apiGet('deals', `id=in.(${chunk.join(',')})&select=id,stage_id,service_sub_id`))
+      .forEach(d => { dealById[+d.id] = d; });
+  }
+  if (!allData['service_sub']) { try { allData['service_sub'] = await apiGet('service_sub', 'select=id,is_recurring'); } catch (e) { allData['service_sub'] = []; } }
+  const subById = Object.fromEntries((allData['service_sub'] || []).map(s => [+s.id, s]));
+  const catOf = e => {
+    if (e.lead_id != null) return 'Outreach';
+    const d = dealById[+e.deal_id];
+    if (d && [5, 7, 8].includes(+d.stage_id)) {
+      const ss = subById[+d.service_sub_id];
+      return (ss && ss.is_recurring === false) ? 'Project' : 'Contract';
+    }
+    return 'Sales';
+  };
+
+  // Bucket counts: per period per category, plus per person in the current period.
+  const buckets = periods.map(() => ({ total: 0, cats: { Outreach: 0, Sales: 0, Contract: 0, Project: 0 } }));
+  const curByPerson = {};
+  const cur = periods.length - 1;
+  for (const e of engs) {
+    const d = e.engagement_date || '';
+    const pi = periods.findIndex(p => d >= iso(p.s) && d < iso(p.e));
+    if (pi < 0) continue;
+    buckets[pi].total++;
+    buckets[pi].cats[catOf(e)]++;
+    if (pi === cur) { const k = e.created_by == null ? 0 : +e.created_by; curByPerson[k] = (curByPerson[k] || 0) + 1; }
+  }
+  const curCount = buckets[cur].total, prevCount = buckets[cur - 1].total;
+  const delta = curCount - prevCount;
+
+  // Chart: stacked columns, dashed target line (Mine view — target is per person).
+  const H = 88;
+  const maxVal = Math.max(1, ...buckets.map(b => b.total), (scope === 'own' && target) ? target : 0);
+  const cols = buckets.map((b, i) => {
+    const segs = _DASH_INT_CATS.map(c => b.cats[c]
+      ? `<div style="height:${Math.max(1, Math.round(b.cats[c] / maxVal * H))}px;background:${_DASH_INT_COLORS[c]};"></div>` : '').join('');
+    const tip = periods[i].label + ': ' + b.total + _DASH_INT_CATS.map(c => b.cats[c] ? ` · ${c} ${b.cats[c]}` : '').join('');
+    const showLbl = period === 'week' ? (i % 3 === 2) : (i % 2 === 1);
+    return `<div title="${esc(tip)}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch;min-width:0;">
+      <div style="display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden;${i === cur ? 'outline:1.5px solid var(--red);outline-offset:1px;' : ''}">${segs || '<div style="height:1px;"></div>'}</div>
+      <div style="font-size:8.5px;color:var(--text3);text-align:center;margin-top:3px;white-space:nowrap;overflow:hidden;">${showLbl ? esc(periods[i].label) : '&nbsp;'}</div>
+    </div>`;
+  }).join('');
+  const targetLine = (scope === 'own' && target)
+    ? `<div style="position:absolute;left:0;right:0;bottom:${13 + Math.round(target / maxVal * H)}px;border-top:2px dashed var(--red);"><span style="position:absolute;right:0;top:-14px;font-size:9px;font-weight:700;color:var(--red);">target ${target}</span></div>` : '';
+  const legend = _DASH_INT_CATS.map(c =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text3);"><span style="width:8px;height:8px;border-radius:2px;background:${_DASH_INT_COLORS[c]};"></span>${c}</span>`).join('');
+
+  // Team view: this period per person vs the per-person target.
+  let teamList = '';
+  if (scope === 'team') {
+    if (!allData['people']) { try { allData['people'] = await apiGetAll('people', 'select=id,first_name,last_name'); } catch (e) { allData['people'] = []; } }
+    const personName = id => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown'; };
+    const ppl = Object.entries(curByPerson).map(([id, n]) => ({ id: +id, n })).sort((a, b) => b.n - a.n).slice(0, 8);
+    teamList = ppl.length ? `<div style="margin-top:10px;">` + ppl.map(p => {
+      const col = target ? (p.n >= target ? '#16a34a' : 'var(--red)') : 'var(--navy)';
+      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid var(--border);font-size:12px;">
+        <span style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(personName(p.id))}</span>
+        <span style="font-weight:700;color:${col};white-space:nowrap;">${p.n}${target ? ' / ' + target : ''}</span></div>`;
+    }).join('') + `</div>` : `<div style="margin-top:10px;color:var(--text3);font-size:12px;">No interactions logged this ${period} yet.</div>`;
+  }
+
+  const chipTxt = scope === 'team' ? 'Team' : 'Mine';
+  const seg = (label, on, click) =>
+    `<button onclick="${click}" style="border:1px solid var(--border);background:${on ? 'var(--navy)' : 'var(--bg2)'};color:${on ? '#fff' : 'var(--text2)'};font-size:10px;font-weight:700;padding:2px 8px;cursor:pointer;">${label}</button>`;
+  const periodSeg = `<span style="display:inline-flex;border-radius:4px;overflow:hidden;">${seg('Wk', period === 'week', "window._dashIntPeriod='week';_dashReloadInteractions()")}${seg('Mo', period === 'month', "window._dashIntPeriod='month';_dashReloadInteractions()")}</span>`;
+  const scopeSeg = teamAllowed
+    ? `<span style="display:inline-flex;border-radius:4px;overflow:hidden;margin-left:6px;">${seg('Mine', scope === 'own', "window._dashIntScope='own';_dashReloadInteractions()")}${seg('Team', scope === 'team', "window._dashIntScope='team';_dashReloadInteractions()")}</span>` : '';
+  const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color || 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  const deltaHtml = kpi('vs previous', (delta >= 0 ? '▲ +' : '▼ ') + delta, delta >= 0 ? '#16a34a' : 'var(--red)');
+
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Interactions<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipTxt}</span></div>
+      <div>${periodSeg}${scopeSeg}</div>
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('This ' + period, curCount)}${deltaHtml}${(scope === 'own' && target) ? kpi('Target', target) : ''}</div>
+      <div style="position:relative;margin-top:14px;">
+        <div style="display:flex;gap:3px;align-items:flex-end;">${cols}</div>
+        ${targetLine}
+      </div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">${legend}</div>
+      ${teamList}
     </div></div>`;
 }
 
@@ -19276,6 +19422,32 @@ async function renderSettingsPage() {
           </div>
         </div>
       </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Interactions Widget</div>
+        <div class="form-row-3">
+          <div class="form-group">
+            <label class="form-label">Who sees the Team view?</label>
+            <select id="setting-int-team-scope" class="form-control">
+              <option value="managers" ${(appSettings['interactions_team_scope']||'managers')!=='everyone'?'selected':''}>Managers only</option>
+              <option value="everyone" ${(appSettings['interactions_team_scope']||'managers')==='everyone'?'selected':''}>Everyone</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The team breakdown (per-person counts) on the dashboard Interactions widget. Everyone else sees only their own numbers.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Weekly target per person</label>
+            <input type="number" id="setting-int-weekly-target" class="form-control" min="0" step="1" value="${appSettings['interactions_weekly_target']||''}" placeholder="none">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Interactions each person should log per week. Shows as a target line (personal view) and a per-person red/green comparison (team view). Monthly view derives its target from this. Empty = no target.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Count promotion engagements?</label>
+            <select id="setting-int-count-promo" class="form-control">
+              <option value="true" ${(appSettings['interactions_count_promotion']||'true')==='true'?'selected':''}>Yes — promotions count as touches</option>
+              <option value="false" ${(appSettings['interactions_count_promotion']||'true')!=='true'?'selected':''}>No — manually logged only</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether the engagement written automatically by the Promote flow counts toward interaction totals.</div>
+          </div>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
@@ -19299,6 +19471,9 @@ async function saveSettings() {
     const engEdit = document.getElementById('setting-eng-edit')?.value || '60';
     const promoMinGreen = String(Math.min(4, Math.max(1, +document.getElementById('setting-promotion-min-green').value || 4)));
     const promoWeak = document.getElementById('setting-promotion-weak').value === 'true' ? 'true' : 'false';
+    const intTeamScope = document.getElementById('setting-int-team-scope')?.value === 'everyone' ? 'everyone' : 'managers';
+    const intWeeklyTarget = String(Math.max(0, +document.getElementById('setting-int-weekly-target')?.value || 0) || '');
+    const intCountPromo = document.getElementById('setting-int-count-promo')?.value === 'false' ? 'false' : 'true';
     await Promise.all([
       api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
       api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
@@ -19310,6 +19485,9 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: engEdit, updated_at: new Date().toISOString() }, 'key=eq.engagement_edit_minutes'),
       api('settings', 'PATCH', { value: promoMinGreen, updated_at: new Date().toISOString() }, 'key=eq.promotion_min_green'),
       api('settings', 'PATCH', { value: promoWeak, updated_at: new Date().toISOString() }, 'key=eq.promotion_green_counts_weak'),
+      api('settings', 'PATCH', { value: intTeamScope, updated_at: new Date().toISOString() }, 'key=eq.interactions_team_scope'),
+      api('settings', 'PATCH', { value: intWeeklyTarget, updated_at: new Date().toISOString() }, 'key=eq.interactions_weekly_target'),
+      api('settings', 'PATCH', { value: intCountPromo, updated_at: new Date().toISOString() }, 'key=eq.interactions_count_promotion'),
     ]);
 
     appSettings['fy_start_month'] = fyStart;
@@ -19325,6 +19503,9 @@ async function saveSettings() {
     appSettings['engagement_edit_minutes'] = engEdit;
     appSettings['promotion_min_green'] = promoMinGreen;
     appSettings['promotion_green_counts_weak'] = promoWeak;
+    appSettings['interactions_team_scope'] = intTeamScope;
+    appSettings['interactions_weekly_target'] = intWeeklyTarget;
+    appSettings['interactions_count_promotion'] = intCountPromo;
     showStatus('Settings saved');
   } catch(e) {
     showStatus('Failed to save: ' + e.message, 'error');
