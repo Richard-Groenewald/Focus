@@ -240,6 +240,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .tbl-filter-clear-btn{float:right;background:var(--red);color:#fff;border:none;border-radius:4px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer;}
 .tbl-filter-clear-btn:hover{background:#d90910;}
 .tbl-filter-banner-bar{display:flex;align-items:center;justify-content:space-between;background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;padding:6px 12px;border:1px solid var(--red);border-radius:4px;margin:8px 0 6px;}
+.dash-drop-target{outline:2px dashed var(--red);outline-offset:2px;border-radius:8px;}
 #table-filter-popup{position:fixed;display:none;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:99997;min-width:240px;max-width:320px;padding:8px 0;font-size:13px;}
 .tbl-popup-section{display:flex;gap:6px;padding:4px 12px;}
 .tbl-popup-btn{flex:1;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text);}
@@ -572,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.13 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -606,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.13 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9050,11 +9051,44 @@ function _dashCard(title, scope, kpis, sub, page, linkLabel) {
     </div></div>`;
 }
 
+// Personal widget order: drag-to-reorder, persisted per person in localStorage.
+// The BASE layout stays the admin config (Settings → Dashboards role matrix);
+// "Reset layout" drops the personal order and returns to it. New widgets a role
+// gains later are appended in base order, so a stale saved order never hides one.
+function _dashOrderKey() { return 'focus_dash_order_' + (currentUser?.personId || 'anon'); }
+function _dashApplyUserOrder(widgets) {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(_dashOrderKey()) || 'null'); } catch (e) {}
+  if (!Array.isArray(saved)) return widgets;
+  const out = saved.filter(w => widgets.includes(w));
+  widgets.forEach(w => { if (!out.includes(w)) out.push(w); });
+  return out;
+}
+let _dashDragKey = null;
+function dashDragStart(ev, w) { _dashDragKey = w; ev.dataTransfer.effectAllowed = 'move'; }
+function dashDragOver(ev) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; ev.currentTarget.classList.add('dash-drop-target'); }
+function dashDragLeave(ev) { ev.currentTarget.classList.remove('dash-drop-target'); }
+function dashDrop(ev, w) {
+  ev.preventDefault(); ev.currentTarget.classList.remove('dash-drop-target');
+  if (!_dashDragKey || _dashDragKey === w) { _dashDragKey = null; return; }
+  const order = _dashApplyUserOrder(_dashWidgetsForUser());
+  const from = order.indexOf(_dashDragKey), to = order.indexOf(w);
+  if (from < 0 || to < 0) { _dashDragKey = null; return; }
+  order.splice(to, 0, order.splice(from, 1)[0]);
+  _dashDragKey = null;
+  try { localStorage.setItem(_dashOrderKey(), JSON.stringify(order)); } catch (e) {}
+  renderDashboard();
+}
+function dashResetLayout() {
+  try { localStorage.removeItem(_dashOrderKey()); } catch (e) {}
+  renderDashboard();
+}
+
 async function renderDashboard() {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
   head.innerHTML = '';
-  const widgets = _dashWidgetsForUser();
+  const widgets = _dashApplyUserOrder(_dashWidgetsForUser());
   const greeting = ('Welcome, ' + (currentUser?.name || '')).trim().replace(/,$/, '');
   if (!widgets.length) {
     body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:48px 24px;text-align:center;color:var(--text3);">
@@ -9064,11 +9098,20 @@ async function renderDashboard() {
   }
   // Make sure shared lookups the widgets read are present.
   if (!allData['stages']) { try { allData['stages'] = await apiGet('stages', 'select=id,name'); } catch(e) { allData['stages'] = []; } }
+  const customised = !!localStorage.getItem(_dashOrderKey());
   const shell = widgets.map(w =>
-    `<div id="dash-${w}"><div class="card" style="padding:20px;color:var(--text3);">Loading…</div></div>`).join('');
+    `<div id="dash-${w}" draggable="true" title="Drag to rearrange your dashboard"
+       ondragstart="dashDragStart(event,'${w}')" ondragover="dashDragOver(event)" ondragleave="dashDragLeave(event)" ondrop="dashDrop(event,'${w}')"
+       style="cursor:grab;"><div class="card" style="padding:20px;color:var(--text3);">Loading…</div></div>`).join('');
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div style="padding:2px 0 18px;">
-      <div style="font-size:16px;font-weight:700;color:var(--navy);margin-bottom:14px;">${greeting}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+        <div style="font-size:16px;font-weight:700;color:var(--navy);">${greeting}</div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:11px;color:var(--text3);">Drag cards to rearrange</span>
+          ${customised ? `<button class="btn btn-ghost btn-sm" onclick="dashResetLayout()" title="Return to the standard layout for your role">↺ Reset layout</button>` : ''}
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
   const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
@@ -9419,7 +9462,8 @@ async function renderDashboardAdmin() {
     <div style="padding:2px 0 24px;max-width:1000px;">
       <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">
         Tick the categories each role sees on its dashboard. A user with several roles sees the union of their roles' categories.
-        Widgets appear in the column order below; changes apply the next time a user opens their dashboard.
+        Widgets appear in the column order below — this is the BASE layout; users can drag-reorder their own dashboard,
+        and its <em>Reset layout</em> button returns them to this base. Changes apply the next time a user opens their dashboard.
       </div>
       <div class="card" style="padding:0;overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
