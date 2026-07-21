@@ -233,7 +233,13 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .tbl-sort-arrow{margin-left:4px;font-size:10px;color:var(--text);opacity:0.9;}
 .tbl-filter-btn{display:inline-block;padding:0 4px;margin-left:4px;font-size:10px;color:var(--text3);cursor:pointer;border-radius:3px;line-height:1;vertical-align:middle;}
 .tbl-filter-btn:hover{background:var(--bg);color:var(--text);}
-.tbl-filter-btn.active{color:var(--red);font-weight:700;}
+.tbl-filter-btn.active{color:#fff;background:var(--red);font-weight:700;padding:1px 5px;}
+.tbl-filter-btn.active:hover{background:#d90910;}
+.tbl-filter-banner th{background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;text-align:left;padding:6px 12px;border-bottom:2px solid var(--red);}
+.tbl-filter-banner th span{vertical-align:middle;}
+.tbl-filter-clear-btn{float:right;background:var(--red);color:#fff;border:none;border-radius:4px;padding:3px 12px;font-size:12px;font-weight:700;cursor:pointer;}
+.tbl-filter-clear-btn:hover{background:#d90910;}
+.tbl-filter-banner-bar{display:flex;align-items:center;justify-content:space-between;background:#FEE2E2;color:#991B1B;font-weight:700;font-size:12px;padding:6px 12px;border:1px solid var(--red);border-radius:4px;margin:8px 0 6px;}
 #table-filter-popup{position:fixed;display:none;background:white;border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,0.18);z-index:99997;min-width:240px;max-width:320px;padding:8px 0;font-size:13px;}
 .tbl-popup-section{display:flex;gap:6px;padding:4px 12px;}
 .tbl-popup-btn{flex:1;padding:6px 10px;background:var(--bg);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text);}
@@ -566,7 +572,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.11 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.12 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -600,7 +606,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.11 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.12 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2036,9 +2042,18 @@ function _renderTable(tableId) {
     }
   }
 
-  // Headers
+  // Headers. When any column filter is active, a full-width banner row sits above
+  // the column headers: impossible to miss, names the filtered columns, shows the
+  // hidden-row impact, and clears everything in one click.
   if (headRoot) {
-    headRoot.innerHTML = '<tr>' + columns.map(c => {
+    const activeCols = columns.filter(c => s.filters[c.key] && s.filters[c.key].size);
+    const banner = activeCols.length
+      ? `<tr class="tbl-filter-banner"><th colspan="${columns.length}">` +
+        `<span>▼&nbsp; FILTERED — showing ${filtered.length} of ${rows.length} · ${activeCols.map(c => c.label).join(', ')}</span>` +
+        `<button class="tbl-filter-clear-btn" onclick="_clearAllFilters('${tableId}')">✕ Clear filters</button>` +
+        `</th></tr>`
+      : '';
+    headRoot.innerHTML = banner + '<tr>' + columns.map(c => {
       const isSorted = s.sortKey === c.key;
       const sortArrow = isSorted ? `<span class="tbl-sort-arrow">${s.sortDir === 'asc' ? '▲' : '▼'}</span>` : '';
       const sortable  = c.sortable !== false;
@@ -2168,6 +2183,13 @@ function _toggleSelectAll(tableId, colKey, checked) {
     s.filters[colKey] = excl;
   }
   document.querySelectorAll('#tbl-popup-list input[type=checkbox]').forEach(cb => { cb.checked = checked; });
+  _renderTable(tableId);
+}
+
+function _clearAllFilters(tableId) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  s.filters = {};
   _renderTable(tableId);
 }
 
@@ -9491,6 +9513,7 @@ const RPP = (function () {
     paint();
   }
   function clearFilter(key){ delete filters[key]; paint(); closeFilter(); }
+  function clearAllFilters(){ for (const k of Object.keys(filters)) delete filters[k]; paint(); }
   function sortFromPopup(key, dir){ sortKey=key; sortDir=dir; paint(); closeFilter(); }
   function filterPopupList(q){
     q = (q||'').toLowerCase();
@@ -9660,6 +9683,17 @@ const RPP = (function () {
 
   function paint(){
     const hs = document.getElementById('rpp-hscroll'); if (!hs) return;
+    // Filter banner: same impossible-to-miss treatment as the shared tables.
+    const fb = document.getElementById('rpp-filter-banner');
+    if (fb) {
+      const act = COLS.filter(c => filters[c.key] && filters[c.key].size);
+      if (act.length) {
+        const vis = visibleDeals().length;
+        fb.style.display = '';
+        fb.innerHTML = `<span>▼&nbsp; FILTERED — showing ${vis} of ${DEALS.length} deal${DEALS.length===1?'':'s'} · ${act.map(c=>c.label).join(', ')}</span>` +
+          `<button class="tbl-filter-clear-btn" onclick="RPP.clearAllFilters()">✕ Clear filters</button>`;
+      } else { fb.style.display = 'none'; }
+    }
     const avail = hs.clientWidth - 2;
     const total = FYS.length;
     let visN = Math.min(MIN_FY, total);
@@ -9769,6 +9803,7 @@ const RPP = (function () {
           <span class="hint">Past months show <b style="color:var(--green)">actuals</b>; future months show the selected projection.</span>
           <button class="btn-toggle" id="rpp-varToggle" style="margin-left:auto;" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
         </div>
+        <div class="tbl-filter-banner-bar" id="rpp-filter-banner" style="display:none;"></div>
         <div class="hscroll" id="rpp-hscroll">
           <div class="tabs" id="rpp-tabs"></div>
           <div class="grid-card" id="rpp-card">
@@ -9804,7 +9839,7 @@ const RPP = (function () {
   });
 
   return { render, setBasis, setMetric, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
-           cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, closeFilter, filterPopupList };
+           cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
 // ── Deal Administration ───────────────────────────────────
