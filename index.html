@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.18 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.18 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2002,7 +2002,13 @@ function stopBusy() { _netBusy(false); }
 const _tableState = {};
 
 function makeSortableFilterableTable(cfg) {
-  const s = _tableState[cfg.tableId] = _tableState[cfg.tableId] || { sortKey: null, sortDir: null, filters: {} };
+  // First render of a table seeds the sort from cfg.defaultSortKey/-Dir (admin
+  // "Sort Defaults" settings); after that the user's clicked sort always wins.
+  const s = _tableState[cfg.tableId] = _tableState[cfg.tableId] || {
+    sortKey: cfg.defaultSortKey || null,
+    sortDir: cfg.defaultSortKey ? (cfg.defaultSortDir === 'desc' ? 'desc' : 'asc') : null,
+    filters: {},
+  };
   Object.assign(s, cfg);
   _renderTable(cfg.tableId);
 }
@@ -10588,10 +10594,13 @@ async function renderLeadsPage() {
       const isActiveTab = t.key === leadsViewTab;
       // Inactive tabs carry a subtle status colour so the pipeline is visually
       // scannable. Active tab keeps the existing navy/white selected look so
-      // the "you are here" cue stays strong (inline style is omitted when active
-      // so the .opp-tab.active CSS rule wins without specificity fights).
-      const tint = (!isActiveTab && LEAD_STATUS_STYLES[t.key]) ? `style="${LEAD_STATUS_STYLES[t.key]}border-color:transparent;"` : '';
-      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" ${tint} onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span></button>`;
+      // the "you are here" cue stays strong (tint is omitted when active so the
+      // .opp-tab.active CSS rule wins without specificity fights; the Dead
+      // push-right margin is layout-only, so it stays on in both states).
+      const push = (t.key === 'Dead') ? 'margin-left:auto;' : '';   // off-pipeline bucket sits apart, far right
+      const tint = (!isActiveTab && LEAD_STATUS_STYLES[t.key]) ? `${LEAD_STATUS_STYLES[t.key]}border-color:transparent;` : '';
+      const style = (push || tint) ? `style="${push}${tint}"` : '';
+      return `<button class="opp-tab ${isActiveTab ? 'active' : ''}" ${style} onclick="leadsViewTab='${t.key}'; renderLeadsPage();">${t.label} <span style="opacity:0.7;font-weight:400;margin-left:4px;">(${count})</span></button>`;
     }).join('');
 
     // Filter to active tab
@@ -10658,6 +10667,9 @@ async function renderLeadsPage() {
       rows: filtered,
       rowRenderer: (l) => renderLeadRow(l, sources, regions, people, orgs),
       emptyMessage: 'No leads in this tab match the current filters.',
+      // Admin → Settings → Sort Defaults. Empty key = server order (created desc).
+      defaultSortKey: appSettings['leads_default_sort_key'] || null,
+      defaultSortDir: appSettings['leads_default_sort_dir'] || 'asc',
     });
     startEditCountdownTicker();   // drive any New-lane / lane-header countdown chips
   } catch(e) {
@@ -19442,6 +19454,28 @@ async function renderSettingsPage() {
           </div>
         </div>
       </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Sort Defaults</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">How list pages are ordered before anyone clicks a column header. A user's own column click always overrides these for their session.</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Leads register — sort by</label>
+            <select id="setting-leads-sort-key" class="form-control">
+              ${[['', 'Created (newest first)'], ['target', 'Site'], ['source', 'Source'], ['region', 'Region'], ['branch', 'Branch'], ['qual', 'F A C T score'], ['owner', 'Owner'], ['nxt', 'Next Action'], ['touch', 'Last Touch (days since)']]
+                .map(([v, l]) => `<option value="${v}" ${(appSettings['leads_default_sort_key'] || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Applies to every status tab on the Leads Register. "Created (newest first)" is the classic behaviour.</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Direction</label>
+            <select id="setting-leads-sort-dir" class="form-control">
+              <option value="asc"  ${(appSettings['leads_default_sort_dir'] || 'asc') !== 'desc' ? 'selected' : ''}>Ascending</option>
+              <option value="desc" ${(appSettings['leads_default_sort_dir'] || 'asc') === 'desc' ? 'selected' : ''}>Descending</option>
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Ignored for "Created (newest first)". For Last Touch: ascending puts the most recently touched on top, descending the most neglected.</div>
+          </div>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
@@ -19468,6 +19502,8 @@ async function saveSettings() {
     const intTeamScope = document.getElementById('setting-int-team-scope')?.value === 'everyone' ? 'everyone' : 'managers';
     const intWeeklyTarget = String(Math.max(0, +document.getElementById('setting-int-weekly-target')?.value || 0) || '');
     const intCountPromo = document.getElementById('setting-int-count-promo')?.value === 'false' ? 'false' : 'true';
+    const leadsSortKey = document.getElementById('setting-leads-sort-key')?.value || '';
+    const leadsSortDir = document.getElementById('setting-leads-sort-dir')?.value === 'desc' ? 'desc' : 'asc';
     await Promise.all([
       api('settings', 'PATCH', { value: fyStart, updated_at: new Date().toISOString() }, 'key=eq.fy_start_month'),
       api('settings', 'PATCH', { value: escMonth, updated_at: new Date().toISOString() }, 'key=eq.escalation_month'),
@@ -19482,6 +19518,8 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: intTeamScope, updated_at: new Date().toISOString() }, 'key=eq.interactions_team_scope'),
       api('settings', 'PATCH', { value: intWeeklyTarget, updated_at: new Date().toISOString() }, 'key=eq.interactions_weekly_target'),
       api('settings', 'PATCH', { value: intCountPromo, updated_at: new Date().toISOString() }, 'key=eq.interactions_count_promotion'),
+      api('settings', 'PATCH', { value: leadsSortKey, updated_at: new Date().toISOString() }, 'key=eq.leads_default_sort_key'),
+      api('settings', 'PATCH', { value: leadsSortDir, updated_at: new Date().toISOString() }, 'key=eq.leads_default_sort_dir'),
     ]);
 
     appSettings['fy_start_month'] = fyStart;
@@ -19500,6 +19538,11 @@ async function saveSettings() {
     appSettings['interactions_team_scope'] = intTeamScope;
     appSettings['interactions_weekly_target'] = intWeeklyTarget;
     appSettings['interactions_count_promotion'] = intCountPromo;
+    appSettings['leads_default_sort_key'] = leadsSortKey;
+    appSettings['leads_default_sort_dir'] = leadsSortDir;
+    // Drop the leads tables' remembered sort state so the new default seeds on
+    // the next visit to the register (a fresh click still overrides it).
+    Object.keys(_tableState).filter(k => k.startsWith('leads-')).forEach(k => delete _tableState[k]);
     showStatus('Settings saved');
   } catch(e) {
     showStatus('Failed to save: ' + e.message, 'error');
