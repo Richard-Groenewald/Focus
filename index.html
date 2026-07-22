@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.15 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.15 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -15091,10 +15091,12 @@ function leadCadenceRibbonShell(camp, body) {
 }
 
 // Peer review (simulated): Qualified leads must be reviewed before Promote.
+// Also rendered on Nurture — that stage is promote-eligible, so a manager needs
+// the same Approve gate there (previously unreachable from Nurture).
 function renderLeadPeerReview(status) {
   const el = document.getElementById('lead-peer-review');
   if (!el) return;
-  if (status !== 'Qualified' || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  if ((status !== 'Qualified' && status !== LEAD_STAGE_X) || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
   const prs = leadData.peer_review_status || 'Pending';
   const btn = (val, label, bg) =>
@@ -15109,7 +15111,7 @@ function renderLeadPeerReview(status) {
         ${btn('Rejected', 'Rejected', '#b91c1c')}
       </div>
       <button type="button" onclick="demoteLeadToWorking()" class="btn btn-secondary" style="padding:5px 10px;font-size:12px;">← Demote to Working</button>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button · park via Promote → "can't progress now". ${reviewedAt}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button. ${reviewedAt}</div>
     </div>`;
 }
 
@@ -15133,13 +15135,17 @@ async function demoteLeadToWorking() {
   startBusy('Demoting…');
   try {
     // Hold blocks re-qualification; pin working_at so it lands on Working.
-    await api('leads', 'PATCH', {
+    const patch = {
       qualification_demoted: true,
       peer_review_status: null,
       peer_review_at: null,
       working_at: leadData.working_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }, 'id=eq.' + leadData.id);
+    };
+    // Nurture is sticky in the status engine — clear it explicitly so the
+    // recompute can land on Working instead of echoing Nurture back.
+    if (leadData.status === LEAD_STAGE_X) patch.status = 'Working';
+    await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id);
     await reloadLeadAfterServerChange();   // recompute → Working
     showStatus('Demoted to Working');
   } catch (e) { showStatus('Could not demote: ' + e.message, 'error'); }
