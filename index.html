@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1175,12 +1175,12 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
           <!-- Peer review panel (visible only when status = Qualified) -->
           <div id="lead-peer-review" style="display:none;"></div>
 
-          <!-- Wake date (visible only when status = Nurture) -->
+          <!-- Wake date (visible only when status = Dormant — legacy parked leads) -->
           <div class="opp-section" id="lead-wake-date-wrap" style="display:none;">
             <div class="form-group" style="flex:1;margin-bottom:0;">
               <label class="form-label">Wake date</label>
               <input type="date" id="lead-wake-date" class="form-control" disabled style="background:#F1F5F9;color:var(--text2);cursor:not-allowed;">
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Set via the Promote wizard. Lead sits in Nurture until this date.</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Legacy parked lead. Dormant is retired — no new leads enter this stage.</div>
             </div>
           </div>
 
@@ -3915,7 +3915,8 @@ const HELP_CONTENT = {
       New: 'Fill the required (<span style="color:var(--red)">*</span>) fields and log a next action to move this lead to <strong>Working</strong>.',
       Working: 'Keep engaging. Set the primary service interest and estimated value, and get the four qualification dots to Strong to reach <strong>Qualified</strong>.',
       Qualified: 'A peer review is needed before promotion. Once reviewed, use <strong>Promote →</strong> to turn this lead into an opportunity.',
-      Nurture: 'This lead is parked. Set or clear the wake date, or re-engage to bring it back to Working.',
+      Nurture: 'This lead is a deliberate focus push. Keep engaging and complete the qualification dots to reach <strong>Qualified</strong>, or move it back to Working.',
+      Dormant: 'This lead is parked (legacy stage — retired, no new leads enter here). Re-engage to bring it back to Working.',
       Dead: 'This lead was declined. It stays on record; reopen it if things change.',
       Promoted: 'This lead has been promoted — open the deal to continue there.',
     }[status] || '';
@@ -10572,9 +10573,13 @@ async function renderLeadsPage() {
       { key: LEAD_STAGE_X, label: LEAD_STAGE_X, filter: l => l.status === LEAD_STAGE_X },
       { key: 'Qualified', label: 'Qualified', filter: l => l.status === 'Qualified' },
       { key: 'Promoted',  label: 'Promoted',  filter: l => l.status === 'Promoted' },
-      { key: 'Nurture',   label: 'Nurture',   filter: l => l.status === 'Nurture' },
+      { key: 'Dormant',   label: 'Dormant',   filter: l => l.status === 'Dormant' },
       { key: 'Dead',      label: 'Dead',      filter: l => l.status === 'Dead' },
-    ];
+    ].filter(t =>
+      // Dormant is retired (no route in) — surface the tab only while legacy
+      // parked leads still carry the status, so nothing silently disappears.
+      t.key !== 'Dormant' || leads.some(t.filter)
+    );
 
     // Render tabs
     const tabBar = document.getElementById('leads-tabs');
@@ -13892,7 +13897,7 @@ function populateLeadForm() {
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
   if (leadData.next_action) document.getElementById('lead-next-action').value = leadData.next_action;
   if (leadData.next_action_date) document.getElementById('lead-next-action-date').value = leadData.next_action_date;
-  // Wake date display (only visible when Nurture)
+  // Wake date display (only visible when Dormant — legacy parked leads)
   const wd = document.getElementById('lead-wake-date'); if (wd) wd.value = leadData.wake_date || '';
   // Dead reason + notes — preserved in hidden inputs so save round-trips them
   document.getElementById('lead-dead-reason-value').value = leadData.dead_reason || '';
@@ -14788,14 +14793,16 @@ function showModal(html) {
 // ── Status badge + workflow chrome ────────────────────────
 // One source of truth — used by the lead-form badge, the leads-list row badge,
 // and the leads-page tab headers. Palette is an orange→green progression with
-// red for Dead and slate (off-axis) for Nurture.
-// Priority sits between Working and Qualified — a lead deliberately focused on
+// red for Dead and slate (off-axis) for Dormant.
+// Nurture sits between Working and Qualified — a lead deliberately focused on
 // even though it doesn't tick all qualification boxes yet. The stage is MANUAL:
 // a Working lead is moved in/out via the lead-form button; the status engine
-// keeps it sticky until promoted / dead / nurture / moved back. Renaming again =
+// keeps it sticky until promoted / dead / dormant / moved back. Renaming again =
 // change this string, swap the DB status CHECK and UPDATE existing rows (see
-// sql/rename_lead_stages_priority_nurture.sql).
-const LEAD_STAGE_X = 'Priority';
+// sql/rename_nurture_dormant_focus_nurture.sql).
+// NOTE: 'Nurture' previously named the parked/wake-date stage; that stage is now
+// 'Dormant' again and is RETIRED — no new entries, tab shown only for legacy rows.
+const LEAD_STAGE_X = 'Nurture';
 
 const LEAD_STATUS_STYLES = {
   'New':       'background:#FFEDD5;color:#9A3412;',   // warm orange — fresh, needs attention
@@ -14803,7 +14810,7 @@ const LEAD_STATUS_STYLES = {
   [LEAD_STAGE_X]: 'background:#A7F3D0;color:#065F46;', // emerald — focus push toward qualification
   'Qualified': 'background:#D9F99D;color:#3F6212;',   // lime — almost there
   'Promoted':  'background:#BBF7D0;color:#166534;',   // green — won
-  'Nurture':   'background:#E2E8F0;color:#475569;',   // slate — parked, off the axis
+  'Dormant':   'background:#E2E8F0;color:#475569;',   // slate — parked, off the axis (legacy, retired)
   'Dead':      'background:#FECACA;color:#991B1B;',   // red — closed
 };
 
@@ -14840,7 +14847,7 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (rejectBtn) rejectBtn.style.display = 'none';
-  // Priority mover: a Working lead can be elevated to Priority; a lead already
+  // Nurture mover: a Working lead can be elevated to Nurture; a lead already
   // there can step back to Working (the status engine then re-derives — a lead
   // that meanwhile ticks all boxes lands on Qualified). Plain status writes.
   const stageXBtn = document.getElementById('lead-stagex-btn');
@@ -14922,7 +14929,7 @@ function refreshLeadWorkflowChrome() {
   }
   // Decline only applies to a lead that already exists — not a brand-new unsaved one.
   if (declineBtn) declineBtn.style.display = (!!leadData.id && status !== 'Dead' && status !== 'Promoted' && !leadReadOnly) ? '' : 'none';
-  if (wakeWrap)   wakeWrap.style.display   = (status === 'Nurture') ? '' : 'none';
+  if (wakeWrap)   wakeWrap.style.display   = (status === 'Dormant') ? '' : 'none';
 
   if (deadBlock) {
     if (status === 'Dead') {
@@ -15084,10 +15091,12 @@ function leadCadenceRibbonShell(camp, body) {
 }
 
 // Peer review (simulated): Qualified leads must be reviewed before Promote.
+// Also rendered on Nurture — that stage is promote-eligible, so a manager needs
+// the same Approve gate there (previously unreachable from Nurture).
 function renderLeadPeerReview(status) {
   const el = document.getElementById('lead-peer-review');
   if (!el) return;
-  if (status !== 'Qualified' || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  if ((status !== 'Qualified' && status !== LEAD_STAGE_X) || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
   const prs = leadData.peer_review_status || 'Pending';
   const btn = (val, label, bg) =>
@@ -15102,7 +15111,7 @@ function renderLeadPeerReview(status) {
         ${btn('Rejected', 'Rejected', '#b91c1c')}
       </div>
       <button type="button" onclick="demoteLeadToWorking()" class="btn btn-secondary" style="padding:5px 10px;font-size:12px;">← Demote to Working</button>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button · park via Promote → "can't progress now". ${reviewedAt}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button. ${reviewedAt}</div>
     </div>`;
 }
 
@@ -15126,13 +15135,17 @@ async function demoteLeadToWorking() {
   startBusy('Demoting…');
   try {
     // Hold blocks re-qualification; pin working_at so it lands on Working.
-    await api('leads', 'PATCH', {
+    const patch = {
       qualification_demoted: true,
       peer_review_status: null,
       peer_review_at: null,
       working_at: leadData.working_at || new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    }, 'id=eq.' + leadData.id);
+    };
+    // Nurture is sticky in the status engine — clear it explicitly so the
+    // recompute can land on Working instead of echoing Nurture back.
+    if (leadData.status === LEAD_STAGE_X) patch.status = 'Working';
+    await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id);
     await reloadLeadAfterServerChange();   // recompute → Working
     showStatus('Demoted to Working');
   } catch (e) { showStatus('Could not demote: ' + e.message, 'error'); }
@@ -15326,8 +15339,8 @@ function leadSourceSummaryHtml() {
 // Refetch the lead row after a derived-status change (red flag tick, promote wizard,
 // decline modal, or any interaction save that the trigger reacts to) so the badge
 // and Next Action display reflect the new server-side state without closing the lead.
-// Elevate a Working lead into Priority (forward=true), or move it back to
-// Working (forward=false). computeLeadStatus keeps Priority sticky; moving back
+// Elevate a Working lead into Nurture (forward=true), or move it back to
+// Working (forward=false). computeLeadStatus keeps Nurture sticky; moving back
 // lets the engine re-derive from the qualification state as usual (all-green →
 // Qualified).
 async function moveLeadToStageX(forward) {
@@ -15545,10 +15558,11 @@ async function submitRejectPromotion() {
 }
 
 // ── Promote wizard ────────────────────────────────────────
-// Available when status = Qualified. Asks two questions:
-//   1. Any limiting red flags?  Y → pick flag type → insert lead_red_flags row → Dead.
-//   2. Can you make progress now?  Y → set promoted_at=now() → Promoted.
-//                                  N → ask wake_date → set wake_date → Nurture.
+// Available when status = Qualified (or Nurture). Gate question:
+//   Any limiting red flags?  Y → pick flag type → insert lead_red_flags row → Dead.
+//                            N → straight on to the org-confirm / package screens.
+// (The old "park in Nurture with a wake date" branch is gone — the parked stage
+// is retired as 'Dormant'; legacy rows keep wake_date and derive to Dormant.)
 // Format "by <name> on <date>" for a promotion request, using cached people.
 function _promotionRequestSuffix() {
   let s = '';
@@ -15706,25 +15720,9 @@ async function promoteWizardRedFlag(hasFlag) {
     `);
     return;
   }
-  // No red flag → Q2
-  showModal(`
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:520px;">
-        <div class="modal-header">
-          <div class="modal-title">Promote lead — next step</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
-        </div>
-        <div class="modal-body">
-          <div style="font-weight:700;font-size:14px;margin-bottom:10px;">Can you make progress now?</div>
-          <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">If yes, this lead is promoted to a deal. If not, park it in Nurture with a wake date.</div>
-          <div style="display:flex;gap:10px;">
-            <button class="btn btn-primary"   onclick="promoteWizardProgress(true)"  style="flex:1;">Yes — promote now</button>
-            <button class="btn btn-secondary" onclick="promoteWizardProgress(false)" style="flex:1;">No — move to Nurture</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `);
+  // No red flag → straight to Q3 (org confirmation). The old "park with a wake
+  // date" question is gone with the retired Dormant stage.
+  await openPromoteOrgConfirm();
 }
 
 async function promoteWizardSaveRedFlag() {
@@ -15749,54 +15747,6 @@ async function promoteWizardSaveRedFlag() {
     if (typeof renderLeadRedFlags === 'function') renderLeadRedFlags();
     if (typeof refreshLeadRedFlagPool === 'function') refreshLeadRedFlagPool();
     showStatus('Lead closed — red flag recorded');
-  } catch (e) {
-    showStatus('Could not save: ' + e.message, 'error');
-  } finally {
-    stopBusy();
-  }
-}
-
-async function promoteWizardProgress(canProgress) {
-  if (canProgress) {
-    // Hand off to Q3: confirm the organisation. promoted_at is set only when
-    // savePromoteAll commits at the end of the wizard (Q4 screen 2).
-    await openPromoteOrgConfirm();
-    return;
-  }
-  // Wake date prompt
-  const todayPlus7 = new Date(Date.now() + 7*24*60*60*1000).toISOString().slice(0,10);
-  showModal(`
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:480px;">
-        <div class="modal-header">
-          <div class="modal-title">Park in Nurture</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
-        </div>
-        <div class="modal-body">
-          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">When should this lead resurface for another look?</div>
-          <input type="date" id="promote-wake-date" class="form-control" value="${todayPlus7}" min="${new Date().toISOString().slice(0,10)}">
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary"   onclick="promoteWizardSaveWake()">Save</button>
-        </div>
-      </div>
-    </div>
-  `);
-}
-
-async function promoteWizardSaveWake() {
-  const wake = document.getElementById('promote-wake-date')?.value || '';
-  if (!wake) { showStatus('Pick a wake date', 'error'); return; }
-  startBusy('Parking lead…');
-  try {
-    await api('leads', 'PATCH', {
-      wake_date:  wake,
-      updated_at: new Date().toISOString(),
-    }, 'id=eq.' + leadData.id);
-    closeModal();
-    await reloadLeadAfterServerChange();
-    showStatus('Lead parked — will resurface ' + wake);
   } catch (e) {
     showStatus('Could not save: ' + e.message, 'error');
   } finally {
@@ -17280,7 +17230,7 @@ function flagLeadField(fieldId, message) {
 
 // ── Lead status engine (app-layer; replaces the retired DB status triggers) ───
 // Status is derived here on every write path + a New→Working sweep on list load.
-// Precedence: Promoted → Dead → Nurture → Qualified → Working → New.
+// Precedence: Promoted → Dead → Dormant (legacy) → Nurture → Qualified → Working → New.
 const LEAD_GREEN = (l) => +l.fit===2 && +l.trigger_score===2 && +l.access===2 && +l.capacity===2;
 
 // ── Promotion-eligibility tunables (Settings → Lead Lifecycle) ────────────────
@@ -17386,9 +17336,9 @@ function computeLeadStatus(l, ctx) {
   const now = ctx.now || new Date();
   if (l.promoted_at) return 'Promoted';
   if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
-  if (l.wake_date) return 'Nurture';
-  // Manual Priority stage (between Working and Qualified) is sticky until
-  // promoted / dead / nurture above, or explicitly moved back to Working.
+  if (l.wake_date) return 'Dormant';   // legacy parked leads only — no route in
+  // Manual Nurture stage (between Working and Qualified) is sticky until
+  // promoted / dead / dormant above, or explicitly moved back to Working.
   if (l.status === LEAD_STAGE_X) return LEAD_STAGE_X;
   const hasEst = l.est_value != null && +l.est_value > 0;
   const hasService = l.service_major_id != null && +l.service_major_id > 0;
@@ -17406,7 +17356,7 @@ function computeLeadStatus(l, ctx) {
 
 // Derive + persist status (and lifecycle stamps) for the currently-open lead.
 // Called from reloadLeadAfterServerChange() so interaction / decline / promote /
-// nurture / red-flag paths all converge here.
+// red-flag paths all converge here.
 async function recomputeOpenLeadStatus() {
   if (!leadData || !leadData.id) return;
   const nowIso = new Date().toISOString();
