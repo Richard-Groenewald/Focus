@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.19 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.19 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -910,6 +910,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;" id="lead-action-buttons">
       <span id="lead-save-indicator" style="font-size:12px;font-weight:600;"></span>
+      <button type="button" id="lead-hold-btn" class="btn btn-secondary btn-sm" style="display:none;">Hold →</button>
       <button type="button" id="lead-stagex-btn" class="btn btn-secondary btn-sm" style="display:none;"></button>
       <button type="button" id="lead-promote-btn" onclick="openPromoteWizard()" class="btn btn-primary btn-sm" style="display:none;">Promote →</button>
       <button type="button" id="lead-reject-btn" onclick="openRejectPromotion()" class="btn btn-sm" style="display:none;background:var(--red);color:#fff;border-color:var(--red);">Reject…</button>
@@ -1172,8 +1173,12 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
              otherwise. id kept for applyLeadFormLayout(). -->
         <div id="lead-workflow-section">
 
-          <!-- Peer review panel (visible only when status = Qualified) -->
-          <div id="lead-peer-review" style="display:none;"></div>
+          <!-- Stage-change approval panel (pending Hold/Nurture request chip +
+               Approve/Decline for sales management) — rendered by renderLeadStageRequest() -->
+          <div id="lead-stage-request" style="display:none;"></div>
+
+          <!-- Nurture cadence summary (visible only when status = Nurture) -->
+          <div id="lead-nurture-info" style="display:none;"></div>
 
           <!-- Wake date (visible only when status = Hold) -->
           <div class="opp-section" id="lead-wake-date-wrap" style="display:none;">
@@ -3918,8 +3923,8 @@ const HELP_CONTENT = {
     const nextStep = {
       New: 'Fill the required (<span style="color:var(--red)">*</span>) fields and log a first engagement with a next action to move this lead to <strong>Working</strong>.',
       Working: 'Keep engaging. Set the primary service interest and get the four qualification dots to Strong to reach <strong>Qualified</strong>.',
-      Qualified: 'A peer review is needed before promotion. Once reviewed, use <strong>Promote →</strong> to turn this lead into an opportunity.',
-      Nurture: 'This lead is a deliberate focus push. Keep engaging and complete the qualification dots to reach <strong>Qualified</strong>, or move it back to Working.',
+      Qualified: 'Fully qualified — awaiting promotion approval. <strong>Request promotion</strong> (owner) or <strong>Promote →</strong> (manager) to turn it into an opportunity, or place it on <strong>Hold</strong> / move it to <strong>Nurture</strong> (sales-management approved).',
+      Nurture: 'Long-game cultivation, entered with sales-management approval. The per-lead touch cadence keeps the relationship alive; there is no exit from Nurture for now.',
       Hold: 'This lead is on hold — right profile, waiting for its moment. It returns to Working on its wake date; going all-green flips it straight to Qualified.',
       Dead: 'This lead was declined. It stays on record; reopen it if things change.',
       Promoted: 'This lead has been promoted — open the deal to continue there.',
@@ -10166,7 +10171,7 @@ async function adminDeleteDeal(id) {
 // reverse-chron, paged 200 at a time.
 const AUDIT_TABLES = ['leads','deals','organisations','people','sites','engagements',
   'revenue_streams','revenue_stream_months','deal_contacts','deal_collaborators',
-  'person_organisation_roles','promotion_requests','lead_red_flags',
+  'person_organisation_roles','promotion_requests','lead_stage_requests','lead_red_flags',
   'settings','system_users','user_roles','role_permissions'];
 const AUDIT_PAGE_SIZE = 200;
 let _auditOffset = 0;
@@ -14855,25 +14860,30 @@ function refreshLeadWorkflowChrome() {
   const promoteNote = document.getElementById('lead-promotion-note');
   if (promoteNote) promoteNote.style.display = 'none';
   if (rejectBtn) rejectBtn.style.display = 'none';
-  // Nurture mover: a Working lead can be elevated to Nurture; a lead already
-  // there can step back to Working (the status engine then re-derives — a lead
-  // that meanwhile ticks all boxes lands on Qualified). Plain status writes.
+  // Stage-change requests (LEAD_LIFECYCLE_RULES.md): Hold and Nurture are entered
+  // from Working/Qualified via a sales-management-approved request (self-approval
+  // collapses). Nurture has no exit path for now, so there is no back button.
+  if (leadData.id && window._leadStageRequestFor !== leadData.id) {
+    window._leadStageRequestFor = leadData.id;
+    window._leadStageRequest = null;   // drop any stale row from a previously open lead
+    loadLeadStageRequest(leadData.id).then(() => refreshLeadWorkflowChrome());
+  }
+  const stageEligible = (status === 'Working' || status === 'Qualified')
+    && canRequestStageChange(leadData) && !window._leadStageRequest;
   const stageXBtn = document.getElementById('lead-stagex-btn');
   if (stageXBtn) {
-    if (status === 'Working' && !!leadData.id && !leadReadOnly) {
-      stageXBtn.style.display = '';
-      stageXBtn.textContent = LEAD_STAGE_X + ' →';
-      stageXBtn.onclick = () => moveLeadToStageX(true);
-    } else if (status === LEAD_STAGE_X && !leadReadOnly) {
-      stageXBtn.style.display = '';
-      stageXBtn.textContent = '← Back to Working';
-      stageXBtn.onclick = () => moveLeadToStageX(false);
-    } else {
-      stageXBtn.style.display = 'none';
-    }
+    stageXBtn.style.display = stageEligible ? '' : 'none';
+    stageXBtn.textContent = LEAD_STAGE_X + ' →';
+    stageXBtn.onclick = () => openStageRequestModal('nurture');
+  }
+  const holdBtn = document.getElementById('lead-hold-btn');
+  if (holdBtn) {
+    holdBtn.style.display = (stageEligible && leadHoldEligible(leadData)) ? '' : 'none';
+    holdBtn.onclick = () => openStageRequestModal('hold');
   }
   if (promoteBtn) {
-    const qualified       = ((status === 'Qualified' || status === LEAD_STAGE_X) && !leadReadOnly);
+    // Nurture is no longer promote-eligible — it has no exit path for now.
+    const qualified       = (status === 'Qualified' && !leadReadOnly);
     const flagBlocked     = leadPromotionBlockedByRedFlag() && status !== 'Dead' && status !== 'Promoted';
     const requested       = !!leadData.promotion_requested_at;
     const isSpecialReq    = leadData.promotion_request_type === 'special';
@@ -14911,15 +14921,11 @@ function refreshLeadWorkflowChrome() {
       promoteBtn.textContent = isSpecialReq ? '⏳ Special promotion requested' : '⏳ Promotion requested';
       promoteBtn.onclick = null;
     } else if (qualified && manager) {
-      // Manager direct-promote, gated on peer review Approved.
-      if (leadData.peer_review_status === 'Approved') {
-        promoteBtn.style.display = '';
-        promoteBtn.disabled = false;
-        promoteBtn.textContent = 'Promote →';
-        promoteBtn.onclick = () => openPromoteWizard();
-      } else {
-        promoteBtn.style.display = 'none';   // pending peer review — use the review panel
-      }
+      // Manager direct-promote (self-approval collapse — no separate review step).
+      promoteBtn.style.display = '';
+      promoteBtn.disabled = false;
+      promoteBtn.textContent = 'Promote →';
+      promoteBtn.onclick = () => openPromoteWizard();
     } else if (qualified) {
       // Owner, fully qualified: standard request.
       promoteBtn.style.display = '';
@@ -14979,7 +14985,8 @@ function refreshLeadWorkflowChrome() {
       deadBlock.style.display = 'none';
     }
   }
-  renderLeadPeerReview(status);
+  renderLeadStageRequest(status);
+  renderLeadNurtureInfo(status);
   renderLeadNextActionChip();
   renderLeadCadenceRibbon();
   updateLeadQualifyNote();
@@ -15103,65 +15110,266 @@ function leadCadenceRibbonShell(camp, body) {
     <span style="color:var(--text3);">${camp}</span><span style="color:var(--border);">·</span>${body}</div>`;
 }
 
-// Peer review (simulated): Qualified leads must be reviewed before Promote.
-// Also rendered on Nurture — that stage is promote-eligible, so a manager needs
-// the same Approve gate there (previously unreachable from Nurture).
-function renderLeadPeerReview(status) {
-  const el = document.getElementById('lead-peer-review');
+// ── Stage-change approvals (Hold / Nurture) ───────────────────────────────────
+// LEAD_LIFECYCLE_RULES.md: the lead owner (or a sales manager) initiates Hold or
+// Nurture; sales management approves. An initiator with approval rights collapses
+// the approval (the request row is recorded pre-approved for the audit trail).
+// Declines are the approver's choice: keep the lead where it is (default) or
+// close it as Dead — a reason is mandatory either way.
+// (This replaces the old simulated peer-review panel; peer_review_* columns stay
+// in the DB for history but are no longer written.)
+
+function canRequestStageChange(l) {
+  if (!l || !l.id || leadReadOnly || !currentUser) return false;
+  return canPromote(l) || +l.owner_id === +(currentUser.personId || 0) || !!currentUser.isAdmin;
+}
+
+// Hold entry precondition: F/A/C all Strong — Trigger may be anything.
+function leadHoldEligible(l) {
+  return +l.fit === 2 && +l.access === 2 && +l.capacity === 2;
+}
+
+// Lazy-load the pending request for the open lead (mirrors the promotion-request
+// cache pattern). window._leadStageRequestFor guards one load per lead.
+async function loadLeadStageRequest(leadId) {
+  try {
+    const rows = await apiGet('lead_stage_requests',
+      `lead_id=eq.${leadId}&status=eq.pending&select=*&order=requested_at.desc&limit=1`);
+    window._leadStageRequest = (rows && rows[0]) ? rows[0] : null;
+  } catch (e) {
+    window._leadStageRequest = null;
+    console.warn('Could not load stage request:', e.message);
+  }
+}
+
+// Pending-request panel: chip for everyone, Approve / Decline for sales management.
+function renderLeadStageRequest(status) {
+  const el = document.getElementById('lead-stage-request');
   if (!el) return;
-  if ((status !== 'Qualified' && status !== LEAD_STAGE_X) || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const req = window._leadStageRequest;
+  if (!req || leadReadOnly) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const p = (allData['people'] || []).find(x => +x.id === +req.requested_by);
+  const who = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown';
+  const when = req.requested_at ? new Date(req.requested_at).toLocaleDateString('en-ZA') : '';
+  const what = req.request_type === 'hold'
+    ? `Hold until ${req.wake_date ? new Date(req.wake_date).toLocaleDateString('en-ZA') : '—'}`
+    : `${LEAD_STAGE_X} — touch every ${req.cadence_days || '—'} days`;
+  const manager = canPromote(leadData);
   el.style.display = '';
-  const prs = leadData.peer_review_status || 'Pending';
-  const btn = (val, label, bg) =>
-    `<button type="button" onclick="setLeadPeerReview('${val}')" style="padding:5px 10px;font-size:12px;border-radius:6px;cursor:pointer;${prs===val?`background:${bg};color:#fff;border:1px solid ${bg};font-weight:700;`:'background:#fff;color:var(--text2);border:1px solid var(--border);'}">${label}</button>`;
-  const reviewedAt = leadData.peer_review_at ? ('Last set ' + new Date(leadData.peer_review_at).toLocaleString('en-ZA')) : '';
   el.innerHTML = `
-    <div style="padding:12px 14px;background:#F8FAFC;border:1px solid var(--border);border-radius:var(--radius);">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--text3);margin-bottom:8px;">Peer review — required before promote</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
-        ${btn('Pending', 'Pending', '#6b7280')}
-        ${btn('Approved', 'Approved', '#16a34a')}
-        ${btn('Rejected', 'Rejected', '#b91c1c')}
-      </div>
-      <button type="button" onclick="demoteLeadToWorking()" class="btn btn-secondary" style="padding:5px 10px;font-size:12px;">← Demote to Working</button>
-      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Simulated review. <b>Approve</b> to unlock Promote · <b>Reject</b> via the Decline button. ${reviewedAt}</div>
+    <div style="padding:12px 14px;background:#EFF6FF;border:1px solid #93C5FD;border-radius:var(--radius);">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:var(--navy);margin-bottom:6px;">Awaiting sales-management approval</div>
+      <div style="font-size:13px;color:var(--text);margin-bottom:${manager ? '10px' : '0'};"><strong>${what}</strong> — requested by ${who}${when ? ' on ' + when : ''}${req.note ? ' · &ldquo;' + String(req.note).replace(/</g, '&lt;') + '&rdquo;' : ''}</div>
+      ${manager ? `<div style="display:flex;gap:8px;">
+        <button type="button" class="btn btn-primary" style="padding:5px 12px;font-size:12px;" onclick="approveStageRequest()">✓ Approve</button>
+        <button type="button" class="btn btn-secondary" style="padding:5px 12px;font-size:12px;" onclick="openDeclineStageRequest()">Decline…</button>
+      </div>` : ''}
     </div>`;
 }
 
-async function setLeadPeerReview(val) {
-  if (!leadData || !leadData.id) return;
-  startBusy('Saving review…');
+// Nurture cadence summary panel (status = Nurture only).
+function renderLeadNurtureInfo(status) {
+  const el = document.getElementById('lead-nurture-info');
+  if (!el) return;
+  if (status !== LEAD_STAGE_X) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const days = +leadData.nurture_cadence_days || 0;
+  const since = leadData.nurture_started_at ? new Date(leadData.nurture_started_at).toLocaleDateString('en-ZA') : null;
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="padding:10px 14px;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:var(--radius);font-size:12px;color:#065F46;">
+      <span style="font-weight:700;text-transform:uppercase;letter-spacing:0.04em;font-size:11px;">${LEAD_STAGE_X} cadence</span>
+      ${days ? ` · touch every <strong>${days} day${days === 1 ? '' : 's'}</strong>` : ' · no cadence set'}
+      ${since ? ` · nurturing since ${since}` : ''}
+      <span style="color:#047857;opacity:0.85;"> — the engagement modal pre-fills the next touch date.</span>
+    </div>`;
+}
+
+// Request modal: hold → mandatory wake date; nurture → mandatory cadence (days).
+function openStageRequestModal(type) {
+  if (!canRequestStageChange(leadData)) { showStatus('Only the lead owner or a manager can request this', 'error'); return; }
+  if (leadData.status !== 'Working' && leadData.status !== 'Qualified') { showStatus('Hold and ' + LEAD_STAGE_X + ' are available for Working or Qualified leads', 'error'); return; }
+  if (window._leadStageRequest) { showStatus('A stage request is already awaiting approval', 'error'); return; }
+  if (type === 'hold' && !leadHoldEligible(leadData)) { showStatus('Hold needs Fit, Access and Capacity all Strong', 'error'); return; }
+  const isHold = type === 'hold';
+  const selfApprove = canPromote(leadData);
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const title = isHold ? 'Place lead on Hold' : ('Move lead to ' + LEAD_STAGE_X);
+  const blurb = isHold
+    ? 'Right profile, waiting for its moment. The lead stays live (engagements and qualification edits continue) and returns to <strong>Working</strong> on its wake date — or flips straight to <strong>Qualified</strong> if all four gates go Strong.'
+    : 'Long-game cultivation. A recurring touch cadence keeps the relationship alive. There is no exit from ' + LEAD_STAGE_X + ' for now.';
+  const field = isHold
+    ? `<div class="form-group" style="margin-bottom:12px;">
+         <label class="form-label">Wake date <span style="color:var(--red)">*</span></label>
+         <input type="date" id="stage-req-date" class="form-control" min="${tomorrow}">
+         <div style="font-size:11px;color:var(--text3);margin-top:4px;">The lead returns to Working on this date.</div>
+       </div>`
+    : `<div class="form-group" style="margin-bottom:12px;">
+         <label class="form-label">Touch cadence — every N days <span style="color:var(--red)">*</span></label>
+         <input type="number" id="stage-req-cadence" class="form-control" min="1" step="1" value="30">
+         <div style="font-size:11px;color:var(--text3);margin-top:4px;">Per-lead setting. Each logged touch pre-fills the next one this many days out.</div>
+       </div>`;
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">${title}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">${blurb}</div>
+          ${field}
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Note</label>
+            <textarea id="stage-req-note" class="form-control" rows="2" placeholder="Optional context for the approver."></textarea>
+          </div>
+          ${selfApprove ? '' : '<div style="font-size:11px;color:var(--text3);margin-top:10px;">This request goes to sales management for approval.</div>'}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitStageRequest('${type}')">${selfApprove ? 'Apply' : 'Submit for approval'}</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function submitStageRequest(type) {
+  if (!leadData?.id) return;
+  const isHold = type === 'hold';
+  const wake = isHold ? (document.getElementById('stage-req-date')?.value || '') : null;
+  const cad  = !isHold ? Math.floor(+(document.getElementById('stage-req-cadence')?.value || 0)) : null;
+  const note = (document.getElementById('stage-req-note')?.value || '').trim() || null;
+  if (isHold && !wake) { showStatus('A wake date is required for Hold', 'error'); return; }
+  if (isHold && wake <= new Date().toISOString().slice(0, 10)) { showStatus('The wake date must be in the future', 'error'); return; }
+  if (!isHold && (!cad || cad < 1)) { showStatus('A touch cadence (days) is required for ' + LEAD_STAGE_X, 'error'); return; }
+  const selfApprove = canPromote(leadData);
+  startBusy(selfApprove ? 'Applying…' : 'Submitting…');
   try {
-    const patch = { peer_review_status: val, peer_review_at: new Date().toISOString(), peer_review_by: currentUser?.personId || null, updated_at: new Date().toISOString() };
-    const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
-    if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
-    populateLeadForm();
-    showStatus('Peer review: ' + val);
-    // Approval auto-fires the Promote wizard for anyone who can actually promote.
-    if (val === 'Approved' && canPromote(leadData)) openPromoteWizard();
-  } catch (e) { showStatus('Could not save review: ' + e.message, 'error'); }
+    const nowIso = new Date().toISOString();
+    const row = {
+      lead_id: leadData.id, request_type: type,
+      wake_date: wake, cadence_days: cad, note,
+      requested_by: currentUser?.personId || null, requested_at: nowIso,
+      status: selfApprove ? 'approved' : 'pending',
+      decided_by: selfApprove ? (currentUser?.personId || null) : null,
+      decided_at: selfApprove ? nowIso : null,
+    };
+    const made = await api('lead_stage_requests', 'POST', row, 'select=*');
+    closeModal();
+    if (selfApprove) {
+      await applyStageRequest(made && made[0] ? made[0] : row);
+      showStatus(isHold ? 'Lead placed on Hold' : 'Lead moved to ' + LEAD_STAGE_X);
+    } else {
+      window._leadStageRequest = made && made[0] ? made[0] : row;
+      window._leadStageRequestFor = leadData.id;
+      refreshLeadWorkflowChrome();
+      showStatus('Request submitted — awaiting sales-management approval');
+    }
+  } catch (e) { showStatus('Could not submit: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
 
-async function demoteLeadToWorking() {
-  if (!leadData || !leadData.id) return;
-  startBusy('Demoting…');
+// Commit an approved request onto the lead. Hold writes the wake date (the status
+// engine derives Hold from it); Nurture writes the sticky status + cadence.
+async function applyStageRequest(req) {
+  const patch = { updated_at: new Date().toISOString() };
+  if (req.request_type === 'hold') {
+    patch.wake_date = req.wake_date;
+  } else {
+    patch.status = LEAD_STAGE_X;
+    patch.nurture_cadence_days = req.cadence_days || null;
+    patch.nurture_started_at = new Date().toISOString();
+  }
+  await api('leads', 'PATCH', patch, 'id=eq.' + req.lead_id);
+  window._leadStageRequest = null;
+  window._leadStageRequestFor = null;
+  await reloadLeadAfterServerChange();
+}
+
+async function approveStageRequest() {
+  const req = window._leadStageRequest;
+  if (!req) { showStatus('No pending request found — refresh the lead', 'error'); return; }
+  if (!canPromote(leadData)) { showStatus('Only sales management can approve', 'error'); return; }
+  startBusy('Approving…');
   try {
-    // Hold blocks re-qualification; pin working_at so it lands on Working.
-    const patch = {
-      qualification_demoted: true,
-      peer_review_status: null,
-      peer_review_at: null,
-      working_at: leadData.working_at || new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    // Nurture is sticky in the status engine — clear it explicitly so the
-    // recompute can land on Working instead of echoing Nurture back.
-    if (leadData.status === LEAD_STAGE_X) patch.status = 'Working';
-    await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id);
-    await reloadLeadAfterServerChange();   // recompute → Working
-    showStatus('Demoted to Working');
-  } catch (e) { showStatus('Could not demote: ' + e.message, 'error'); }
+    await api('lead_stage_requests', 'PATCH',
+      { status: 'approved', decided_by: currentUser?.personId || null, decided_at: new Date().toISOString() },
+      'id=eq.' + req.id);
+    await applyStageRequest(req);
+    showStatus(req.request_type === 'hold' ? 'Approved — lead placed on Hold' : 'Approved — lead moved to ' + LEAD_STAGE_X);
+  } catch (e) { showStatus('Could not approve: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// Decline: approver chooses the outcome — keep the lead where it is (default) or
+// close it as Dead. Reason mandatory either way (LEAD_LIFECYCLE_RULES.md).
+function openDeclineStageRequest() {
+  const req = window._leadStageRequest;
+  if (!req) return;
+  if (!canPromote(leadData)) { showStatus('Only sales management can decline', 'error'); return; }
+  const what = req.request_type === 'hold' ? 'Hold' : LEAD_STAGE_X;
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Decline ${what} request</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom:12px;">
+            <label class="form-label">Outcome <span style="color:var(--red)">*</span></label>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <label style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:white;display:flex;gap:10px;align-items:center;">
+                <input type="radio" name="stage-decline-outcome" value="stay" checked>
+                <div><div style="font-weight:700;font-size:13px;">Keep in ${leadData.status || 'its stage'}</div>
+                <div style="font-size:11px;color:var(--text3);">The lead stays where it is and keeps being worked.</div></div>
+              </label>
+              <label style="padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;background:white;display:flex;gap:10px;align-items:center;">
+                <input type="radio" name="stage-decline-outcome" value="dead">
+                <div><div style="font-weight:700;font-size:13px;">Close as Dead</div>
+                <div style="font-size:11px;color:var(--text3);">Not worth holding or nurturing — close it with this reason on record.</div></div>
+              </label>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <textarea id="stage-decline-reason" class="form-control" rows="3" placeholder="Why this request is declined."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-danger" onclick="saveDeclineStageRequest()">Decline request</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function saveDeclineStageRequest() {
+  const req = window._leadStageRequest;
+  if (!req) return;
+  const outcome = document.querySelector('input[name="stage-decline-outcome"]:checked')?.value || 'stay';
+  const reason = (document.getElementById('stage-decline-reason')?.value || '').trim();
+  if (!reason) { showStatus('A reason is required', 'error'); return; }
+  startBusy('Declining…');
+  try {
+    await api('lead_stage_requests', 'PATCH', {
+      status: 'declined', decided_by: currentUser?.personId || null,
+      decided_at: new Date().toISOString(), decision_reason: reason, decline_outcome: outcome,
+    }, 'id=eq.' + req.id);
+    if (outcome === 'dead') {
+      await api('leads', 'PATCH', {
+        dead_reason: 'declined',
+        dead_notes: (req.request_type === 'hold' ? 'Hold' : LEAD_STAGE_X) + ' request declined: ' + reason,
+        updated_at: new Date().toISOString(),
+      }, 'id=eq.' + leadData.id);
+    }
+    window._leadStageRequest = null;
+    window._leadStageRequestFor = null;
+    closeModal();
+    await reloadLeadAfterServerChange();
+    showStatus(outcome === 'dead' ? 'Request declined — lead closed as Dead' : 'Request declined — lead stays put');
+  } catch (e) { showStatus('Could not decline: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
 
@@ -15352,21 +15560,8 @@ function leadSourceSummaryHtml() {
 // Refetch the lead row after a derived-status change (red flag tick, promote wizard,
 // decline modal, or any interaction save that the trigger reacts to) so the badge
 // and Next Action display reflect the new server-side state without closing the lead.
-// Elevate a Working lead into Nurture (forward=true), or move it back to
-// Working (forward=false). computeLeadStatus keeps Nurture sticky; moving back
-// lets the engine re-derive from the qualification state as usual (all-green →
-// Qualified).
-async function moveLeadToStageX(forward) {
-  if (!leadData?.id) return;
-  const from = leadData.status;
-  if (forward && from !== 'Working') { showStatus('Only a Working lead can move to ' + LEAD_STAGE_X, 'error'); return; }
-  if (!forward && from !== LEAD_STAGE_X) return;
-  try {
-    await api('leads', 'PATCH', { status: forward ? LEAD_STAGE_X : 'Working' }, 'id=eq.' + leadData.id);
-    showStatus(forward ? ('Lead moved to ' + LEAD_STAGE_X) : 'Lead moved back to Working');
-    await reloadLeadAfterServerChange();
-  } catch (e) { showStatus('Move failed: ' + e.message, 'error'); }
-}
+// (moveLeadToStageX removed — Nurture entry now goes through the approved
+// stage-request flow, and Nurture has no exit path for now.)
 
 async function reloadLeadAfterServerChange() {
   if (!leadData?.id) return;
@@ -15572,7 +15767,7 @@ async function submitRejectPromotion() {
 }
 
 // ── Promote wizard ────────────────────────────────────────
-// Available when status = Qualified (or Nurture). Gate question:
+// Available when status = Qualified only. Gate question:
 //   Any limiting red flags?  Y → pick flag type → insert lead_red_flags row →
 //                                lead stays put, promotion blocked pending
 //                                Executive review (increment 3 adds the verdicts).
@@ -15603,8 +15798,8 @@ function startPromoteFlow(mode, requestType, justification) {
   if (leadPromotionBlockedByRedFlag()) { showStatus('Red flag raised — promotion is blocked pending Executive review', 'error'); return; }
   if (mode === 'commit') {
     if (!canPromote(leadData)) { showStatus('Only a manager or admin can promote a lead. Use Request promotion instead.', 'error'); return; }
-    if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) { showStatus('Promote is only available for Qualified leads', 'error'); return; }
-  } else if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) {
+    if (leadData.status !== 'Qualified') { showStatus('Promote is only available for Qualified leads', 'error'); return; }
+  } else if (leadData.status !== 'Qualified') {
     showStatus('Promotion can only be requested for Qualified leads', 'error'); return;
   }
   window._promoteMode = mode;
@@ -17122,9 +17317,8 @@ function renderLeadQualification() {
 function setLeadQual(key, level) {
   if (leadReadOnly) return;
   leadData[key] = level;
-  // Changing a score re-opens qualification: drop any demote hold and stale review.
+  // Changing a score re-opens qualification: drop any legacy demote hold.
   leadData.qualification_demoted = false;
-  leadData.peer_review_status = null;
   renderLeadQualification();
   markLeadDirty();
 }
@@ -17141,7 +17335,7 @@ function updateLeadReadiness() {
   if (!el) return;
   // "Ready to promote" appears only once the lead is actually Qualified (all-green +
   // service category). Before that, reflect the qualification-dot state.
-  if (leadData.status === 'Qualified' || leadData.status === LEAD_STAGE_X) {
+  if (leadData.status === 'Qualified') {
     if (leadData.promotion_requested_at) {
       // Already flagged for promotion → show who flagged it instead of the nudge.
       const p = (allData['people'] || []).find(x => +x.id === +leadData.promotion_requested_by);
@@ -17317,15 +17511,12 @@ async function recomputeOpenLeadStatus() {
   if (status === 'Working' && !workingAt) workingAt = nowIso;
   if (status === 'New') workingAt = null;
   let qualifiedAt = leadData.qualified_at || null;  if (status === 'Qualified' && !qualifiedAt) qualifiedAt = nowIso;
-  let peerReviewStatus = leadData.peer_review_status || null;
-  if (status === 'Qualified' && !peerReviewStatus) peerReviewStatus = 'Pending';  // schedule review (spec c)
   const changed = status !== leadData.status
     || workingAt !== (leadData.working_at || null)
-    || qualifiedAt !== (leadData.qualified_at || null)
-    || peerReviewStatus !== (leadData.peer_review_status || null);
+    || qualifiedAt !== (leadData.qualified_at || null);
   if (!changed) return;
   try {
-    const patch = { status, working_at: workingAt, qualified_at: qualifiedAt, peer_review_status: peerReviewStatus, updated_at: nowIso };
+    const patch = { status, working_at: workingAt, qualified_at: qualifiedAt, updated_at: nowIso };
     const res = await api('leads', 'PATCH', patch, 'id=eq.' + leadData.id + '&select=*');
     if (res && res[0]) leadData = res[0]; else Object.assign(leadData, patch);
   } catch (e) { console.warn('Lead status persist failed:', e.message); }
@@ -17613,6 +17804,16 @@ async function saveLead(opts) {
   const nowIso = new Date().toISOString();
   const prevStatus = leadData.status || null;
   const merged = Object.assign({}, leadData, payload);
+  // Hold auto-flip event (LEAD_LIFECYCLE_RULES.md): the dots BECOMING all-green
+  // (+ service) on a held lead clears the wake date, so the engine below derives
+  // Qualified straight off Hold. Transition-guarded — a lead parked while already
+  // all-green stays held.
+  if (leadData.wake_date && !LEAD_GREEN(leadData) && LEAD_GREEN(merged)
+      && merged.service_major_id != null && +merged.service_major_id > 0) {
+    payload.wake_date = null;
+    merged.wake_date = null;
+    showStatus('All gates Strong — hold released, lead is Qualified');
+  }
   const status = computeLeadStatus(merged, { primaryContact: null });
   // working_at anchors the editable grace: stamped when the lead first becomes
   // Working, cleared if an edit drops it back to New ("becomes new again").
@@ -17624,8 +17825,6 @@ async function saveLead(opts) {
   payload.working_at          = workingAt;
   payload.qualified_at        = qualifiedAt;
   payload.qualification_demoted = !!leadData.qualification_demoted;
-  // Becoming Qualified schedules a peer review (spec c).
-  if (status === 'Qualified' && !leadData.peer_review_status) payload.peer_review_status = 'Pending';
 
   if (!opts.silent) startBusy('Saving lead…');   // autosave is fully silent — no busy overlay
   // Lost-update guard (bug report #5): while this request is on the wire the user
@@ -18057,7 +18256,7 @@ async function leadCadenceModalContext() {
 async function maybeApplyCadencePrefill() {
   const ctx = await leadCadenceModalContext();
   const hint = document.getElementById('li-cadence-hint');
-  if (!ctx) return;
+  if (!ctx) { maybeApplyNurturePrefill(hint); return; }
   if (ctx.complete) {
     if (hint) hint.innerHTML = `<div style="margin:-4px 0 14px;padding:10px 12px;background:#F1F5F9;border:1px solid #CBD5E1;border-radius:var(--radius);color:#475569;font-size:12px;font-weight:600;">Cadence complete — all ${ctx.total} steps logged. Set any further next action manually.</div>`;
     return;
@@ -18089,6 +18288,21 @@ async function maybeApplyCadencePrefill() {
     const det = document.getElementById('li-action-details');
     if (det && !det.value && onward.instruction) det.value = onward.instruction;
   }
+}
+
+// Nurture cadence → obligation bridge (Q9): on a Nurture lead, pre-fill the next
+// touch date one cadence interval out, so every logged touch queues the next one.
+// Campaign cadence (above) takes precedence when both apply.
+function maybeApplyNurturePrefill(hint) {
+  if (!leadData || leadData.status !== LEAD_STAGE_X) return;
+  const days = Math.floor(+leadData.nurture_cadence_days || 0);
+  if (days < 1) return;
+  if (hint) hint.innerHTML = `<div style="margin:-4px 0 14px;padding:10px 12px;background:#ECFDF5;border:1px solid #6EE7B7;border-radius:var(--radius);color:#065F46;font-size:12px;line-height:1.5;">
+      <div style="font-weight:700;">${LEAD_STAGE_X} cadence</div>
+      <div>A touch every ${days} day${days === 1 ? '' : 's'} — next touch date pre-filled below; edit as needed.</div>
+    </div>`;
+  const dateEl = document.getElementById('li-next-date');
+  if (dateEl && !dateEl.value) dateEl.value = cadenceDateStr(new Date().toISOString().slice(0, 10), days);
 }
 
 function populateLiCompletionSection(i) {
