@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.24 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.25 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.24 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.25 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17792,9 +17792,28 @@ function setLeadQualComment(cKey, val) {
 function updateLeadReadiness() {
   const el = document.getElementById('lead-qual-readiness');
   if (!el) return;
+  // Status-aware first: past-qualification and parked stages get their own line —
+  // the dot-state nudges below only apply to a lead still being qualified.
+  const status = leadData.status || 'New';
+  if (status === 'Promoted') {
+    el.innerHTML = '<span style="color:#166534;">✓ Promoted</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— qualification is complete; continue on the opportunity.</span>';
+    return;
+  }
+  if (status === 'Dead') {
+    el.innerHTML = '<span style="color:var(--text3);">Closed</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— no further qualification applies.</span>';
+    return;
+  }
+  if (status === LEAD_STAGE_X) {
+    el.innerHTML = `<span style="color:#065F46;">In ${LEAD_STAGE_X}</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— long-game cultivation; promotion does not apply in this stage.</span>`;
+    return;
+  }
+  if (status === 'Hold') {
+    el.innerHTML = '<span style="color:#075985;">On Hold</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— returns to Working on its wake date; all four gates Strong flips it straight to Qualified.</span>';
+    return;
+  }
   // "Ready to promote" appears only once the lead is actually Qualified (all-green +
   // service category). Before that, reflect the qualification-dot state.
-  if (leadData.status === 'Qualified') {
+  if (status === 'Qualified') {
     if (leadData.promotion_requested_at) {
       // Already flagged for promotion → show who flagged it instead of the nudge.
       const p = (allData['people'] || []).find(x => +x.id === +leadData.promotion_requested_by);
