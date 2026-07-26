@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.18 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.19 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.18 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.19 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1175,12 +1175,12 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
           <!-- Peer review panel (visible only when status = Qualified) -->
           <div id="lead-peer-review" style="display:none;"></div>
 
-          <!-- Wake date (visible only when status = Dormant — legacy parked leads) -->
+          <!-- Wake date (visible only when status = Hold) -->
           <div class="opp-section" id="lead-wake-date-wrap" style="display:none;">
             <div class="form-group" style="flex:1;margin-bottom:0;">
               <label class="form-label">Wake date</label>
               <input type="date" id="lead-wake-date" class="form-control" disabled style="background:#F1F5F9;color:var(--text2);cursor:not-allowed;">
-              <div style="font-size:11px;color:var(--text3);margin-top:4px;">Legacy parked lead. Dormant is retired — no new leads enter this stage.</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">On hold — right profile, waiting for its moment. Returns to Working on this date; going all-green flips it straight to Qualified.</div>
             </div>
           </div>
 
@@ -1683,8 +1683,6 @@ function _mockSeed() {
       { id: 2, key: 'fy_start_month',         value: 'July' },
       { id: 3, key: 'escalation_month',       value: 'July' },
       { id: 4, key: 'new_lead_waiting_minutes', value: '10' },
-      { id: 5, key: 'promotion_min_green',      value: '4' },
-      { id: 6, key: 'promotion_green_counts_weak', value: 'false' },
     ],
     promotion_reject_reasons: [
       { id: 1, name: 'Financials need rework',   description: 'Revenue stream / margin / dates are off.',         sort_order: 1, active: true, created_at: now },
@@ -3918,11 +3916,11 @@ const HELP_CONTENT = {
   lead: () => {
     const status = (typeof leadData !== 'undefined' && leadData && leadData.status) || 'New';
     const nextStep = {
-      New: 'Fill the required (<span style="color:var(--red)">*</span>) fields and log a next action to move this lead to <strong>Working</strong>.',
-      Working: 'Keep engaging. Set the primary service interest and estimated value, and get the four qualification dots to Strong to reach <strong>Qualified</strong>.',
+      New: 'Fill the required (<span style="color:var(--red)">*</span>) fields and log a first engagement with a next action to move this lead to <strong>Working</strong>.',
+      Working: 'Keep engaging. Set the primary service interest and get the four qualification dots to Strong to reach <strong>Qualified</strong>.',
       Qualified: 'A peer review is needed before promotion. Once reviewed, use <strong>Promote →</strong> to turn this lead into an opportunity.',
       Nurture: 'This lead is a deliberate focus push. Keep engaging and complete the qualification dots to reach <strong>Qualified</strong>, or move it back to Working.',
-      Dormant: 'This lead is parked (legacy stage — retired, no new leads enter here). Re-engage to bring it back to Working.',
+      Hold: 'This lead is on hold — right profile, waiting for its moment. It returns to Working on its wake date; going all-green flips it straight to Qualified.',
       Dead: 'This lead was declined. It stays on record; reopen it if things change.',
       Promoted: 'This lead has been promoted — open the deal to continue there.',
     }[status] || '';
@@ -10579,12 +10577,12 @@ async function renderLeadsPage() {
       { key: LEAD_STAGE_X, label: LEAD_STAGE_X, filter: l => l.status === LEAD_STAGE_X },
       { key: 'Qualified', label: 'Qualified', filter: l => l.status === 'Qualified' },
       { key: 'Promoted',  label: 'Promoted',  filter: l => l.status === 'Promoted' },
-      { key: 'Dormant',   label: 'Dormant',   filter: l => l.status === 'Dormant' },
+      { key: 'Hold',      label: 'Hold',      filter: l => l.status === 'Hold' },
       { key: 'Dead',      label: 'Dead',      filter: l => l.status === 'Dead' },
     ].filter(t =>
-      // Dormant is retired (no route in) — surface the tab only while legacy
-      // parked leads still carry the status, so nothing silently disappears.
-      t.key !== 'Dormant' || leads.some(t.filter)
+      // Hold entry flows ship with the approval framework (increment 2) — until
+      // then the stage is empty, so surface the tab only once rows exist.
+      t.key !== 'Hold' || leads.some(t.filter)
     );
 
     // Render tabs
@@ -13909,7 +13907,7 @@ function populateLeadForm() {
   if (leadData.owner_id) document.getElementById('lead-owner-id').value = leadData.owner_id;
   if (leadData.next_action) document.getElementById('lead-next-action').value = leadData.next_action;
   if (leadData.next_action_date) document.getElementById('lead-next-action-date').value = leadData.next_action_date;
-  // Wake date display (only visible when Dormant — legacy parked leads)
+  // Wake date display (only visible when on Hold)
   const wd = document.getElementById('lead-wake-date'); if (wd) wd.value = leadData.wake_date || '';
   // Dead reason + notes — preserved in hidden inputs so save round-trips them
   document.getElementById('lead-dead-reason-value').value = leadData.dead_reason || '';
@@ -14805,24 +14803,22 @@ function showModal(html) {
 // ── Status badge + workflow chrome ────────────────────────
 // One source of truth — used by the lead-form badge, the leads-list row badge,
 // and the leads-page tab headers. Palette is an orange→green progression with
-// red for Dead and slate (off-axis) for Dormant.
-// Nurture sits between Working and Qualified — a lead deliberately focused on
-// even though it doesn't tick all qualification boxes yet. The stage is MANUAL:
-// a Working lead is moved in/out via the lead-form button; the status engine
-// keeps it sticky until promoted / dead / dormant / moved back. Renaming again =
-// change this string, swap the DB status CHECK and UPDATE existing rows (see
-// sql/rename_nurture_dormant_focus_nurture.sql).
-// NOTE: 'Nurture' previously named the parked/wake-date stage; that stage is now
-// 'Dormant' again and is RETIRED — no new entries, tab shown only for legacy rows.
+// red for Dead and sky (off-axis) for Hold.
+// Stage rules: LEAD_LIFECYCLE_RULES.md. Nurture is the sticky manual stage (no
+// exit path for now); the status engine keeps it until promoted / dead. Renaming
+// again = change this string, swap the DB status CHECK and UPDATE existing rows.
+// 'Dormant' (the old parked/wake-date stage) is fully deleted — zero rows on
+// both DBs; its wake_date column now powers the new Hold stage (entry flows
+// ship with the approval framework, increment 2).
 const LEAD_STAGE_X = 'Nurture';
 
 const LEAD_STATUS_STYLES = {
   'New':       'background:#FFEDD5;color:#9A3412;',   // warm orange — fresh, needs attention
   'Working':   'background:#FEF3C7;color:#92400E;',   // amber — momentum
-  [LEAD_STAGE_X]: 'background:#A7F3D0;color:#065F46;', // emerald — focus push toward qualification
+  [LEAD_STAGE_X]: 'background:#A7F3D0;color:#065F46;', // emerald — strategic cultivation
   'Qualified': 'background:#D9F99D;color:#3F6212;',   // lime — almost there
   'Promoted':  'background:#BBF7D0;color:#166534;',   // green — won
-  'Dormant':   'background:#E2E8F0;color:#475569;',   // slate — parked, off the axis (legacy, retired)
+  'Hold':      'background:#E0F2FE;color:#075985;',   // sky — parked, waiting for its moment
   'Dead':      'background:#FECACA;color:#991B1B;',   // red — closed
 };
 
@@ -14878,7 +14874,7 @@ function refreshLeadWorkflowChrome() {
   }
   if (promoteBtn) {
     const qualified       = ((status === 'Qualified' || status === LEAD_STAGE_X) && !leadReadOnly);
-    const specialEligible = !qualified && !leadReadOnly && leadSpecialPromotionEligible(leadData);
+    const flagBlocked     = leadPromotionBlockedByRedFlag() && status !== 'Dead' && status !== 'Promoted';
     const requested       = !!leadData.promotion_requested_at;
     const isSpecialReq    = leadData.promotion_request_type === 'special';
     const manager         = canPromote(leadData);
@@ -14892,7 +14888,16 @@ function refreshLeadWorkflowChrome() {
       window._leadPromotionRequestFor = null;
     }
 
-    if (requested && manager) {
+    if (flagBlocked) {
+      // Red flag pending Executive review — promotion is blocked; the lead stays
+      // in its stage. A pending request can still be rejected, not accepted.
+      promoteBtn.style.display = 'none';
+      if (requested && manager && rejectBtn) { rejectBtn.style.display = ''; rejectBtn.disabled = false; rejectBtn.textContent = 'Reject…'; rejectBtn.onclick = () => openRejectPromotion(); }
+      if (promoteNote && (qualified || requested)) {
+        promoteNote.textContent = '⛔ Red flag raised — promotion blocked pending Executive review';
+        promoteNote.style.display = '';
+      }
+    } else if (requested && manager) {
       // Manager: review the pending request → Accept / Reject.
       promoteBtn.style.display = '';
       promoteBtn.disabled = false;
@@ -14921,18 +14926,12 @@ function refreshLeadWorkflowChrome() {
       promoteBtn.disabled = false;
       promoteBtn.textContent = 'Request promotion';
       promoteBtn.onclick = () => requestPromotion();
-    } else if (specialEligible) {
-      // Special path: not fully Qualified but meets the threshold.
-      promoteBtn.style.display = '';
-      promoteBtn.disabled = false;
-      promoteBtn.textContent = 'Special promotion request';
-      promoteBtn.onclick = () => openSpecialPromotionRequest();
     } else {
       promoteBtn.style.display = 'none';
     }
 
     // Surface a compact request summary to a manager who can act on it.
-    if (promoteNote && requested && manager) {
+    if (promoteNote && requested && manager && !flagBlocked) {
       let txt = (isSpecialReq ? '⚠️ Special request' : '⏳ Request') + _promotionRequestSuffix();
       if (isSpecialReq && leadData.promotion_request_note) txt += ' — “' + leadData.promotion_request_note + '”';
       promoteNote.textContent = txt;
@@ -14941,7 +14940,7 @@ function refreshLeadWorkflowChrome() {
   }
   // Decline only applies to a lead that already exists — not a brand-new unsaved one.
   if (declineBtn) declineBtn.style.display = (!!leadData.id && status !== 'Dead' && status !== 'Promoted' && !leadReadOnly) ? '' : 'none';
-  if (wakeWrap)   wakeWrap.style.display   = (status === 'Dormant') ? '' : 'none';
+  if (wakeWrap)   wakeWrap.style.display   = (status === 'Hold') ? '' : 'none';
 
   if (deadBlock) {
     if (status === 'Dead') {
@@ -14951,13 +14950,15 @@ function refreshLeadWorkflowChrome() {
       const flagNames = (window._leadRedFlags || []).map(f => f.name);
       let reasonLabel;
       let notesText = leadData.dead_notes || '—';
-      if (flagNames.length) {
-        reasonLabel = 'Red flag — ' + flagNames.join(', ');
-        if (!leadData.dead_notes) notesText = 'See red flag tag(s) on the Qualification tab.';
-      } else if (leadData.dead_reason === 'not_qualified') {
+      // Dead always carries an explicit dead_reason now (red flags no longer
+      // close leads) — flags render as a fallback for historic rows only.
+      if (leadData.dead_reason === 'not_qualified') {
         reasonLabel = 'Not Qualified';
       } else if (leadData.dead_reason === 'declined') {
         reasonLabel = 'Declined';
+      } else if (flagNames.length) {
+        reasonLabel = 'Red flag — ' + flagNames.join(', ');
+        if (!leadData.dead_notes) notesText = 'See red flag tag(s) on the Qualification tab.';
       } else {
         reasonLabel = '—';
       }
@@ -15442,6 +15443,7 @@ function renderPromotionRequestSummary(req) {
 async function acceptPromotionRequest() {
   const req = window._leadPromotionRequest;
   if (!req) { showStatus('No pending request found — refresh the lead', 'error'); return; }
+  if (leadPromotionBlockedByRedFlag()) { showStatus('Red flag raised — promotion is blocked pending Executive review', 'error'); return; }
   if (!canPromote(leadData)) { showStatus('Only a manager or admin can accept a promotion', 'error'); return; }
   // Ensure lookups the summary needs are present.
   if (!allData['service_sub_all']) {
@@ -15571,10 +15573,10 @@ async function submitRejectPromotion() {
 
 // ── Promote wizard ────────────────────────────────────────
 // Available when status = Qualified (or Nurture). Gate question:
-//   Any limiting red flags?  Y → pick flag type → insert lead_red_flags row → Dead.
+//   Any limiting red flags?  Y → pick flag type → insert lead_red_flags row →
+//                                lead stays put, promotion blocked pending
+//                                Executive review (increment 3 adds the verdicts).
 //                            N → straight on to the org-confirm / package screens.
-// (The old "park in Nurture with a wake date" branch is gone — the parked stage
-// is retired as 'Dormant'; legacy rows keep wake_date and derive to Dormant.)
 // Format "by <name> on <date>" for a promotion request, using cached people.
 function _promotionRequestSuffix() {
   let s = '';
@@ -15593,19 +15595,17 @@ function _promotionRequestSuffix() {
 //   mode 'commit'  → manager direct-promote: the wizard commits immediately.
 //   mode 'request' → owner assembles the full deal package; a manager later
 //                    Accepts (commits) or Rejects (with reason). No deal yet.
-//   requestType    → 'standard' (fully Qualified) | 'special' (below-threshold).
+// (The 'special' below-threshold request path is retired — Strong-only gates +
+// the automatic flip to Qualified supersede it.)
 // Sets the wizard mode globals, gates, then renders the wizard's first screen (Q1).
 function startPromoteFlow(mode, requestType, justification) {
   if (!leadData?.id) return;
+  if (leadPromotionBlockedByRedFlag()) { showStatus('Red flag raised — promotion is blocked pending Executive review', 'error'); return; }
   if (mode === 'commit') {
     if (!canPromote(leadData)) { showStatus('Only a manager or admin can promote a lead. Use Request promotion instead.', 'error'); return; }
     if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) { showStatus('Promote is only available for Qualified leads', 'error'); return; }
-  } else {
-    if (requestType === 'special') {
-      if (!leadSpecialPromotionEligible(leadData)) { showStatus('This lead does not meet the special promotion-request criteria', 'error'); return; }
-    } else if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) {
-      showStatus('Promotion can only be requested for Qualified leads', 'error'); return;
-    }
+  } else if (leadData.status !== 'Qualified' && leadData.status !== LEAD_STAGE_X) {
+    showStatus('Promotion can only be requested for Qualified leads', 'error'); return;
   }
   window._promoteMode = mode;
   window._promoteRequestType = requestType || 'standard';
@@ -15613,8 +15613,9 @@ function startPromoteFlow(mode, requestType, justification) {
   _renderPromoteQ1();
 }
 
-// Q1 — red-flag gate. Shared by all modes (a red flag closes the lead as Dead
-// regardless; "No" continues to Q2/progress). Title + intro reflect the mode.
+// Q1 — red-flag gate. Shared by all modes. A "Yes" tags the flag and STOPS the
+// wizard: the lead stays in its stage with promotion blocked pending Executive
+// review (red flags no longer close a lead). "No" continues to the org confirm.
 function _renderPromoteQ1() {
   const isReq = (window._promoteMode === 'request');
   const title = isReq ? 'Request promotion' : 'Promote lead';
@@ -15631,9 +15632,9 @@ function _renderPromoteQ1() {
         <div class="modal-body">
           <div style="font-size:13px;color:var(--text2);margin-bottom:16px;">${intro}</div>
           <div style="font-weight:700;font-size:14px;margin-bottom:10px;">Are there any limiting red flags?</div>
-          <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">Payment risk, ethical concern, conflict, capacity — anything that disqualifies us.</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">Payment risk, ethical concern, conflict, capacity — anything that disqualifies us. Flagging pauses promotion for an Executive review; the lead itself stays where it is.</div>
           <div style="display:flex;gap:10px;">
-            <button class="btn btn-danger"    onclick="promoteWizardRedFlag(true)"  style="flex:1;">Yes — flag &amp; close as Dead</button>
+            <button class="btn btn-danger"    onclick="promoteWizardRedFlag(true)"  style="flex:1;">Yes — raise a red flag</button>
             <button class="btn btn-secondary" onclick="promoteWizardRedFlag(false)" style="flex:1;">No — continue</button>
           </div>
         </div>
@@ -15645,67 +15646,25 @@ function _renderPromoteQ1() {
 // Owner-side: request promotion of a fully-Qualified lead → runs the package wizard.
 function requestPromotion() { startPromoteFlow('request', 'standard'); }
 
-// Owner-side: a lead NOT yet fully Qualified but meeting the configurable green
-// threshold (+ service). Captures a required justification, then runs the same
-// package wizard (request_type 'special').
-function openSpecialPromotionRequest() {
-  if (!leadData?.id) return;
-  if (!leadSpecialPromotionEligible(leadData)) {
-    showStatus('This lead does not meet the special promotion-request criteria', 'error');
-    return;
-  }
-  const n = leadGreenCount(leadData), need = promotionMinGreen();
-  showModal(`
-    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
-      <div class="modal" style="width:520px;">
-        <div class="modal-header">
-          <div class="modal-title">Special promotion request</div>
-          <button class="modal-close" onclick="closeModal()">×</button>
-        </div>
-        <div class="modal-body">
-          <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">This lead is <strong>not yet fully qualified</strong> (${n}/${QUAL_DIMENSIONS.length} dimensions green, minimum ${need}), but a service category is set. You can ask a manager to consider it for promotion to an opportunity.</div>
-          <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Justification <span style="font-weight:400;color:var(--text3);">(required)</span></div>
-          <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Why should this lead be considered despite not being fully qualified?</div>
-          <textarea id="special-promo-note" class="form-control" rows="4" placeholder="e.g. Strong incumbent relationship and an imminent renewal — worth pursuing now even though access is still weak."></textarea>
-        </div>
-        <div class="modal-footer">
-          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-          <button class="btn btn-primary"   onclick="submitSpecialPromotionRequest()">Submit request</button>
-        </div>
-      </div>
-    </div>
-  `);
-}
-
-// Justification captured → continue into the shared package wizard as a special request.
-function submitSpecialPromotionRequest() {
-  if (!leadData?.id) return;
-  const note = (document.getElementById('special-promo-note')?.value || '').trim();
-  if (!note) { showStatus('A justification is required for a special promotion request', 'error'); return; }
-  if (!leadSpecialPromotionEligible(leadData)) {
-    showStatus('This lead no longer meets the special promotion-request criteria', 'error');
-    return;
-  }
-  startPromoteFlow('request', 'special', note);   // _renderPromoteQ1 replaces this modal
-}
+// (openSpecialPromotionRequest / submitSpecialPromotionRequest removed — the
+// below-threshold special request path is retired with Strong-only gates.)
 
 // Manager direct-promote entry (the Promote → button).
 function openPromoteWizard() { startPromoteFlow('commit'); }
 
 async function promoteWizardRedFlag(hasFlag) {
   if (hasFlag) {
-    // Pick which red flag type, then add a lead_red_flags row.
-    // The trigger flips status to Dead on insert.
+    // Pick which red flag type, then add a lead_red_flags row. The lead STAYS in
+    // its stage — the flag blocks promotion pending Executive review.
     const allFlags = allData['red_flags'] || [];
     const selectedIds = new Set((window._leadRedFlags || []).map(f => +f.id));
     const available = allFlags.filter(f => f.active !== false && !selectedIds.has(+f.id));
     if (!available.length) {
       // Either nothing in the lookup, or every flag is already tagged.
-      // If already tagged, the trigger would have set Dead anyway — refresh and finish.
       if (selectedIds.size > 0) {
-        await reloadLeadAfterServerChange();
         closeModal();
-        showStatus('Lead closed — existing red flag(s) recorded');
+        refreshLeadWorkflowChrome();
+        showStatus('Red flag(s) already recorded — promotion blocked pending Executive review');
       } else {
         showStatus('No red flag types defined — add some in Lookups → Red Flags', 'error');
       }
@@ -15720,20 +15679,19 @@ async function promoteWizardRedFlag(hasFlag) {
             <button class="modal-close" onclick="closeModal()">×</button>
           </div>
           <div class="modal-body">
-            <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Tag the flag that disqualifies this lead. Closes the lead as Dead.</div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Tag the concern. The lead stays where it is, but promotion is blocked until an Executive reviews the flag.</div>
             <select id="promote-red-flag-id" class="form-control">${opts}</select>
           </div>
           <div class="modal-footer">
             <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-            <button class="btn btn-danger"    onclick="promoteWizardSaveRedFlag()">Add flag &amp; close lead</button>
+            <button class="btn btn-danger"    onclick="promoteWizardSaveRedFlag()">Raise flag</button>
           </div>
         </div>
       </div>
     `);
     return;
   }
-  // No red flag → straight to Q3 (org confirmation). The old "park with a wake
-  // date" question is gone with the retired Dormant stage.
+  // No red flag → straight to Q3 (org confirmation).
   await openPromoteOrgConfirm();
 }
 
@@ -15758,7 +15716,7 @@ async function promoteWizardSaveRedFlag() {
     await reloadLeadAfterServerChange();
     if (typeof renderLeadRedFlags === 'function') renderLeadRedFlags();
     if (typeof refreshLeadRedFlagPool === 'function') refreshLeadRedFlagPool();
-    showStatus('Lead closed — red flag recorded');
+    showStatus('Red flag recorded — promotion blocked pending Executive review');
   } catch (e) {
     showStatus('Could not save: ' + e.message, 'error');
   } finally {
@@ -17182,7 +17140,7 @@ function updateLeadReadiness() {
   const el = document.getElementById('lead-qual-readiness');
   if (!el) return;
   // "Ready to promote" appears only once the lead is actually Qualified (all-green +
-  // service category + estimate). Before that, reflect the qualification-dot state.
+  // service category). Before that, reflect the qualification-dot state.
   if (leadData.status === 'Qualified' || leadData.status === LEAD_STAGE_X) {
     if (leadData.promotion_requested_at) {
       // Already flagged for promotion → show who flagged it instead of the nudge.
@@ -17194,21 +17152,11 @@ function updateLeadReadiness() {
     }
     return;
   }
-  // Not yet fully Qualified — but maybe eligible for a special (below-threshold) request.
-  if (leadSpecialPromotionEligible(leadData)) {
-    if (leadData.promotion_requested_at) {
-      el.innerHTML = '<span style="color:#d97706;">⚠️ Special promotion requested</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— awaiting a manager\'s consideration</span>';
-    } else {
-      const n = leadGreenCount(leadData), need = promotionMinGreen();
-      el.innerHTML = `<span style="color:#d97706;">Eligible for a special promotion request</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— ${n}/${QUAL_DIMENSIONS.length} dimensions green (min ${need}) + service set; a written justification is required</span>`;
-    }
-    return;
-  }
   const scores = QUAL_DIMENSIONS.map(d => +leadData[d.key] || 0);
   const allStrong = scores.every(s => s === 2);
   const anyUnknown = scores.some(s => s === 0);
   if (allStrong) {
-    el.innerHTML = '<span style="color:#d97706;">Dimensions all strong</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— add a Primary Service Interest and Estimated Deal Value to qualify</span>';
+    el.innerHTML = '<span style="color:#d97706;">Dimensions all strong</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— add a Primary Service Interest to qualify</span>';
   } else if (anyUnknown) {
     const missing = QUAL_DIMENSIONS.filter((d,i) => scores[i] === 0).map(d => d.label).join(', ');
     el.innerHTML = `<span style="color:var(--text3);">Still assessing</span> <span style="font-weight:400;color:var(--text3);font-size:12px;">— unknown: ${missing}</span>`;
@@ -17242,35 +17190,18 @@ function flagLeadField(fieldId, message) {
 
 // ── Lead status engine (app-layer; replaces the retired DB status triggers) ───
 // Status is derived here on every write path + a New→Working sweep on list load.
-// Precedence: Promoted → Dead → Dormant (legacy) → Nurture → Qualified → Working → New.
+// Precedence: Promoted → Dead → Hold → Nurture → Qualified → Working → New.
+// Canonical rules: LEAD_LIFECYCLE_RULES.md (approved 2026-07-26).
 const LEAD_GREEN = (l) => +l.fit===2 && +l.trigger_score===2 && +l.access===2 && +l.capacity===2;
 
-// ── Promotion-eligibility tunables (Settings → Lead Lifecycle) ────────────────
-// promotion_min_green: how many dimensions must read as "green" for a SPECIAL
-//   (below-full-qualification) promotion request. Default 4 = special path off.
-// promotion_green_counts_weak: if true a Weak (1) dot counts toward the tally,
-//   else only Strong (2) counts. Full Qualified ALWAYS needs all-4-Strong.
-function promotionMinGreen() {
-  const v = +((typeof appSettings !== 'undefined' && appSettings['promotion_min_green']));
-  return isNaN(v) ? 4 : Math.min(4, Math.max(1, v));
-}
-function promotionGreenCountsWeak() {
-  return String((typeof appSettings !== 'undefined' && appSettings['promotion_green_counts_weak']) || '') === 'true';
-}
-// Count dimensions that read as "green" under the current setting.
-function leadGreenCount(l) {
-  const floor = promotionGreenCountsWeak() ? 1 : 2;
-  return QUAL_DIMENSIONS.reduce((n, d) => n + ((+l[d.key] || 0) >= floor ? 1 : 0), 0);
-}
-// Eligible for a SPECIAL promotion request: not (yet) fully Qualified, but the green
-// tally meets the configured minimum AND a service category is set. Estimate is NOT
-// required for the special path (it is for full Qualified). Excludes dead/promoted.
-function leadSpecialPromotionEligible(l) {
-  if (!l || !l.id) return false;
-  if (l.status === 'Qualified' || l.status === LEAD_STAGE_X || l.status === 'Promoted' || l.status === 'Dead') return false;
-  if (LEAD_GREEN(l)) return false;   // all-strong uses the standard path
-  const hasService = l.service_major_id != null && +l.service_major_id > 0;
-  return hasService && leadGreenCount(l) >= promotionMinGreen();
+// The special (below-threshold) promotion path is retired: gates are Strong-only
+// and all-green auto-flips to Qualified, so there is nothing below the bar to
+// special-case. Historic pending 'special' requests still render read-only.
+// Unresolved red flags block promotion — the lead itself STAYS in its stage.
+// Executive Kill/Ignore verdicts arrive in increment 3; until then any tagged
+// flag counts as unresolved. Reads the open lead's loaded flag tags.
+function leadPromotionBlockedByRedFlag() {
+  return (window._leadRedFlags || []).length > 0;
 }
 
 function leadWaitingMinutes() {
@@ -17342,27 +17273,34 @@ function leadInEditGrace(l, now) {
   return !!(l && l.status === 'Working' && l.working_at && !leadEditGraceExpired(l, now));
 }
 
-// Pure status computation. ctx: { redFlagCount, primaryContact, now }
+// Pure status computation. ctx: { primaryContact, now }
 function computeLeadStatus(l, ctx) {
   ctx = ctx || {};
   const now = ctx.now || new Date();
   if (l.promoted_at) return 'Promoted';
-  if ((ctx.redFlagCount || 0) > 0 || l.dead_reason) return 'Dead';
-  if (l.wake_date) return 'Dormant';   // legacy parked leads only — no route in
-  // Manual Nurture stage (between Working and Qualified) is sticky until
-  // promoted / dead / dormant above, or explicitly moved back to Working.
+  // Only an explicit dead request (dead_reason) kills a lead. Red flags no longer
+  // force Dead — a flagged lead stays in its stage with promotion blocked pending
+  // Executive review.
+  if (l.dead_reason) return 'Dead';
+  // Hold: parked awaiting its moment (wake_date mandatory on entry). Sticky —
+  // a deliberately parked all-green lead STAYS held. The all-green auto-flip off
+  // Hold is an event, not a state: the qualification-save path clears wake_date
+  // when the dots go all-green on a held lead, and the recompute then lands
+  // Qualified below. (Entry flows ship with the approval framework — increment 2.)
+  if (l.wake_date) return 'Hold';
+  // Manual Nurture stage is sticky — no exit path for now (per the rules doc).
   if (l.status === LEAD_STAGE_X) return LEAD_STAGE_X;
-  const hasEst = l.est_value != null && +l.est_value > 0;
   const hasService = l.service_major_id != null && +l.service_major_id > 0;
-  // Qualified needs all-green + an estimate + a service category, and must not be under
-  // a peer-review demote hold.
-  if (LEAD_GREEN(l) && hasEst && hasService && !l.qualification_demoted) return 'Qualified';
+  // Qualified = all four gates Strong + a service category (no estimate required),
+  // and not under a peer-review demote hold.
+  if (LEAD_GREEN(l) && hasService && !l.qualification_demoted) return 'Qualified';
   // Once the grace has elapsed, Working is locked in (sticky) and stays Working.
   if (l.working_at && leadEditGraceExpired(l, now)) return 'Working';
-  // Meeting the mandatory fields promotes to Working immediately (editable grace runs).
-  // If a later edit breaks the criteria during the grace, this falls through to New
-  // ("becomes new again") and the persist layer clears working_at.
-  if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l)) return 'Working';
+  // Meeting the mandatory fields AND having a first logged engagement promotes to
+  // Working immediately (editable grace runs). If a later edit breaks the criteria
+  // during the grace, this falls through to New ("becomes new again") and the
+  // persist layer clears working_at.
+  if (leadWorkingPrereqsMet(l, ctx.primaryContact) && leadHasNextStep(l) && l.first_engaged_at) return 'Working';
   return 'New';
 }
 
@@ -17372,7 +17310,7 @@ function computeLeadStatus(l, ctx) {
 async function recomputeOpenLeadStatus() {
   if (!leadData || !leadData.id) return;
   const nowIso = new Date().toISOString();
-  const status = computeLeadStatus(leadData, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
+  const status = computeLeadStatus(leadData, { primaryContact: null });
   // working_at anchors the editable grace window: stamped when the lead first
   // becomes Working, cleared if it drops back to New ("becomes new again").
   let workingAt = leadData.working_at || null;
@@ -17394,14 +17332,15 @@ async function recomputeOpenLeadStatus() {
 }
 
 // New→Working sweep for the leads list: promotes any New lead that already meets
-// the mandatory fields (promotion is immediate — no waiting period).
+// the mandatory fields AND has a first logged engagement (promotion is immediate —
+// no waiting period; first_engaged_at is stamped by a DB trigger on engagements).
 async function sweepNewToWorking(leads) {
   const now = new Date();
-  // Promotion to Working is immediate once the mandatory fields are met. This keeps
+  // Promotion to Working is immediate once the criteria are met. This keeps
   // list rows consistent for any lead whose persisted status lags its data.
   const toFlip = (leads || []).filter(l =>
     l.status === 'New' && !l.dead_reason && !l.wake_date && !l.promoted_at &&
-    leadWorkingPrereqsMet(l, null) && leadHasNextStep(l));
+    leadWorkingPrereqsMet(l, null) && leadHasNextStep(l) && l.first_engaged_at);
   for (const l of toFlip) {
     try {
       const patch = { status: 'Working', working_at: l.working_at || now.toISOString(), updated_at: now.toISOString() };
@@ -17674,7 +17613,7 @@ async function saveLead(opts) {
   const nowIso = new Date().toISOString();
   const prevStatus = leadData.status || null;
   const merged = Object.assign({}, leadData, payload);
-  const status = computeLeadStatus(merged, { redFlagCount: (window._leadRedFlags || []).length, primaryContact: null });
+  const status = computeLeadStatus(merged, { primaryContact: null });
   // working_at anchors the editable grace: stamped when the lead first becomes
   // Working, cleared if an edit drops it back to New ("becomes new again").
   let workingAt   = leadData.working_at   || null;
@@ -19412,21 +19351,6 @@ async function renderSettingsPage() {
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">A pending next action due within this many days shows "Due soon" (orange); once the due date passes it shows "Overdue" (red).</div>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label class="form-label">Promotion eligibility — min. green dimensions</label>
-            <input type="number" id="setting-promotion-min-green" class="form-control" min="1" max="4" step="1" value="${appSettings['promotion_min_green']||'4'}">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A fully qualified lead (all four dimensions Strong + estimate + service) is urged to request promotion normally. A lead with at least this many green dimensions + a service category can instead make a <em>special</em> promotion request (with a written justification). Set to 4 to disable the special path.</div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Count "Weak" dimensions as green?</label>
-            <select id="setting-promotion-weak" class="form-control">
-              <option value="false" ${(appSettings['promotion_green_counts_weak']||'false')!=='true'?'selected':''}>No — only Strong counts</option>
-              <option value="true"  ${(appSettings['promotion_green_counts_weak']||'false')==='true'?'selected':''}>Yes — Weak also counts</option>
-            </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether a Weak (amber) rating counts toward the special-request threshold above. Full qualification always requires all four Strong, regardless of this setting.</div>
-          </div>
-        </div>
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Interactions Widget</div>
@@ -19497,8 +19421,6 @@ async function saveSettings() {
     // stayed on the DB value). 'indefinite' is stored as-is; engagementEditMinutes()
     // resolves it to Infinity.
     const engEdit = document.getElementById('setting-eng-edit')?.value || '60';
-    const promoMinGreen = String(Math.min(4, Math.max(1, +document.getElementById('setting-promotion-min-green').value || 4)));
-    const promoWeak = document.getElementById('setting-promotion-weak').value === 'true' ? 'true' : 'false';
     const intTeamScope = document.getElementById('setting-int-team-scope')?.value === 'everyone' ? 'everyone' : 'managers';
     const intWeeklyTarget = String(Math.max(0, +document.getElementById('setting-int-weekly-target')?.value || 0) || '');
     const intCountPromo = document.getElementById('setting-int-count-promo')?.value === 'false' ? 'false' : 'true';
@@ -19513,8 +19435,6 @@ async function saveSettings() {
       api('settings', 'PATCH', { value: newLeadWait, updated_at: new Date().toISOString() }, 'key=eq.new_lead_waiting_minutes'),
       api('settings', 'PATCH', { value: dueSoonDays, updated_at: new Date().toISOString() }, 'key=eq.lead_due_soon_days'),
       api('settings', 'PATCH', { value: engEdit, updated_at: new Date().toISOString() }, 'key=eq.engagement_edit_minutes'),
-      api('settings', 'PATCH', { value: promoMinGreen, updated_at: new Date().toISOString() }, 'key=eq.promotion_min_green'),
-      api('settings', 'PATCH', { value: promoWeak, updated_at: new Date().toISOString() }, 'key=eq.promotion_green_counts_weak'),
       api('settings', 'PATCH', { value: intTeamScope, updated_at: new Date().toISOString() }, 'key=eq.interactions_team_scope'),
       api('settings', 'PATCH', { value: intWeeklyTarget, updated_at: new Date().toISOString() }, 'key=eq.interactions_weekly_target'),
       api('settings', 'PATCH', { value: intCountPromo, updated_at: new Date().toISOString() }, 'key=eq.interactions_count_promotion'),
@@ -19533,8 +19453,6 @@ async function saveSettings() {
     appSettings['new_lead_waiting_minutes'] = newLeadWait;
     appSettings['lead_due_soon_days'] = dueSoonDays;
     appSettings['engagement_edit_minutes'] = engEdit;
-    appSettings['promotion_min_green'] = promoMinGreen;
-    appSettings['promotion_green_counts_weak'] = promoWeak;
     appSettings['interactions_team_scope'] = intTeamScope;
     appSettings['interactions_weekly_target'] = intWeeklyTarget;
     appSettings['interactions_count_promotion'] = intCountPromo;
