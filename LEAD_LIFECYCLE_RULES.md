@@ -41,6 +41,9 @@ special-request path is superseded by the auto-flip to Qualified.
 | Any → Dead | User requests | Moves immediately; SM oversight lands **post-hoc** in Dead |
 | Dead → Working | SM or Executive reopens, reason required | FACT dots **cleared** on reopen |
 
+**Nurture has no exit path for now** (confirmed 2026-07-26) — a nurtured lead stays in Nurture;
+an exit mechanism may be added later.
+
 **Declines:** any declined approval (promotion, Hold, Nurture, or the post-hoc dead review) is
 the **approver's choice — default back to Working, option Dead — reason always required**.
 
