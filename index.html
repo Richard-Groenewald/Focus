@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1180,6 +1180,9 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
           <!-- Nurture cadence summary (visible only when status = Nurture) -->
           <div id="lead-nurture-info" style="display:none;"></div>
 
+          <!-- Red-flag Executive review panel (pending flags + Kill/Ignore verdicts) -->
+          <div id="lead-redflag-review" style="display:none;"></div>
+
           <!-- Wake date (visible only when status = Hold) -->
           <div class="opp-section" id="lead-wake-date-wrap" style="display:none;">
             <div class="form-group" style="flex:1;margin-bottom:0;">
@@ -1194,6 +1197,8 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#8B0F18;margin-bottom:8px;">This lead is closed</div>
             <div style="font-size:13px;color:var(--text);"><span style="font-weight:700;">Reason:</span> <span id="lead-dead-reason-display">—</span></div>
             <div style="font-size:13px;color:var(--text);margin-top:6px;"><span style="font-weight:700;">Notes:</span> <span id="lead-dead-notes-display" style="white-space:pre-wrap;">—</span></div>
+            <!-- Oversight state: awaiting SM confirm/reject, or confirmed + reopen -->
+            <div id="lead-dead-oversight" style="margin-top:10px;"></div>
           </div>
 
           <!-- Hidden inputs preserve dead_reason / dead_notes for save payload.
@@ -3926,7 +3931,7 @@ const HELP_CONTENT = {
       Qualified: 'Fully qualified — awaiting promotion approval. <strong>Request promotion</strong> (owner) or <strong>Promote →</strong> (manager) to turn it into an opportunity, or place it on <strong>Hold</strong> / move it to <strong>Nurture</strong> (sales-management approved).',
       Nurture: 'Long-game cultivation, entered with sales-management approval. The per-lead touch cadence keeps the relationship alive; there is no exit from Nurture for now.',
       Hold: 'This lead is on hold — right profile, waiting for its moment. It returns to Working on its wake date; going all-green flips it straight to Qualified.',
-      Dead: 'This lead was declined. It stays on record; reopen it if things change.',
+      Dead: 'This lead was closed. Sales management confirms the death (or rejects it back to Working); a confirmed Dead can be reopened by sales management or an Executive — qualification then resets.',
       Promoted: 'This lead has been promoted — open the deal to continue there.',
     }[status] || '';
     return {
@@ -8737,6 +8742,11 @@ function canPromote(record) {
   return recordInUserScope(record);
 }
 
+// Executive role: red-flag Kill/Ignore verdicts + Dead reopen rights (Admin counts).
+function isExecutive() {
+  return !!(currentUser && (currentUser.isAdmin || (currentUser.roles || []).some(r => r.name === 'Executive')));
+}
+
 function doLogout() {
   currentUser = null;
   document.getElementById('main-app').style.display = 'none';
@@ -13111,7 +13121,12 @@ async function loadLeadQualificationSelections(leadId) {
     const allSd = allData['strategic_decisions'] || [];
     window._leadRedFlags = rfLinks.map(l => {
       const x = allRf.find(r => +r.id === +l.red_flag_id);
-      return { id: +l.red_flag_id, name: x?.name || 'Unknown', comment: l.comment || '' };
+      // Review fields ride along so the DELETE-then-INSERT sync in
+      // saveLeadQualificationSelections round-trips Executive verdicts intact.
+      return { id: +l.red_flag_id, name: x?.name || 'Unknown', comment: l.comment || '',
+               review_status: l.review_status || 'pending', cleared: !!l.cleared,
+               reviewed_by: l.reviewed_by || null, reviewed_at: l.reviewed_at || null,
+               review_reason: l.review_reason || null };
     });
     window._leadStrategicDecisions = sdLinks.map(l => {
       const x = allSd.find(r => +r.id === +l.strategic_decision_id);
@@ -13126,6 +13141,9 @@ async function loadLeadQualificationSelections(leadId) {
   renderLeadStrategicDecisions();
   refreshLeadRedFlagPool();
   refreshLeadStrategicDecisionPool();
+  // Flags load after the first chrome render — refresh the Executive review
+  // panel + promote-block state now that the verdicts are known.
+  if (typeof refreshLeadWorkflowChrome === 'function' && leadData && leadData.id) refreshLeadWorkflowChrome();
 }
 
 function refreshLeadRedFlagPool() {
@@ -13258,7 +13276,10 @@ async function saveLeadQualificationSelections(leadId) {
         await api('lead_red_flags', 'DELETE', null, `lead_id=eq.${leadId}`);
         if (window._leadRedFlags.length) {
           await api('lead_red_flags', 'POST',
-            window._leadRedFlags.map(x => ({ lead_id: leadId, red_flag_id: x.id, comment: x.comment || null })), '');
+            window._leadRedFlags.map(x => ({ lead_id: leadId, red_flag_id: x.id, comment: x.comment || null,
+              review_status: x.review_status || 'pending', cleared: !!x.cleared,
+              reviewed_by: x.reviewed_by || null, reviewed_at: x.reviewed_at || null,
+              review_reason: x.review_reason || null })), '');
         }
       })(),
       (async () => {
@@ -14958,7 +14979,9 @@ function refreshLeadWorkflowChrome() {
       let notesText = leadData.dead_notes || '—';
       // Dead always carries an explicit dead_reason now (red flags no longer
       // close leads) — flags render as a fallback for historic rows only.
-      if (leadData.dead_reason === 'not_qualified') {
+      if (leadData.dead_reason === 'red_flag') {
+        reasonLabel = 'Red flag (Executive Kill)' + (flagNames.length ? ' — ' + flagNames.join(', ') : '');
+      } else if (leadData.dead_reason === 'not_qualified') {
         reasonLabel = 'Not Qualified';
       } else if (leadData.dead_reason === 'declined') {
         reasonLabel = 'Declined';
@@ -14981,12 +15004,33 @@ function refreshLeadWorkflowChrome() {
       }
       if (reasonEl) reasonEl.textContent = reasonLabel;
       if (notesEl)  notesEl.textContent  = notesText;
+      // Oversight state (Q6): stamps null = awaiting sales management; stamped =
+      // confirmed, with reopen available to SM/Executive (Q11).
+      const ovEl = document.getElementById('lead-dead-oversight');
+      if (ovEl) {
+        if (!leadData.dead_reviewed_at) {
+          const btns = canPromote(leadData)
+            ? `<div style="display:flex;gap:8px;margin-top:8px;">
+                 <button type="button" class="btn btn-danger" style="padding:5px 12px;font-size:12px;" onclick="confirmDeadLead()">✓ Confirm dead</button>
+                 <button type="button" class="btn btn-secondary" style="padding:5px 12px;font-size:12px;" onclick="openRejectDeadModal()">↩ Reject — back to Working…</button>
+               </div>` : '';
+          ovEl.innerHTML = `<div style="font-size:12px;font-weight:700;color:#B45309;">⏳ Awaiting sales-management oversight</div>${btns}`;
+        } else {
+          const rv = (allData['people'] || []).find(p => +p.id === +leadData.dead_reviewed_by);
+          const who = rv ? [rv.first_name, rv.last_name].filter(Boolean).join(' ') : '—';
+          const when = new Date(leadData.dead_reviewed_at).toLocaleDateString('en-ZA');
+          const reopen = (canPromote(leadData) || isExecutive())
+            ? `<button type="button" class="btn btn-secondary" style="padding:5px 12px;font-size:12px;margin-top:8px;" onclick="openReopenLeadModal()">Reopen lead…</button>` : '';
+          ovEl.innerHTML = `<div style="font-size:12px;color:#8B0F18;">Death confirmed by <strong>${who}</strong> on ${when}.</div>${reopen}`;
+        }
+      }
     } else {
       deadBlock.style.display = 'none';
     }
   }
   renderLeadStageRequest(status);
   renderLeadNurtureInfo(status);
+  renderLeadRedFlagReview(status);
   renderLeadNextActionChip();
   renderLeadCadenceRibbon();
   updateLeadQualifyNote();
@@ -15133,8 +15177,10 @@ function leadHoldEligible(l) {
 // cache pattern). window._leadStageRequestFor guards one load per lead.
 async function loadLeadStageRequest(leadId) {
   try {
+    // Hold/Nurture only — 'dead' oversight renders in the Dead block (driven by
+    // the lead's dead_reviewed_at stamp), and 'reopen' rows are always pre-approved.
     const rows = await apiGet('lead_stage_requests',
-      `lead_id=eq.${leadId}&status=eq.pending&select=*&order=requested_at.desc&limit=1`);
+      `lead_id=eq.${leadId}&status=eq.pending&request_type=in.(hold,nurture)&select=*&order=requested_at.desc&limit=1`);
     window._leadStageRequest = (rows && rows[0]) ? rows[0] : null;
   } catch (e) {
     window._leadStageRequest = null;
@@ -15182,6 +15228,223 @@ function renderLeadNurtureInfo(status) {
       ${since ? ` · nurturing since ${since}` : ''}
       <span style="color:#047857;opacity:0.85;"> — the engagement modal pre-fills the next touch date.</span>
     </div>`;
+}
+
+// ── Red-flag Executive review (Q6b) ───────────────────────────────────────────
+// A raised flag does NOT move the lead — it stays in its stage, not frozen, with
+// promotion blocked until the Executive verdict lands. Verdicts (reason always
+// required): Kill → Dead with the flag preserved on the record; Ignore → lead
+// continues, flag left visible or cleared at the Executive's choice.
+
+function renderLeadRedFlagReview(status) {
+  const el = document.getElementById('lead-redflag-review');
+  if (!el) return;
+  const pending = (window._leadRedFlags || []).filter(f => (f.review_status || 'pending') === 'pending' && !f.cleared);
+  if (!pending.length || status === 'Dead' || status === 'Promoted') { el.style.display = 'none'; el.innerHTML = ''; return; }
+  const exec = isExecutive();
+  el.style.display = '';
+  el.innerHTML = `
+    <div style="padding:12px 14px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:var(--radius);">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#8B0F18;margin-bottom:6px;">Red flag — pending Executive review</div>
+      ${pending.map(f => `
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;">
+          <div style="flex:1;min-width:220px;font-size:13px;color:var(--text);"><strong>${String(f.name).replace(/</g, '&lt;')}</strong>${f.comment ? ' — ' + String(f.comment).replace(/</g, '&lt;') : ''}</div>
+          ${exec ? `<div style="display:flex;gap:6px;">
+            <button type="button" class="btn btn-danger" style="padding:4px 10px;font-size:12px;" onclick="openExecFlagVerdict(${f.id}, 'kill')">Kill…</button>
+            <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="openExecFlagVerdict(${f.id}, 'ignore')">Ignore…</button>
+          </div>` : ''}
+        </div>`).join('')}
+      <div style="font-size:11px;color:#8B0F18;opacity:0.85;margin-top:4px;">The lead stays live and can keep being worked, but cannot be promoted until the review lands on Ignore or the flag is removed.</div>
+    </div>`;
+}
+
+function openExecFlagVerdict(flagId, verdict) {
+  if (!isExecutive()) { showStatus('Only an Executive can review a red flag', 'error'); return; }
+  const f = (window._leadRedFlags || []).find(x => +x.id === +flagId);
+  if (!f) return;
+  const isKill = verdict === 'kill';
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">${isKill ? 'Kill lead' : 'Ignore red flag'} — ${String(f.name).replace(/</g, '&lt;')}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">${isKill
+            ? 'The lead closes as <strong>Dead</strong> with the red flag preserved on its record. No further oversight is needed — an Executive verdict is final.'
+            : 'The lead continues as it is and can be promoted again. You can leave the flag visible on the record as a caution, or clear it.'}</div>
+          ${isKill ? '' : `<label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:12px;cursor:pointer;">
+            <input type="checkbox" id="exec-flag-clear"> Also clear the flag from the record
+          </label>`}
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <textarea id="exec-flag-reason" class="form-control" rows="3" placeholder="${isKill ? 'Why this flag disqualifies the lead.' : 'Why this flag does not disqualify the lead.'}"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn ${isKill ? 'btn-danger' : 'btn-primary'}" onclick="saveExecFlagVerdict(${flagId}, '${verdict}')">${isKill ? 'Kill lead' : 'Record Ignore'}</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function saveExecFlagVerdict(flagId, verdict) {
+  const reason = (document.getElementById('exec-flag-reason')?.value || '').trim();
+  if (!reason) { showStatus('A reason is required', 'error'); return; }
+  const isKill = verdict === 'kill';
+  const clear = !isKill && !!document.getElementById('exec-flag-clear')?.checked;
+  const nowIso = new Date().toISOString();
+  startBusy(isKill ? 'Closing lead…' : 'Recording verdict…');
+  try {
+    await api('lead_red_flags', 'PATCH', {
+      review_status: isKill ? 'killed' : 'ignored',
+      cleared: clear,
+      reviewed_by: currentUser?.personId || null,
+      reviewed_at: nowIso,
+      review_reason: reason,
+    }, `lead_id=eq.${leadData.id}&red_flag_id=eq.${flagId}`);
+    if (isKill) {
+      // Executive Kill = final: the dead-oversight stamps are set here so the
+      // lead does not also queue for sales-management review.
+      await api('leads', 'PATCH', {
+        dead_reason: 'red_flag',
+        dead_notes: 'Red flag (Executive Kill): ' + reason,
+        dead_reviewed_by: currentUser?.personId || null,
+        dead_reviewed_at: nowIso,
+        updated_at: nowIso,
+      }, 'id=eq.' + leadData.id);
+    }
+    closeModal();
+    await loadLeadQualificationSelections(leadData.id);
+    await reloadLeadAfterServerChange();
+    showStatus(isKill ? 'Lead killed — red flag preserved on record' : (clear ? 'Flag ignored and cleared' : 'Flag ignored — left visible on the record'));
+  } catch (e) { showStatus('Could not save verdict: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// ── Dead oversight + reopen (Q6 / Q6a / Q11) ──────────────────────────────────
+// A dead request moves the lead to Dead immediately; sales management then
+// confirms (stamps dead_reviewed_*) or rejects it back to Working with a reason.
+// A confirmed Dead can be reopened by SM or an Executive (reason required) —
+// the lead lands in Working with its FACT dots cleared.
+
+async function _updatePendingDeadRequest(patch) {
+  try {
+    const rows = await apiGet('lead_stage_requests',
+      `lead_id=eq.${leadData.id}&status=eq.pending&request_type=eq.dead&select=id&order=requested_at.desc&limit=1`);
+    if (rows && rows[0]) await api('lead_stage_requests', 'PATCH', patch, 'id=eq.' + rows[0].id);
+  } catch (e) { console.warn('Dead request update failed:', e.message); }
+}
+
+async function confirmDeadLead() {
+  if (!canPromote(leadData)) { showStatus('Only sales management can confirm', 'error'); return; }
+  const nowIso = new Date().toISOString();
+  startBusy('Confirming…');
+  try {
+    await api('leads', 'PATCH',
+      { dead_reviewed_by: currentUser?.personId || null, dead_reviewed_at: nowIso, updated_at: nowIso },
+      'id=eq.' + leadData.id);
+    await _updatePendingDeadRequest({ status: 'approved', decided_by: currentUser?.personId || null, decided_at: nowIso });
+    await reloadLeadAfterServerChange();
+    showStatus('Dead confirmed');
+  } catch (e) { showStatus('Could not confirm: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+function openRejectDeadModal() {
+  if (!canPromote(leadData)) { showStatus('Only sales management can reject', 'error'); return; }
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Reject dead request</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">The lead returns to <strong>Working</strong> and keeps being worked. Its qualification state is untouched.</div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <textarea id="reject-dead-reason" class="form-control" rows="3" placeholder="Why this lead should stay in play."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveRejectDead()">Reject — back to Working</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function saveRejectDead() {
+  const reason = (document.getElementById('reject-dead-reason')?.value || '').trim();
+  if (!reason) { showStatus('A reason is required', 'error'); return; }
+  const nowIso = new Date().toISOString();
+  startBusy('Reviving…');
+  try {
+    await _updatePendingDeadRequest({ status: 'declined', decided_by: currentUser?.personId || null, decided_at: nowIso, decision_reason: reason });
+    await api('leads', 'PATCH', {
+      dead_reason: null, dead_notes: null, decline_reason_id: null,
+      dead_reviewed_by: null, dead_reviewed_at: null, updated_at: nowIso,
+    }, 'id=eq.' + leadData.id);
+    closeModal();
+    await reloadLeadAfterServerChange();   // engine re-derives (working_at → Working)
+    showStatus('Dead request rejected — lead back in play');
+  } catch (e) { showStatus('Could not reject: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+function openReopenLeadModal() {
+  if (!canPromote(leadData) && !isExecutive()) { showStatus('Only sales management or an Executive can reopen', 'error'); return; }
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Reopen lead</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">The lead returns to <strong>Working</strong> with its four FACT dots <strong>cleared</strong> — qualification starts fresh, history stays on record.</div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <textarea id="reopen-lead-reason" class="form-control" rows="3" placeholder="What changed to bring this lead back."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveReopenLead()">Reopen lead</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+async function saveReopenLead() {
+  const reason = (document.getElementById('reopen-lead-reason')?.value || '').trim();
+  if (!reason) { showStatus('A reason is required', 'error'); return; }
+  const nowIso = new Date().toISOString();
+  startBusy('Reopening…');
+  try {
+    // Pre-approved audit row — reopen is a direct SM/Executive action.
+    await api('lead_stage_requests', 'POST', {
+      lead_id: leadData.id, request_type: 'reopen', note: reason,
+      requested_by: currentUser?.personId || null, requested_at: nowIso,
+      status: 'approved', decided_by: currentUser?.personId || null, decided_at: nowIso,
+    }, '');
+    await api('leads', 'PATCH', {
+      dead_reason: null, dead_notes: null, decline_reason_id: null,
+      dead_reviewed_by: null, dead_reviewed_at: null,
+      fit: 0, access: 0, capacity: 0, trigger_score: 0,   // FACT cleared (Q11)
+      qualification_demoted: false, updated_at: nowIso,
+    }, 'id=eq.' + leadData.id);
+    closeModal();
+    await reloadLeadAfterServerChange();
+    showStatus('Lead reopened — back to Working, qualification reset');
+  } catch (e) { showStatus('Could not reopen: ' + e.message, 'error'); }
+  finally { stopBusy(); }
 }
 
 // Request modal: hold → mandatory wake date; nurture → mandatory cadence (days).
@@ -17223,15 +17486,32 @@ async function saveDecline() {
   }
   startBusy('Closing lead…');
   try {
+    const nowIso = new Date().toISOString();
+    // Post-hoc oversight (Q6): the lead moves to Dead IMMEDIATELY; a manager
+    // requesting it collapses the oversight (stamps written in the same PATCH),
+    // anyone else leaves the stamps null = "awaiting oversight" in Dead.
+    const selfOversee = canPromote(leadData);
     await api('leads', 'PATCH', {
       dead_reason:       reason,
       decline_reason_id: reasonId,
       dead_notes:        notes || null,
-      updated_at:        new Date().toISOString(),
+      dead_reviewed_by:  selfOversee ? (currentUser?.personId || null) : null,
+      dead_reviewed_at:  selfOversee ? nowIso : null,
+      updated_at:        nowIso,
     }, 'id=eq.' + leadData.id);
+    // Audit/queue row for the Approvals widget (pre-approved on self-oversight).
+    const rLabel = (allData['decline_reasons'] || []).find(x => +x.id === reasonId)?.name || '';
+    await api('lead_stage_requests', 'POST', {
+      lead_id: leadData.id, request_type: 'dead',
+      note: (reason === 'not_qualified' ? 'Not Qualified' : 'Declined') + (rLabel ? ' — ' + rLabel : '') + (notes ? ' — ' + notes : ''),
+      requested_by: currentUser?.personId || null, requested_at: nowIso,
+      status: selfOversee ? 'approved' : 'pending',
+      decided_by: selfOversee ? (currentUser?.personId || null) : null,
+      decided_at: selfOversee ? nowIso : null,
+    }, '');
     closeModal();
     await reloadLeadAfterServerChange();
-    showStatus('Lead closed');
+    showStatus(selfOversee ? 'Lead closed' : 'Lead closed — awaiting sales-management oversight');
   } catch (e) {
     showStatus('Could not save: ' + e.message, 'error');
   } finally {
@@ -17392,10 +17672,11 @@ const LEAD_GREEN = (l) => +l.fit===2 && +l.trigger_score===2 && +l.access===2 &&
 // and all-green auto-flips to Qualified, so there is nothing below the bar to
 // special-case. Historic pending 'special' requests still render read-only.
 // Unresolved red flags block promotion — the lead itself STAYS in its stage.
-// Executive Kill/Ignore verdicts arrive in increment 3; until then any tagged
-// flag counts as unresolved. Reads the open lead's loaded flag tags.
+// A flag blocks while its Executive review is pending and it hasn't been
+// cleared; an Ignore verdict (flag left visible or cleared) unblocks, as does
+// removing the flag tag. Killed flags never reach here (the lead is Dead).
 function leadPromotionBlockedByRedFlag() {
-  return (window._leadRedFlags || []).length > 0;
+  return (window._leadRedFlags || []).some(f => (f.review_status || 'pending') === 'pending' && !f.cleared);
 }
 
 function leadWaitingMinutes() {
