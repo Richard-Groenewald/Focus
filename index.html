@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8997,10 +8997,10 @@ async function renderOpportunitiesPage() {
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
   'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions'],
-  'Sales Manager': ['actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions'],
+  'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions'],
   'Operations':    ['contracts'],
-  'Executive':     ['company'],   // was 'EXCO' — no such role exists; the live role name is Executive
-  'Admin':         ['bugs'],
+  'Executive':     ['approvals', 'company'],   // was 'EXCO' — no such role exists; the live role name is Executive
+  'Admin':         ['approvals', 'bugs'],
   'Read Only':     [],
 };
 
@@ -9008,6 +9008,7 @@ const DASH_ROLE_WIDGETS = {
 // order. The Admin → Settings → Dashboards matrix is built from this — adding a
 // widget here (+ its loader in renderDashboard) makes it assignable to roles.
 const DASH_WIDGET_CATALOG = {
+  approvals:     'Approvals Outstanding',
   actions:       'Outstanding Actions',
   leads:         'Leads',
   opportunities: 'Opportunities',
@@ -9134,15 +9135,87 @@ async function renderDashboard() {
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
-  const loaders = { actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps, pipeline: _dashPipeline,
-                    campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany, bugs: _dashBugs,
-                    interactions: _dashInteractions };
+  const loaders = { approvals: _dashApprovals, actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps,
+                    pipeline: _dashPipeline, campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany,
+                    bugs: _dashBugs, interactions: _dashInteractions };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
     if (!el) return;
     try { el.innerHTML = loaders[w] ? await loaders[w]() : ''; }
     catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load ${w}: ${e.message}</div>`; }
   }));
+}
+
+// Approvals Outstanding — every approval the current user's rights put on their
+// desk (LEAD_LIFECYCLE_RULES.md): sales management sees pending promotion
+// requests, Hold/Nurture stage requests and unreviewed dead leads; Executives
+// see red flags awaiting a verdict. Rights decide the content, the role×widget
+// matrix decides who gets the card. Each row opens its lead.
+async function _dashApprovals() {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const isSM = !!(currentUser && (currentUser.isAdmin
+    || currentUser.permissions.includes('all') || currentUser.permissions.includes('promote_lead')));
+  const exec = isExecutive();
+  const shell = inner => `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Approvals Outstanding</div>
+    </div><div style="padding:10px 16px 14px;">${inner}</div></div>`;
+  if (!isSM && !exec) return shell('<div style="padding:14px 0;color:var(--text3);font-size:12px;">Your role has no approval duties.</div>');
+
+  const rows = [];
+  const leads = await apiGet('leads', 'select=id,owner_id,target_org_name,description,status,site_id,site_name,sites(name)');
+  const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+  const people = allData['people'] || [];
+  const personName = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '—'; };
+  const leadLabel = l => l ? (leadEngLabel(l) || ('Lead #' + l.id)) : 'Unknown lead';
+
+  if (isSM) {
+    const [promos, stageReqs] = await Promise.all([
+      apiGet('promotion_requests', 'status=eq.pending&select=lead_id,request_type,requested_by,requested_at'),
+      apiGet('lead_stage_requests', 'status=eq.pending&select=lead_id,request_type,wake_date,cadence_days,requested_by,requested_at'),
+    ]);
+    for (const r of promos) {
+      const l = leadById[+r.lead_id]; if (!l) continue;
+      rows.push({ leadId: +r.lead_id, kind: r.request_type === 'special' ? 'Promotion (special)' : 'Promotion',
+                  label: leadLabel(l), who: personName(r.requested_by), at: r.requested_at, color: '#16a34a' });
+    }
+    for (const r of stageReqs) {
+      const l = leadById[+r.lead_id]; if (!l) continue;
+      const kind = r.request_type === 'hold' ? ('Hold until ' + (r.wake_date || '—'))
+        : r.request_type === 'nurture' ? (LEAD_STAGE_X + ' — every ' + (r.cadence_days || '—') + 'd')
+        : r.request_type === 'dead' ? 'Dead review' : r.request_type;
+      rows.push({ leadId: +r.lead_id, kind, label: leadLabel(l), who: personName(r.requested_by),
+                  at: r.requested_at, color: r.request_type === 'dead' ? 'var(--red)' : 'var(--navy)' });
+    }
+  }
+  if (exec) {
+    try {
+      let rfLookup = allData['red_flags'];
+      if (!rfLookup) { rfLookup = await apiGet('red_flags', 'select=id,name'); allData['red_flags'] = rfLookup; }
+      const flagNames = Object.fromEntries((rfLookup || []).map(f => [+f.id, f.name]));
+      const flags = await apiGet('lead_red_flags', 'review_status=eq.pending&cleared=eq.false&select=lead_id,red_flag_id');
+      for (const f of flags) {
+        const l = leadById[+f.lead_id]; if (!l) continue;
+        if (l.status === 'Dead' || l.status === 'Promoted') continue;   // nothing left to verdict
+        rows.push({ leadId: +f.lead_id, kind: 'Red flag — ' + (flagNames[+f.red_flag_id] || 'review'),
+                    label: leadLabel(l), who: '', at: null, color: 'var(--red)' });
+      }
+    } catch (e) { /* pre-migration DB — no review columns yet */ }
+  }
+
+  rows.sort((a, b) => String(a.at || '9999') < String(b.at || '9999') ? -1 : 1);   // oldest waiting first
+  if (!rows.length) return shell('<div style="padding:14px 0;color:var(--text3);font-size:12px;">Nothing awaiting your approval.</div>');
+  const list = rows.slice(0, 8).map(r => `
+    <div onclick="openLeadForm(${r.leadId})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+      <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
+        <div style="color:${r.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.kind)}${r.who ? ' · ' + esc(r.who) : ''}</div></div>
+      <div style="white-space:nowrap;color:var(--text3);">${r.at ? String(r.at).slice(0, 10) : ''}</div>
+    </div>`).join('');
+  const more = rows.length > 8 ? `<div style="padding-top:8px;font-size:11px;color:var(--text3);">+ ${rows.length - 8} more</div>` : '';
+  return shell(`
+    <div style="font-size:26px;font-weight:800;color:${rows.length ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${rows.length}</div>
+    <div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin:2px 0 8px;">awaiting your decision</div>
+    ${list}${more}`);
 }
 
 // Outstanding actions across leads AND opportunities — one source now that
