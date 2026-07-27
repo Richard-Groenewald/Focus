@@ -573,7 +573,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.26 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -607,7 +607,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.26 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -901,7 +901,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 <div class="opp-page" id="lead-page">
   <div class="opp-topbar">
     <button class="btn btn-ghost btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeLeadPage()">← Back</button>
-    <button type="button" class="btn btn-secondary btn-sm" onclick="openHelpDrawer('lead')" title="Help for this page" aria-label="Help">? Help</button>
+    <!-- Help lives on the floating green ? button (help-fab), not the topbar. -->
     <div class="opp-topbar-title" id="lead-page-title" style="flex:0 0 auto;">Load Lead</div>
     <!-- Lead status badge sits right after the title; edit-window countdown + promotion note follow it. -->
     <span id="lead-status-badge" style="padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;background:#f3f4f6;color:#4b5563;">—</span>
@@ -1337,6 +1337,11 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <path d="M12 6.8v13M7 10.2h10" stroke="var(--red)" stroke-width="1.1"/>
   </svg>
 </button>
+
+<!-- Floating context-help button — sits left of the bug button, but only on
+     pages/contexts that have a HELP_CONTENT entry (updateHelpFab decides). -->
+<button id="help-fab" onclick="openHelpDrawer(currentHelpKey())" title="Help for this page" aria-label="Help for this page"
+  style="position:fixed;bottom:18px;right:70px;z-index:100000;width:44px;height:44px;border-radius:50%;background:var(--green);border:none;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,0.3);display:none;align-items:center;justify-content:center;padding:0;color:#fff;font-family:Arial,sans-serif;font-size:24px;font-weight:800;line-height:1;">?</button>
 <div id="bug-root"></div>
 
 <script>
@@ -3079,6 +3084,7 @@ function showPage(page) {
 
   // Load data
   loadTable(page);
+  updateHelpFab();
 }
 
 // ── Table Rendering ──────────────────────────────────────
@@ -3940,8 +3946,9 @@ function closeModal() {
 
 // ── Context-sensitive help drawer ─────────────────────────────────────────────
 // Reusable across pages: add a HELP_CONTENT entry (object, or a function for
-// state-aware content) and drop a `? Help` button calling openHelpDrawer('<key>')
-// into that page's header. Content is curated here.
+// state-aware content) keyed by the page name (or map it in currentHelpKey for
+// overlay pages) and the floating green ? button next to the bug button appears
+// there automatically. Content is curated here.
 const HELP_CONTENT = {
   lead: () => {
     const status = (typeof leadData !== 'undefined' && leadData && leadData.status) || 'New';
@@ -3995,6 +4002,23 @@ function closeHelpDrawer() {
   document.getElementById('help-drawer')?.classList.remove('show');
   document.getElementById('help-drawer-overlay')?.classList.remove('show');
 }
+
+// Which help key applies right now — an open full-page overlay wins over the
+// list page beneath it; otherwise the current list page keys HELP_CONTENT directly.
+function currentHelpKey() {
+  if (document.getElementById('lead-page')?.classList.contains('active')) return 'lead';
+  if (document.getElementById('opp-page')?.classList.contains('active')) return HELP_CONTENT.deal ? 'deal' : null;
+  return HELP_CONTENT[currentPage] ? currentPage : null;
+}
+function updateHelpFab() {
+  const fab = document.getElementById('help-fab');
+  if (fab) fab.style.display = currentHelpKey() ? 'flex' : 'none';
+}
+// Overlay pages open/close from many call sites — watching their class attribute
+// keeps the fab in sync without touching each one. showPage() covers list pages.
+document.querySelectorAll('.opp-page').forEach(el =>
+  new MutationObserver(updateHelpFab).observe(el, { attributes: true, attributeFilter: ['class'] }));
+updateHelpFab();
 
 // ── In-app dialogs — NEVER use native confirm()/prompt()/alert() ──────────
 // Promise-based modal confirm/prompt that stacks above any open modal (its own
