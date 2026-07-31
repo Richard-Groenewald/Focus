@@ -38,11 +38,17 @@ special-request path is superseded by the auto-flip to Qualified.
 | Working/Qualified → Nurture | Owner or SM initiates; any time pre-promotion | Sales management |
 | Hold → Working | Wake date expires | None (auto) — owner + SM get top-of-dashboard reminders |
 | Hold → Qualified | FACT goes all green while on Hold | None (auto) — wake date cleared, owner notified |
+| Hold → Working/Qualified | **Early release** — owner or SM takes it off Hold before the wake date | None (direct) — wake date cleared, landing stage derived off the data |
+| Nurture → Working/Qualified | **Exit** — owner or SM releases it from Nurture | None (direct) — cadence cleared, landing stage derived off the data |
 | Any → Dead | User requests | Moves immediately; SM oversight lands **post-hoc** in Dead |
 | Dead → Working | SM or Executive reopens, reason required | FACT dots **cleared** on reopen |
 
-**Nurture has no exit path for now** (confirmed 2026-07-26) — a nurtured lead stays in Nurture;
-an exit mechanism may be added later.
+**Parked leads are releasable** (added 2026-07-31, supersedes the 2026-07-26 "no exit from
+Nurture" decision): the owner or a sales manager can take a lead off Hold early or exit Nurture
+at any time from the Lead Progression tab. This is a **direct action with no approval step** —
+un-parking returns the lead to active work, mirroring the automatic wake — and writes no
+`lead_stage_requests` row (the leads audit trigger records it). The engine derives the landing
+stage: Qualified if all four gates are Strong with a service interest, otherwise Working.
 
 **Declines:** any declined approval (promotion, Hold, Nurture, or the post-hoc dead review) is
 the **approver's choice — default back to Working, option Dead — reason always required**.
