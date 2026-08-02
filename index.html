@@ -586,7 +586,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.33 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.34 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -620,7 +620,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.33 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.34 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12559,17 +12559,17 @@ function _engHistShell() {
           </select></div>
         <div style="flex:1;min-width:140px;">${lbl('Search')}
           <input type="text" id="eh-search" class="form-control" style="height:34px;" placeholder="notes, type…" oninput="_engHistApply()"></div>
+        <div><button type="button" class="btn btn-secondary" style="height:34px;font-size:12px;" onclick="openEngShiftModal()" title="Push the open next actions in the current view later by N days">Shift due dates…</button></div>
       </div>
     </div>`;
   body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:0 0 24px;">${bar}<div id="eh-results"></div></div></td></tr>`;
 }
 
-// Filter + group + render — into #eh-results only (leaves the filter bar intact).
-function _engHistApply() {
+// Current filtered row set — shared by the render (_engHistApply) and the bulk
+// due-date shift, so "what you see is what you shift".
+function _engHistFilteredRows() {
   const st = window._engHist;
-  const out = document.getElementById('eh-results');
-  if (!st || !out) return;
-
+  if (!st) return [];
   const q = (document.getElementById('eh-search')?.value || '').trim().toLowerCase();
   const scope = st.scope || 'mine';   // driven by the topbar Own/All pills
   const client = document.getElementById('eh-client')?.value || '';
@@ -12587,6 +12587,114 @@ function _engHistApply() {
   if (nextOnly) rows = rows.filter(r => !!r.e.next_action);
   if (q) rows = rows.filter(r =>
     (r.clientName + ' ' + r.parentLabel + ' ' + r.persons.join(' ') + ' ' + (r.e.notes || '') + ' ' + (r.e.engagement_type || '') + ' ' + (r.e.next_action || '')).toLowerCase().includes(q));
+  return rows;
+}
+
+// ── Bulk due-date shift ("move the follow-up pile out") ──────────────────────
+// Pushes the OPEN next actions in the current filtered view later by N days —
+// each keeps its date relative to the others. Everyone can shift their own
+// obligations (parent owner or engagement creator); sales management (Admin,
+// 'all' or the promote right) can shift anyone's. Rescheduling is allowed on
+// locked engagements — like marking one done, it touches the obligation, not
+// the historic record. The kept refresh_lead_next_action trigger re-denormalises
+// lead rows automatically.
+function _engShiftCanAll() {
+  return !!(currentUser && (currentUser.isAdmin
+    || currentUser.permissions.includes('all') || currentUser.permissions.includes('promote_lead')));
+}
+function _engShiftCounts() {
+  const me = currentUser && currentUser.personId;
+  const canAll = _engShiftCanAll();
+  const open = _engHistFilteredRows().filter(r => r.e.next_action && !r.e.next_action_done && r.e.next_action_date);
+  const ok = canAll ? open : open.filter(r => String(r.ownerId) === String(me) || String(r.e.created_by) === String(me));
+  const today = new Date().toISOString().slice(0, 10);
+  return { ok, blocked: open.length - ok.length, overdue: ok.filter(r => r.e.next_action_date < today) };
+}
+
+function openEngShiftModal() {
+  const { ok, blocked, overdue } = _engShiftCounts();
+  if (!ok.length) {
+    showStatus(blocked ? 'The open actions in this view belong to others — you can only shift your own' : 'No open next actions in the current view', 'error');
+    return;
+  }
+  const blockedNote = blocked
+    ? `<div style="font-size:11px;color:var(--text3);margin-top:10px;">${blocked} more open action${blocked === 1 ? '' : 's'} in this view belong${blocked === 1 ? 's' : ''} to other people and won't be touched — sales management can shift everyone's.</div>` : '';
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Shift due dates out</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">
+            Pushes the <strong>open next actions in the current filtered view</strong> later by the days below —
+            each keeps its place in the queue. Completed actions and engagements outside the filters are untouched.
+          </div>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label class="form-label">Move out by (days) <span style="color:var(--red)">*</span></label>
+            <input type="number" id="eng-shift-days" class="form-control" min="1" step="1" value="7">
+          </div>
+          <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--text2);cursor:pointer;margin-bottom:12px;">
+            <input type="checkbox" id="eng-shift-overdue" style="margin:0;" onchange="_engShiftUpdateCount()"> Only overdue actions (due before today)</label>
+          <div id="eng-shift-count" style="font-size:13px;color:var(--text);">Will move <strong>${ok.length}</strong> open action${ok.length === 1 ? '' : 's'} (${overdue.length} overdue).</div>
+          ${blockedNote}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="applyEngShift()">Shift dates</button>
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+function _engShiftUpdateCount() {
+  const { ok, overdue } = _engShiftCounts();
+  const onlyOd = document.getElementById('eng-shift-overdue')?.checked || false;
+  const n = onlyOd ? overdue.length : ok.length;
+  const el = document.getElementById('eng-shift-count');
+  if (el) el.innerHTML = `Will move <strong>${n}</strong> open action${n === 1 ? '' : 's'}${onlyOd ? '' : ` (${overdue.length} overdue)`}.`;
+}
+
+async function applyEngShift() {
+  const days = Math.floor(+(document.getElementById('eng-shift-days')?.value || 0));
+  if (!days || days < 1) { showStatus('Enter how many days to shift by (1 or more)', 'error'); return; }
+  const onlyOd = document.getElementById('eng-shift-overdue')?.checked || false;
+  const { ok } = _engShiftCounts();
+  const today = new Date().toISOString().slice(0, 10);
+  const targets = onlyOd ? ok.filter(r => r.e.next_action_date < today) : ok;
+  if (!targets.length) { showStatus('Nothing to shift with the current choices', 'error'); return; }
+  startBusy('Shifting ' + targets.length + ' due date' + (targets.length === 1 ? '' : 's') + '…');
+  try {
+    // One PATCH per distinct current date (same shift → same new date), with the
+    // id list chunked to keep URLs safe — same pattern as the other bulk reads.
+    const byDate = new Map();
+    for (const r of targets) {
+      const cur = String(r.e.next_action_date).slice(0, 10);
+      if (!byDate.has(cur)) byDate.set(cur, []);
+      byDate.get(cur).push(+r.e.id);
+    }
+    for (const [cur, ids] of byDate) {
+      const d = new Date(cur + 'T00:00:00Z');
+      d.setUTCDate(d.getUTCDate() + days);
+      const next = d.toISOString().slice(0, 10);
+      for (let i = 0; i < ids.length; i += 150)
+        await api('engagements', 'PATCH', { next_action_date: next }, `id=in.(${ids.slice(i, i + 150).join(',')})`);
+    }
+    closeModal();
+    showStatus(targets.length + ' due date' + (targets.length === 1 ? '' : 's') + ' moved out ' + days + ' day' + (days === 1 ? '' : 's'));
+    await _engHistReload();
+  } catch (e) { showStatus('Could not shift: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// Filter + group + render — into #eh-results only (leaves the filter bar intact).
+function _engHistApply() {
+  const st = window._engHist;
+  const out = document.getElementById('eh-results');
+  if (!st || !out) return;
+  const rows = _engHistFilteredRows();
 
   const capNote = st.capHit ? `<div style="padding:8px 12px;margin-bottom:10px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:6px;font-size:12px;color:#92400E;">Showing the most recent 1,000 engagements in range — narrow the date window to see older activity.</div>` : '';
   const countNote = `<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">${rows.length} engagement${rows.length!==1?'s':''}${st.viewCategory!=='All'?' · '+st.viewCategory:''}</div>`;
