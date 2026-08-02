@@ -590,7 +590,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.39 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -624,7 +624,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.39 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2534,6 +2534,17 @@ const PAGES = {
     fields: [],
   },
 
+  // Milestone groups (area-assigned) + types — the engagement milestone
+  // lookups. sql/add_engagement_milestones.sql.
+  milestone_admin: {
+    title: 'Milestones',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
+
   people: {
     title: 'People',
     table: 'people',
@@ -3224,6 +3235,7 @@ async function loadTable(page) {
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'dashboard_admin') { await renderDashboardAdmin(); return; }
     if (page === 'broadcast_admin') { await renderBroadcastAdmin(); return; }
+    if (page === 'milestone_admin') { await renderMilestoneAdmin(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
@@ -4498,6 +4510,8 @@ const MENU = [
             icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' },
           { page: 'broadcast_admin', label: 'Broadcasts', permission: 'manage_settings',
             icon: '<path d="M2 6v4l8 3V3L2 6z"/><path d="M12 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'milestone_admin', label: 'Milestones', permission: 'manage_settings',
+            icon: '<path d="M8 1l2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 11.8 3.8 14l.8-4.7L1.2 6l4.7-.7L8 1z"/>' },
         ]
       },
       {
@@ -9177,8 +9191,8 @@ async function renderOpportunitiesPage() {
 // (managers). Fixed per-role for now — user customisation is a later increment.
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
-  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions'],
-  'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions'],
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions', 'milestones'],
+  'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions', 'milestones'],
   'Operations':    ['contracts'],
   'Executive':     ['approvals', 'company'],   // was 'EXCO' — no such role exists; the live role name is Executive
   'Admin':         ['approvals', 'bugs'],
@@ -9198,6 +9212,7 @@ const DASH_WIDGET_CATALOG = {
   contracts:     'Active Contracts',
   company:       'Company Overview',
   interactions:  'Interactions',
+  milestones:    'Recent Milestones',
   bugs:          'Bugs',
 };
 
@@ -9428,7 +9443,7 @@ async function renderDashboard() {
     </div></td></tr>`;
   const loaders = { approvals: _dashApprovals, actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps,
                     pipeline: _dashPipeline, campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany,
-                    bugs: _dashBugs, interactions: _dashInteractions };
+                    bugs: _dashBugs, interactions: _dashInteractions, milestones: _dashMilestones };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
     if (!el) return;
@@ -9478,6 +9493,28 @@ async function _dashApprovals() {
       rows.push({ leadId: +r.lead_id, kind, label: leadLabel(l), who: personName(r.requested_by),
                   at: r.requested_at, color: r.request_type === 'dead' ? 'var(--red)' : 'var(--navy)' });
     }
+    // Pending milestone designations (sales-management review; click → review modal).
+    try {
+      const pend = await apiGet('engagement_milestones', 'status=eq.pending&select=*&order=proposed_at.asc&limit=100');
+      if (pend.length) {
+        await _milLookups();
+        const engIds = [...new Set(pend.map(p => +p.engagement_id))];
+        const engById = {};
+        for (let i = 0; i < engIds.length; i += 150)
+          (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id`)).forEach(e => { engById[+e.id] = e; });
+        const dIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+        const dealById = {};
+        for (let i = 0; i < dIds.length; i += 150)
+          (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&select=id,name`)).forEach(d => { dealById[+d.id] = d; });
+        for (const p of pend) {
+          const e = engById[+p.engagement_id]; if (!e) continue;
+          const label = e.lead_id != null ? leadLabel(leadById[+e.lead_id])
+            : ((dealById[+e.deal_id] || {}).name || ('Deal #' + e.deal_id));
+          rows.push({ open: `openMilestoneReview(${+p.id})`, kind: '★ Milestone — ' + _milTypeName(p.milestone_type_id),
+                      label, who: personName(p.proposed_by), at: p.proposed_at, color: '#B45309' });
+        }
+      }
+    } catch (e) { /* pre-migration DB — no milestones yet */ }
   }
   if (exec) {
     try {
@@ -9497,7 +9534,7 @@ async function _dashApprovals() {
   rows.sort((a, b) => String(a.at || '9999') < String(b.at || '9999') ? -1 : 1);   // oldest waiting first
   if (!rows.length) return shell('<div style="padding:14px 0;color:var(--text3);font-size:12px;">Nothing awaiting your approval.</div>');
   const list = rows.slice(0, 8).map(r => `
-    <div onclick="openLeadForm(${r.leadId})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+    <div onclick="${r.open || `openLeadForm(${r.leadId})`}" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
       <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
         <div style="color:${r.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.kind)}${r.who ? ' · ' + esc(r.who) : ''}</div></div>
       <div style="white-space:nowrap;color:var(--text3);">${r.at ? String(r.at).slice(0, 10) : ''}</div>
@@ -9853,6 +9890,63 @@ async function _dashBugs() {
   ], sub, can('manage_settings') ? 'bug_reports' : null, 'Triage');
 }
 
+// Recent Milestones — the latest APPROVED milestones within the dashboard
+// scope (pending stay invisible here — provisional until reviewed).
+async function _dashMilestones() {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const scope = _dashScope();
+  await _milLookups();
+  let rows = [];
+  try {
+    rows = await apiGet('engagement_milestones', 'status=eq.approved&select=*&order=decided_at.desc.nullslast&limit=80');
+  } catch (e) {
+    return _dashCard('Recent Milestones', null, [['Milestones', '—']], 'Needs the milestones migration (sql/add_engagement_milestones.sql)', null);
+  }
+  const engIds = [...new Set(rows.map(r => +r.engagement_id))];
+  const engById = {};
+  for (let i = 0; i < engIds.length; i += 150)
+    (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
+  const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
+  const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+  const [leads, deals] = await Promise.all([
+    leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id,target_org_name,description`) : [],
+    dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id,name`) : [],
+  ]);
+  const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+  const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
+  const items = [];
+  for (const m of rows) {
+    const e = engById[+m.engagement_id]; if (!e) continue;
+    const parent = e.lead_id != null ? leadById[+e.lead_id] : dealById[+e.deal_id];
+    if (!parent || !_dashInScope(parent, scope)) continue;
+    const label = e.lead_id != null
+      ? (parent.target_org_name || parent.description || ('Lead #' + parent.id))
+      : (parent.name || ('Deal #' + parent.id));
+    items.push({ engId: +m.engagement_id, type: _milTypeName(m.milestone_type_id), label,
+                 date: e.engagement_date || String(m.decided_at || '').slice(0, 10) });
+  }
+  const monthAgo = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  const recent = items.filter(i => (i.date || '') >= monthAgo).length;
+  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine'}</span>`;
+  const list = items.slice(0, 8).map(i => `
+    <div onclick="openEngagement(${i.engId})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
+      <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">★ ${esc(i.type)}</div>
+        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(i.label)}</div></div>
+      <div style="white-space:nowrap;color:var(--text2);">${i.date || ''}</div>
+    </div>`).join('');
+  const kpi = (label, val) => `<div><div style="font-size:26px;font-weight:800;color:var(--navy);line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Recent Milestones${chip}</div>
+      <button class="btn btn-ghost btn-sm" onclick="showPage('eng_hist_outreach')">History →</button>
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('Last 30 days', recent)}${kpi('In view', items.length)}</div>
+      ${items.length ? `<div style="margin-top:10px;">${list}</div>${items.length > 8 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${items.length - 8} more</div>` : ''}`
+                     : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">No milestones yet${(allData['milestone_types'] || []).length ? '' : ' — configure types under Admin → Settings → Milestones'}.</div>`}
+    </div></div>`;
+}
+
 // ── Dashboards admin (Admin → Settings → Dashboards) ────────────────────────
 // Role × widget matrix: tick which dashboard categories each role sees. Saved
 // as JSON in settings.dashboard_role_widgets (keyed by role NAME, matching the
@@ -10023,6 +10117,126 @@ async function endBroadcast(id) {
     await renderBroadcastAdmin();
   } catch (e) { showStatus('Could not end: ' + e.message, 'error'); }
   finally { stopBusy(); }
+}
+
+// ── Milestones admin (Admin → Settings → Milestones) ─────────────────────────
+// Groups carry the area assignment (Outreach/Sales/Contract/Project); types
+// live inside a group and are what users tag on engagements. Per-row Save,
+// FK-guarded Delete (in-use rows fail safely — deactivate instead).
+async function renderMilestoneAdmin() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '';
+  body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--text3);">Loading…</td></tr>';
+  const ok = await _milLookups(true);
+  if (!ok) {
+    body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--red);">Milestones need the sql/add_engagement_milestones.sql migration on this database.</td></tr>';
+    return;
+  }
+  const groups = allData['milestone_groups'] || [];
+  const types = allData['milestone_types'] || [];
+  const areaTicks = g => MIL_AREAS.map(a => `<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin-right:8px;cursor:pointer;">
+      <input type="checkbox" class="mg-area" data-id="${+g.id}" data-area="${a}" ${Array.isArray(g.areas) && g.areas.includes(a) ? 'checked' : ''} style="margin:0;">${a}</label>`).join('');
+  const gRows = groups.map(g => `
+    <tr style="border-top:1px solid var(--border);">
+      <td style="padding:8px 12px;"><input type="text" class="form-control" id="mg-name-${+g.id}" value="${cEsc(g.name)}" style="height:30px;min-width:160px;"></td>
+      <td style="padding:8px 12px;white-space:nowrap;">${areaTicks(g)}</td>
+      <td style="padding:8px 12px;text-align:center;"><input type="checkbox" id="mg-active-${+g.id}" ${g.active !== false ? 'checked' : ''}></td>
+      <td style="padding:8px 12px;text-align:center;"><input type="number" class="form-control" id="mg-sort-${+g.id}" value="${+g.sort_order || 0}" style="height:30px;width:70px;"></td>
+      <td style="padding:8px 12px;white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" onclick="saveMilestoneGroup(${+g.id})">Save</button>
+        <button class="btn btn-sm" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="deleteMilestoneRow('milestone_groups',${+g.id})">Delete</button></td>
+    </tr>`).join('');
+  const tRows = types.map(t => `
+    <tr style="border-top:1px solid var(--border);">
+      <td style="padding:8px 12px;"><input type="text" class="form-control" id="mt-name-${+t.id}" value="${cEsc(t.name)}" style="height:30px;min-width:160px;"></td>
+      <td style="padding:8px 12px;"><select class="form-control" id="mt-group-${+t.id}" style="height:30px;">${groups.map(g => `<option value="${+g.id}" ${+g.id === +t.group_id ? 'selected' : ''}>${cEsc(g.name)}</option>`).join('')}</select></td>
+      <td style="padding:8px 12px;text-align:center;"><input type="checkbox" id="mt-active-${+t.id}" ${t.active !== false ? 'checked' : ''}></td>
+      <td style="padding:8px 12px;text-align:center;"><input type="number" class="form-control" id="mt-sort-${+t.id}" value="${+t.sort_order || 0}" style="height:30px;width:70px;"></td>
+      <td style="padding:8px 12px;white-space:nowrap;">
+        <button class="btn btn-secondary btn-sm" onclick="saveMilestoneType(${+t.id})">Save</button>
+        <button class="btn btn-sm" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="deleteMilestoneRow('milestone_types',${+t.id})">Delete</button></td>
+    </tr>`).join('');
+  const gOpts = groups.map(g => `<option value="${+g.id}">${cEsc(g.name)}</option>`).join('');
+  body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:2px 0 24px;max-width:980px;">
+    <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">Milestone <strong>groups</strong> are assigned to engagement areas; the <strong>types</strong> inside a group are what users tag on engagements. An engagement's picker offers only types whose group covers its area. Deleting anything already in use fails safely — untick <em>Active</em> instead.</div>
+    <div class="card" style="padding:0;margin-bottom:16px;overflow-x:auto;">
+      <div style="padding:12px 16px;font-weight:700;color:var(--navy);border-bottom:1px solid var(--border);">Milestone Groups</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--bg);text-align:left;"><th style="padding:8px 12px;">Name</th><th style="padding:8px 12px;">Areas</th><th style="padding:8px 12px;text-align:center;">Active</th><th style="padding:8px 12px;text-align:center;">Order</th><th style="padding:8px 12px;"></th></tr></thead>
+        <tbody>${gRows || '<tr><td colspan="5" style="padding:14px;color:var(--text3);">No groups yet.</td></tr>'}</tbody>
+      </table>
+      <div style="display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--border);flex-wrap:wrap;">
+        <input type="text" id="mg-new-name" class="form-control" placeholder="New group name" style="height:30px;max-width:220px;">
+        <button class="btn btn-primary btn-sm" onclick="addMilestoneGroup()">+ Add group</button>
+      </div>
+    </div>
+    <div class="card" style="padding:0;overflow-x:auto;">
+      <div style="padding:12px 16px;font-weight:700;color:var(--navy);border-bottom:1px solid var(--border);">Milestone Types</div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr style="background:var(--bg);text-align:left;"><th style="padding:8px 12px;">Name</th><th style="padding:8px 12px;">Group</th><th style="padding:8px 12px;text-align:center;">Active</th><th style="padding:8px 12px;text-align:center;">Order</th><th style="padding:8px 12px;"></th></tr></thead>
+        <tbody>${tRows || '<tr><td colspan="5" style="padding:14px;color:var(--text3);">No milestone types yet.</td></tr>'}</tbody>
+      </table>
+      <div style="display:flex;gap:8px;align-items:center;padding:10px 12px;border-top:1px solid var(--border);flex-wrap:wrap;">
+        <input type="text" id="mt-new-name" class="form-control" placeholder="New milestone type" style="height:30px;max-width:220px;">
+        <select id="mt-new-group" class="form-control" style="height:30px;max-width:200px;">${gOpts || '<option value="">— add a group first —</option>'}</select>
+        <button class="btn btn-primary btn-sm" onclick="addMilestoneType()">+ Add type</button>
+      </div>
+    </div>
+  </div></td></tr>`;
+}
+async function addMilestoneGroup() {
+  const name = (document.getElementById('mg-new-name')?.value || '').trim();
+  if (!name) { showStatus('Enter a group name', 'error'); return; }
+  try {
+    await api('milestone_groups', 'POST', { name, areas: [], active: true, sort_order: 0, created_by: currentUser?.personId || null }, '');
+    await renderMilestoneAdmin();
+  } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
+}
+async function saveMilestoneGroup(id) {
+  const areas = [...document.querySelectorAll(`input.mg-area[data-id="${id}"]`)].filter(c => c.checked).map(c => c.dataset.area);
+  const patch = {
+    name: (document.getElementById('mg-name-' + id)?.value || '').trim(), areas,
+    active: !!document.getElementById('mg-active-' + id)?.checked,
+    sort_order: Math.floor(+(document.getElementById('mg-sort-' + id)?.value || 0)),
+  };
+  if (!patch.name) { showStatus('Group name is required', 'error'); return; }
+  try {
+    await api('milestone_groups', 'PATCH', patch, 'id=eq.' + id);
+    showStatus('Group saved');
+    await renderMilestoneAdmin();
+  } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
+}
+async function addMilestoneType() {
+  const name = (document.getElementById('mt-new-name')?.value || '').trim();
+  const gid = +(document.getElementById('mt-new-group')?.value || 0);
+  if (!name || !gid) { showStatus('Enter a type name and pick its group', 'error'); return; }
+  try {
+    await api('milestone_types', 'POST', { name, group_id: gid, active: true, sort_order: 0, created_by: currentUser?.personId || null }, '');
+    await renderMilestoneAdmin();
+  } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
+}
+async function saveMilestoneType(id) {
+  const patch = {
+    name: (document.getElementById('mt-name-' + id)?.value || '').trim(),
+    group_id: +(document.getElementById('mt-group-' + id)?.value || 0) || null,
+    active: !!document.getElementById('mt-active-' + id)?.checked,
+    sort_order: Math.floor(+(document.getElementById('mt-sort-' + id)?.value || 0)),
+  };
+  if (!patch.name || !patch.group_id) { showStatus('Type name and group are required', 'error'); return; }
+  try {
+    await api('milestone_types', 'PATCH', patch, 'id=eq.' + id);
+    showStatus('Type saved');
+    await renderMilestoneAdmin();
+  } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
+}
+async function deleteMilestoneRow(table, id) {
+  try {
+    await api(table, 'DELETE', null, 'id=eq.' + id);
+    showStatus('Deleted');
+    await renderMilestoneAdmin();
+  } catch (e) { showStatus('In use — untick Active instead (' + e.message + ')', 'error'); }
 }
 
 const RPP = (function () {
@@ -12673,6 +12887,10 @@ async function _engHistLoad() {
   const leadsById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const subsById  = Object.fromEntries(subs.map(s => [+s.id, s]));
 
+  // Milestone badges for every listed engagement (fail-silent pre-migration).
+  await _milLookups();
+  st.milestones = await _milForEngagements(engIds);
+
   // Stream labels: roots inside the window carry their own label; roots outside
   // it are fetched in chunks (URL-length safe). Pre-migration DBs skip cleanly.
   const streamLabelById = {};
@@ -12758,6 +12976,8 @@ function _engHistShell() {
           <input type="checkbox" id="eh-outstanding" style="margin:0;" onchange="_engHistApply()"> Outstanding</label>
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);height:34px;cursor:pointer;">
           <input type="checkbox" id="eh-nextonly" style="margin:0;" onchange="_engHistApply()"> Next action only</label>
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);height:34px;cursor:pointer;" title="Only engagements carrying an approved milestone">
+          <input type="checkbox" id="eh-milestones" style="margin:0;" onchange="_engHistApply()"> ★ Milestones only</label>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border);">
         <span style="font-size:11px;color:var(--text3);align-self:center;font-weight:600;">Filter by:</span>
@@ -12801,6 +13021,9 @@ function _engHistFilteredRows() {
   if (person) rows = rows.filter(r => r.persons.includes(person));
   if (outstanding) rows = rows.filter(r => r.e.next_action && !r.e.next_action_done);
   if (nextOnly) rows = rows.filter(r => !!r.e.next_action);
+  // Milestones only = at least one APPROVED milestone (pending are provisional).
+  if (document.getElementById('eh-milestones')?.checked)
+    rows = rows.filter(r => ((st.milestones || {})[+r.e.id] || []).some(m => m.status === 'approved'));
   if (q) rows = rows.filter(r =>
     (r.clientName + ' ' + r.parentLabel + ' ' + r.persons.join(' ') + ' ' + (r.e.notes || '') + ' ' + (r.e.engagement_type || '') + ' ' + (r.e.next_action || '')).toLowerCase().includes(q));
   return rows;
@@ -12950,10 +13173,11 @@ function _engHistApply() {
     if (st.group !== 'client') ctxBits.push(cEsc(r.clientName));
     if (st.group !== 'deal')   ctxBits.push(`<a href="#" onclick="closeOrNav_eh(${r.parentId},'${r.parentKind}');return false;" style="color:var(--red);">${cEsc(r.parentLabel)}</a>`);
     else                       ctxBits.push(`<a href="#" onclick="closeOrNav_eh(${r.parentId},'${r.parentKind}');return false;" style="color:var(--red);">open ${r.parentKind}</a>`);
+    const milBadges = ((st.milestones || {})[+e.id] || []).map(m => _milBadgeHtml(m)).join(' ');
     return `
       <div style="padding:10px 12px;border-bottom:1px solid var(--border);">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">
-          <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${typeBadge} ${catBadge}</div>
+          <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${typeBadge} ${catBadge} ${milBadges}</div>
           <div style="font-size:11px;color:var(--text3);white-space:nowrap;">${cEsc(r.ownerName)}</div>
         </div>
         <div style="font-size:12px;margin-top:3px;">${persons} <span style="color:var(--text3);">· ${ctxBits.join(' · ')}</span></div>
@@ -18924,6 +19148,253 @@ async function saveLead(opts) {
 }
 
 
+// ── Engagement Milestones ─────────────────────────────────────────────────────
+// A milestone tags an engagement as a significant event; several may sit on one
+// engagement (engagement_milestones link table). Types are grouped and each
+// GROUP is assigned to engagement areas (Outreach/Sales/Contract/Project), so
+// each area's picker offers its own subset. Every designation is 'pending'
+// until sales management reviews it (managers self-approve); pending shows as a
+// hollow badge and is EXCLUDED from counts/filters/widget until approved.
+// All calls fail silent on a pre-migration DB (sql/add_engagement_milestones.sql).
+const MIL_AREAS = ['Outreach', 'Sales', 'Contract', 'Project'];
+function _milCanReview() { return _engShiftCanAll(); }   // sales management: Admin / 'all' / promote right
+
+async function _milLookups(force) {
+  if (!force && allData['milestone_groups'] && allData['milestone_types']) return true;
+  try {
+    const [gs, ts] = await Promise.all([
+      apiGet('milestone_groups', 'select=*&order=sort_order.asc,id.asc'),
+      apiGet('milestone_types', 'select=*&order=sort_order.asc,id.asc'),
+    ]);
+    allData['milestone_groups'] = gs;
+    allData['milestone_types'] = ts;
+    return true;
+  } catch (e) { return false; }   // pre-migration DB
+}
+function _milTypesForArea(area) {
+  const gById = Object.fromEntries((allData['milestone_groups'] || []).map(g => [+g.id, g]));
+  return (allData['milestone_types'] || []).filter(t => {
+    if (t.active === false) return false;
+    const g = gById[+t.group_id];
+    return g && g.active !== false && Array.isArray(g.areas) && g.areas.includes(area);
+  });
+}
+function _milTypeName(id) {
+  const t = (allData['milestone_types'] || []).find(x => +x.id === +id);
+  return t ? t.name : ('Milestone #' + id);
+}
+// Milestone rows for a set of engagement ids → { engId: [rows] }.
+async function _milForEngagements(engIds) {
+  const map = {};
+  if (!engIds || !engIds.length) return map;
+  try {
+    for (let i = 0; i < engIds.length; i += 150) {
+      (await apiGet('engagement_milestones', `engagement_id=in.(${engIds.slice(i, i + 150).join(',')})&select=*`))
+        .forEach(m => { (map[+m.engagement_id] = map[+m.engagement_id] || []).push(m); });
+    }
+  } catch (e) { /* pre-migration DB */ }
+  return map;
+}
+// Engagement area: leads are Outreach; deals derive via stage + service
+// recurring flag — the same _engHistCat classification the history view uses.
+function _milAreaFor(kind, deal) {
+  if (kind !== 'deal') return 'Outreach';
+  if (!deal) return 'Sales';
+  const sub = (allData['service_sub'] || []).find(s => +s.id === +deal.service_sub_id);
+  return (_engHistCat(deal.stage_id, sub).cat) || 'Sales';
+}
+
+// Badge: solid navy/khaki star = approved; hollow amber dashed = proposed.
+// Declined rows render nothing in lists. Click opens the review/withdraw modal.
+function _milBadgeHtml(m) {
+  if (!m || m.status === 'declined') return '';
+  const pending = m.status === 'pending';
+  const style = pending
+    ? 'background:#fff;color:#B45309;border:1.5px dashed #F59E0B;'
+    : 'background:var(--navy);color:#C3B091;border:1.5px solid var(--navy);';
+  const title = pending ? 'Proposed milestone — awaiting sales-management review' : 'Milestone';
+  return `<span onclick="event.stopPropagation();openMilestoneReview(${+m.id})" title="${title}" style="display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;cursor:pointer;white-space:nowrap;${style}">★ ${cEsc(_milTypeName(m.milestone_type_id))}</span>`;
+}
+
+// After any milestone change, re-render whichever surfaces are on screen.
+async function _milAfterChange() {
+  try {
+    if (window._engHist && document.getElementById('eh-results')) await _engHistReload();
+    if (typeof leadData !== 'undefined' && leadData?.id && document.getElementById('lead-interactions-list')) {
+      window._leadMilMap = await _milForEngagements((leadInteractions || []).map(i => +i.id));
+      renderLeadInteractions();
+    }
+  } catch (e) { /* cosmetic refresh only */ }
+}
+
+// Review / withdraw modal for a single designation.
+async function openMilestoneReview(id) {
+  await _milLookups();
+  let m = null;
+  try { m = (await apiGet('engagement_milestones', 'id=eq.' + id + '&select=*'))[0]; } catch (e) {}
+  if (!m) { showStatus('Milestone not found — it may have been withdrawn', 'error'); return; }
+  const reviewer = _milCanReview();
+  const mine = +m.proposed_by === +(currentUser?.personId || 0);
+  const name = cEsc(_milTypeName(m.milestone_type_id));
+  const who = (() => { const p = (allData['people'] || []).find(x => +x.id === +m.proposed_by); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '—'; })();
+  const when = m.proposed_at ? new Date(m.proposed_at).toLocaleDateString('en-ZA') : '';
+  let stateLine, buttons;
+  if (m.status === 'pending' && reviewer) {
+    stateLine = `Proposed by <strong>${cEsc(who)}</strong>${when ? ' on ' + when : ''} — awaiting your review.`;
+    buttons = `<button class="btn btn-primary" onclick="decideMilestone(${+m.id},'approved')">✓ Approve</button>
+      <button class="btn btn-sm" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="declineMilestonePrompt(${+m.id})">Decline…</button>`;
+  } else if (m.status === 'pending' && mine) {
+    stateLine = `You proposed this${when ? ' on ' + when : ''} — awaiting sales-management review.`;
+    buttons = `<button class="btn btn-secondary" onclick="withdrawMilestone(${+m.id})">Withdraw proposal</button>`;
+  } else if (m.status === 'pending') {
+    stateLine = `Proposed by <strong>${cEsc(who)}</strong>${when ? ' on ' + when : ''} — awaiting sales-management review.`;
+    buttons = '';
+  } else if (m.status === 'approved') {
+    stateLine = `Approved milestone.`;
+    buttons = reviewer ? `<button class="btn btn-sm" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="withdrawMilestone(${+m.id})">Remove milestone</button>` : '';
+  } else {
+    stateLine = `Declined${m.decline_reason ? ' — “' + cEsc(m.decline_reason) + '”' : ''}.`;
+    buttons = '';
+  }
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:460px;">
+        <div class="modal-header">
+          <div class="modal-title">★ ${name}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);">${stateLine}</div>
+          <div id="mil-decline-wrap" style="display:none;margin-top:12px;">
+            <label class="form-label">Reason <span style="color:var(--red)">*</span></label>
+            <textarea id="mil-decline-reason" class="form-control" rows="2"></textarea>
+            <button class="btn btn-sm" style="margin-top:8px;background:var(--red);color:#fff;border-color:var(--red);" onclick="decideMilestone(${+m.id},'declined')">Confirm decline</button>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+          ${buttons}
+        </div>
+      </div>
+    </div>`);
+}
+function declineMilestonePrompt() {
+  const w = document.getElementById('mil-decline-wrap');
+  if (w) w.style.display = '';
+}
+async function decideMilestone(id, status) {
+  if (!_milCanReview()) { showStatus('Only sales management can review milestones', 'error'); return; }
+  const reason = (document.getElementById('mil-decline-reason')?.value || '').trim();
+  if (status === 'declined' && !reason) { showStatus('A reason is required to decline', 'error'); return; }
+  startBusy(status === 'approved' ? 'Approving…' : 'Declining…');
+  try {
+    await api('engagement_milestones', 'PATCH', {
+      status, decided_by: currentUser?.personId || null, decided_at: new Date().toISOString(),
+      decline_reason: status === 'declined' ? reason : null,
+    }, 'id=eq.' + id);
+    closeModal();
+    showStatus(status === 'approved' ? 'Milestone approved' : 'Milestone declined');
+    await _milAfterChange();
+  } catch (e) { showStatus('Could not review: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+// Withdraw an own pending proposal, or (management) remove an approved milestone.
+async function withdrawMilestone(id) {
+  startBusy('Removing…');
+  try {
+    await api('engagement_milestones', 'DELETE', null, 'id=eq.' + id);
+    closeModal();
+    showStatus('Milestone removed');
+    await _milAfterChange();
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// ── Milestone picker inside the engagement modal ─────────────────────────────
+// Renders into #li-milestones-wrap (present in the shared modal). Checked =
+// designated; disabled when the viewer may not change that particular row
+// (approved needs management; someone else's pending proposal likewise).
+async function _liRenderMilestones() {
+  const wrap = document.getElementById('li-milestones-wrap');
+  if (!wrap) return;
+  const ok = await _milLookups();
+  if (!ok) { wrap.style.display = 'none'; return; }
+  const parent = window._engParent;
+  let area = 'Outreach';
+  if (parent && parent.kind === 'deal') {
+    try {
+      if (!parent.dealRow) parent.dealRow = (await apiGet('deals', `id=eq.${parent.id}&select=id,stage_id,service_sub_id`))[0] || null;
+      if (!allData['service_sub']) allData['service_sub'] = await apiGet('service_sub', 'select=id,name,major_id,is_recurring');
+    } catch (e) {}
+    area = _milAreaFor('deal', parent.dealRow);
+  }
+  const types = _milTypesForArea(area);
+  if (!types.length) { wrap.style.display = 'none'; window._liMilRows = []; return; }
+  const i = window._liEditing || {};
+  let rows = [];
+  if (i.id) { try { rows = await apiGet('engagement_milestones', `engagement_id=eq.${i.id}&select=*`); } catch (e) {} }
+  window._liMilRows = rows;
+  const reviewer = _milCanReview();
+  const hardLocked = !!(parent && parent.kind === 'lead' && typeof leadReadOnly !== 'undefined' && leadReadOnly);
+  const boxes = types.map(t => {
+    const row = rows.find(r => +r.milestone_type_id === +t.id);
+    const state = row ? row.status : null;
+    const mine = row && +row.proposed_by === +(currentUser?.personId || 0);
+    const checked = state === 'pending' || state === 'approved';
+    const disabled = hardLocked
+      || (state === 'approved' && !reviewer)
+      || (state === 'pending' && !reviewer && !mine);
+    const chip = state === 'approved' ? '<span style="font-size:9px;font-weight:700;color:var(--navy);">✓ approved</span>'
+      : state === 'pending' ? '<span style="font-size:9px;font-weight:700;color:#B45309;">proposed</span>'
+      : state === 'declined' ? `<span style="font-size:9px;font-weight:700;color:var(--red);" title="${cEsc(row.decline_reason || '')}">declined</span>` : '';
+    return `<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:${disabled ? 'not-allowed' : 'pointer'};border:1px solid var(--border);border-radius:6px;padding:4px 10px;${checked ? 'background:#F5F1E8;' : ''}">
+      <input type="checkbox" class="li-mil-cb" data-type="${+t.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} style="margin:0;">
+      ★ ${cEsc(t.name)} ${chip}</label>`;
+  }).join('');
+  wrap.style.display = '';
+  wrap.innerHTML = `
+    <label class="form-label">Milestones <span style="font-weight:400;color:var(--text3);font-size:11px;">— significant events on this engagement</span></label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;">${boxes}</div>
+    <div style="font-size:11px;color:var(--text3);margin-top:5px;">${reviewer ? 'Your designations apply immediately.' : 'Designations are proposed until sales management approves.'}</div>`;
+}
+
+// Sync picker state → engagement_milestones after the engagement saves.
+async function _liSyncMilestones(engId) {
+  const wrap = document.getElementById('li-milestones-wrap');
+  if (!wrap || wrap.style.display === 'none') return;
+  const boxes = [...wrap.querySelectorAll('input.li-mil-cb')];
+  if (!boxes.length) return;
+  const existing = window._liMilRows || [];
+  const reviewer = _milCanReview();
+  const nowIso = new Date().toISOString();
+  for (const cb of boxes) {
+    if (cb.disabled) continue;
+    const typeId = +cb.dataset.type;
+    const row = existing.find(r => +r.milestone_type_id === typeId);
+    try {
+      if (cb.checked && !row) {
+        await api('engagement_milestones', 'POST', {
+          engagement_id: engId, milestone_type_id: typeId,
+          status: reviewer ? 'approved' : 'pending',
+          proposed_by: currentUser?.personId || null, proposed_at: nowIso,
+          decided_by: reviewer ? (currentUser?.personId || null) : null,
+          decided_at: reviewer ? nowIso : null,
+        }, '');
+      } else if (cb.checked && row && row.status === 'declined') {
+        // Re-proposal resets the declined row (unique engagement+type).
+        await api('engagement_milestones', 'PATCH', {
+          status: reviewer ? 'approved' : 'pending',
+          proposed_by: currentUser?.personId || null, proposed_at: nowIso,
+          decided_by: reviewer ? (currentUser?.personId || null) : null,
+          decided_at: reviewer ? nowIso : null, decline_reason: null,
+        }, 'id=eq.' + row.id);
+      } else if (!cb.checked && row && row.status !== 'declined') {
+        await api('engagement_milestones', 'DELETE', null, 'id=eq.' + row.id);
+      }
+    } catch (e) { console.warn('Milestone sync failed:', e.message); }
+  }
+}
+
 // ── Lead Interactions ─────────────────────────────────────
 async function loadLeadInteractions(leadId) {
   if (!leadId) { leadInteractions = []; return; }
@@ -18934,6 +19405,9 @@ async function loadLeadInteractions(leadId) {
     leadInteractions = [];
     console.warn('Could not load lead interactions:', e.message);
   }
+  // Milestone badges for the list (fail-silent pre-migration).
+  await _milLookups();
+  window._leadMilMap = await _milForEngagements(leadInteractions.map(i => +i.id));
 }
 
 function renderLeadInteractions() {
@@ -18977,9 +19451,11 @@ function renderLeadInteractions() {
     const chainMark = chainParent
       ? `<span title="Related to ${((chainParent.engagement_date || '') + (chainParent.engagement_type ? ' · ' + chainParent.engagement_type : '')).replace(/"/g,'&quot;')}" style="color:var(--navy);font-weight:700;flex-shrink:0;">↳</span>`
       : '';
+    const milBadges = ((window._leadMilMap || {})[+i.id] || []).map(m => _milBadgeHtml(m)).join('');
     const typeCell = `<div style="display:flex;align-items:center;gap:10px;min-width:0;">
       ${chainMark}
       <span class="eng-badge" style="flex-shrink:0;">${i.engagement_type || ''}</span>
+      ${milBadges}
       ${notesPreview ? `<span style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${notesPreview}</span>` : ''}
     </div>`;
 
@@ -19105,6 +19581,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
             <label class="form-label">Engagement Details</label>
             <textarea id="li-notes" class="form-control" rows="3" placeholder="What happened?" ${dis}>${notesValue}</textarea>
           </div>
+          <div class="form-group" id="li-milestones-wrap" style="display:none;"></div>
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Next Action</label>
@@ -19253,6 +19730,9 @@ async function loadLiLookups() {
     loadFilteredLookup('activity_types', flag, 'li-type'),
     loadFilteredLookup('next_actions',   flag, 'li-next-action'),
   ]);
+  // Milestone picker (no-op when the open surface has no #li-milestones-wrap,
+  // e.g. the cockpit quick-log, or on a pre-migration DB).
+  _liRenderMilestones().catch(() => {});
 }
 
 // ── Cadence pre-fill for the engagement modal ─────────────
@@ -19819,6 +20299,8 @@ async function saveLeadInteraction(editId) {
         }
       } catch (e) { console.warn('Stream bookkeeping failed:', e.message); }
     }
+    // Milestones: sync picker → engagement_milestones (best-effort, own errors logged).
+    if (engId) { try { await _liSyncMilestones(engId); } catch (e) { console.warn('Milestones failed:', e.message); } }
     // Sync People Involved → engagement_people (replace-all on edit). Best-effort:
     // never fail the whole save if a person link can't be written.
     if (engId) {
