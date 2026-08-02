@@ -586,7 +586,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.34 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.35 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -620,7 +620,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.34 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.35 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1447,6 +1447,68 @@ async function checkAppVersion() {
 setTimeout(checkAppVersion, 5000);
 setInterval(checkAppVersion, 15 * 60 * 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) checkAppVersion(); });
+
+// ── Broadcasts to active users + presence heartbeat ──────────────────────────
+// Admin → Settings → Broadcasts composes an announcement; every logged-in
+// session polls the broadcasts table every 60s and shows live rows as a
+// dismissible banner. The same tick upserts user_presence (who has the app
+// open right now — shown on the admin page, useful before a release). Polling,
+// not websockets, by design: it matches the app's REST-only architecture.
+// Both calls fail silent on a pre-migration DB (sql/add_broadcasts.sql).
+const BCAST_POLL_MS = 60 * 1000;
+const BCAST_ACTIVE_MIN = 3;   // "active" = heartbeat within the last N minutes
+function _bcastDismissedKey() { return 'focus_bcast_dismissed_' + (currentUser?.personId || 'anon'); }
+function _bcastDismissed() {
+  try { const a = JSON.parse(localStorage.getItem(_bcastDismissedKey()) || '[]'); return Array.isArray(a) ? a : []; }
+  catch (e) { return []; }
+}
+function dismissBroadcast(id) {
+  try { localStorage.setItem(_bcastDismissedKey(), JSON.stringify([..._bcastDismissed(), +id].slice(-50))); } catch (e) {}
+  const el = document.getElementById('bcast-' + id);
+  if (el) el.remove();
+}
+function _bcastAppVersion() {
+  const stampEl = document.querySelector('.build-stamp');
+  return (((stampEl && stampEl.parentElement.textContent) || '').match(/v(\d+\.\d+\.\d+)/) || [])[1] || '';
+}
+async function broadcastTick() {
+  if (typeof currentUser === 'undefined' || !currentUser?.personId) return;
+  // Presence heartbeat — upsert: PATCH the person's row, POST when it's new.
+  try {
+    const beat = { last_seen_at: new Date().toISOString(), app_version: _bcastAppVersion() };
+    const r = await api('user_presence', 'PATCH', beat, 'person_id=eq.' + currentUser.personId + '&select=person_id');
+    if (!r || !r.length) await api('user_presence', 'POST', Object.assign({ person_id: currentUser.personId }, beat), '');
+  } catch (e) { /* pre-migration DB or offline — stay quiet */ }
+  // Live broadcasts → stacked banners (dismissed ids remembered per browser).
+  try {
+    const live = await apiGet('broadcasts',
+      'ended_at=is.null&expires_at=gt.' + encodeURIComponent(new Date().toISOString()) + '&select=*&order=created_at.desc');
+    const seen = _bcastDismissed();
+    const wanted = (live || []).filter(b => !seen.includes(+b.id));
+    let wrap = document.getElementById('bcast-wrap');
+    if (!wanted.length) { if (wrap) wrap.remove(); return; }
+    if (!wrap) {
+      wrap = document.createElement('div');
+      wrap.id = 'bcast-wrap';
+      wrap.style.cssText = 'position:fixed;top:0;left:50%;transform:translateX(-50%);z-index:99998;width:min(720px,94vw);display:flex;flex-direction:column;gap:6px;padding-top:8px;';
+      document.body.appendChild(wrap);
+    }
+    wrap.innerHTML = wanted.map(b => {
+      const urgent = b.severity === 'urgent';
+      return `<div id="bcast-${+b.id}" style="display:flex;align-items:flex-start;gap:12px;background:${urgent ? 'var(--red)' : 'var(--navy)'};color:#fff;border-left:5px solid #C3B091;border-radius:6px;padding:11px 14px;box-shadow:0 4px 14px rgba(0,0,0,0.3);font-size:13px;">
+        <span style="font-size:16px;line-height:1;">${urgent ? '⚠️' : '📢'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#C3B091;">${urgent ? 'Urgent — Focus announcement' : 'Focus announcement'}</div>
+          <div style="margin-top:2px;white-space:pre-wrap;">${cEsc(b.message || '')}</div>
+        </div>
+        <button onclick="dismissBroadcast(${+b.id})" title="Dismiss" style="background:none;border:none;color:#fff;font-size:16px;cursor:pointer;line-height:1;padding:0;">×</button>
+      </div>`;
+    }).join('');
+  } catch (e) { /* pre-migration DB or offline — stay quiet */ }
+}
+setInterval(broadcastTick, BCAST_POLL_MS);
+setTimeout(broadcastTick, 8000);   // first check shortly after load (no-op until logged in)
+document.addEventListener('visibilitychange', () => { if (!document.hidden) broadcastTick(); });
 // ENVIRONMENT label ("Production"/"Development") is authoritative to the DATA SOURCE:
 // it comes from the `environment` row in the connected database's `settings` table,
 // NOT from the code or hostname. Shown above the version.
@@ -2457,6 +2519,17 @@ const PAGES = {
     fields: [],
   },
 
+  // Compose announcements shown as banners in every open session + see who is
+  // active right now (user_presence heartbeats). sql/add_broadcasts.sql.
+  broadcast_admin: {
+    title: 'Broadcasts',
+    table: null,
+    custom: true,
+    readOnly: true,
+    columns: [],
+    fields: [],
+  },
+
   people: {
     title: 'People',
     table: 'people',
@@ -3146,6 +3219,7 @@ async function loadTable(page) {
     if (page === 'campaign_help') { renderCampaignHelp(); return; }
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'dashboard_admin') { await renderDashboardAdmin(); return; }
+    if (page === 'broadcast_admin') { await renderBroadcastAdmin(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
@@ -4418,6 +4492,8 @@ const MENU = [
             icon: '<ellipse cx="8" cy="9" rx="4" ry="5"/><path d="M4 9H1.6M12 9h2.4M4.6 6 2.8 4.6M11.4 6l1.8-1.4M4.6 12l-1.8 1.4M11.4 12l1.8 1.4M6.4 4.2 5.4 2.4M9.6 4.2l1-1.8" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round"/>' },
           { page: 'dashboard_admin', label: 'Dashboards', permission: 'manage_settings',
             icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' },
+          { page: 'broadcast_admin', label: 'Broadcasts', permission: 'manage_settings',
+            icon: '<path d="M2 6v4l8 3V3L2 6z"/><path d="M12 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/>' },
         ]
       },
       {
@@ -9807,6 +9883,111 @@ async function saveDashboardAdmin() {
   } finally {
     stopBusy();
   }
+}
+
+// ── Broadcasts admin (Admin → Settings → Broadcasts) ─────────────────────────
+// Compose a banner announcement for every open session, see who is active right
+// now (user_presence heartbeats from broadcastTick), and end live broadcasts
+// early. Delivery is the 60s session poll — no push infrastructure.
+async function renderBroadcastAdmin() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '';
+  body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--text3);">Loading…</td></tr>';
+  let presence = [], history = [];
+  try {
+    [presence, history] = await Promise.all([
+      apiGet('user_presence', 'select=*&order=last_seen_at.desc&limit=100'),
+      apiGet('broadcasts', 'select=*&order=created_at.desc&limit=10'),
+    ]);
+  } catch (e) {
+    body.innerHTML = `<tr><td style="padding:24px;border:none;color:var(--red);">Broadcasts need the sql/add_broadcasts.sql migration on this database (${cEsc(e.message)}).</td></tr>`;
+    return;
+  }
+  if (!allData['people']) { try { allData['people'] = await apiGetAll('people', 'select=id,first_name,last_name'); } catch (e) { allData['people'] = []; } }
+  const pName = id => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ('Person #' + id); };
+  const now = Date.now();
+  const activeMs = BCAST_ACTIVE_MIN * 60000;
+  const active = presence.filter(p => now - new Date(p.last_seen_at).getTime() < activeMs);
+  const recent = presence.filter(p => { const age = now - new Date(p.last_seen_at).getTime(); return age >= activeMs && age < 30 * 60000; });
+  const fmtAge = ts => { const m = Math.round((now - new Date(ts).getTime()) / 60000); return m < 1 ? 'now' : m + ' min ago'; };
+  const userRow = p => `<div style="display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--border);font-size:13px;">
+      <span style="font-weight:600;">${cEsc(pName(p.person_id))}</span>
+      <span style="color:var(--text3);">${p.app_version ? 'v' + cEsc(p.app_version) + ' · ' : ''}${fmtAge(p.last_seen_at)}</span></div>`;
+  const histRow = b => {
+    const isLive = !b.ended_at && new Date(b.expires_at).getTime() > now;
+    return `<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--border);font-size:13px;align-items:flex-start;">
+      <div style="min-width:0;">
+        <div style="white-space:pre-wrap;">${b.severity === 'urgent' ? '⚠️ ' : ''}${cEsc(b.message)}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:2px;">${cEsc(pName(b.created_by))} · ${String(b.created_at).slice(0, 16).replace('T', ' ')} · ${isLive ? ('live until ' + new Date(b.expires_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })) : (b.ended_at ? 'ended early' : 'expired')}</div>
+      </div>
+      ${isLive ? `<button class="btn btn-secondary btn-sm" onclick="endBroadcast(${+b.id})">End now</button>` : ''}
+    </div>`;
+  };
+  body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:2px 0 24px;max-width:760px;">
+    <div class="card" style="padding:18px;margin-bottom:16px;">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:4px;">Send a broadcast</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:12px;">Shows as a banner in every open Focus session within about a minute (sessions poll every 60s), and to anyone who logs in while it is live. Users can dismiss it for themselves; it disappears everywhere when it expires or you end it.</div>
+      <div class="form-group" style="margin-bottom:10px;">
+        <label class="form-label">Message <span style="color:var(--red)">*</span></label>
+        <textarea id="bcast-msg" class="form-control" rows="2" placeholder="e.g. New version deploying in 5 minutes — please finish what you're doing, then refresh."></textarea>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Severity</label>
+          <select id="bcast-sev" class="form-control" style="height:34px;"><option value="notice">Notice</option><option value="urgent">Urgent</option></select></div>
+        <div class="form-group" style="margin-bottom:0;">
+          <label class="form-label">Live for</label>
+          <select id="bcast-mins" class="form-control" style="height:34px;">
+            <option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15" selected>15 minutes</option>
+            <option value="30">30 minutes</option><option value="60">1 hour</option><option value="240">4 hours</option></select></div>
+        <button class="btn btn-primary" onclick="sendBroadcast()">Broadcast</button>
+      </div>
+    </div>
+    <div class="card" style="padding:18px;margin-bottom:16px;">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:8px;">Active users <span style="font-weight:400;color:var(--text3);font-size:12px;">(heartbeat in the last ${BCAST_ACTIVE_MIN} minutes)</span></div>
+      ${active.length ? active.map(userRow).join('') : '<div style="font-size:12px;color:var(--text3);">No one active right now.</div>'}
+      ${recent.length ? `<div style="font-weight:700;color:var(--navy);margin:14px 0 4px;font-size:12px;">Seen in the last 30 minutes</div>` + recent.map(userRow).join('') : ''}
+      <div style="font-size:11px;color:var(--text3);margin-top:10px;">Presence comes from this version's heartbeat — sessions still on a build before v7.8.35 don't report and won't appear here.</div>
+    </div>
+    <div class="card" style="padding:18px;">
+      <div style="font-weight:700;color:var(--navy);margin-bottom:8px;">Recent broadcasts</div>
+      ${history.length ? history.map(histRow).join('') : '<div style="font-size:12px;color:var(--text3);">None yet.</div>'}
+    </div>
+  </div></td></tr>`;
+}
+
+async function sendBroadcast() {
+  const msg = (document.getElementById('bcast-msg')?.value || '').trim();
+  const sev = document.getElementById('bcast-sev')?.value === 'urgent' ? 'urgent' : 'notice';
+  const mins = Math.max(1, Math.floor(+(document.getElementById('bcast-mins')?.value || 15)));
+  if (!can('manage_settings')) { showStatus('Only settings admins can broadcast', 'error'); return; }
+  if (!msg) { showStatus('Enter the message to broadcast', 'error'); return; }
+  startBusy('Broadcasting…');
+  try {
+    await api('broadcasts', 'POST', {
+      message: msg, severity: sev,
+      created_by: currentUser?.personId || null,
+      expires_at: new Date(Date.now() + mins * 60000).toISOString(),
+    }, '');
+    showStatus('Broadcast live — sessions pick it up within a minute');
+    broadcastTick();   // sender sees their own banner immediately
+    await renderBroadcastAdmin();
+  } catch (e) { showStatus('Could not broadcast: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+async function endBroadcast(id) {
+  if (!can('manage_settings')) return;
+  startBusy('Ending…');
+  try {
+    await api('broadcasts', 'PATCH', { ended_at: new Date().toISOString() }, 'id=eq.' + id);
+    showStatus('Broadcast ended');
+    broadcastTick();
+    await renderBroadcastAdmin();
+  } catch (e) { showStatus('Could not end: ' + e.message, 'error'); }
+  finally { stopBusy(); }
 }
 
 const RPP = (function () {
