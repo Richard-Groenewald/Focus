@@ -586,7 +586,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.32 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.33 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -620,7 +620,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.32 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.33 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9141,14 +9141,39 @@ function _dashWidgetsForUser() {
   }
   return out;
 }
-// Managers see their team/branch; everyone else sees only their own records.
+// Elective dashboard scope — Mine / Team / All — persisted per person in
+// localStorage (survives logins on this browser, same pattern as the widget
+// order). Options depend on rights: everyone has Mine; Sales Managers add Team
+// (their region/branch via recordInUserScope); Admin, the 'all' permission or a
+// view-all right adds All. The saved choice is clamped to what the current
+// rights allow, so a role change silently falls back to a legal scope.
+function _dashScopeOptions() {
+  const opts = ['own'];
+  if ((currentUser?.roles || []).some(r => r.name === 'Sales Manager')) opts.push('team');
+  if (currentUser?.isAdmin || (currentUser?.permissions || []).includes('all')
+      || can('view_all_leads') || can('view_all_opportunities')) opts.push('all');
+  return opts;
+}
+function _dashScopeKey() { return 'focus_dash_scope_' + (currentUser?.personId || 'anon'); }
 function _dashScope() {
-  return (currentUser?.roles || []).some(r => r.name === 'Sales Manager') ? 'team' : 'own';
+  const opts = _dashScopeOptions();
+  let s = null;
+  try { s = localStorage.getItem(_dashScopeKey()); } catch (e) {}
+  if (s && opts.includes(s)) return s;
+  // Defaults mirror the old fixed behaviour: Admin effectively saw everything
+  // (now labelled honestly as All), Sales Managers their team, others their own.
+  if (currentUser?.isAdmin && opts.includes('all')) return 'all';
+  return opts.includes('team') ? 'team' : 'own';
+}
+function dashSetScope(s) {
+  if (!_dashScopeOptions().includes(s)) return;
+  try { localStorage.setItem(_dashScopeKey(), s); } catch (e) {}
+  renderDashboard();
 }
 function _dashInScope(rec, scope) {
   if (!rec) return false;
-  if (currentUser?.isAdmin) return true;
-  const mine = rec.owner_id != null && +rec.owner_id === +currentUser.personId;
+  if (scope === 'all') return true;
+  const mine = rec.owner_id != null && +rec.owner_id === +(currentUser?.personId || 0);
   return scope === 'team' ? (mine || recordInUserScope(rec)) : mine;
 }
 function _dashStageIds(names) {
@@ -9296,6 +9321,14 @@ async function renderDashboard() {
   // Lifecycle reminders (woke-from-Hold + aging escalations) — top of dashboard.
   const remindersHtml = await _dashRemindersHtml();
   const customised = !!localStorage.getItem(_dashOrderKey());
+  // Global scope switch (Mine / Team / All) — shown only when rights offer a
+  // choice; the pick is remembered per person and drives every scoped card.
+  const scopeOpts = _dashScopeOptions();
+  const curScope = _dashScope();
+  const scopeBtn = (val, label) =>
+    `<button onclick="dashSetScope('${val}')" style="border:1px solid var(--border);background:${curScope === val ? 'var(--navy)' : 'var(--bg2)'};color:${curScope === val ? '#fff' : 'var(--text2)'};font-size:11px;font-weight:700;padding:3px 10px;cursor:pointer;">${label}</button>`;
+  const scopeSeg = scopeOpts.length > 1
+    ? `<span title="Which records the scoped cards show — remembered for you" style="display:inline-flex;border-radius:5px;overflow:hidden;">${scopeOpts.map(o => scopeBtn(o, o === 'own' ? 'Mine' : o === 'team' ? 'Team' : 'All')).join('')}</span>` : '';
   const shell = widgets.map(w =>
     `<div id="dash-${w}" draggable="true" title="Drag to rearrange your dashboard"
        ondragstart="dashDragStart(event,'${w}')" ondragover="dashDragOver(event)" ondragleave="dashDragLeave(event)" ondrop="dashDrop(event,'${w}')"
@@ -9305,6 +9338,7 @@ async function renderDashboard() {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div style="font-size:16px;font-weight:700;color:var(--navy);">${greeting}</div>
         <div style="display:flex;align-items:center;gap:10px;">
+          ${scopeSeg}
           <span style="font-size:11px;color:var(--text3);">Drag cards to rearrange</span>
           ${customised ? `<button class="btn btn-ghost btn-sm" onclick="dashResetLayout()" title="Return to the standard layout for your role">↺ Reset layout</button>` : ''}
         </div>
@@ -9438,7 +9472,7 @@ async function _dashActions() {
   rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
   const overdue = rows.filter(r => r.due < today).length;
   const dueSoon = rows.filter(r => r.due >= today && r.due <= soon).length;
-  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : 'Mine'}</span>`;
+  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine'}</span>`;
   const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color === 'red' ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
   const list = rows.slice(0, 5).map(r => {
     const od = r.due < today;
@@ -9478,7 +9512,7 @@ async function _dashReloadInteractions() {
 async function _dashInteractions() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const period = window._dashIntPeriod === 'month' ? 'month' : 'week';
-  const teamAllowed = ((appSettings['interactions_team_scope'] || 'managers') === 'everyone') || _dashScope() === 'team';
+  const teamAllowed = ((appSettings['interactions_team_scope'] || 'managers') === 'everyone') || _dashScope() !== 'own';
   let scope = window._dashIntScope || (teamAllowed ? 'team' : 'own');
   if (scope === 'team' && !teamAllowed) scope = 'own';
   const countPromo = (appSettings['interactions_count_promotion'] || 'true') === 'true';
@@ -9651,8 +9685,11 @@ async function _dashPipeline() {
 }
 
 async function _dashCampaigns() {
-  // Sales Management (and Admin) see ALL campaigns; a Sales User sees only their own.
-  const seeAll = currentUser?.isAdmin || (currentUser?.roles || []).some(r => r.name === 'Sales Manager');
+  // Scope-aware: Mine → own campaigns even for admins/managers; Team or All →
+  // every campaign for those whose rights allow it (campaigns carry no branch
+  // scoping, so Team collapses to All here).
+  const seeAllAllowed = currentUser?.isAdmin || (currentUser?.roles || []).some(r => r.name === 'Sales Manager');
+  const seeAll = seeAllAllowed && _dashScope() !== 'own';
   const camps = await apiGet('research_campaigns', 'select=id,name,status,owner_id,created_by');
   const mine = seeAll ? camps : camps.filter(c =>
     (c.owner_id != null && +c.owner_id === +currentUser.personId) ||
