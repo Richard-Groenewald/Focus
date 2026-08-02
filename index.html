@@ -589,7 +589,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -623,7 +623,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9588,12 +9588,26 @@ async function _dashReloadInteractions() {
   catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load interactions: ${e.message}</div>`; }
 }
 
+// Widget scope toggle — remembered per person across logins (same pattern as
+// the global dashboard scope switch).
+function dashSetIntScope(s) {
+  window._dashIntScope = s;
+  try { localStorage.setItem('focus_dash_int_scope_' + (currentUser?.personId || 'anon'), s); } catch (e) {}
+  _dashReloadInteractions();
+}
+
 async function _dashInteractions() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const period = window._dashIntPeriod === 'month' ? 'month' : 'week';
-  const teamAllowed = ((appSettings['interactions_team_scope'] || 'managers') === 'everyone') || _dashScope() !== 'own';
-  let scope = window._dashIntScope || (teamAllowed ? 'team' : 'own');
-  if (scope === 'team' && !teamAllowed) scope = 'own';
+  // Everyone-scope (value 'team' = no person filter) is choosable for managers,
+  // admins and view-all users — or literally everyone via the
+  // interactions_team_scope setting. The pick persists per person across
+  // logins; default follows the global dashboard scope (Mine → own, else all).
+  const canChoose = ((appSettings['interactions_team_scope'] || 'managers') === 'everyone') || _dashScopeOptions().length > 1;
+  let saved = null;
+  try { saved = localStorage.getItem('focus_dash_int_scope_' + (currentUser?.personId || 'anon')); } catch (e) {}
+  let scope = window._dashIntScope || saved || (_dashScope() === 'own' ? 'own' : 'team');
+  if (scope === 'team' && !canChoose) scope = 'own';
   const countPromo = (appSettings['interactions_count_promotion'] || 'true') === 'true';
   const weeklyTarget = Math.max(0, +(appSettings['interactions_weekly_target'] || 0) || 0);
   const target = period === 'week' ? weeklyTarget : Math.round(weeklyTarget * 52 / 12);
@@ -9622,7 +9636,21 @@ async function _dashInteractions() {
   let engs = await apiGetAll('engagements',
     'engagement_date=gte.' + fromIso + '&select=id,lead_id,deal_id,engagement_date,engagement_type,created_by');
   if (!countPromo) engs = engs.filter(e => e.engagement_type !== 'Promotion');
-  if (scope === 'own') engs = engs.filter(e => +e.created_by === +currentUser.personId);
+  if (scope === 'own') {
+    // Mine = engagements I logged OR on records I own — same rule as the
+    // Engagement History page (created-by alone hid owned records' activity).
+    const me = +currentUser.personId;
+    const ownLeadIds = new Set(), ownDealIds = new Set();
+    const lIds = [...new Set(engs.filter(e => e.lead_id != null).map(e => +e.lead_id))];
+    const dIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
+    for (let i = 0; i < lIds.length; i += 150)
+      (await apiGet('leads', `id=in.(${lIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(l => ownLeadIds.add(+l.id));
+    for (let i = 0; i < dIds.length; i += 150)
+      (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(d => ownDealIds.add(+d.id));
+    engs = engs.filter(e => +e.created_by === me
+      || (e.lead_id != null && ownLeadIds.has(+e.lead_id))
+      || (e.deal_id != null && ownDealIds.has(+e.deal_id)));
+  }
 
   // Category derivation needs stage + recurring flag for deal-side engagements.
   const dealIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
@@ -9691,12 +9719,15 @@ async function _dashInteractions() {
     }).join('') + `</div>` : `<div style="margin-top:10px;color:var(--text3);font-size:12px;">No interactions logged this ${period} yet.</div>`;
   }
 
-  const chipTxt = scope === 'team' ? 'Team' : 'Mine';
+  // The non-Mine scope has no person filter — it is everyone's activity, so
+  // label it All for users whose rights say all; Team for managers without.
+  const wideLabel = _dashScopeOptions().includes('all') ? 'All' : 'Team';
+  const chipTxt = scope === 'team' ? wideLabel : 'Mine';
   const seg = (label, on, click) =>
     `<button onclick="${click}" style="border:1px solid var(--border);background:${on ? 'var(--navy)' : 'var(--bg2)'};color:${on ? '#fff' : 'var(--text2)'};font-size:10px;font-weight:700;padding:2px 8px;cursor:pointer;">${label}</button>`;
   const periodSeg = `<span style="display:inline-flex;border-radius:4px;overflow:hidden;">${seg('Wk', period === 'week', "window._dashIntPeriod='week';_dashReloadInteractions()")}${seg('Mo', period === 'month', "window._dashIntPeriod='month';_dashReloadInteractions()")}</span>`;
-  const scopeSeg = teamAllowed
-    ? `<span style="display:inline-flex;border-radius:4px;overflow:hidden;margin-left:6px;">${seg('Mine', scope === 'own', "window._dashIntScope='own';_dashReloadInteractions()")}${seg('Team', scope === 'team', "window._dashIntScope='team';_dashReloadInteractions()")}</span>` : '';
+  const scopeSeg = canChoose
+    ? `<span style="display:inline-flex;border-radius:4px;overflow:hidden;margin-left:6px;">${seg('Mine', scope === 'own', "dashSetIntScope('own')")}${seg(wideLabel, scope === 'team', "dashSetIntScope('team')")}</span>` : '';
   const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color || 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
   const deltaHtml = kpi('vs previous', (delta >= 0 ? '▲ +' : '▼ ') + delta, delta >= 0 ? '#16a34a' : 'var(--red)');
 
