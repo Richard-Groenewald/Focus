@@ -11,7 +11,7 @@
 |---|---|---|---|
 | **New** | Captured, not yet worked | Lead creation (any source) | Yes |
 | **Working** | Being actively qualified via FACT | Auto: completeness **and** first logged engagement | Yes |
-| **Qualified** | Promotion-ready, awaiting approval | **Auto**: FACT all green + service category set | Yes |
+| **Qualified** | Promotion-ready, awaiting approval | **Auto**: FACT all green + service category set + organisation (linked or typed) | Yes |
 | **Hold** | Right profile, waiting for its moment | Owner/SM initiates, SM approves; F/A/C green (T optional); **wake date mandatory** | Yes — engagements + FACT edits allowed |
 | **Nurture** | Strategic long-game cultivation | Owner/SM initiates from Working or Qualified, SM approves; **per-lead cadence set** | Yes |
 | **Dead** | Killed, with record | User requests → moves **immediately**, awaiting SM oversight there | No — but reopenable |
@@ -31,8 +31,8 @@ special-request path is superseded by the auto-flip to Qualified.
 
 | From → To | Trigger | Approval |
 |---|---|---|
-| New → Working | Completeness (source, description, site, contact, next action) **and** first engagement | None (auto) |
-| Working → Qualified | FACT all green + service category | None (auto) |
+| New → Working | Completeness (source, description, site, contact, next action) **and** first engagement — organisation **not** required here | None (auto) |
+| Working → Qualified | FACT all green + service category + organisation | None (auto) |
 | Qualified → Promoted | SM approves | Sales management (existing request/accept machinery) |
 | Working/Qualified → Hold | Owner or SM initiates; F/A/C green (Trigger green or not) | Sales management |
 | Working/Qualified → Nurture | Owner or SM initiates; any time pre-promotion | Sales management |
@@ -48,7 +48,14 @@ Nurture" decision): the owner or a sales manager can take a lead off Hold early 
 at any time from the Lead Progression tab. This is a **direct action with no approval step** —
 un-parking returns the lead to active work, mirroring the automatic wake — and writes no
 `lead_stage_requests` row (the leads audit trigger records it). The engine derives the landing
-stage: Qualified if all four gates are Strong with a service interest, otherwise Working.
+stage: Qualified if all four gates are Strong with a service interest and an organisation,
+otherwise Working.
+
+**Organisation requirement moved to Qualified** (2026-08-08): an organisation identity (linked
+record or typed name) is no longer part of the Working completeness set — a lead can be worked
+without knowing whose site it is. It becomes mandatory at Qualified, and therefore for
+promotion. The form shows guidance wording instead of a required star, and once FACT goes
+all-green any field still blocking Qualified (service interest, organisation) is highlighted.
 
 **Declines:** any declined approval (promotion, Hold, Nurture, or the post-hoc dead review) is
 the **approver's choice — default back to Working, option Dead — reason always required**.
@@ -98,3 +105,4 @@ Lives in the existing role×widget matrix; future approval types join the same w
 - Dead-is-permanent (no-reopen)
 - Estimate-of-value requirement for Qualified
 - Weak-counts-toward-green (`promotion_green_counts_weak`)
+- Organisation-required-for-Working (moved to the Qualified gate, 2026-08-08)
