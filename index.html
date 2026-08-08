@@ -590,7 +590,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.43 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -624,7 +624,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.43 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8999,6 +8999,7 @@ let leadsOwnerView = 'own'; // 'own' | 'all' | 'team'
 let oppsOwnerView  = 'own'; // 'own' | 'all' | 'collab' | 'team'
 let oppsStatusFilter = 'open'; // 'open' (stage category Opportunity-Open only) | 'all'
 let oppsGroupByClient = false; // Opportunities list: band rows under client (organisation) headers
+let leadsGroupByClient = false; // Leads register: band rows under client (organisation) headers
 
 // Team view is region-based and shown only to managers (literal edit_all_records
 // holders — admins carry 'all', not this string, so the button stays manager-only).
@@ -9043,6 +9044,12 @@ function renderViewFilterBar(kind) {
       `<button class="btn btn-sm ${oppsGroupByClient ? 'btn-primary' : 'btn-secondary'}"
          onclick="toggleOppsGroupByClient()">Group by Client</button>`;
   }
+  // Leads register: same client roll-up (leads are site-scoped like deals).
+  if (kind === 'leads') {
+    html += (html ? `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` : '') +
+      `<button class="btn btn-sm ${leadsGroupByClient ? 'btn-primary' : 'btn-secondary'}"
+         onclick="toggleLeadsGroupByClient()">Group by Client</button>`;
+  }
   bar.innerHTML = html;
 }
 
@@ -9053,6 +9060,8 @@ function setOwnerView(kind, view) {
 }
 
 function setOppsStatusFilter(v) { oppsStatusFilter = v; renderOpportunitiesPage(); }
+
+function toggleLeadsGroupByClient() { leadsGroupByClient = !leadsGroupByClient; renderLeadsPage(); }
 
 function toggleOppsGroupByClient() {
   oppsGroupByClient = !oppsGroupByClient;
@@ -11507,6 +11516,49 @@ async function renderLeadsPage() {
       { key: 'touch',  label: 'Last Touch',  get: l => lastTouchDays(l) },
     ];
 
+    // Group-by-Client: band leads under their client. A lead's client = its
+    // linked organisation, else its site's organisation, else the typed org
+    // name (case-folded so free-text spellings of one client band together).
+    const leadClientOf = (l) => {
+      if (l.target_org_id) {
+        const o = orgs.find(x => +x.id === +l.target_org_id);
+        if (o) return { key: 'o' + o.id, label: o.name };
+      }
+      if (l.site_id) {
+        const s = sites.find(x => +x.id === +l.site_id);
+        const o = (s && s.organisation_id) ? orgs.find(x => +x.id === +s.organisation_id) : null;
+        if (o) return { key: 'o' + o.id, label: o.name };
+      }
+      const nm = (l.target_org_name || '').trim();
+      if (nm) return { key: 'n' + nm.toLowerCase(), label: nm };
+      return { key: 'none', label: '(No client)' };
+    };
+    // Bands form from the filtered+sorted rows in order of first appearance,
+    // so the user's column sort still decides band order (same rule as the
+    // Opportunities client grouping).
+    const leadsGroupRenderer = (rows) => {
+      if (!leadsGroupByClient) return rows.map(l => renderLeadRow(l, sources, regions, people, orgs)).join('');
+      const bands = new Map(); const order = [];
+      rows.forEach(l => {
+        const c = leadClientOf(l);
+        let b = bands.get(c.key);
+        if (!b) { b = { label: c.label, rows: [] }; bands.set(c.key, b); order.push(b); }
+        b.rows.push(l);
+      });
+      return order.map(b => {
+        const nSites = new Set(b.rows
+          .map(l => l.site_id ? 'id' + l.site_id : (leadSiteLabel(l) || '').toLowerCase())
+          .filter(Boolean)).size;
+        const bits = [b.rows.length + ' lead' + (b.rows.length !== 1 ? 's' : '')];
+        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
+        return `<tr><td colspan="${cols.length}" style="background:var(--bg);border-bottom:2px solid var(--border);padding:8px 12px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+            <span style="font-weight:700;font-size:13px;color:#003057;">${b.label}</span>
+            <span style="font-size:11px;font-weight:600;color:var(--text3);white-space:nowrap;">${bits.join(' · ')}</span>
+          </div></td></tr>` + b.rows.map(l => renderLeadRow(l, sources, regions, people, orgs)).join('');
+      }).join('');
+    };
+
     makeSortableFilterableTable({
       tableId: 'leads-' + leadsViewTab,   // per-tab state so each tab has its own filter
       headRoot: leadsHead,
@@ -11514,6 +11566,7 @@ async function renderLeadsPage() {
       columns: cols,
       rows: filtered,
       rowRenderer: (l) => renderLeadRow(l, sources, regions, people, orgs),
+      groupRenderer: leadsGroupRenderer,
       emptyMessage: 'No leads in this tab match the current filters.',
       // Admin → Settings → Sort Defaults. Empty key = server order (created desc).
       defaultSortKey: appSettings['leads_default_sort_key'] || null,
