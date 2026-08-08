@@ -590,7 +590,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -624,7 +624,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8998,6 +8998,7 @@ function doLogout() {
 let leadsOwnerView = 'own'; // 'own' | 'all' | 'team'
 let oppsOwnerView  = 'own'; // 'own' | 'all' | 'collab' | 'team'
 let oppsStatusFilter = 'open'; // 'open' (stage category Opportunity-Open only) | 'all'
+let oppsGroupByClient = false; // Opportunities list: band rows under client (organisation) headers
 
 // Team view is region-based and shown only to managers (literal edit_all_records
 // holders — admins carry 'all', not this string, so the button stays manager-only).
@@ -9037,6 +9038,10 @@ function renderViewFilterBar(kind) {
       statusBtns.map(b =>
         `<button class="btn btn-sm ${b.key === oppsStatusFilter ? 'btn-primary' : 'btn-secondary'}"
            onclick="setOppsStatusFilter('${b.key}')">${b.label}</button>`).join('');
+    // Client roll-up: band the site-level deals under organisation headers.
+    html += `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 8px;vertical-align:middle;"></span>` +
+      `<button class="btn btn-sm ${oppsGroupByClient ? 'btn-primary' : 'btn-secondary'}"
+         onclick="toggleOppsGroupByClient()">Group by Client</button>`;
   }
   bar.innerHTML = html;
 }
@@ -9048,6 +9053,15 @@ function setOwnerView(kind, view) {
 }
 
 function setOppsStatusFilter(v) { oppsStatusFilter = v; renderOpportunitiesPage(); }
+
+function toggleOppsGroupByClient() {
+  oppsGroupByClient = !oppsGroupByClient;
+  // The first column swaps meaning (Organisation ↔ Site), so a filter saved on
+  // its old values would silently mismatch — clear it rather than carry it over.
+  const s = _tableState['opportunities'];
+  if (s && s.filters) delete s.filters['org'];
+  renderOpportunitiesPage();
+}
 
 // Leads: own / all / team (no collaborator concept on leads). Synchronous.
 function filterLeadsByView(leads, view) {
@@ -9098,17 +9112,19 @@ async function renderOpportunitiesPage() {
   renderViewFilterBar('opps');
 
   try {
-    let [deals, orgs, stages, people, stageCats] = await Promise.all([
+    let [deals, orgs, stages, people, stageCats, sites] = await Promise.all([
       apiGetAll('deals', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['organisations'] || apiGet('organisations', 'select=*'),
       allData['stages'] || apiGet('stages', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
       allData['stage_categories'] || apiGet('stage_categories', 'select=*'),
+      allData['sites'] || apiGet('sites', 'select=*'),
     ]);
     allData['organisations'] = orgs;
     allData['stages'] = stages;
     allData['people'] = people;
     allData['stage_categories'] = stageCats;
+    allData['sites'] = sites;
 
     // Apply the ownership view (own / all / collab / team) before rendering.
     deals = await filterDealsByView(deals, oppsOwnerView);
@@ -9124,6 +9140,22 @@ async function renderOpportunitiesPage() {
       }
     }
 
+    // Client grouping shows a value per client: TCV summed from the opportunity
+    // stream months (streams are the only source of financials — never Base
+    // Amount / Num Months). One paged fetch of all opportunity streams with
+    // months nested (nested rows aren't subject to the 1000-row cap).
+    const dealTcv = {};
+    if (oppsGroupByClient && deals.length) {
+      try {
+        const strms = await apiGetAll('revenue_streams',
+          'stream_type=eq.opportunity&select=deal_id,revenue_stream_months(opportunity_revenue)');
+        for (const st of strms) {
+          const did = +st.deal_id;
+          for (const m of (st.revenue_stream_months || [])) dealTcv[did] = (dealTcv[did] || 0) + (+m.opportunity_revenue || 0);
+        }
+      } catch (e) { console.warn('Could not load stream totals for client grouping:', e.message); }
+    }
+
     document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
 
     if (!deals.length) {
@@ -9135,10 +9167,17 @@ async function renderOpportunitiesPage() {
       return;
     }
 
+    const siteNameOf = d => (d.site_id && (sites.find(x => +x.id === +d.site_id)?.name)) || null;
+
     // Column metadata: each col.get(row) returns the raw value used for sort +
     // filter checkbox labels. Display in the row stays bespoke via rowRenderer.
+    // Grouped-by-client mode repurposes the first column: the organisation moves
+    // up into the client band, so the column shows (and sorts/filters on) the
+    // deal's SITE — the natural unit beneath the client.
     const columns = [
-      { key: 'org',        label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
+      oppsGroupByClient
+        ? { key: 'org',    label: 'Site',         get: d => siteNameOf(d) || '' }
+        : { key: 'org',    label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
       { key: 'name',       label: 'Deal Name',    get: d => d.name || '' },
       { key: 'order_date', label: 'Order Date',   get: d => d.order_date || '' },
       { key: 'stage',      label: 'Stage',        get: d => (stages.find(s => +s.id === +d.stage_id)?.name) || '' },
@@ -9150,12 +9189,17 @@ async function renderOpportunitiesPage() {
       d.opportunity_type === 'variation' ? ' <span class="tag-var">Variation</span>' :
       ' <span class="tag-orig">Original</span>';
 
+    // First column: organisation normally; under a client band the org is
+    // redundant, so the row shows its site instead.
+    const col1Of = (d, grouped) => grouped
+      ? (siteNameOf(d) || '—')
+      : ((orgs.find(o => +o.id === +d.org_id)?.name) || '—');
+
     const dealRow = (d, opts) => {
       const stage = stages.find(s => +s.id === +d.stage_id);
       const nameCls = opts.child ? ' class="lin-name"' : '';
-      const org = opts.child ? null : orgs.find(o => +o.id === +d.org_id);
       return `<tr class="${opts.child ? 'lineage-child' : ''}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
-        <td style="font-weight:600;">${opts.child ? '' : (org?.name || '—')}</td>
+        <td style="font-weight:600;">${opts.child ? '' : col1Of(d, opts.grouped)}</td>
         <td${nameCls}>${d.name}${(opts.child || opts.tag) ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
@@ -9166,11 +9210,10 @@ async function renderOpportunitiesPage() {
     // A family renders as a VIRTUAL master header (not a DB record — just the
     // group, click to expand/collapse) with the original and every extension/
     // variation as its children.
-    const masterRow = (d, members, open, mid) => {
-      const org = orgs.find(o => +o.id === +d.org_id);
+    const masterRow = (d, members, open, mid, grouped) => {
       const n = members.length;
       return `<tr class="lineage-master" onclick="toggleLineage(${mid})" style="cursor:pointer;">
-        <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${org?.name || '—'}</td>
+        <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${col1Of(d, grouped)}</td>
         <td style="color:#003057;font-weight:700;">${d.name}</td>
         <td style="color:var(--text3);">${n} linked deals</td>
         <td>—</td>
@@ -9182,9 +9225,9 @@ async function renderOpportunitiesPage() {
     // including extension/variation children — participates in sort and the
     // filter value lists individually; families then form from the visible
     // rows. A family with one visible member renders as a plain tagged row.
-    const groupRenderer = (filtered) => {
+    const familiesHtml = (list, grouped) => {
       const famByMid = new Map(); const groups = [];
-      filtered.forEach(d => {
+      list.forEach(d => {
         const mid = d.master_deal_id ? +d.master_deal_id : +d.id;
         let g = famByMid.get(mid);
         if (!g) { g = { mid, members: [] }; famByMid.set(mid, g); groups.push(g); }
@@ -9194,16 +9237,44 @@ async function renderOpportunitiesPage() {
       groups.forEach(g => {
         if (g.members.length === 1) {
           const d = g.members[0];
-          html += dealRow(d, { tag: d.opportunity_type && d.opportunity_type !== 'new_business' });
+          html += dealRow(d, { tag: d.opportunity_type && d.opportunity_type !== 'new_business', grouped });
           return;
         }
         g.members.sort((a, b) => (+a.id === g.mid ? -1 : 0) - (+b.id === g.mid ? -1 : 0));   // original first
         const orig = g.members.find(m => +m.id === g.mid) || g.members[0];
         const open = _lineageOpen.has(g.mid);
-        html += masterRow(orig, g.members, open, g.mid)
-              + g.members.map(m => dealRow(m, { child: true, open })).join('');
+        html += masterRow(orig, g.members, open, g.mid, grouped)
+              + g.members.map(m => dealRow(m, { child: true, open, grouped })).join('');
       });
       return html;
+    };
+
+    // Group-by-Client: band the deals under organisation headers. Bands form
+    // from the filtered+sorted rows in order of first appearance, so the user's
+    // column sort still decides band order; lineage families nest within their
+    // band. Header carries the roll-up: deal count, distinct sites, client TCV.
+    const groupRenderer = (filtered) => {
+      if (!oppsGroupByClient) return familiesHtml(filtered, false);
+      const byOrg = new Map(); const order = [];
+      filtered.forEach(d => {
+        const k = d.org_id != null ? +d.org_id : 0;
+        if (!byOrg.has(k)) { byOrg.set(k, []); order.push(k); }
+        byOrg.get(k).push(d);
+      });
+      return order.map(k => {
+        const members = byOrg.get(k);
+        const org = orgs.find(o => +o.id === k);
+        const nSites = new Set(members.filter(d => d.site_id).map(d => +d.site_id)).size;
+        const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
+        const bits = [members.length + ' deal' + (members.length !== 1 ? 's' : '')];
+        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
+        bits.push(pbFmtRand(Math.round(tcv)) + ' TCV');
+        return `<tr><td colspan="5" style="background:var(--bg);border-bottom:2px solid var(--border);padding:8px 12px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+            <span style="font-weight:700;font-size:13px;color:#003057;">${org?.name || '(No organisation)'}</span>
+            <span style="font-size:11px;font-weight:600;color:var(--text3);white-space:nowrap;">${bits.join(' · ')}</span>
+          </div></td></tr>` + familiesHtml(members, true);
+      }).join('');
     };
 
     makeSortableFilterableTable({
