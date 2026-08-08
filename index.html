@@ -597,7 +597,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.46 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.47 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -631,7 +631,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.46 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.47 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2450,6 +2450,7 @@ const PAGES = {
   eng_hist_sales:    { title: 'Engagement History — Sales',    custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_contract: { title: 'Engagement History — Contract', custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_project:  { title: 'Engagement History — Project',  custom: true, readOnly: true, columns: [], fields: [] },
+  milestones:        { title: 'Milestones', custom: true, readOnly: true, columns: [], fields: [] },
   proposal_sandbox:         { title: 'Proposal Sandbox', custom: true, columns: [], fields: [] },
   pb_human_resources:       { title: 'Proposal Builder — Human Resources', custom: true, columns: [], fields: [] },
   pb_standard_posts:        { title: 'Proposal Builder — Standard Posts',  custom: true, columns: [], fields: [] },
@@ -3251,6 +3252,7 @@ async function loadTable(page) {
     if (page === 'eng_hist_sales')    { await renderEngagementHistory('Sales');    return; }
     if (page === 'eng_hist_contract') { await renderEngagementHistory('Contract'); return; }
     if (page === 'eng_hist_project')  { await renderEngagementHistory('Project');  return; }
+    if (page === 'milestones') { await renderMilestonesPage(); return; }
     if (page === 'proposal_sandbox')          { await renderProposalSandboxPage(); return; }
     if (page === 'pb_human_resources')        { await renderPbHumanResourcesPage(); return; }
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
@@ -4462,6 +4464,10 @@ const MENU = [
         icon: '<path d="M6.5 2h3M7.5 2v4.2L3.4 12.6A1.6 1.6 0 0 0 4.8 15h6.4a1.6 1.6 0 0 0 1.4-2.4L8.5 6.2V2" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
       { page: 'eng_hist_sales', label: 'Engagement History', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M8 5v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
+      // Milestones span all four engagement areas; the register lives with the
+      // sales pages because sales proposes and sales management reviews.
+      { page: 'milestones', label: 'Milestones', permission: 'manage_leads',
+        icon: '<path d="M8 1l2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 11.8 3.8 14l.8-4.7L1.2 6l4.7-.7L8 1z"/>' },
     ]
   },
   {
@@ -9319,8 +9325,8 @@ async function renderOpportunitiesPage() {
 // (managers). Fixed per-role for now — user customisation is a later increment.
 // Renders into the shared #table-body cell, mirroring the cockpit pattern.
 const DASH_ROLE_WIDGETS = {
-  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions', 'milestones'],
-  'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions', 'milestones'],
+  'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions', 'milestones', 'milestone_pulse'],
+  'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions', 'milestones', 'milestone_pulse'],
   'Operations':    ['contracts'],
   'Executive':     ['approvals', 'company'],   // was 'EXCO' — no such role exists; the live role name is Executive
   'Admin':         ['approvals', 'bugs'],
@@ -9341,6 +9347,7 @@ const DASH_WIDGET_CATALOG = {
   company:       'Company Overview',
   interactions:  'Interactions',
   milestones:    'Recent Milestones',
+  milestone_pulse: 'Milestone Pulse',
   bugs:          'Bugs',
 };
 
@@ -9575,7 +9582,8 @@ async function renderDashboard() {
     </div></td></tr>`;
   const loaders = { approvals: _dashApprovals, actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps,
                     pipeline: _dashPipeline, campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany,
-                    bugs: _dashBugs, interactions: _dashInteractions, milestones: _dashMilestones };
+                    bugs: _dashBugs, interactions: _dashInteractions, milestones: _dashMilestones,
+                    milestone_pulse: _dashMilestonePulse };
   await Promise.all(widgets.map(async w => {
     const el = document.getElementById('dash-' + w);
     if (!el) return;
@@ -19437,6 +19445,7 @@ async function _milAfterChange() {
       window._leadMilMap = await _milForEngagements((leadInteractions || []).map(i => +i.id));
       renderLeadInteractions();
     }
+    if (document.getElementById('mil-page')) await renderMilestonesPage();   // register open → refresh
   } catch (e) { /* cosmetic refresh only */ }
 }
 
@@ -19521,6 +19530,287 @@ async function withdrawMilestone(id) {
     await _milAfterChange();
   } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
   finally { stopBusy(); }
+}
+
+// ── Milestones Register (page) ───────────────────────────────────────────────
+// The milestone home: every DESIGNATION across the book (not engagements) with
+// status tabs, Own/All scope and two views — List (sortable/filterable table)
+// and By Client (per-client chronological timeline). Reviewers work the Pending
+// tab directly; Approvals Outstanding keeps notifying. Row/entry click opens
+// the shared review modal (approve / decline / withdraw).
+let _milPageState = { tab: 'pending', scope: 'own', view: 'list' };
+
+function _milPageCanAll() {
+  return !!currentUser && (currentUser.isAdmin || _milCanReview()
+    || can('view_all_leads') || can('view_all_opportunities'));
+}
+
+async function renderMilestonesPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div id="mil-page" style="padding:0 0 24px;">
+      <div id="mil-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
+      <div id="mil-results"><div style="padding:20px;color:var(--text3);">Loading milestones…</div></div>
+    </div></td></tr>`;
+  try {
+    const ok = await _milLookups();
+    if (!ok) {
+      document.getElementById('mil-results').innerHTML =
+        '<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">Milestones need the database migration (sql/add_engagement_milestones.sql).</div>';
+      return;
+    }
+    const [rows, orgs, people] = await Promise.all([
+      apiGetAll('engagement_milestones', 'select=*&order=proposed_at.desc'),
+      allData['organisations'] || apiGet('organisations', 'select=*'),
+      allData['people'] || apiGet('people', 'select=*'),
+    ]);
+    allData['organisations'] = orgs;
+    allData['people'] = people;
+    const orgById = Object.fromEntries(orgs.map(o => [+o.id, o]));
+    const pName = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; };
+
+    // Joins in id batches: designations → engagements → their lead/deal parent.
+    const engIds = [...new Set(rows.map(r => +r.engagement_id))];
+    const engById = {};
+    for (let i = 0; i < engIds.length; i += 150)
+      (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date,engagement_type`)).forEach(e => { engById[+e.id] = e; });
+    const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
+    const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+    const [leads, deals] = await Promise.all([
+      leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,target_org_id,target_org_name,site_id,site_name,description,sites(name,organisation_id)`) : [],
+      dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,name,org_id,site_id`) : [],
+    ]);
+    const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+    const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
+
+    const gById = Object.fromEntries((allData['milestone_groups'] || []).map(g => [+g.id, g]));
+    const orgLabel = o => (o.trading_name || o.name || '').trim();
+    const items = [];
+    for (const m of rows) {
+      const e = engById[+m.engagement_id]; if (!e) continue;
+      const kind = e.lead_id != null ? 'lead' : 'deal';
+      const parent = kind === 'lead' ? leadById[+e.lead_id] : dealById[+e.deal_id];
+      if (!parent) continue;
+      // Client = the parent's organisation (lead: linked org, else its site's
+      // org, else the typed name — same ladder as the list bands).
+      let clientKey, clientLabel;
+      let org = kind === 'lead'
+        ? (parent.target_org_id ? orgById[+parent.target_org_id] : null) || (parent.sites?.organisation_id ? orgById[+parent.sites.organisation_id] : null)
+        : (parent.org_id ? orgById[+parent.org_id] : null);
+      if (org) { clientKey = 'o' + org.id; clientLabel = orgLabel(org); }
+      else if (kind === 'lead' && (parent.target_org_name || '').trim()) { const nm = parent.target_org_name.trim(); clientKey = 'n' + nm.toLowerCase(); clientLabel = nm; }
+      else { clientKey = 'x' + kind + parent.id; clientLabel = '(No client)'; }
+      const t = (allData['milestone_types'] || []).find(x => +x.id === +m.milestone_type_id);
+      items.push({
+        m, id: +m.id, status: m.status, engId: +m.engagement_id, clientKey, clientLabel,
+        date: e.engagement_date || String(m.proposed_at || '').slice(0, 10),
+        typeName: t ? t.name : ('Milestone #' + m.milestone_type_id),
+        groupName: (t && gById[+t.group_id]) ? gById[+t.group_id].name : '',
+        kind, parentId: +parent.id,
+        parentLabel: kind === 'lead'
+          ? ((parent.sites && parent.sites.name) || (parent.site_name || '').trim() || parent.target_org_name || parent.description || ('Lead #' + parent.id))
+          : (parent.name || ('Deal #' + parent.id)),
+        ownerId: parent.owner_id, proposedBy: pName(m.proposed_by),
+        proposedById: +m.proposed_by || 0, decidedBy: pName(m.decided_by),
+      });
+    }
+    items.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    window._milPageItems = items;
+    _milPageApply();
+  } catch (e) {
+    const el = document.getElementById('mil-results');
+    if (el) el.innerHTML = `<div style="padding:20px;color:var(--red);">Error loading milestones: ${e.message}</div>`;
+  }
+}
+
+function _milPageSet(k, v) { _milPageState[k] = v; _milPageApply(); }
+
+function _milPageApply() {
+  const st = _milPageState;
+  const controls = document.getElementById('mil-controls');
+  const out = document.getElementById('mil-results');
+  if (!controls || !out) return;
+  const pid = +(currentUser?.personId || 0);
+  if (st.scope === 'all' && !_milPageCanAll()) st.scope = 'own';
+  const all = window._milPageItems || [];
+  const scoped = st.scope === 'all' ? all
+    : all.filter(i => i.proposedById === pid || +i.ownerId === pid);
+  const counts = { pending: 0, approved: 0, declined: 0 };
+  scoped.forEach(i => { if (counts[i.status] != null) counts[i.status]++; });
+
+  const btn = (on, click, label) =>
+    `<button class="btn btn-sm ${on ? 'btn-primary' : 'btn-secondary'}" onclick="${click}">${label}</button>`;
+  const div = `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 6px;vertical-align:middle;"></span>`;
+  let html = '';
+  if (_milPageCanAll()) html += btn(st.scope === 'own', "_milPageSet('scope','own')", 'Own') + btn(st.scope === 'all', "_milPageSet('scope','all')", 'All');
+  html += (html ? div : '')
+    + btn(st.tab === 'pending',  "_milPageSet('tab','pending')",  `Pending review (${counts.pending})`)
+    + btn(st.tab === 'approved', "_milPageSet('tab','approved')", `Approved (${counts.approved})`)
+    + btn(st.tab === 'declined', "_milPageSet('tab','declined')", `Declined (${counts.declined})`)
+    + btn(st.tab === 'all',      "_milPageSet('tab','all')",      `All (${scoped.length})`)
+    + div
+    + btn(st.view === 'list',   "_milPageSet('view','list')",   'List')
+    + btn(st.view === 'client', "_milPageSet('view','client')", 'By Client');
+  controls.innerHTML = html;
+
+  const items = st.tab === 'all' ? scoped : scoped.filter(i => i.status === st.tab);
+  document.getElementById('page-sub').textContent =
+    items.length + ' milestone' + (items.length !== 1 ? 's' : '') + ' in this view · ' + scoped.length + ' total';
+  if (!items.length) {
+    out.innerHTML = '<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">No milestones in this view.</div>';
+    return;
+  }
+  if (st.view === 'client') { out.innerHTML = _milPageTimelineHtml(items); return; }
+
+  out.innerHTML = `<table style="width:100%;border-collapse:collapse;">
+    <thead id="mil-thead" style="background:var(--bg);"></thead>
+    <tbody id="mil-tbody"></tbody>
+  </table>`;
+  const statusChip = i =>
+    i.status === 'pending'  ? '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;background:#fff;color:#B45309;border:1.5px dashed #F59E0B;white-space:nowrap;">★ Pending</span>' :
+    i.status === 'approved' ? '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;background:var(--navy);color:#C3B091;white-space:nowrap;">★ Approved</span>' :
+                              '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;background:#FECACA;color:#991B1B;white-space:nowrap;">Declined</span>';
+  const cols = [
+    { key: 'date',    label: 'Date',        get: i => i.date || '' },
+    { key: 'type',    label: 'Milestone',   get: i => i.typeName },
+    { key: 'group',   label: 'Group',       get: i => i.groupName },
+    { key: 'status',  label: 'Status',      get: i => i.status },
+    { key: 'client',  label: 'Client',      get: i => i.clientLabel || '' },
+    { key: 'record',  label: 'Record',      get: i => i.parentLabel },
+    { key: 'prop',    label: 'Proposed by', get: i => i.proposedBy },
+    { key: 'dec',     label: 'Reviewed by', get: i => i.decidedBy },
+  ];
+  makeSortableFilterableTable({
+    tableId: 'milestones-' + st.tab,   // per-tab state so each tab keeps its own filters
+    headRoot: document.getElementById('mil-thead'),
+    bodyRoot: document.getElementById('mil-tbody'),
+    columns: cols,
+    rows: items,
+    rowRenderer: i => `<tr onclick="openMilestoneReview(${i.id})" style="cursor:pointer;border-bottom:1px solid var(--border);">
+      <td style="padding:10px 12px;font-size:13px;white-space:nowrap;">${i.date || '—'}</td>
+      <td style="padding:10px 12px;font-size:13px;font-weight:600;">★ ${cEsc(i.typeName)}</td>
+      <td style="padding:10px 12px;font-size:13px;">${cEsc(i.groupName) || '—'}</td>
+      <td style="padding:10px 12px;">${statusChip(i)}</td>
+      <td style="padding:10px 12px;font-size:13px;">${cEsc(i.clientLabel)}</td>
+      <td style="padding:10px 12px;font-size:13px;">${cEsc(i.parentLabel)} <span style="font-size:10px;color:var(--text3);text-transform:uppercase;">${i.kind}</span></td>
+      <td style="padding:10px 12px;font-size:13px;">${cEsc(i.proposedBy) || '—'}</td>
+      <td style="padding:10px 12px;font-size:13px;">${cEsc(i.decidedBy) || '—'}</td>
+    </tr>`,
+    emptyMessage: 'No milestones match the current filters.',
+    defaultSortKey: 'date', defaultSortDir: 'desc',
+  });
+}
+
+// By Client view: one card per client, milestones as a vertical timeline
+// (newest first). Clients ordered by their most recent milestone.
+function _milPageTimelineHtml(items) {
+  const bands = new Map(); const order = [];
+  items.forEach(i => {
+    let b = bands.get(i.clientKey);
+    if (!b) { b = { label: i.clientLabel, rows: [] }; bands.set(i.clientKey, b); order.push(b); }
+    b.rows.push(i);
+  });
+  return order.map(b => {
+    const entries = b.rows.map((i, idx) => `
+      <div style="display:flex;gap:12px;">
+        <div style="width:80px;flex-shrink:0;text-align:right;font-size:11px;color:var(--text3);padding-top:3px;">${i.date || ''}</div>
+        <div style="flex-shrink:0;display:flex;flex-direction:column;align-items:center;">
+          <span style="width:10px;height:10px;border-radius:50%;flex-shrink:0;margin-top:4px;${
+            i.status === 'approved' ? 'background:var(--navy);' :
+            i.status === 'pending'  ? 'background:#fff;border:2px dashed #F59E0B;' : 'background:#FECACA;'}"></span>
+          ${idx < b.rows.length - 1 ? '<span style="flex:1;width:2px;background:var(--border);min-height:14px;"></span>' : ''}
+        </div>
+        <div onclick="openMilestoneReview(${i.id})" style="flex:1;min-width:0;padding-bottom:14px;cursor:pointer;">
+          <div style="font-size:13px;font-weight:700;color:var(--navy);">★ ${cEsc(i.typeName)}
+            ${i.status === 'pending' ? '<span style="font-size:10px;font-weight:700;color:#B45309;">· pending review</span>' : ''}
+            ${i.status === 'declined' ? '<span style="font-size:10px;font-weight:700;color:#991B1B;">· declined</span>' : ''}</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px;">${cEsc(i.parentLabel)} <span style="font-size:10px;color:var(--text3);text-transform:uppercase;">${i.kind}</span>
+            <span style="color:var(--text3);">· proposed by ${cEsc(i.proposedBy) || '—'}${i.status === 'approved' && i.decidedBy ? ' · approved by ' + cEsc(i.decidedBy) : ''}</span></div>
+        </div>
+      </div>`).join('');
+    return `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:14px;">
+      <div style="padding:8px 12px;background:var(--bg);border-bottom:2px solid var(--border);display:flex;justify-content:space-between;align-items:baseline;gap:10px;">
+        <span style="font-weight:700;font-size:13px;color:#003057;">${cEsc(b.label)} <span style="font-weight:500;color:var(--text2);">milestone timeline</span></span>
+        <span style="font-size:11px;font-weight:600;color:var(--text3);">${b.rows.length} milestone${b.rows.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div style="padding:14px 16px 4px;">${entries}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Milestone Pulse (dashboard widget) ───────────────────────────────────────
+// "How are we doing": approved milestones this month vs last (by engagement
+// date), the pending-review queue, and a this-month breakdown by group.
+// Scope-aware like the other cards; clicks land on the Milestones register.
+async function _dashMilestonePulse() {
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const scope = _dashScope();
+  await _milLookups();
+  let rows = [];
+  try {
+    rows = await apiGetAll('engagement_milestones', 'select=*');
+  } catch (e) {
+    return _dashCard('Milestone Pulse', null, [['Milestones', '—']], 'Needs the milestones migration (sql/add_engagement_milestones.sql)', null);
+  }
+  const engIds = [...new Set(rows.map(r => +r.engagement_id))];
+  const engById = {};
+  for (let i = 0; i < engIds.length; i += 150)
+    (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
+  const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
+  const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+  const [leads, deals] = await Promise.all([
+    leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
+    dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
+  ]);
+  const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
+  const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
+  const gById = Object.fromEntries((allData['milestone_groups'] || []).map(g => [+g.id, g]));
+  const tById = Object.fromEntries((allData['milestone_types'] || []).map(t => [+t.id, t]));
+
+  const ym = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const now = new Date();
+  const thisM = ym(now), lastM = ym(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  let cntThis = 0, cntLast = 0, pending = 0;
+  const byGroup = {};
+  for (const m of rows) {
+    const e = engById[+m.engagement_id]; if (!e) continue;
+    const parent = e.lead_id != null ? leadById[+e.lead_id] : dealById[+e.deal_id];
+    if (!parent || !_dashInScope(parent, scope)) continue;
+    if (m.status === 'pending') { pending++; continue; }
+    if (m.status !== 'approved') continue;
+    const month = String(e.engagement_date || m.decided_at || '').slice(0, 7);
+    if (month === thisM) {
+      cntThis++;
+      const t = tById[+m.milestone_type_id];
+      const gName = (t && gById[+t.group_id]) ? gById[+t.group_id].name : 'Ungrouped';
+      byGroup[gName] = (byGroup[gName] || 0) + 1;
+    } else if (month === lastM) cntLast++;
+  }
+  const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine'}</span>`;
+  const kpi = (label, val, extra) => `<div${extra || ''}><div style="font-size:26px;font-weight:800;color:var(--navy);line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  const groups = Object.entries(byGroup).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const maxG = groups.length ? groups[0][1] : 1;
+  const groupRows = groups.map(([g, n]) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-top:1px solid var(--border);font-size:12px;">
+      <div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(g)}</div>
+      <div style="width:90px;height:7px;background:var(--bg);border-radius:4px;overflow:hidden;flex-shrink:0;"><div style="width:${Math.round(n / maxG * 100)}%;height:100%;background:var(--navy);"></div></div>
+      <div style="width:20px;text-align:right;font-weight:700;color:var(--navy);">${n}</div>
+    </div>`).join('');
+  return `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Milestone Pulse${chip}</div>
+      <button class="btn btn-ghost btn-sm" onclick="showPage('milestones')">Register →</button>
+    </div>
+    <div style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;">
+        ${kpi('This month', cntThis)}${kpi('Last month', cntLast)}
+        ${kpi('Pending review', pending, ` style="cursor:pointer;" onclick="_milPageState.tab='pending';showPage('milestones')" title="Open the pending-review queue"`)}
+      </div>
+      ${groupRows ? `<div style="margin-top:10px;">${groupRows}</div>`
+                  : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">No approved milestones this month${(allData['milestone_types'] || []).length ? '' : ' — configure types under Admin → Settings → Milestones'}.</div>`}
+    </div></div>`;
 }
 
 // ── Milestone picker inside the engagement modal ─────────────────────────────
