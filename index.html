@@ -597,7 +597,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -631,7 +631,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19182,6 +19182,23 @@ async function _onOpenLeadEditWindowClosed() {
   populateLeadForm();                // re-applies the now-expired lock + flips the description box to append mode
 }
 
+// A <select> can only report a value that exists among its <option>s. When a lead's
+// stored FK isn't in the list — options not built yet, or built from a cache that
+// didn't carry that row — the select reads back as '' and a full-form PATCH writes
+// null OVER a perfectly good FK. That is silent data loss: it wiped owner_id and
+// source_org_id off lead 4157 (prod, 18 Aug 2026) mid-edit, dropping a Qualified
+// lead into the shared pool where its owner could no longer see it.
+// So: an empty select means "user cleared it" ONLY if the stored value was actually
+// offered. If it wasn't, the select never had a say — keep what's on the record.
+function leadSelectFk(elId, storedVal) {
+  const el  = document.getElementById(elId);
+  const cur = +(el && el.value) || null;
+  if (cur) return cur;                                   // an explicit pick always wins
+  if (storedVal == null || !el) return null;
+  const offered = Array.from(el.options).some(o => +o.value === +storedVal);
+  return offered ? null : (+storedVal || null);          // not offered → preserve
+}
+
 async function saveLead(opts) {
   // opts.keepOpen → save without closing the form (used when auto-saving a new
   // lead before logging its first interaction). Returns true on success.
@@ -19276,9 +19293,9 @@ async function saveLead(opts) {
       ? (document.getElementById('lead-source-person-email').value.trim() || null) : null,
     source_person_phone: (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
       ? (document.getElementById('lead-source-person-phone').value.trim() || null) : null,
-    source_org_id:    sourceName === 'Client Expansion' ? (+document.getElementById('lead-source-org-id').value || null) : null,
-    research_campaign_id: (sourceName === 'Marketing Campaign' || sourceName === 'Research Campaign' || sourceName === 'Research') ? (+document.getElementById('lead-research-campaign-id').value || null) : null,
-    sales_campaign_id:    (sourceName === 'Research Study' || sourceName === 'Sales Campaign') ? (+document.getElementById('lead-sales-campaign-id').value || null) : null,
+    source_org_id:    sourceName === 'Client Expansion' ? leadSelectFk('lead-source-org-id', leadData.source_org_id) : null,
+    research_campaign_id: (sourceName === 'Marketing Campaign' || sourceName === 'Research Campaign' || sourceName === 'Research') ? leadSelectFk('lead-research-campaign-id', leadData.research_campaign_id) : null,
+    sales_campaign_id:    (sourceName === 'Research Study' || sourceName === 'Sales Campaign') ? leadSelectFk('lead-sales-campaign-id', leadData.sales_campaign_id) : null,
     source_detail: (sourceName !== 'Referral' && sourceName !== 'Client Expansion' && sourceName !== 'Research')
       ? (document.getElementById('lead-source-detail').value.trim() || null) : null,
 
@@ -19292,8 +19309,8 @@ async function saveLead(opts) {
     ...(_leadContactsPatch()),
 
     description: description || null,   // nullable: capture-always
-    region_id:        +document.getElementById('lead-region-id').value || null,
-    branch_id:        +document.getElementById('lead-branch-id').value || null,
+    region_id:        leadSelectFk('lead-region-id', leadData.region_id),
+    branch_id:        leadSelectFk('lead-branch-id', leadData.branch_id),
     service_major_ids: (function () {
       const set = new Set(readServiceFocusBoxes('lead-svc-major'));
       const primary = +document.getElementById('lead-service-major-id').value || 0;
@@ -19321,7 +19338,7 @@ async function saveLead(opts) {
     // Owner can only be (re)assigned by managers/admin. For everyone else, preserve
     // the existing owner (edit) or default to themselves (new) — ignore the field.
     owner_id: canAssignOwner(leadData)
-      ? (+document.getElementById('lead-owner-id').value || null)
+      ? leadSelectFk('lead-owner-id', leadData.owner_id)
       : (leadData.id ? (leadData.owner_id || null) : (currentUser?.personId || null)),
 
     // next_action / next_action_date are derived from engagements
