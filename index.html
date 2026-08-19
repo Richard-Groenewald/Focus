@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -739,6 +739,17 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
               <button class="btn btn-sm" onclick="openAddClientModal()" style="white-space:nowrap;background:var(--navy);color:white;flex-shrink:0;">Create</button>
             </div>
             <div id="opp-org-display" style="display:none;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);font-weight:600;color:var(--text);"></div>
+          </div>
+
+          <!-- Site: carried from the lead at promotion and stored on the deal all
+               along, but until v7.8.57 there was nowhere to see it. A client like
+               Exxaro or Clover has a dozen sites, so an opportunity without one is
+               genuinely ambiguous. Unlike Client, this stays editable — a deal can
+               move site. -->
+          <div class="form-group">
+            <label class="form-label">Site</label>
+            <select id="opp-site-id" class="form-control"></select>
+            <div id="opp-site-hint" style="font-size:11px;color:var(--text3);margin-top:4px;"></div>
           </div>
 
           <div class="form-group">
@@ -5044,7 +5055,7 @@ async function syncDealOwnerCollaborator(dealId, newOwnerId) {
 
 async function initOppForm() {
   // Load lookups in parallel
-  const [orgs, regions, stages, stageCats, majorCats, people, branches] = await Promise.all([
+  const [orgs, regions, stages, stageCats, majorCats, people, branches, sites] = await Promise.all([
     allData['organisations'] || apiGet('organisations', 'active=eq.true&select=*&order=name.asc'),
     allData['regions'] || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['stages'] || apiGet('stages', 'active=eq.true&select=*&order=sort_order.asc'),
@@ -5052,8 +5063,10 @@ async function initOppForm() {
     allData['service_major'] || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people'] || apiGet('people', 'select=*&order=first_name.asc'),
     allData['branches'] || apiGet('branches', 'active=eq.true&select=*&order=name.asc'),
+    allData['sites'] || apiGet('sites', 'select=*&order=name.asc'),
   ]);
 
+  allData['sites'] = sites;
   allData['organisations'] = orgs;
   allData['branches'] = branches;
   allData['regions'] = regions;
@@ -5083,6 +5096,8 @@ async function initOppForm() {
     displayEl.style.display = 'none';
     if (reqEl) reqEl.style.display = '';
   }
+
+  populateOppSites();
 
   // Populate region dropdown
   const regSel = document.getElementById('opp-region-id');
@@ -5240,7 +5255,34 @@ function onProbabilityInput() {
 }
 
 function onOppOrgChange() {
-  // Could filter contacts/people by org in future
+  // The site list belongs to the chosen client, so it follows the client.
+  populateOppSites();
+}
+
+// Sites for the deal's client. Kept deliberately simple — a <select> rather than
+// the lead form's typeahead — because by this point the client is already known
+// and its site list is short. The deal's stored site is ALWAYS offered even if it
+// belongs to another org (data predating a client change), so opening a deal can
+// never silently drop its site; selectFkOrKeep on save is the second guard.
+function populateOppSites() {
+  const sel = document.getElementById('opp-site-id');
+  if (!sel) return;
+  const hint = document.getElementById('opp-site-hint');
+  const orgId = +(document.getElementById('opp-org-id')?.value || oppData.org_id || 0);
+  const all = allData['sites'] || [];
+  const mine = all.filter(x => +x.organisation_id === orgId);
+  // Never lose the stored one, whatever org it hangs off.
+  if (oppData.site_id && !mine.some(x => +x.id === +oppData.site_id)) {
+    const stored = all.find(x => +x.id === +oppData.site_id);
+    if (stored) mine.unshift(stored);
+  }
+  sel.innerHTML = '<option value="">— no site —</option>' +
+    mine.map(x => `<option value="${x.id}" ${+oppData.site_id === +x.id ? 'selected' : ''}>${cEsc(x.name)}</option>`).join('');
+  if (hint) {
+    hint.textContent = !orgId
+      ? 'Pick a client first to see its sites.'
+      : mine.length ? '' : 'This client has no sites on record yet.';
+  }
 }
 
 function switchOppTab(tab, btn) {
@@ -7346,6 +7388,7 @@ async function saveOpportunity() {
   const payload = {
     name,
     org_id: +orgId || null,
+    site_id: selectFkOrKeep('opp-site-id', oppData.site_id),
     region_id: selectFkOrKeep('opp-region-id', oppData.region_id),
     branch_id: selectFkOrKeep('opp-branch-id', oppData.branch_id),
     stage_id: +stageId || null,
