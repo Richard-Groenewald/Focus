@@ -597,7 +597,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -631,7 +631,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7179,7 +7179,7 @@ async function saveOpportunity() {
   const reassignWrap = document.getElementById('opp-owner-reassign-wrap');
   const ownerIsReassignable = reassignWrap && reassignWrap.style.display !== 'none';
   const newOwnerId = ownerIsReassignable
-    ? (+document.getElementById('opp-owner-reassign').value || null)
+    ? selectFkOrKeep('opp-owner-reassign', oppData.owner_id)
     : (oppData.owner_id || currentUser?.personId || null);
 
   // Stage before this save — drives the secure-contract handler below.
@@ -7188,11 +7188,11 @@ async function saveOpportunity() {
   const payload = {
     name,
     org_id: +orgId || null,
-    region_id: +document.getElementById('opp-region-id').value || null,
-    branch_id: +document.getElementById('opp-branch-id').value || null,
+    region_id: selectFkOrKeep('opp-region-id', oppData.region_id),
+    branch_id: selectFkOrKeep('opp-branch-id', oppData.branch_id),
     stage_id: +stageId || null,
     service_major_id: +document.getElementById('opp-service-major-id').value || null,
-    service_sub_id: +document.getElementById('opp-service-sub-id').value || null,
+    service_sub_id: selectFkOrKeep('opp-service-sub-id', oppData.service_sub_id),
     margin_pct: +document.getElementById('opp-margin-pct').value || 25,
     probability: document.getElementById('opp-probability').value !== '' ? +document.getElementById('opp-probability').value : null,
     order_date: document.getElementById('opp-order-date').value || null,
@@ -8900,6 +8900,31 @@ async function ensureHomeOrgMembers() {
   }
   return allData['home_organisation_members'];
 }
+// Read an FK out of a <select> for a full-form PATCH, WITHOUT letting an
+// unrendered option null the column.
+//
+// A select can only report a value that exists among its options. Our owner /
+// region / campaign pickers are built from the shared allData caches, which are
+// written from ~20 places (some slim, some filtered) — so a stored FK is not
+// guaranteed to be on offer when the form is saved. Read the select raw and an
+// absent option looks exactly like "user cleared it", and the PATCH writes null
+// over a perfectly good value. That is silent data loss: it wiped owner_id and
+// source_org_id off lead 4157 (prod, 18 Aug 2026) mid-edit, dropping a Qualified
+// R7.2m lead into the shared pool where its owner could no longer see it.
+//
+// So: an explicit pick always wins; an empty select clears the column ONLY if the
+// stored value was actually offered. If it wasn't, the select never had a say —
+// keep what is on the record. Deliberate clears still work, because every owner
+// pool carries the record's current owner (see homeOrgPeople keepIds).
+function selectFkOrKeep(elId, storedVal) {
+  const el  = document.getElementById(elId);
+  const cur = +(el && el.value) || null;
+  if (cur) return cur;
+  if (storedVal == null || !el || !el.options) return null;   // non-select: nothing to reason about
+  const offered = Array.from(el.options).some(o => +o.value === +storedVal);
+  return offered ? null : (+storedVal || null);
+}
+
 // Restrict a people array to home-org members. `keepIds` are person ids retained
 // even if they aren't members (e.g. a record's existing owner, so reassignment
 // never silently drops the current value). Falls back to the full list only when
@@ -12804,7 +12829,7 @@ async function saveCampaignTarget() {
     priority: document.getElementById('ct-priority').value,
     status:   document.getElementById('ct-status').value,
     research_notes: document.getElementById('ct-notes').value.trim() || null,
-    owner_id: +document.getElementById('ct-owner-id').value || null,
+    owner_id: selectFkOrKeep('ct-owner-id', campaignTargetData.owner_id),
     updated_at: new Date().toISOString(),
   };
   try {
@@ -19276,9 +19301,9 @@ async function saveLead(opts) {
       ? (document.getElementById('lead-source-person-email').value.trim() || null) : null,
     source_person_phone: (sourceName === 'Referral' && !(+document.getElementById('lead-source-person-id').value))
       ? (document.getElementById('lead-source-person-phone').value.trim() || null) : null,
-    source_org_id:    sourceName === 'Client Expansion' ? (+document.getElementById('lead-source-org-id').value || null) : null,
-    research_campaign_id: (sourceName === 'Marketing Campaign' || sourceName === 'Research Campaign' || sourceName === 'Research') ? (+document.getElementById('lead-research-campaign-id').value || null) : null,
-    sales_campaign_id:    (sourceName === 'Research Study' || sourceName === 'Sales Campaign') ? (+document.getElementById('lead-sales-campaign-id').value || null) : null,
+    source_org_id:    sourceName === 'Client Expansion' ? selectFkOrKeep('lead-source-org-id', leadData.source_org_id) : null,
+    research_campaign_id: (sourceName === 'Marketing Campaign' || sourceName === 'Research Campaign' || sourceName === 'Research') ? selectFkOrKeep('lead-research-campaign-id', leadData.research_campaign_id) : null,
+    sales_campaign_id:    (sourceName === 'Research Study' || sourceName === 'Sales Campaign') ? selectFkOrKeep('lead-sales-campaign-id', leadData.sales_campaign_id) : null,
     source_detail: (sourceName !== 'Referral' && sourceName !== 'Client Expansion' && sourceName !== 'Research')
       ? (document.getElementById('lead-source-detail').value.trim() || null) : null,
 
@@ -19292,8 +19317,8 @@ async function saveLead(opts) {
     ...(_leadContactsPatch()),
 
     description: description || null,   // nullable: capture-always
-    region_id:        +document.getElementById('lead-region-id').value || null,
-    branch_id:        +document.getElementById('lead-branch-id').value || null,
+    region_id:        selectFkOrKeep('lead-region-id', leadData.region_id),
+    branch_id:        selectFkOrKeep('lead-branch-id', leadData.branch_id),
     service_major_ids: (function () {
       const set = new Set(readServiceFocusBoxes('lead-svc-major'));
       const primary = +document.getElementById('lead-service-major-id').value || 0;
@@ -19321,7 +19346,7 @@ async function saveLead(opts) {
     // Owner can only be (re)assigned by managers/admin. For everyone else, preserve
     // the existing owner (edit) or default to themselves (new) — ignore the field.
     owner_id: canAssignOwner(leadData)
-      ? (+document.getElementById('lead-owner-id').value || null)
+      ? selectFkOrKeep('lead-owner-id', leadData.owner_id)
       : (leadData.id ? (leadData.owner_id || null) : (currentUser?.personId || null)),
 
     // next_action / next_action_date are derived from engagements
@@ -21103,14 +21128,14 @@ async function saveResearchCampaign() {
   const rcSvc = readServiceFocusBoxes('rc-svc-major');
   const payload = {
     name,
-    industry_sector_id: +document.getElementById('rc-industry-sector-id').value || null,
-    region_id: +document.getElementById('rc-region-id').value || null,
-    branch_id: +document.getElementById('rc-branch-id').value || null,
+    industry_sector_id: selectFkOrKeep('rc-industry-sector-id', researchCampaignData.industry_sector_id),
+    region_id: selectFkOrKeep('rc-region-id', researchCampaignData.region_id),
+    branch_id: selectFkOrKeep('rc-branch-id', researchCampaignData.branch_id),
     service_major_ids: rcSvc.length ? rcSvc : null,
     service_major_id:  rcSvc[0] || null,
     status: document.getElementById('rc-status').value,
     notes: document.getElementById('rc-notes').value.trim() || null,
-    owner_id: +document.getElementById('rc-owner-id').value || null,
+    owner_id: selectFkOrKeep('rc-owner-id', researchCampaignData.owner_id),
     start_date: document.getElementById('rc-start-date').value || null,
     end_date:   document.getElementById('rc-end-date').value || null,
     target_accounts:  document.getElementById('rc-target-accounts').value !== '' ? +document.getElementById('rc-target-accounts').value : null,
@@ -21507,9 +21532,9 @@ async function saveSalesCampaign() {
     purpose: document.getElementById('sc-purpose').value.trim() || null,
     industry_sector_ids: _scSectorIds.length ? _scSectorIds : null,
     industry_sector_id:  _scSectorIds[0] || null,   // primary, for legacy single-value reads
-    region_id: +document.getElementById('sc-region-id').value || null,
+    region_id: selectFkOrKeep('sc-region-id', salesCampaignData.region_id),
     status: document.getElementById('sc-status').value,
-    owner_id: +document.getElementById('sc-owner-id').value || null,
+    owner_id: selectFkOrKeep('sc-owner-id', salesCampaignData.owner_id),
   };
   try {
     let saved;
