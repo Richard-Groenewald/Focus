@@ -588,16 +588,35 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="font-size:13px;color:var(--text3);margin-bottom:28px;">Sign in to continue</div>
     <div style="text-align:left;margin-bottom:16px;">
       <label class="form-label">Select User</label>
-      <select id="login-user" class="form-control" style="font-size:14px;">
+      <select id="login-user" class="form-control" style="font-size:14px;" onchange="onLoginUserChange()">
         <option value="">— loading users —</option>
       </select>
     </div>
+    <div id="login-pw-wrap" style="text-align:left;margin-bottom:16px;">
+      <label class="form-label">Password</label>
+      <input type="password" id="login-password" class="form-control" style="font-size:14px;" autocomplete="current-password"
+             onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <!-- First sign-in after the password release: choose one before going further. -->
+    <div id="login-setpw" style="display:none;text-align:left;margin-bottom:16px;">
+      <div style="padding:9px 11px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;margin-bottom:12px;">
+        <strong>Choose a password.</strong> Focus now needs one to sign in. At least 8 characters — letters, numbers and symbols all welcome.
+      </div>
+      <label class="form-label">New password</label>
+      <input type="password" id="login-newpw" class="form-control" style="font-size:14px;margin-bottom:10px;" autocomplete="new-password"
+             oninput="renderLoginPwStrength()">
+      <label class="form-label">Confirm password</label>
+      <input type="password" id="login-newpw2" class="form-control" style="font-size:14px;" autocomplete="new-password"
+             onkeydown="if(event.key==='Enter')submitNewPassword()" oninput="renderLoginPwStrength()">
+      <div id="login-pw-rule" style="font-size:11px;color:var(--text3);margin-top:6px;"></div>
+    </div>
     <div id="login-error" style="display:none;color:var(--red);font-size:13px;margin-bottom:12px;"></div>
-    <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
-    <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
+    <div id="login-note" style="display:none;color:#166534;font-size:13px;margin-bottom:12px;"></div>
+    <button class="btn btn-primary" id="login-btn" style="width:100%;justify-content:center;padding:11px;" onclick="doLogin()">Sign In</button>
+    <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -627,17 +646,22 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
         <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
+        <button class="btn btn-sm" id="masquerade-btn" onclick="openMasqueradeModal()" style="display:none;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Work as…</button>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
 
   <!-- Main -->
   <div class="main">
+    <!-- Masquerade banner: only visible while working as somebody else. Loud on
+         purpose — you must never forget whose name your work is going under. -->
+    <div id="masquerade-bar" style="display:none;align-items:center;justify-content:space-between;gap:12px;
+         padding:8px 18px;background:#FEF3C7;border-bottom:2px solid #E9C46A;color:#7A5B10;font-size:13px;font-weight:600;"></div>
     <div class="topbar">
       <div style="display:flex;align-items:center;">
         <button id="sidebar-toggle" class="btn btn-sm" onclick="toggleSidebar()" style="display:none;margin-right:14px;">☰ Menu</button>
@@ -1901,6 +1925,9 @@ async function api(table, method='GET', body=null, params='') {
   // Audit attribution: who is acting. Forwarded by the sb proxy to PostgREST,
   // where the audit_row_change trigger reads it (request.headers GUC).
   if (typeof currentUser !== 'undefined' && currentUser?.personId) opts.headers['X-Actor-Id'] = String(currentUser.personId);
+  // Masquerade: the work is attributed to the person being worked as (X-Actor-Id),
+  // but the audit trail also records who was really at the keyboard.
+  if (typeof realUser !== 'undefined' && realUser?.personId) opts.headers['X-Real-Actor-Id'] = String(realUser.personId);
   if (body) opts.body = JSON.stringify(body);
 
   const maxAttempts = (method === 'GET') ? API_GET_RETRIES : 1;
@@ -2736,7 +2763,10 @@ const PAGES = {
     fields: [
       { key: 'person_id', label: 'Person (eligible only)', type: 'lookup', lookupTable: 'eligible_people', lookupLabel: r => [r.first_name, r.last_name].filter(Boolean).join(' '), required: true },
       { key: 'username',  label: 'Username', required: true },
-      { key: 'password',  label: 'Password', type: 'password', required: true },
+      // No password field: passwords are chosen by the user at sign-in and stored
+      // hashed (sql/add_passwords_and_masquerade.sql). Ticking "Require new
+      // password" makes the user choose a fresh one next time they sign in.
+      { key: 'must_set_password', label: 'Require new password at next sign-in', type: 'checkbox' },
       // Login role: not a column on system_users — written to user_roles separately
       // (see saveRecord / syncSystemUserRole). skipPersist keeps it out of the row body.
       { key: 'login_role', label: 'Login Role', type: 'lookup', lookupTable: 'roles', lookupLabel: r => r.name, skipPersist: true },
@@ -8840,6 +8870,144 @@ function openInstallGuide() {
   document.body.appendChild(overlay);
 }
 
+// ── Authentication ───────────────────────────────────────────────────────────
+// Deliberately rudimentary (see sql/add_passwords_and_masquerade.sql): one
+// password per user, PBKDF2-hashed and verified inside the Netlify function so
+// the hash never reaches the browser. No sessions — currentUser lives in memory,
+// so a refresh is already a logout. Tightened with the wider permissions work.
+async function authCall(payload) {
+  const res = await fetch(`${FN_URL}/auth`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+function _loginMsg(text, kind) {
+  const err = document.getElementById('login-error');
+  const note = document.getElementById('login-note');
+  if (err)  { err.style.display  = (text && kind !== 'ok') ? 'block' : 'none'; if (kind !== 'ok') err.textContent = text || ''; }
+  if (note) { note.style.display = (text && kind === 'ok') ? 'block' : 'none'; if (kind === 'ok') note.textContent = text || ''; }
+}
+
+// Swap the login card between "sign in" and "choose a password".
+function showLoginSetPassword(on) {
+  document.getElementById('login-pw-wrap').style.display    = on ? 'none' : 'block';
+  document.getElementById('login-setpw').style.display      = on ? 'block' : 'none';
+  document.getElementById('login-btn').style.display        = on ? 'none' : 'flex';
+  document.getElementById('login-setpw-btn').style.display  = on ? 'flex' : 'none';
+  if (on) { document.getElementById('login-newpw').value = ''; document.getElementById('login-newpw2').value = ''; }
+  renderLoginPwStrength();
+}
+
+function renderLoginPwStrength() {
+  const el = document.getElementById('login-pw-rule');
+  if (!el) return;
+  const a = document.getElementById('login-newpw')?.value || '';
+  const b = document.getElementById('login-newpw2')?.value || '';
+  if (!a) { el.textContent = 'At least 8 characters.'; el.style.color = 'var(--text3)'; return; }
+  if (a.length < 8) { el.textContent = `${8 - a.length} more character${8 - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
+  if (b && a !== b) { el.textContent = 'The two entries do not match.'; el.style.color = 'var(--red)'; return; }
+  el.textContent = b ? 'Ready.' : 'Long enough — confirm it below.';
+  el.style.color = b ? '#166534' : 'var(--text3)';
+}
+
+async function submitNewPassword() {
+  const userId = document.getElementById('login-user').value;
+  const a = document.getElementById('login-newpw').value || '';
+  const b = document.getElementById('login-newpw2').value || '';
+  if (!userId) { _loginMsg('Please select a user'); return; }
+  if (a.length < 8) { _loginMsg('Password must be at least 8 characters'); return; }
+  if (a !== b) { _loginMsg('The two entries do not match'); return; }
+  _loginMsg('');
+  try {
+    const r = await authCall({ action: 'set', userId: +userId, newPassword: a });
+    if (!r || !r.ok) { _loginMsg((r && r.error) || 'Could not set the password'); return; }
+    // Set, then sign in with it — the password is proved once before it is trusted.
+    showLoginSetPassword(false);
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-password').focus();
+    _loginMsg('Password set. Sign in with it to continue.', 'ok');
+  } catch (e) { _loginMsg('Could not reach the server — try again'); }
+}
+
+// When the selected user changes, ask whether they still need to choose one, so
+// the card shows the right thing before they type.
+async function onLoginUserChange() {
+  const userId = document.getElementById('login-user').value;
+  _loginMsg('');
+  document.getElementById('login-password').value = '';
+  if (!userId) { showLoginSetPassword(false); return; }
+  try {
+    const r = await authCall({ action: 'check', userId: +userId });
+    showLoginSetPassword(!!(r && r.ok && r.mustSet));
+  } catch (e) { showLoginSetPassword(false); }
+}
+
+// Everything that defines a user's identity, permissions and scope. Used by
+// sign-in AND by masquerade, so "working as" resolves the same context that
+// person would get by signing in themselves — no partial impersonation.
+async function buildUserContext(userId) {
+  // Round 1 — everything keyed only on the (already-known) userId, in parallel.
+  // Region/branch scope tolerate failure (older users may have no assignments).
+  const [users, userRoles, userRegions, userBranches] = await Promise.all([
+    // Named columns, not *: the credential columns are stripped by the proxy, but
+    // the login has no business asking for them in the first place.
+    apiGet('system_users', 'id=eq.' + userId + '&select=id,person_id,username,active,created_at,must_set_password'),
+    apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id'),
+    apiGet('system_user_regions', 'system_user_id=eq.' + userId + '&select=region_id').catch(() => []),
+    apiGet('system_user_branches', 'system_user_id=eq.' + userId + '&select=branch_id').catch(() => []),
+  ]);
+  const user = users[0];
+  if (!user) return null;
+  const roleIds = userRoles.map(r => r.role_id);
+
+  // Round 2 — person details, roles, and role→permission links, in parallel.
+  const [people, roles, rp] = await Promise.all([
+    apiGet('people', 'id=eq.' + user.person_id + '&select=*'),
+    roleIds.length ? apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*') : Promise.resolve([]),
+    roleIds.length ? apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id') : Promise.resolve([]),
+  ]);
+  const person = people[0] || {};
+
+  // Round 3 — resolve permission names.
+  const permIds = rp.map(r => r.permission_id);
+  let permissions = [];
+  if (permIds.length) {
+    const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
+    permissions = perms.map(p => p.name);
+  }
+  // Per-user overrides on top of the role's set: granted TRUE adds a permission,
+  // FALSE takes one away. The table has existed since the permissions build but
+  // was never read; today it carries exactly one row (the masquerade grant).
+  try {
+    const ovr = await apiGet('user_permission_overrides', 'user_id=eq.' + userId + '&select=permission_id,granted');
+    if (ovr.length) {
+      const names = Object.fromEntries((await apiGet('permissions',
+        'id=in.(' + ovr.map(o => o.permission_id).join(',') + ')&select=id,name')).map(x => [+x.id, x.name]));
+      ovr.forEach(o => {
+        const nm = names[+o.permission_id]; if (!nm) return;
+        if (o.granted) { if (!permissions.includes(nm)) permissions.push(nm); }
+        else permissions = permissions.filter(x => x !== nm);
+      });
+    }
+  } catch (e) { /* overrides are additive chrome — never block a login on them */ }
+
+  const ctx = {
+    id: user.id,
+    personId: user.person_id,
+    name: [person.first_name, person.last_name].filter(Boolean).join(' '),
+    roles,
+    permissions,
+    isAdmin: roles.some(r => r.name === 'Admin'),
+  };
+  // If admin and no permissions set yet, grant all
+  if (ctx.isAdmin && !permissions.length) ctx.permissions = ['all'];
+  // Region/branch scope (union is the effective scope, see recordInUserScope).
+  ctx.regions  = userRegions.map(r => +r.region_id);
+  ctx.branches = userBranches.map(r => +r.branch_id);
+  return ctx;
+}
+
 async function doLogin() {
   const sel = document.getElementById('login-user');
   const userId = sel.value;
@@ -8852,60 +9020,32 @@ async function doLogin() {
     return;
   }
 
+  // Password first: nothing about the user is loaded until it checks out.
+  const password = document.getElementById('login-password')?.value || '';
+  if (!password) { _loginMsg('Enter your password'); return; }
+  try {
+    const auth = await authCall({ action: 'login', userId: +userId, password });
+    if (!auth || !auth.ok) {
+      if (auth && auth.mustSet) { showLoginSetPassword(true); _loginMsg('Choose a password to continue'); return; }
+      _loginMsg((auth && auth.error) || 'Sign-in failed');
+      return;
+    }
+  } catch (e) { _loginMsg('Could not reach the server — try again'); return; }
+  _loginMsg('');
+
   try {
     // Warm allData from any persisted lookup cache before we start fetching.
     hydrateLookupCache();
 
-    // Round 1 — everything keyed only on the (already-known) userId, in parallel.
-    // Region/branch scope tolerate failure (older users may have no assignments).
-    const [users, userRoles, userRegions, userBranches] = await Promise.all([
-      apiGet('system_users', 'id=eq.' + userId + '&select=*'),
-      apiGet('user_roles', 'user_id=eq.' + userId + '&select=role_id'),
-      apiGet('system_user_regions', 'system_user_id=eq.' + userId + '&select=region_id').catch(() => []),
-      apiGet('system_user_branches', 'system_user_id=eq.' + userId + '&select=branch_id').catch(() => []),
-    ]);
-    const user = users[0];
-    if (!user) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
-    const roleIds = userRoles.map(r => r.role_id);
-
-    // Round 2 — person details, roles, and role→permission links, in parallel.
-    const [people, roles, rp] = await Promise.all([
-      apiGet('people', 'id=eq.' + user.person_id + '&select=*'),
-      roleIds.length ? apiGet('roles', 'id=in.(' + roleIds.join(',') + ')&select=*') : Promise.resolve([]),
-      roleIds.length ? apiGet('role_permissions', 'role_id=in.(' + roleIds.join(',') + ')&select=permission_id') : Promise.resolve([]),
-    ]);
-    const person = people[0] || {};
-
-    // Round 3 — resolve permission names.
-    const permIds = rp.map(r => r.permission_id);
-    let permissions = [];
-    if (permIds.length) {
-      const perms = await apiGet('permissions', 'id=in.(' + permIds.join(',') + ')&select=name');
-      permissions = perms.map(p => p.name);
-    }
-
-    // Set current user (unchanged shape)
-    currentUser = {
-      id: user.id,
-      personId: user.person_id,
-      name: [person.first_name, person.last_name].filter(Boolean).join(' '),
-      roles,
-      permissions,
-      isAdmin: roles.some(r => r.name === 'Admin')
-    };
-    // If admin and no permissions set yet, grant all
-    if (currentUser.isAdmin && !permissions.length) {
-      currentUser.permissions = ['all'];
-    }
-    // Region/branch scope (union is the effective scope, see recordInUserScope).
-    currentUser.regions  = userRegions.map(r => +r.region_id);
-    currentUser.branches = userBranches.map(r => +r.branch_id);
+    const ctx = await buildUserContext(userId);
+    if (!ctx) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
+    currentUser = ctx;
+    realUser = null;            // a fresh sign-in is never a masquerade
 
     // Show app
     document.getElementById('login-screen').style.display = 'none';
     document.getElementById('main-app').style.display = 'flex';
-    document.getElementById('sidebar-user-name').textContent = currentUser.name;
-    document.getElementById('sidebar-user-role').textContent = roles.map(r => r.name).join(', ') || 'No role';
+    applyUserContextChrome();
 
     // Login already made several successful calls — we're demonstrably online.
     setOnline(true);
@@ -9068,11 +9208,124 @@ function isExecutive() {
   return !!(currentUser && (currentUser.isAdmin || (currentUser.roles || []).some(r => r.name === 'Executive')));
 }
 
+
+// ── Masquerade ───────────────────────────────────────────────────────────────
+// A permitted user (masquerade_user) can work as somebody else — to see exactly
+// what they see, and to fix things in their own records. Everything behaves as if
+// that person were signed in: ownership, scope, permissions, attribution. The one
+// thing that does NOT change is the audit trail, which records both — the work is
+// attributed to the person being masqueraded as, with the real human named
+// alongside (audit_log.real_actor_id, via the X-Real-Actor-Id header).
+let realUser = null;   // the human actually signed in, while a masquerade is active
+
+const isMasquerading = () => !!realUser;
+
+async function openMasqueradeModal() {
+  if (!can('masquerade_user') && !isMasquerading()) { showStatus('You cannot do that', 'error'); return; }
+  let users = [];
+  try {
+    users = await apiGet('system_users', 'active=eq.true&select=id,person_id,username&order=username.asc');
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+  } catch (e) { showStatus('Could not load users: ' + e.message, 'error'); return; }
+  const me = (realUser || currentUser || {}).id;
+  const nameOf = pid => {
+    const p = (allData['people'] || []).find(x => +x.id === +pid);
+    return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : null;
+  };
+  const rows = users.filter(u => +u.id !== +me);
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:460px;">
+        <div class="modal-header">
+          <div class="modal-title">Work as another user</div>
+          <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div style="padding:10px 12px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;margin-bottom:14px;">
+            Focus will behave exactly as it does for them. Anything you record is attributed to them &mdash;
+            and the audit trail also records that <strong>you</strong> were the one acting.
+          </div>
+          <div class="form-group">
+            <label class="form-label">User</label>
+            <select id="masq-user" class="form-control">
+              <option value="">&mdash; select &mdash;</option>
+              ${rows.map(u => `<option value="${u.id}">${cEsc(nameOf(u.person_id) || u.username)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="startMasquerade()">Work as this user</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+async function startMasquerade() {
+  const targetId = +(document.getElementById('masq-user')?.value || 0);
+  if (!targetId) { showStatus('Pick a user first', 'error'); return; }
+  const mine = realUser || currentUser;
+  if (!mine) return;
+  startBusy('Switching user\u2026');
+  try {
+    const ctx = await buildUserContext(targetId);
+    if (!ctx) { showStatus('That user could not be loaded', 'error'); return; }
+    realUser = mine;              // remember the human, so we can come back
+    currentUser = ctx;
+    closeModal();
+    applyUserContextChrome();
+    showStatus('Now working as ' + ctx.name);
+    await showPage('dashboard');
+  } catch (e) {
+    showStatus('Could not switch user: ' + e.message, 'error');
+  } finally { stopBusy(); }
+}
+
+async function endMasquerade() {
+  if (!realUser) return;
+  startBusy('Returning\u2026');
+  try {
+    const ctx = await buildUserContext(realUser.id);
+    currentUser = ctx || realUser;
+    realUser = null;
+    applyUserContextChrome();
+    showStatus('Back as yourself');
+    await showPage('dashboard');
+  } catch (e) {
+    showStatus('Could not switch back: ' + e.message, 'error');
+  } finally { stopBusy(); }
+}
+
+// Sidebar identity + the masquerade banner. Called after any identity change.
+function applyUserContextChrome() {
+  const nameEl = document.getElementById('sidebar-user-name');
+  const roleEl = document.getElementById('sidebar-user-role');
+  if (nameEl) nameEl.textContent = currentUser?.name || '';
+  if (roleEl) roleEl.textContent = (currentUser?.roles || []).map(r => r.name).join(', ') || 'No role';
+  const btn = document.getElementById('masquerade-btn');
+  if (btn) btn.style.display = (can('masquerade_user') || isMasquerading()) ? '' : 'none';
+  const bar = document.getElementById('masquerade-bar');
+  if (bar) {
+    bar.style.display = isMasquerading() ? 'flex' : 'none';
+    if (isMasquerading()) {
+      bar.innerHTML = `<span>You are working as <strong>${cEsc(currentUser?.name || '')}</strong>
+        &mdash; recorded as ${cEsc(realUser?.name || '')} acting on their behalf.</span>
+        <button class="btn btn-sm btn-secondary" onclick="endMasquerade()">Return to ${cEsc(realUser?.name || 'yourself')}</button>`;
+    }
+  }
+  buildNav();
+}
+
 function doLogout() {
   currentUser = null;
+  realUser = null;
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
   document.getElementById('login-user').value = '';
+  const pw = document.getElementById('login-password'); if (pw) pw.value = '';
+  showLoginSetPassword(false);
+  _loginMsg('');
+  const bar = document.getElementById('masquerade-bar'); if (bar) bar.style.display = 'none';
 }
 
 
@@ -11225,7 +11478,7 @@ function _auditRowHtml(r) {
   }
   return `<div class="audit-row" style="display:grid;grid-template-columns:150px 150px 76px 210px 1fr;gap:10px;padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;align-items:start;">
     <div style="color:var(--text2);white-space:nowrap;">${when}</div>
-    <div>${_auditActorName(r.actor_id)}</div>
+    <div>${_auditActorName(r.actor_id)}${r.real_actor_id ? `<div style="font-size:10px;font-weight:700;color:#92400E;background:#FEF3C7;border-radius:4px;padding:1px 5px;margin-top:3px;display:inline-block;" title="Attributed to the user above, but performed by someone working as them">via ${_auditActorName(r.real_actor_id)}</div>` : ''}</div>
     <div><span style="display:inline-block;padding:1px 7px;border-radius:8px;background:${bg};color:${fg};font-size:10.5px;font-weight:700;">${r.op}</span></div>
     <div style="word-break:break-word;"><span style="font-weight:600;">${_audEsc(r.table_name)}</span>${r.row_id ? ' #' + r.row_id : ''}${_auditRowLabel(r)}</div>
     <div style="min-width:0;">${detail}</div>
