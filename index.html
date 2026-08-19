@@ -597,7 +597,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div style="margin-top:16px;font-size:11px;color:var(--text3);">Password disabled — test mode</div>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -631,7 +631,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2447,6 +2447,7 @@ const PAGES = {
 
   // ── Engagement History (read-only) — one view, four category-preset doorways ──
   eng_hist_outreach: { title: 'Engagement History — Outreach', custom: true, readOnly: true, columns: [], fields: [] },
+  internal_activity: { title: 'Internal Activity', custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_sales:    { title: 'Engagement History — Sales',    custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_contract: { title: 'Engagement History — Contract', custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_project:  { title: 'Engagement History — Project',  custom: true, readOnly: true, columns: [], fields: [] },
@@ -2971,6 +2972,27 @@ const PAGES = {
     ],
   },
 
+  work_projects: {
+    title: 'Work Projects',
+    table: 'work_projects',
+    columns: [
+      { key: 'name',       label: 'Name' },
+      { key: 'code',       label: 'Code' },
+      { key: 'kind',       label: 'Kind' },
+      { key: 'notes',      label: 'Notes' },
+      { key: 'sort_order', label: 'Sort Order' },
+      { key: 'active',     label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',       label: 'Name', required: true },
+      { key: 'code',       label: 'Code' },
+      { key: 'kind',       label: 'Kind', type: 'select', options: ['internal', 'client', 'overhead'] },
+      { key: 'notes',      label: 'Notes', type: 'textarea' },
+      { key: 'sort_order', label: 'Sort Order', type: 'number' },
+      { key: 'active',     label: 'Active', type: 'checkbox' },
+    ],
+  },
+
   red_flags: {
     title: 'Red Flags',
     table: 'red_flags',
@@ -3253,6 +3275,7 @@ async function loadTable(page) {
     if (page === 'eng_hist_contract') { await renderEngagementHistory('Contract'); return; }
     if (page === 'eng_hist_project')  { await renderEngagementHistory('Project');  return; }
     if (page === 'milestones') { await renderMilestonesPage(); return; }
+    if (page === 'internal_activity') { await renderInternalActivityPage(); return; }
     if (page === 'proposal_sandbox')          { await renderProposalSandboxPage(); return; }
     if (page === 'pb_human_resources')        { await renderPbHumanResourcesPage(); return; }
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
@@ -4128,6 +4151,20 @@ const HELP_CONTENT = {
     ],
   }),
 
+  internal_activity: () => ({
+    eyebrow: 'FOCUS \u00b7 INTERNAL ACTIVITY',
+    title: 'Internal Activity Guide',
+    sub: 'Where our own work goes \u2014 the hours that have no prospect on the other end.',
+    sections: [
+      { note: '<strong>Two kinds of work.</strong> A <strong>client-facing</strong> engagement is contact with someone: a call, a meeting, an email you sent them. <strong>Our own work</strong> is effort \u2014 preparing a proposal, doing the research, meeting internally. Focus records both, but only contact counts as a touch.' },
+      { h: 'What belongs here', body: 'Work with <strong>no prospect behind it at all</strong>: the Bus Dev project, sessions on Focus itself, admin. Pick the <strong>project</strong> to log against, press <strong>+ Log Activity</strong>, and record it exactly like any other engagement \u2014 date, type, people, details, time spent. Projects are maintained under <strong>Site Admin \u2192 Lookups \u2192 Work Projects</strong>.' },
+      { h: 'Work ON a client goes on the client', body: 'Preparing a proposal for a real prospect is <em>not</em> internal activity \u2014 it belongs on that lead or opportunity. Log it there and mark it <strong>Our own work</strong> in the engagement modal. It joins the record\'s history and its time count, but it does <strong>not</strong> move Last Touch, satisfy a cadence step, or pose as contact you never made. That is the whole point of the distinction: your prep is visible without inflating your outreach.' },
+      { h: 'Time spent', body: 'Optional on every engagement, anywhere in Focus. Type the minutes or use the <strong>30m / 1h / 1\u00bdh / 2h</strong> chips. Totals roll up here (overall and per project) and on Engagement History, where a time badge sits on each row and the header carries the total for the current filter.' },
+      { h: 'Reading the page', body: '<strong>From/To</strong> bound the window (it opens on the last full month onward), <strong>Project</strong> narrows to one, and <strong>Mine / Everyone</strong> switches scope where you have the right to see other people\'s. Click any row to open the entry and edit it.' },
+      { h: 'What comes later', body: 'This is deliberately narrow. A fuller timesheet module \u2014 hours against contracts and delivery projects across the whole business \u2014 will build on these same structures rather than replace them, so nothing recorded here is throwaway.' },
+    ],
+  }),
+
   // One guide, four doors: the Engagement History pages differ only in which
   // category they open on, so they share this entry.
   eng_hist_outreach: () => HELP_CONTENT._engHist(),
@@ -4469,6 +4506,11 @@ const MENU = [
       // sales pages because sales proposes and sales management reviews.
       { page: 'milestones', label: 'Milestones', permission: 'manage_leads',
         icon: '<path d="M8 1l2.1 4.3 4.7.7-3.4 3.3.8 4.7L8 11.8 3.8 14l.8-4.7L1.2 6l4.7-.7L8 1z"/>' },
+      // Internal work: no prospect on the other end. Sits here because this is
+      // where the people who record it already work; it moves to its own section
+      // when the wider timesheet module lands.
+      { page: 'internal_activity', label: 'Internal Activity', permission: 'manage_leads',
+        icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M8 4.5V8l2.5 1.5" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none"/>' },
     ]
   },
   {
@@ -4616,6 +4658,8 @@ const MENU = [
             icon: '<path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'activity_types',   label: 'Activity Types',   permission: 'manage_lookups',
             icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'work_projects',    label: 'Work Projects',    permission: 'manage_lookups',
+            icon: '<rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 4V2.8h4V4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M8 7v2l1.5 1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'red_flags',        label: 'Red Flags',        permission: 'manage_lookups',
             icon: '<path d="M3 2v12M3 2h9l-2 3 2 3H3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'strategic_decisions', label: 'Strategic Decisions', permission: 'manage_lookups',
@@ -13379,7 +13423,9 @@ function _engHistApply() {
   const rows = _engHistFilteredRows();
 
   const capNote = st.capHit ? `<div style="padding:8px 12px;margin-bottom:10px;background:#FEF3C7;border:1px solid #FCD34D;border-radius:6px;font-size:12px;color:#92400E;">Showing the most recent 1,000 engagements in range — narrow the date window to see older activity.</div>` : '';
-  const countNote = `<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">${rows.length} engagement${rows.length!==1?'s':''}${st.viewCategory!=='All'?' · '+st.viewCategory:''}</div>`;
+  const totalMins = rows.reduce((t, r) => t + (+r.e.duration_minutes || 0), 0);
+  const internalCount = rows.filter(r => r.e.work_mode === 'internal').length;
+  const countNote = `<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">${rows.length} engagement${rows.length!==1?'s':''}${st.viewCategory!=='All'?' · '+st.viewCategory:''}${totalMins?' · '+fmtMinutes(totalMins)+' recorded':''}${internalCount?' · '+internalCount+' our own work':''}</div>`;
 
   if (!rows.length) {
     out.innerHTML = `${capNote}<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">No engagements match.</div>`;
@@ -13417,10 +13463,18 @@ function _engHistApply() {
     if (st.group !== 'deal')   ctxBits.push(`<a href="#" onclick="closeOrNav_eh(${r.parentId},'${r.parentKind}');return false;" style="color:var(--red);">${cEsc(r.parentLabel)}</a>`);
     else                       ctxBits.push(`<a href="#" onclick="closeOrNav_eh(${r.parentId},'${r.parentKind}');return false;" style="color:var(--red);">open ${r.parentKind}</a>`);
     const milBadges = ((st.milestones || {})[+e.id] || []).map(m => _milBadgeHtml(m)).join(' ');
+    const timeBadge = e.duration_minutes
+      ? `<span style="font-size:10px;font-weight:700;color:var(--navy);background:#EEF2F7;border:1px solid var(--border);padding:1px 6px;border-radius:4px;">${fmtMinutes(e.duration_minutes)}</span>`
+      : '';
+    // Internal work sits on the record but is not contact with the client — say so
+    // plainly, or the history reads as more client contact than actually happened.
+    const modeBadge = e.work_mode === 'internal'
+      ? `<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#FEF3C7;color:#92400E;" title="Our own work on this record — not a touch">OUR WORK</span>`
+      : '';
     return `
       <div style="padding:10px 12px;border-bottom:1px solid var(--border);">
         <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;">
-          <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${typeBadge} ${catBadge} ${milBadges}</div>
+          <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${typeBadge} ${modeBadge} ${timeBadge} ${catBadge} ${milBadges}</div>
           <div style="font-size:11px;color:var(--text3);white-space:nowrap;">${cEsc(r.ownerName)}</div>
         </div>
         <div style="font-size:12px;margin-top:3px;">${persons} <span style="color:var(--text3);">· ${ctxBits.join(' · ')}</span></div>
@@ -19912,6 +19966,7 @@ async function _liRenderMilestones() {
   const ok = await _milLookups();
   if (!ok) { wrap.style.display = 'none'; return; }
   const parent = window._engParent;
+  if (parent && parent.kind === 'project') { wrap.style.display = 'none'; window._liMilRows = []; return; }
   let area = 'Outreach';
   if (parent && parent.kind === 'deal') {
     try {
@@ -20089,6 +20144,80 @@ function openLeadInteractionRow(interactionId) {
 // Shared HTML renderer for the lead interaction modal in any mode.
 // mode: 'new' | 'edit' | 'view'
 // interaction: existing row for 'edit' and 'view', null for 'new'
+// ── Engagement time + work mode ──────────────────────────────────────────────
+// Duration is optional on every engagement. Work mode is the load-bearing part:
+// 'client' is an outward touch (a call, a meeting, an email TO someone), while
+// 'internal' is our own effort on the record — proposal prep, research, a session
+// with our own people. Internal work belongs to the record it advances and shows
+// in its history, but it is NOT a touch: it must not move Last Touch or satisfy a
+// cadence step. Without that distinction the only safe place to log prep work was
+// a fake lead, which is exactly what happened (see sql/add_engagement_time.sql).
+function fmtMinutes(m) {
+  m = +m || 0;
+  if (!m) return '';
+  const h = Math.floor(m / 60), r = m % 60;
+  return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`;
+}
+function setLiDuration(mins) {
+  const el = document.getElementById('li-duration');
+  if (!el || el.disabled) return;
+  el.value = mins;
+  renderLiDurationHint();
+}
+function renderLiDurationHint() {
+  const el = document.getElementById('li-duration');
+  const hint = document.getElementById('li-duration-hint');
+  if (hint) hint.textContent = (el && +el.value) ? fmtMinutes(+el.value) : '';
+}
+function setLiWorkMode(mode) {
+  const hidden = document.getElementById('li-work-mode');
+  if (!hidden) return;
+  const btnC = document.getElementById('li-mode-client');
+  if (btnC && btnC.disabled) return;   // view/locked
+  hidden.value = (mode === 'internal') ? 'internal' : 'client';
+  ['client', 'internal'].forEach(v => {
+    const b = document.getElementById('li-mode-' + v);
+    if (b) b.className = 'btn btn-sm ' + (hidden.value === v ? 'btn-primary' : 'btn-secondary');
+  });
+  renderLiModeHint();
+}
+function renderLiModeHint() {
+  const wrap = document.getElementById('li-mode-hint');
+  const mode = (document.getElementById('li-work-mode') || {}).value || 'client';
+  if (!wrap) return;
+  wrap.style.display = mode === 'internal' ? 'block' : 'none';
+  wrap.innerHTML = mode === 'internal'
+    ? `<div style="margin:-6px 0 12px;padding:8px 12px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;">
+         <strong>Our own work.</strong> It stays on this record and counts toward time spent, but it is not contact with the client — Last Touch and the follow-up clock are unaffected.
+       </div>`
+    : '';
+}
+// Time + mode block for the engagement modal. Project engagements are internal by
+// definition (there is no client on the other end), so the toggle is dropped.
+function _liTimeRowHtml(i, dis, forceInternal) {
+  const mins = (i && i.duration_minutes != null) ? +i.duration_minutes : '';
+  const mode = forceInternal ? 'internal' : ((i && i.work_mode) || 'client');
+  const chip = (m, l) => `<button type="button" class="btn btn-secondary btn-sm" ${dis} onclick="setLiDuration(${m})" style="padding:4px 9px;">${l}</button>`;
+  const modeBtn = (v, l) => `<button type="button" id="li-mode-${v}" class="btn btn-sm ${mode === v ? 'btn-primary' : 'btn-secondary'}" ${dis} onclick="setLiWorkMode('${v}')">${l}</button>`;
+  return `
+          <input type="hidden" id="li-work-mode" value="${mode}">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Time Spent <span style="font-weight:400;color:var(--text3);font-size:11px;">— optional</span></label>
+              <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                <input type="number" id="li-duration" class="form-control" style="width:82px;" min="1" max="1440" step="5" placeholder="min" value="${mins}" ${dis} oninput="renderLiDurationHint()">
+                ${chip(30, '30m')}${chip(60, '1h')}${chip(90, '1½h')}${chip(120, '2h')}
+                <span id="li-duration-hint" style="font-size:12px;color:var(--text3);font-weight:700;"></span>
+              </div>
+            </div>
+            ${forceInternal ? '' : `<div class="form-group">
+              <label class="form-label">This was</label>
+              <div style="display:flex;gap:6px;">${modeBtn('client', 'Client-facing')}${modeBtn('internal', 'Our own work')}</div>
+            </div>`}
+          </div>
+          <div id="li-mode-hint" style="display:none;"></div>`;
+}
+
 function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
   const fullyLocked = !!locked;   // Promoted/Dead/non-owner lead: nothing editable here.
   const title = mode === 'edit' ? 'Edit Engagement' : mode === 'view' ? 'View Engagement' : 'Log Engagement';
@@ -20122,11 +20251,12 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
     : '';
   // Clickable reference to the parent record (lead/opportunity; future project /
   // contract). Identifies the engagement when opened standalone and lets you jump.
+  const isProjectEng = !!(window._engParent && window._engParent.kind === 'project');
   const _ep = window._engParent;
   const relatedRecordLink = (_ep && _ep.id)
     ? `<div style="margin:-4px 0 12px;padding:9px 12px;background:#EEF2F7;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;color:var(--text2);display:flex;justify-content:space-between;align-items:center;gap:10px;">
-         <span>${_ep.kind === 'deal' ? 'Opportunity' : _ep.kind === 'lead' ? 'Lead' : 'Related'}: <strong>${String(_ep.label || '').replace(/</g, '&lt;')}</strong></span>
-         <button class="btn btn-secondary btn-sm" onclick="closeModal();${_ep.kind === 'deal' ? `openOpportunity(${_ep.id})` : `openLead(${_ep.id})`}">Open →</button>
+         <span>${_ep.kind === 'deal' ? 'Opportunity' : _ep.kind === 'lead' ? 'Lead' : _ep.kind === 'project' ? 'Project' : 'Related'}: <strong>${String(_ep.label || '').replace(/</g, '&lt;')}</strong></span>
+         ${_ep.kind === 'project' ? '' : `<button class="btn btn-secondary btn-sm" onclick="closeModal();${_ep.kind === 'deal' ? `openOpportunity(${_ep.id})` : `openLead(${_ep.id})`}">Open →</button>`}
        </div>`
     : '';
   const footer = fullyLocked
@@ -20162,8 +20292,9 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
               </select>
             </div>
           </div>
+          ${_liTimeRowHtml(i, dis, isProjectEng)}
           <div class="form-group">
-            <label class="form-label">People Involved <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${(window._engParent && window._engParent.kind === 'deal') ? 'client contacts & collaborators' : 'client contacts'} in this engagement</span></label>
+            <label class="form-label">People Involved <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${isProjectEng ? 'who took part' : (window._engParent && window._engParent.kind === 'deal') ? 'client contacts & collaborators' : 'client contacts'} in this engagement</span></label>
             <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;" id="li-people-selected"></div>
             ${(isView || fullyLocked) ? '' : `<div style="display:flex;gap:8px;">
               <select id="li-person-pool" class="form-control" style="flex:1;" onchange="addLiPerson()"><option value="">— add a contact —</option></select>
@@ -20263,6 +20394,10 @@ async function openEngagement(engId) {
   } else if (eng.deal_id != null) {
     const d = (await apiGet('deals', `id=eq.${eng.deal_id}&select=id,name`))[0];
     parent = { kind: 'deal', id: +eng.deal_id, label: d ? (d.name || ('Deal #' + d.id)) : ('Deal #' + eng.deal_id) };
+  } else if (eng.work_project_id != null) {
+    let wp = null;
+    try { wp = (await apiGet('work_projects', `id=eq.${eng.work_project_id}&select=id,name`))[0] || null; } catch (e) {}
+    parent = { kind: 'project', id: +eng.work_project_id, label: (wp && wp.name) || ('Project #' + eng.work_project_id) };
   }
   window._engParent = parent;
   window._engStandalone = true;
@@ -20325,6 +20460,9 @@ async function loadLiLookups() {
   // Milestone picker (no-op when the open surface has no #li-milestones-wrap,
   // e.g. the cockpit quick-log, or on a pre-migration DB).
   _liRenderMilestones().catch(() => {});
+  // Time + work-mode chrome (no-op on surfaces that don't render the block).
+  renderLiDurationHint();
+  renderLiModeHint();
 }
 
 // ── Cadence pre-fill for the engagement modal ─────────────
@@ -20527,6 +20665,19 @@ async function _liLoadPeople(preserveSelections) {
         .filter(c => !selectedKeys.has(keyOf(c)))
         .map(c => `<option value="${keyOf(c)}">${cEsc(c.name || 'Contact')}</option>`).join('')
         + '<option value="__new__">＋ Create new contact…</option>';
+    } else if (parent && parent.kind === 'project') {
+      // Project work is internal: the people involved are our own, so the pool is
+      // the home organisation (same source as every owner picker).
+      const cand = new Map();
+      try {
+        await ensureHomeOrgMembers();
+        if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=*'); } catch (e) { allData['people'] = []; } }
+        homeOrgPeople(allData['people'] || [], [currentUser?.personId])
+          .forEach(p => cand.set(+p.id, nameOf(p)));
+      } catch (e) { /* best-effort */ }
+      optionsHtml = [...cand.entries()]
+        .filter(([id]) => !selectedKeys.has('p' + id))
+        .map(([id, name]) => `<option value="p${id}">${cEsc(name)}</option>`).join('');
     } else if (parent && parent.kind === 'deal') {
       // Deal pool: client-org affiliates + deal collaborators (persisted and, when
       // the opp form for this deal is open, in-memory not-yet-saved ones too).
@@ -20795,8 +20946,17 @@ function _liAutoStreamLabel() {
 // rides along on the same PATCH (woke_at clearing). Historical rows that
 // pre-date last-touch bookkeeping are backfilled by sql/backfill_last_touch.sql.
 async function bumpLeadLastTouch(leadId, extraPatch) {
-  const rows = await apiGet('engagements',
-    `lead_id=eq.${leadId}&select=engagement_date&order=engagement_date.desc.nullslast&limit=1`);
+  // Recomputed from the NEWEST CLIENT-FACING engagement, so editing an old row
+  // can't rewind Last Touch — and so our own work on the lead (proposal prep,
+  // research, an internal meeting) never poses as contact with the prospect.
+  // Falls back to the unfiltered query on a pre-migration DB.
+  let rows;
+  const sel = 'select=engagement_date&order=engagement_date.desc.nullslast&limit=1';
+  try {
+    rows = await apiGet('engagements', `lead_id=eq.${leadId}&work_mode=eq.client&${sel}`);
+  } catch (e) {
+    rows = await apiGet('engagements', `lead_id=eq.${leadId}&${sel}`);
+  }
   const last = (rows && rows[0] && rows[0].engagement_date) || null;
   await api('leads', 'PATCH',
     Object.assign({ last_touch_date: last, updated_at: new Date().toISOString() }, extraPatch || {}),
@@ -20820,9 +20980,15 @@ async function saveLeadInteraction(editId) {
   const nextDate = document.getElementById('li-next-date')?.value || '';
   const nextDone = document.getElementById('li-next-done')?.checked || false;
   const completionNoteInput = (document.getElementById('li-completion-note-input')?.value || '').trim();
+  const durationRaw = document.getElementById('li-duration')?.value || '';
+  const durationMinutes = durationRaw !== '' && +durationRaw > 0 ? Math.min(1440, Math.round(+durationRaw)) : null;
+  const workMode = (document.getElementById('li-work-mode')?.value === 'internal') ? 'internal' : 'client';
 
   if (!date) { showStatus('Date is required', 'error'); return; }
   if (!type) { showStatus('Type is required', 'error'); return; }
+  if (durationRaw !== '' && !(+durationRaw > 0 && +durationRaw <= 1440)) {
+    showStatus('Time spent must be between 1 and 1440 minutes', 'error'); return;
+  }
   // Every engagement must carry a next action — an engagement with no follow-up
   // is a dead end the dashboard can never surface. An OPEN action also needs a
   // due date, or it silently never appears in Outstanding Actions.
@@ -20849,10 +21015,13 @@ async function saveLeadInteraction(editId) {
       next_action_done: nextDone,
       next_action_completed_at: completedAt,
       next_action_completion_note: completionNote,
+      duration_minutes: durationMinutes,
+      work_mode: workMode,
     };
     let engId = editId;
     const par = window._engParent || {};
     const isDealEng = !!(par.kind === 'deal' && par.id);
+    const isProjectEng = !!(par.kind === 'project' && par.id);
     // Stream choice (new engagements only; edit/view leave streams untouched).
     const sst = (!editId && window._liStream) ? window._liStream : null;
     const contStream = (sst && sst.mode === 'continue')
@@ -20861,8 +21030,11 @@ async function saveLeadInteraction(editId) {
       await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
     } else {
-      // Target exactly one parent: the deal or the lead (engagements CHECK constraint).
-      const target = isDealEng
+      // Target exactly one parent: the project, the deal or the lead
+      // (engagements_one_target_chk).
+      const target = isProjectEng
+        ? { work_project_id: +par.id }
+        : isDealEng
         ? { deal_id: +par.id }
         : { lead_id: (par.kind === 'lead' && par.id) ? +par.id : leadData.id,
             related_interaction_id: window._liRelatedTo || null };
@@ -20911,7 +21083,8 @@ async function saveLeadInteraction(editId) {
     // never fail the whole save if a person link can't be written.
     if (engId) {
       const parent = window._engParent || null;
-      const isDeal = !!(parent && parent.kind === 'deal');
+      // Project participants are real people records, same as a deal's.
+      const isDeal = !!(parent && (parent.kind === 'deal' || parent.kind === 'project'));
       try {
         if (isDeal) {
           if (editId) await api('engagement_people', 'DELETE', null, 'engagement_id=eq.' + engId);
@@ -20925,6 +21098,15 @@ async function saveLeadInteraction(editId) {
           await api('engagements', 'PATCH', { contacts: refs }, 'id=eq.' + engId);
         }
       } catch (e) { /* best-effort */ }
+    }
+    // Project engagement: no lead or deal bookkeeping at all — refresh the
+    // Internal Activity register it was logged from.
+    if (isProjectEng) {
+      window._engStandalone = false;
+      closeModal();
+      if (currentPage === 'internal_activity') await renderInternalActivityPage();
+      else if (currentPage === 'dashboard') await renderDashboard();
+      return;
     }
     // Deal engagement: no lead bookkeeping. Refresh whichever surface it was
     // opened from — the opp form's engagement list, or the dashboard.
@@ -20970,6 +21152,223 @@ async function saveLeadInteraction(editId) {
   }
 }
 
+
+// -- Internal Activity --------------------------------------------------------
+// Time and notes for work that has no prospect behind it: the Bus Dev project,
+// Focus development, admin. Before this existed the only way to record it was to
+// invent a lead and push it to Qualified, which put internal meetings into the
+// sales pipeline and the milestone reporting. Engagements against a work_project
+// are always work_mode='internal' and never touch a lead or a deal.
+let _intAct = null;
+
+function _intActScopeKey() { return 'focus_ia_scope:' + ((currentUser && currentUser.personId) || ''); }
+
+async function renderInternalActivityPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  if (head) head.innerHTML = '';
+  if (body) body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:0 0 24px;">
+      <div id="ia-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;"></div>
+      <div id="ia-kpis"></div>
+      <div id="ia-results"><div style="padding:20px;color:var(--text3);">Loading internal activity...</div></div>
+    </div></td></tr>`;
+
+  let savedScope = 'mine';
+  try { savedScope = localStorage.getItem(_intActScopeKey()) === 'all' ? 'all' : 'mine'; } catch (e) {}
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1).toISOString().slice(0, 10);
+  const prev = _intAct || {};
+  _intAct = {
+    from: prev.from || monthStart,
+    to: prev.to || '',
+    projectId: prev.projectId || '',
+    logProjectId: prev.logProjectId || '',
+    scope: can('view_all_leads') ? savedScope : 'mine',
+    projects: [], rows: [], people: [], peopleByEng: {},
+  };
+
+  try {
+    const [projects, people] = await Promise.all([
+      apiGet('work_projects', 'select=*&order=sort_order.asc.nullslast,name.asc'),
+      allData['people'] || apiGet('people', 'select=*'),
+    ]);
+    allData['people'] = people;
+    _intAct.projects = projects || [];
+    _intAct.people = people || [];
+    if (!_intAct.logProjectId && _intAct.projects.length) _intAct.logProjectId = String(_intAct.projects[0].id);
+    await _intActLoad();
+    _intActRenderControls();
+    _intActRender();
+  } catch (e) {
+    const r = document.getElementById('ia-results');
+    if (r) r.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
+      Internal Activity needs the database migration (sql/add_engagement_time.sql).<br><span style="font-size:12px;">${cEsc(e.message)}</span></div>`;
+  }
+}
+
+async function _intActLoad() {
+  const st = _intAct;
+  const fromQ = st.from ? `&engagement_date=gte.${st.from}` : '';
+  const toQ   = st.to   ? `&engagement_date=lte.${st.to}`   : '';
+  st.rows = await apiGetAll('engagements',
+    `work_project_id=not.is.null${fromQ}${toQ}&select=*&order=engagement_date.desc,id.desc`);
+  // Participants, in id batches (same pattern as the milestones register).
+  const engIds = st.rows.map(e => +e.id);
+  const byEng = {};
+  for (let i = 0; i < engIds.length; i += 150) {
+    try {
+      (await apiGet('engagement_people', `engagement_id=in.(${engIds.slice(i, i + 150).join(',')})&select=engagement_id,person_id`))
+        .forEach(r => { (byEng[+r.engagement_id] = byEng[+r.engagement_id] || []).push(+r.person_id); });
+    } catch (e) { break; }
+  }
+  st.peopleByEng = byEng;
+}
+
+function _intActRenderControls() {
+  const el = document.getElementById('ia-controls');
+  const st = _intAct;
+  if (!el || !st) return;
+  const projOpts = (sel) => st.projects.map(p =>
+    `<option value="${p.id}" ${String(sel) === String(p.id) ? 'selected' : ''}>${cEsc(p.name)}</option>`).join('');
+  const scopePills = can('view_all_leads')
+    ? `<div class="form-group" style="margin:0;">
+         <label class="form-label">Scope</label>
+         <div style="display:flex;gap:6px;">${[['mine', 'Mine'], ['all', 'Everyone']].map(([k, l]) =>
+           `<button class="btn btn-sm ${st.scope === k ? 'btn-primary' : 'btn-secondary'}" onclick="setIntActScope('${k}')">${l}</button>`).join('')}</div>
+       </div>` : '';
+  el.innerHTML = `
+    <div class="form-group" style="margin:0;">
+      <label class="form-label">From</label>
+      <input type="date" id="ia-from" class="form-control" style="width:150px;" value="${st.from}" onchange="reloadIntAct()">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label">To</label>
+      <input type="date" id="ia-to" class="form-control" style="width:150px;" value="${st.to}" onchange="reloadIntAct()">
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label">Project</label>
+      <select id="ia-project" class="form-control" style="width:190px;" onchange="setIntActProject(this.value)">
+        <option value="">All projects</option>${projOpts(st.projectId)}
+      </select>
+    </div>
+    ${scopePills}
+    <div style="flex:1;"></div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label">Log against</label>
+      <div style="display:flex;gap:8px;">
+        <select id="ia-log-project" class="form-control" style="width:190px;" onchange="_intAct.logProjectId=this.value;">
+          ${projOpts(st.logProjectId)}
+        </select>
+        <button class="btn btn-primary" onclick="logInternalActivity()">+ Log Activity</button>
+      </div>
+    </div>`;
+}
+
+function setIntActScope(v) {
+  if (!_intAct) return;
+  _intAct.scope = v === 'all' ? 'all' : 'mine';
+  try { localStorage.setItem(_intActScopeKey(), _intAct.scope); } catch (e) {}
+  _intActRenderControls();
+  _intActRender();
+}
+function setIntActProject(v) { if (_intAct) { _intAct.projectId = v || ''; _intActRender(); } }
+async function reloadIntAct() {
+  if (!_intAct) return;
+  _intAct.from = document.getElementById('ia-from') ? document.getElementById('ia-from').value : '';
+  _intAct.to   = document.getElementById('ia-to')   ? document.getElementById('ia-to').value   : '';
+  await _intActLoad();
+  _intActRender();
+}
+
+function _intActVisibleRows() {
+  const st = _intAct;
+  const me = currentUser && currentUser.personId;
+  return (st.rows || []).filter(r =>
+    (st.scope === 'all' || (me && +r.created_by === +me)) &&
+    (!st.projectId || +r.work_project_id === +st.projectId));
+}
+
+function _intActRender() {
+  const st = _intAct;
+  const rows = _intActVisibleRows();
+  const projById = Object.fromEntries((st.projects || []).map(p => [+p.id, p]));
+  const pName = id => { const p = (st.people || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; };
+
+  // KPIs: hours in the window, then the same split per project.
+  const totalMins = rows.reduce((t, r) => t + (+r.duration_minutes || 0), 0);
+  const untimed = rows.filter(r => !r.duration_minutes).length;
+  const byProject = {};
+  rows.forEach(r => { byProject[+r.work_project_id] = (byProject[+r.work_project_id] || 0) + (+r.duration_minutes || 0); });
+  const maxMins = Math.max(1, ...Object.values(byProject));
+  const kpi = document.getElementById('ia-kpis');
+  if (kpi) kpi.innerHTML = `
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;">
+      <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;min-width:170px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.04em;color:var(--text3);text-transform:uppercase;">Time recorded</div>
+        <div style="font-size:26px;font-weight:800;color:var(--navy);">${fmtMinutes(totalMins) || '&mdash;'}</div>
+        <div style="font-size:11px;color:var(--text3);">${rows.length} ${rows.length === 1 ? 'entry' : 'entries'}${untimed ? ' &middot; ' + untimed + ' with no time' : ''}</div>
+      </div>
+      <div style="flex:1;min-width:260px;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.04em;color:var(--text3);text-transform:uppercase;margin-bottom:8px;">By project</div>
+        ${Object.keys(byProject).length ? Object.entries(byProject).sort((a, b) => b[1] - a[1]).map(([pid, m]) => `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:5px;">
+            <div style="width:150px;font-size:12px;color:var(--text2);font-weight:600;">${cEsc((projById[+pid] || {}).name || ('Project #' + pid))}</div>
+            <div style="flex:1;height:8px;background:var(--bg);border-radius:99px;overflow:hidden;">
+              <div style="width:${Math.round(m / maxMins * 100)}%;height:100%;background:var(--navy);"></div>
+            </div>
+            <div style="width:64px;text-align:right;font-size:12px;font-weight:700;color:var(--navy);">${fmtMinutes(m) || '&mdash;'}</div>
+          </div>`).join('') : '<div style="font-size:12px;color:var(--text3);">Nothing recorded in this window.</div>'}
+      </div>
+    </div>`;
+
+  const res = document.getElementById('ia-results');
+  if (!res) return;
+  if (!rows.length) {
+    res.innerHTML = `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
+      No internal activity in this window. Use <strong>+ Log Activity</strong> to record a meeting, a working session or admin time.</div>`;
+    return;
+  }
+  res.innerHTML = `
+    <table class="data-table" style="width:100%;">
+      <thead><tr>
+        <th style="width:105px;">Date</th><th style="width:170px;">Project</th><th style="width:110px;">Type</th>
+        <th>Details</th><th style="width:160px;">People</th><th style="width:90px;text-align:right;">Time</th>
+      </tr></thead>
+      <tbody>${rows.map(r => `
+        <tr style="cursor:pointer;" onclick="openEngagement(${r.id})">
+          <td style="white-space:nowrap;">${r.engagement_date || ''}</td>
+          <td>${(projById[+r.work_project_id] || {}).name ? cEsc(projById[+r.work_project_id].name) : '&mdash;'}</td>
+          <td>${cEsc(r.engagement_type || '')}</td>
+          <td style="color:var(--text2);">${cEsc((r.notes || '').slice(0, 160))}${(r.notes || '').length > 160 ? '...' : ''}</td>
+          <td style="font-size:12px;color:var(--text2);">${((st.peopleByEng || {})[+r.id] || []).map(pName).filter(Boolean).join(', ')}</td>
+          <td style="text-align:right;font-weight:700;color:${r.duration_minutes ? 'var(--navy)' : 'var(--text3)'};">${fmtMinutes(r.duration_minutes) || '&mdash;'}</td>
+        </tr>`).join('')}
+      </tbody>
+      <tfoot><tr style="font-weight:800;background:var(--bg);">
+        <td colspan="5" style="text-align:right;">Total</td>
+        <td style="text-align:right;color:var(--navy);">${fmtMinutes(totalMins) || '&mdash;'}</td>
+      </tr></tfoot>
+    </table>`;
+}
+
+// Log a new engagement against the chosen work project, through the same modal
+// every other engagement uses.
+function logInternalActivity() {
+  const st = _intAct;
+  const sel = document.getElementById('ia-log-project');
+  const pid = +((sel && sel.value) || (st && st.logProjectId) || 0);
+  if (!pid) { showStatus('Add a work project first (Site Admin -> Lookups -> Work Projects)', 'error'); return; }
+  const proj = ((st && st.projects) || []).find(p => +p.id === pid);
+  window._engParent = { kind: 'project', id: pid, label: proj ? proj.name : ('Project #' + pid) };
+  window._engStandalone = false;
+  window._liEditing = null;
+  window._liRelatedTo = null;
+  window._liStream = null;
+  window._liQuickLogContext = null;
+  document.getElementById('modal-root').innerHTML = renderLeadInteractionModalHtml('new', null);
+  loadLiLookups().then(() => _liLoadPeople());
+}
 
 // ── Research Campaign Modal ───────────────────────────────
 let researchCampaignData = {};
