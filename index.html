@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7028,6 +7028,81 @@ async function openDealEngagementModal() {
   await _liInitStreamSection();
 }
 
+// ── The lead's history, on the opportunity ───────────────────────────────────
+// A promoted lead does not stop being the first half of the story. Its
+// engagements stay ON THE LEAD — one row, one owner — and are shown here as
+// read-only history rather than moved or copied. Copying would double every touch
+// (and every recorded minute) in the counts and in Engagement History; moving
+// would empty the Outreach category retrospectively and quietly rewrite outreach
+// reporting for work that genuinely was outreach at the time.
+//
+// The open engagements the promote wizard copied onto the deal are skipped here —
+// they already appear above as live deal rows, and their lead originals carry the
+// marker note below.
+const _PROMOTE_CARRY_NOTE = 'Engagement copied to opportunity for completion.';
+
+async function _dealLeadHistoryHtml(dealId) {
+  let lead = null;
+  try {
+    const rows = await apiGet('leads',
+      `promoted_deal_id=eq.${dealId}&select=id,target_org_name,site_id,site_name,description,promoted_at,sites(name)`);
+    lead = rows && rows[0];
+  } catch (e) { return ''; }
+  if (!lead) return '';
+
+  let engs = [];
+  try {
+    engs = await apiGet('engagements',
+      `lead_id=eq.${lead.id}&select=*&order=engagement_date.desc,id.desc`);
+  } catch (e) { return ''; }
+  engs = engs.filter(e => (e.next_action_completion_note || '') !== _PROMOTE_CARRY_NOTE);
+  if (!engs.length) return '';
+
+  const label = leadEngLabel(lead) || ('Lead #' + lead.id);
+  const totalMins = engs.reduce((t, e) => t + (+e.duration_minutes || 0), 0);
+  const rows = engs.map(e => {
+    const type = e.engagement_type
+      ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text2);background:var(--card);border:1px solid var(--border);padding:1px 6px;border-radius:4px;">${cEsc(e.engagement_type)}</span>` : '';
+    const mode = e.work_mode === 'internal'
+      ? `<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#FEF3C7;color:#92400E;">OUR WORK</span>` : '';
+    const time = e.duration_minutes
+      ? `<span style="font-size:10px;font-weight:700;color:var(--navy);background:var(--card);border:1px solid var(--border);padding:1px 6px;border-radius:4px;">${fmtMinutes(e.duration_minutes)}</span>` : '';
+    const next = e.next_action
+      ? `<div style="font-size:11px;margin-top:3px;color:var(--text3);">Next: ${cEsc(e.next_action)}${e.next_action_date ? ' &middot; ' + e.next_action_date : ''}${e.next_action_done ? ' &check;' : ''}</div>` : '';
+    const note = e.notes
+      ? `<div style="font-size:12px;color:var(--text2);margin-top:3px;white-space:pre-wrap;">${cEsc(String(e.notes).slice(0, 400))}${String(e.notes).length > 400 ? '…' : ''}</div>` : '';
+    return `
+      <div style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="openEngagement(${e.id})">
+        <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${type} ${mode} ${time}</div>
+        ${note}${next}
+      </div>`;
+  }).join('');
+
+  return `
+    <div id="deal-lead-history" style="margin-top:18px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+      <div onclick="toggleDealLeadHistory()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);font-weight:700;font-size:13px;">
+        <span><span id="deal-lead-history-caret">&#9656;</span> Before promotion &mdash; ${engs.length} engagement${engs.length === 1 ? '' : 's'} on the lead
+          <span style="font-weight:600;color:var(--text3);">&middot; ${cEsc(label)}</span></span>
+        <span style="font-weight:600;color:var(--text3);">${totalMins ? fmtMinutes(totalMins) + ' recorded' : ''}</span>
+      </div>
+      <div id="deal-lead-history-body" style="display:none;">
+        <div style="padding:8px 12px;background:var(--card);font-size:11px;color:var(--text3);border-bottom:1px solid var(--border);">
+          These belong to the lead and are shown here for continuity. Open one to read it; it is edited on the lead, not the deal.
+        </div>
+        ${rows}
+      </div>
+    </div>`;
+}
+
+function toggleDealLeadHistory() {
+  const body = document.getElementById('deal-lead-history-body');
+  const caret = document.getElementById('deal-lead-history-caret');
+  if (!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if (caret) caret.innerHTML = open ? '&#9656;' : '&#9662;';
+}
+
 async function loadEngagements(dealId) {
   const list = document.getElementById('engagement-list');
   if (!list) return;
@@ -7035,8 +7110,9 @@ async function loadEngagements(dealId) {
 
   try {
     const engs = await apiGet('engagements', `deal_id=eq.${dealId}&select=*&order=engagement_date.desc,created_at.desc`);
+    const leadHistoryHtml = await _dealLeadHistoryHtml(dealId);
     if (!engs.length) {
-      list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>';
+      list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>' + leadHistoryHtml;
       return;
     }
 
@@ -7147,7 +7223,7 @@ async function loadEngagements(dealId) {
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:right;white-space:nowrap;">Completed</th>
         </tr></thead>
         <tbody>${rows}</tbody>
-      </table>`;
+      </table>${leadHistoryHtml}`;
     startEditCountdownTicker();   // drive the per-engagement edit-window countdowns
   } catch(err) {
     list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);">Error: ${err.message}</div>`;
