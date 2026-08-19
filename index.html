@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -651,7 +651,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11375,7 +11375,12 @@ async function adminDeleteDeal(id) {
 const AUDIT_TABLES = ['leads','deals','organisations','people','sites','engagements',
   'revenue_streams','revenue_stream_months','deal_contacts','deal_collaborators',
   'person_organisation_roles','promotion_requests','lead_stage_requests','lead_red_flags',
-  'settings','system_users','user_roles','role_permissions'];
+  'settings','system_users','user_roles','role_permissions',
+  // The service taxonomy drives every margin and revenue figure — audited from
+  // v7.8.53 (sql/add_service_taxonomy_audit.sql).
+  'service_major','service_sub',
+  // Work projects + their time entries.
+  'work_projects'];
 const AUDIT_PAGE_SIZE = 200;
 let _auditOffset = 0;
 
@@ -18308,6 +18313,16 @@ async function openPromoteQ4Screen2() {
   const subs = (allData['service_sub_all'] || []).filter(s2 => _focusMajorIds.includes(+s2.major_id));
   const subOpts = '<option value="">— select —</option>' +
     subs.map(s2 => `<option value="${s2.id}" data-recurring="${s2.is_recurring?1:0}" data-margin="${s2.default_margin||25}" data-duration="${s2.default_duration||0}" ${+s.q4.serviceSubId===+s2.id?'selected':''}>${s2.name}${s2.is_recurring?' (recurring)':' (project)'}</option>`).join('');
+  // An empty list is a configuration gap, not a user mistake — name it, and say
+  // where it is fixed, instead of presenting an empty required dropdown.
+  const _focusName = focusMajorNames(leadData) || 'this service focus';
+  const noSubsNote = subs.length ? '' : `
+            <div style="margin-top:8px;padding:10px 12px;background:#FEF3C7;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;">
+              <strong>No service types are set up for ${cEsc(_focusName)}.</strong>
+              Until at least one exists, this lead cannot be promoted. Add them under
+              <strong>Site Admin &rarr; Lookups &rarr; Service Sub</strong> (set Major Category to
+              ${cEsc(_focusName)}), or change the lead's service focus on the Overview tab.
+            </div>`;
 
   // Default order/start dates if not set
   if (!s.q4.orderDate) s.q4.orderDate = new Date().toISOString().slice(0,10);
@@ -18334,8 +18349,9 @@ async function openPromoteQ4Screen2() {
 
           <div class="form-group">
             <label class="form-label">Service type <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-            <select id="promote-q4-service-sub" class="form-control" onchange="_onPromoteQ4ServiceSubChange()">${subOpts}</select>
+            <select id="promote-q4-service-sub" class="form-control" onchange="_onPromoteQ4ServiceSubChange()" ${subs.length ? '' : 'disabled'}>${subOpts}</select>
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">Drives recurring vs project, default margin, and default duration.</div>
+            ${noSubsNote}
           </div>
 
           <div class="form-row">
@@ -18436,7 +18452,14 @@ function buildAndValidateQ4Screen2(s) {
   const subId    = +(document.getElementById('promote-q4-service-sub')?.value || 0);
   const orderDt  = (document.getElementById('promote-q4-order-date')?.value || '').trim();
   const startDt  = (document.getElementById('promote-q4-start-date')?.value || '').trim();
-  if (!subId)   { showStatus('Pick a service type', 'error'); return false; }
+  if (!subId) {
+    const sel = document.getElementById('promote-q4-service-sub');
+    const configured = sel ? [...sel.options].some(o => o.value) : true;
+    showStatus(configured
+      ? 'Pick a service type'
+      : 'No service types are set up for this service focus — add one under Site Admin → Lookups → Service Sub', 'error');
+    return false;
+  }
   if (!orderDt) { showStatus('Expected order date is required', 'error'); return false; }
   if (!startDt) { showStatus('Service start date is required', 'error'); return false; }
   const subRow = (allData['service_sub_all'] || []).find(x => +x.id === subId);
