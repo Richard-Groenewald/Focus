@@ -60,6 +60,25 @@ function sbRest(key, method, path, body) {
   });
 }
 
+// Credential columns must never leave this function. Focus has no RLS — the proxy
+// runs on the service key, so anything PostgREST will serve is reachable by anyone
+// who can call the function. That is a known property of the whole app (every
+// table is readable), but a password hash + salt is a different order of problem:
+// it is an offline brute-force target for every account at once. So the columns
+// are stripped from every system_users response, whatever the caller asked for.
+const CREDENTIAL_COLUMNS = ['password_hash', 'password_salt', 'password'];
+function scrubCredentials(bodyText) {
+  let parsed;
+  try { parsed = JSON.parse(bodyText); } catch (e) { return bodyText; }   // errors, empties: untouched
+  const strip = (o) => {
+    if (!o || typeof o !== 'object') return o;
+    CREDENTIAL_COLUMNS.forEach(c => { if (c in o) delete o[c]; });
+    return o;
+  };
+  const out = Array.isArray(parsed) ? parsed.map(strip) : strip(parsed);
+  return JSON.stringify(out);
+}
+
 const authReply = (statusCode, obj) => ({
   statusCode, headers: { 'Content-Type': 'application/json', ...CORS }, body: JSON.stringify(obj),
 });
@@ -133,6 +152,7 @@ exports.handler = async (event) => {
   }
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
+  const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
   return new Promise(resolve => {
     const doReq = (attempt) => {
       const req = https.request({
@@ -153,7 +173,7 @@ exports.handler = async (event) => {
         res.on('end', () => resolve({
           statusCode: res.statusCode,
           headers: { 'Content-Type': 'application/json', ...CORS },
-          body: d
+          body: isSystemUsers ? scrubCredentials(d) : d
         }));
       });
       req.on('error', e => {
