@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -646,12 +646,13 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
         <div id="conn-status" class="conn-badge offline"><div class="conn-dot"></div> Offline</div>
+        <button class="btn btn-sm" onclick="openChangePasswordModal()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Password</button>
         <button class="btn btn-sm" id="masquerade-btn" onclick="openMasqueradeModal()" style="display:none;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Work as…</button>
         <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2758,6 +2759,7 @@ const PAGES = {
       { key: 'person_id', label: 'Person', lookup: 'people', lookupLabel: r => [r.first_name, r.last_name].filter(Boolean).join(' ') },
       { key: 'username',  label: 'Username' },
       { key: 'active',    label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+      { key: 'must_set_password', label: 'Password', render: v => v ? '<span class="badge" style="background:#FEF3C7;color:#92400E;">Must choose</span>' : '<span class="badge badge-green">Set</span>' },
       { key: 'created_at', label: 'Created', render: v => v ? new Date(v).toLocaleDateString('en-ZA') : '' },
     ],
     fields: [
@@ -3412,6 +3414,11 @@ async function loadTable(page) {
       const profileBtn = (currentPage === 'people' || currentPage === 'contacts')
         ? `<button class="btn btn-ghost btn-sm" onclick="showPersonProfile(${row.id})">Profile</button>`
         : '';
+      // Passwords are never set BY an admin — only cleared, so the person chooses
+      // their own next time. The row already shows whether one is outstanding.
+      const resetPwBtn = currentPage === 'system_users'
+        ? `<button class="btn btn-ghost btn-sm" onclick="resetUserPassword(${row.id}, '${String(row.username || '').replace(/'/g, "\\'")}')" title="Clear their password — they choose a new one at next sign-in">Reset password</button>`
+        : '';
       // System rows (cfg.systemFlag) are required by app logic keyed on their name —
       // editable (e.g. to deactivate) but not deletable.
       const isSystemRow = cfg.systemFlag && row[cfg.systemFlag];
@@ -3421,6 +3428,7 @@ async function loadTable(page) {
       const actions = cfg.readOnly ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
         ${contactsBtn}
         ${profileBtn}
+        ${resetPwBtn}
         <button class="btn btn-ghost btn-sm" onclick="openEditModal(${row.id})">Edit</button>
         ${delBtn}
       </td>`;
@@ -9224,6 +9232,106 @@ function isExecutive() {
 let realUser = null;   // the human actually signed in, while a masquerade is active
 
 const isMasquerading = () => !!realUser;
+
+// ── Change your own password ─────────────────────────────────────────────────
+// Calls the same /auth 'set' action the first-time screen uses, but WITH the
+// current password — the function refuses the change without it, so this is not a
+// route to setting somebody else's. Blocked while masquerading: "your" password is
+// ambiguous when you are working as another user, and silently changing the real
+// account's password from behind someone else's face is the kind of surprise an
+// audit trail cannot undo.
+function openChangePasswordModal() {
+  if (!currentUser) return;
+  if (isMasquerading()) {
+    showStatus('Return to yourself before changing your password', 'error');
+    return;
+  }
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal" style="width:420px;">
+        <div class="modal-header">
+          <div class="modal-title">Change your password</div>
+          <button class="modal-close" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">
+            Signed in as <strong>${cEsc(currentUser.name || '')}</strong>. You need your current password to change it.
+          </div>
+          <div class="form-group">
+            <label class="form-label">Current password</label>
+            <input type="password" id="cpw-current" class="form-control" autocomplete="current-password">
+          </div>
+          <div class="form-group">
+            <label class="form-label">New password</label>
+            <input type="password" id="cpw-new" class="form-control" autocomplete="new-password" oninput="renderCpwHint()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Confirm new password</label>
+            <input type="password" id="cpw-new2" class="form-control" autocomplete="new-password"
+                   oninput="renderCpwHint()" onkeydown="if(event.key==='Enter')submitChangePassword()">
+          </div>
+          <div id="cpw-hint" style="font-size:11px;color:var(--text3);"></div>
+          <div id="cpw-error" style="display:none;color:var(--red);font-size:13px;margin-top:10px;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="submitChangePassword()">Change password</button>
+        </div>
+      </div>
+    </div>`;
+  renderCpwHint();
+}
+
+function renderCpwHint() {
+  const el = document.getElementById('cpw-hint');
+  if (!el) return;
+  const a = document.getElementById('cpw-new')?.value || '';
+  const b = document.getElementById('cpw-new2')?.value || '';
+  if (!a) { el.textContent = PW_MIN > 1 ? `At least ${PW_MIN} characters.` : 'Any password will do for now.'; el.style.color = 'var(--text3)'; return; }
+  if (a.length < PW_MIN) { el.textContent = `${PW_MIN - a.length} more character${PW_MIN - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
+  if (b && a !== b) { el.textContent = 'The two entries do not match.'; el.style.color = 'var(--red)'; return; }
+  el.textContent = b ? 'Ready.' : 'Confirm it below.';
+  el.style.color = b ? '#166534' : 'var(--text3)';
+}
+
+async function submitChangePassword() {
+  const err = document.getElementById('cpw-error');
+  const fail = (m) => { if (err) { err.textContent = m; err.style.display = 'block'; } };
+  const current = document.getElementById('cpw-current')?.value || '';
+  const a = document.getElementById('cpw-new')?.value || '';
+  const b = document.getElementById('cpw-new2')?.value || '';
+  if (err) err.style.display = 'none';
+  if (!current) { fail('Enter your current password'); return; }
+  if (a.length < PW_MIN) { fail(PW_MIN > 1 ? `New password must be at least ${PW_MIN} characters` : 'Enter a new password'); return; }
+  if (a !== b) { fail('The two new entries do not match'); return; }
+  if (a === current) { fail('The new password is the same as the current one'); return; }
+  startBusy('Changing password\u2026');
+  try {
+    const r = await authCall({ action: 'set', userId: +currentUser.id, password: current, newPassword: a });
+    if (!r || !r.ok) { fail((r && r.error) || 'Could not change the password'); return; }
+    closeModal();
+    showStatus('Password changed');
+  } catch (e) {
+    fail('Could not reach the server \u2014 try again');
+  } finally { stopBusy(); }
+}
+
+// Admin: force somebody to choose a new password at their next sign-in. This is
+// the ONLY reset an admin can perform — you cannot set a password on another
+// person's behalf, and you never see theirs. Clearing the stored hash as well as
+// setting the flag means the old password is dead the moment you confirm.
+async function resetUserPassword(userId, label) {
+  if (!confirm(`Reset the password for ${label || 'this user'}?\n\nTheir current password stops working immediately, and they will choose a new one the next time they sign in. You will not see it.`)) return;
+  startBusy('Resetting\u2026');
+  try {
+    await api('system_users', 'PATCH',
+      { password_hash: null, password_salt: null, password_set_at: null, must_set_password: true },
+      'id=eq.' + (+userId));
+    showStatus('Password reset — they will choose a new one at next sign-in');
+  } catch (e) {
+    showStatus('Reset failed: ' + e.message, 'error');
+  } finally { stopBusy(); }
+}
 
 async function openMasqueradeModal() {
   if (!can('masquerade_user') && !isMasquerading()) { showStatus('You cannot do that', 'error'); return; }
