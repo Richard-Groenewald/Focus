@@ -600,7 +600,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <!-- First sign-in after the password release: choose one before going further. -->
     <div id="login-setpw" style="display:none;text-align:left;margin-bottom:16px;">
       <div style="padding:9px 11px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;margin-bottom:12px;">
-        <strong>Choose a password.</strong> Focus now needs one to sign in. At least 8 characters — letters, numbers and symbols all welcome.
+        <strong>Choose a password.</strong> Focus now needs one to sign in. Any length for now — letters, numbers and symbols all welcome. Pick something you will remember; length rules come later.
       </div>
       <label class="form-label">New password</label>
       <input type="password" id="login-newpw" class="form-control" style="font-size:14px;margin-bottom:10px;" autocomplete="new-password"
@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -651,7 +651,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8875,6 +8875,11 @@ function openInstallGuide() {
 // password per user, PBKDF2-hashed and verified inside the Netlify function so
 // the hash never reaches the browser. No sessions — currentUser lives in memory,
 // so a refresh is already a logout. Tightened with the wider permissions work.
+// Minimum password length. Deliberately low for now (see sb.js MIN_PASSWORD_LENGTH,
+// which is the one that actually enforces it — this copy only drives the wording
+// and the client-side nudge). Keep the two in step.
+const PW_MIN = 1;
+
 async function authCall(payload) {
   const res = await fetch(`${FN_URL}/auth`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -8904,8 +8909,8 @@ function renderLoginPwStrength() {
   if (!el) return;
   const a = document.getElementById('login-newpw')?.value || '';
   const b = document.getElementById('login-newpw2')?.value || '';
-  if (!a) { el.textContent = 'At least 8 characters.'; el.style.color = 'var(--text3)'; return; }
-  if (a.length < 8) { el.textContent = `${8 - a.length} more character${8 - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
+  if (!a) { el.textContent = PW_MIN > 1 ? `At least ${PW_MIN} characters.` : 'Any password will do for now.'; el.style.color = 'var(--text3)'; return; }
+  if (a.length < PW_MIN) { el.textContent = `${PW_MIN - a.length} more character${PW_MIN - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
   if (b && a !== b) { el.textContent = 'The two entries do not match.'; el.style.color = 'var(--red)'; return; }
   el.textContent = b ? 'Ready.' : 'Long enough — confirm it below.';
   el.style.color = b ? '#166534' : 'var(--text3)';
@@ -8916,7 +8921,7 @@ async function submitNewPassword() {
   const a = document.getElementById('login-newpw').value || '';
   const b = document.getElementById('login-newpw2').value || '';
   if (!userId) { _loginMsg('Please select a user'); return; }
-  if (a.length < 8) { _loginMsg('Password must be at least 8 characters'); return; }
+  if (a.length < PW_MIN) { _loginMsg(PW_MIN > 1 ? `Password must be at least ${PW_MIN} characters` : 'Enter a password'); return; }
   if (a !== b) { _loginMsg('The two entries do not match'); return; }
   _loginMsg('');
   try {

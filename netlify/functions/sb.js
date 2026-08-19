@@ -32,10 +32,12 @@ function passwordMatches(password, salt, expectedHex) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-// 8+ characters. Any letters, digits or punctuation are allowed — no composition
-// rules, on purpose: length is what matters and arbitrary rules push people to
-// write passwords down. Tightened later with the wider permissions work.
-const passwordAcceptable = (p) => typeof p === 'string' && p.length >= 8 && p.length <= 200;
+// Minimum length, and nothing else: any letters, digits or punctuation are fine.
+// Set to 1 on 19 Aug 2026 at Richard's instruction ("for now") — which means the
+// length check is effectively decorative until it goes back up. Raise it HERE and
+// in PW_MIN in index.html; those two are the only places the number lives.
+const MIN_PASSWORD_LENGTH = 1;
+const passwordAcceptable = (p) => typeof p === 'string' && p.length >= MIN_PASSWORD_LENGTH && p.length <= 200;
 
 // Minimal REST helper against Supabase, service key, for the auth endpoint only.
 function sbRest(key, method, path, body) {
@@ -115,7 +117,9 @@ async function handleAuth(event, key) {
     }
     const next = String(body.newPassword || '');
     if (!passwordAcceptable(next)) {
-      return authReply(200, { ok: false, error: 'Password must be at least 8 characters' });
+      return authReply(200, { ok: false, error: MIN_PASSWORD_LENGTH > 1
+        ? `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+        : 'Enter a password' });
     }
     const salt = crypto.randomBytes(16).toString('hex');
     try {
