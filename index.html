@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3193,10 +3193,50 @@ function toggleSidebar() {
   window.dispatchEvent(new Event('resize'));
 }
 
+// ── Scope defaults for view-only accounts ─────────────────────────────
+// Every scoped view in Focus opens on the viewer's OWN records. For a read-only
+// account that is an empty screen by definition — they own no leads, no deals,
+// and have logged no engagements — so without this they would sign in to blank
+// registers and a dashboard of zeros, and have to click "Show All" on every page
+// on every visit.
+//
+// So a read-only user STARTS at All wherever their rights allow it. Nobody
+// else's defaults change. This is a starting position, not a restriction: the
+// scope buttons still work, and for the views that remember a choice we seed
+// only when the user has never made one, so an explicit preference always wins.
+//
+// Runs once per signed-in person (masquerading counts as a different person),
+// which is why it can be called from showPage without stamping on a switch made
+// mid-session.
+let _scopeDefaultsAppliedFor;
+
+function applyViewerScopeDefaults() {
+  const pid = (typeof currentUser !== 'undefined' && currentUser) ? currentUser.personId : null;
+  if (pid === _scopeDefaultsAppliedFor) return;
+  _scopeDefaultsAppliedFor = pid;
+  if (!isReadOnlyUser()) return;
+
+  // Re-rendered from these on every page load, so a plain assignment is enough.
+  if (can('view_all_leads')) leadsOwnerView = 'all';
+  if (can('view_all_opportunities')) oppsOwnerView = 'all';
+  if (typeof _milPageState !== 'undefined' && _milPageCanAll()) _milPageState.scope = 'all';
+
+  // Remembered per user in localStorage: seed only when nothing is stored yet.
+  const seed = (key, val) => {
+    try { if (key && !localStorage.getItem(key)) localStorage.setItem(key, val); } catch (e) {}
+  };
+  seed(_engHistScopeKey(), 'all');
+  seed(_intActScopeKey(), 'all');
+  // The dashboard key also drives the Interactions card and the Reports page,
+  // which both inherit _dashScope().
+  if (_dashScopeOptions().includes('all')) seed(_dashScopeKey(), 'all');
+}
+
 function showPage(page) {
   currentPage = page;
   const cfg = PAGES[page];
   if (!cfg) return;
+  applyViewerScopeDefaults();
 
   // Update nav highlight
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
