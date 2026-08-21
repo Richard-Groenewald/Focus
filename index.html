@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1927,6 +1927,13 @@ document.addEventListener('mousedown', (e) => {
 
 async function api(table, method='GET', body=null, params='') {
   if (MOCK) return mockApi(table, method, body, params);
+  // View-only accounts: refuse every write here rather than trusting the UI to
+  // have hidden the control that produced it.
+  if (method !== 'GET' && isReadOnlyUser() && !READ_ONLY_WRITE_ALLOW.includes(table)) {
+    const msg = 'Your access is view-only — nothing was saved.';
+    try { showStatus(msg, 'error'); } catch (e) {}
+    throw new Error(msg);
+  }
   _netBusy(true);
   try {
   const url = `${FN_URL}/${table}${params ? '?' + params : ''}`;
@@ -3225,7 +3232,21 @@ function showPage(page) {
 
   // Show/hide and wire add button
   const addBtn = document.getElementById('add-btn');
-  addBtn.style.display = (cfg.readOnly) ? 'none' : '';
+  const viewOnly = isReadOnlyUser();
+  addBtn.style.display = (cfg.readOnly || viewOnly) ? 'none' : '';
+  // Standing chip: without it, a viewer just finds controls missing and wonders
+  // whether the page failed to load.
+  let roChip = document.getElementById('readonly-chip');
+  if (viewOnly && !roChip) {
+    roChip = document.createElement('span');
+    roChip.id = 'readonly-chip';
+    roChip.textContent = 'View only';
+    roChip.title = 'Your access is view-only. You can see everything here but cannot change it.';
+    roChip.style.cssText = 'font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;'
+      + 'color:#7A5B10;background:#FEF3C7;border:1px solid #E9C46A;border-radius:10px;padding:3px 9px;white-space:nowrap;';
+    addBtn.parentNode.insertBefore(roChip, addBtn);
+  }
+  if (roChip) roChip.style.display = viewOnly ? '' : 'none';
   // Clear the ownership view-filter bar; only the leads/opportunities renderers repopulate it.
   const viewBar = document.getElementById('view-filter-bar');
   if (viewBar) viewBar.innerHTML = '';
@@ -3438,7 +3459,7 @@ async function loadTable(page) {
       const delBtn = isSystemRow
         ? '<span class="text-muted text-sm" title="System record — required by app workflows. Deactivate instead of deleting.">System</span>'
         : `<button class="btn btn-danger btn-sm" onclick="confirmDelete(${row.id})">Delete</button>`;
-      const actions = cfg.readOnly ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
+      const actions = (cfg.readOnly || isReadOnlyUser()) ? '<td><span class="text-muted text-sm">Read only</span></td>' : `<td>
         ${contactsBtn}
         ${profileBtn}
         ${resetPwBtn}
@@ -9202,6 +9223,34 @@ async function doLogin() {
     errEl.textContent = 'Login failed: ' + e.message;
     errEl.style.display = 'block';
   }
+}
+
+// ── Read-only users ─────────────────────────────────────────────
+// Focus gates page VISIBILITY on manage_leads / manage_opportunities, and those
+// two permissions are checked nowhere else in the app — so reaching a page has
+// always meant being able to edit on it. This is the missing half: a `read_only`
+// permission that suppresses every write for whoever holds it, while leaving
+// what they can SEE completely untouched.
+//
+// The real guard is inside api(). Every write in the app goes through that one
+// function, so an edit control somewhere that I failed to hide still cannot
+// save. The UI suppression is cosmetic by comparison — it exists so the app
+// reads as deliberately view-only rather than mysteriously broken.
+//
+// ⚠️ UI-LEVEL ONLY. Focus has no RLS and the proxy runs on the service key, so
+// this stops accidents and casual mischief — NOT someone determined with the
+// network tab open. Never describe it as enforcement.
+//
+// Two tables stay writable: the presence heartbeat (or they would look offline
+// to everyone else) and bug reports (a viewer who spots a problem should still
+// be able to say so).
+const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports'];
+
+function isReadOnlyUser() {
+  if (typeof currentUser === 'undefined' || !currentUser) return false;
+  if (currentUser.isAdmin) return false;
+  const perms = currentUser.permissions || [];
+  return !perms.includes('all') && perms.includes('read_only');
 }
 
 function can(permission) {
@@ -20482,6 +20531,7 @@ async function _rptActivity(st) {
   // Distinct LEADS per period, not events: a lead that bounces out of Qualified
   // and back inside one period is one qualified lead, not two.
   const qualSeen = periods.map(() => new Set());
+  const qualAll = new Set();
   const qualRows = [];
   const orgLabel = l => {
     const o = l.target_org_id ? orgById[+l.target_org_id] : null;
@@ -20495,6 +20545,7 @@ async function _rptActivity(st) {
     if (!l) continue;                         // lead since deleted — not counted
     if (!inScope(l, null)) continue;
     qualSeen[i].add(+s.lead_id);
+    qualAll.add(+s.lead_id);
     qualRows.push({ date: day, period: periods[i].label, org: orgLabel(l),
                     site: (l.site_name || '').trim(), leadId: +s.lead_id,
                     description: l.description || '', from: s.from_status || '(new)',
@@ -20504,7 +20555,8 @@ async function _rptActivity(st) {
   qualRows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
   return { periods, totals, byChannel, byMeetingType, byMilestoneType, byPerson,
-           qualRows, stageOk, pendingMils, internalSkipped, dropped, futureCount, st };
+           qualRows, stageOk, pendingMils, internalSkipped, dropped, futureCount,
+           qualDistinct: qualAll.size, st };
 }
 
 // ── Painting ────────────────────────────────────────────────────────────────
@@ -20601,6 +20653,13 @@ function _rptPaint() {
   if (m.pendingMils) notes.push(`${m.pendingMils} milestone${m.pendingMils === 1 ? '' : 's'} in this range still await review and are not counted above.`);
   if (m.internalSkipped) notes.push(`${m.internalSkipped} engagement${m.internalSkipped === 1 ? ' is' : 's are'} marked internal work and excluded by definition.`);
   if (m.futureCount) notes.push(`${m.futureCount} engagement${m.futureCount === 1 ? ' is' : 's are'} dated after ${st.to} and so fall outside this range — activity booked but not yet done.`);
+  // Each period counts DISTINCT leads, so the row total double-counts anyone who
+  // qualified in two of them. Say so instead of quietly overstating.
+  const qualSum = _rptSum(m.totals.qualified);
+  if (m.stageOk && m.qualDistinct != null && qualSum > m.qualDistinct)
+    notes.push(`Leads qualified totals ${qualSum} because each period counts distinct leads and `
+      + `${qualSum - m.qualDistinct} lead${qualSum - m.qualDistinct === 1 ? '' : 's'} qualified in more than one period; `
+      + `${m.qualDistinct} distinct leads qualified across the whole range.`);
   notes.push('First and last periods can be partial — only days inside the chosen range are counted.');
   notes.push('Outreach counts real contact (Call, Email, Meeting, Site Visit, Demo, LinkedIn) on leads and opportunities; Notes, Promotion rows and internal work are excluded. Milestones are dated by their engagement. Leads qualified counts distinct leads entering Qualified, from the stage history — not the overwritable qualified_at.');
 
