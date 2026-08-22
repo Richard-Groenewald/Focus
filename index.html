@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6743,19 +6743,26 @@ function pbOpenSchema(id) { pbActiveSchema = id; pbEditingRowId = null; renderPb
 function pbBackToHrGrid() { pbActiveSchema = null; pbEditingRowId = null; renderPbHumanResourcesPage(); }
 
 // ── Statutory Salary Rates — the version grid ────────────────────────────────
-// Replaces the flat row editor for this one tile. Sectoral wage tables are published as a grid
-// per determination, with blocks of areas and grades sharing a rate, and that is the shape people
-// check their work against.
+// Sectoral wage tables are published as a grid per determination, and this screen edits one the
+// way Richard laid it out (mock, 2026-08-22): every area keeps its own pair of columns; AREAS
+// combine into column groups whose shared description ("Urban" over Areas 1 & 2) lives in its
+// own header row; within each area group, GRADES combine into row blocks. Only the FIRST area's
+// columns, and within a row block only the TOP row, accept typing — red text marks the entry
+// cells, every other member is a tinted echo that fills as you type.
 //
-// A VERSION is one effective date, running until the next starts. A rate GROUP is a block of
-// cells sharing one monthly and one hourly figure under a label; it belongs to its version,
-// because the blocks change between determinations. Groups are DECLARED, never inferred from
-// equal figures — in Areas 3 & 4 Grade B has carried the same rate as C/D/E in every captured
-// year, while in Areas 1 & 2 it stands alone, so equal figures prove nothing on their own.
+// Combining is DECLARED (select columns or rows, right-click or use the Combine button), never
+// inferred from equal figures: rural has carried one rate for B–E in every captured year while
+// urban keeps B on its own, so grades group differently per area and equal figures prove nothing.
 //
-// Underneath, quote_salary_rates is untouched: one row per area × grade × effective date, with a
-// group's figures written across every member row. See sql/add_quote_rate_groups.sql.
-let _srState = { version: null, sel: new Set(), busy: false };
+// A VERSION is one effective date, running until the next starts. Only the NEWEST version opens
+// editable; superseded determinations are history that future quotes will pin, so they open
+// read-only behind an explicit "Edit this version".
+//
+// Storage is unchanged underneath: quote_salary_rates holds one row per area × grade × date with
+// a block's figures repeated across members; quote_rate_groups/_cells hold the cell blocks;
+// quote_rate_area_groups/_members hold the column groups and their per-version descriptions.
+let _srState = { version: null, editing: false, busy: false,
+                 selAreas: new Set(), selRowsAg: null, selRows: new Set(), menuCtx: null };
 
 const _srKey = (areaId, gradeId) => areaId + ':' + gradeId;
 
@@ -6763,46 +6770,20 @@ const _srKey = (areaId, gradeId) => areaId + ':' + gradeId;
 // value pasted from the agreement PDF in en-ZA form (8 184,00), where a naive strip of the
 // comma's neighbours would hundred-fold a wage. A comma is thousands only when it looks like it.
 function _srParseNum(v) {
-  let t = String(v == null ? '' : v).replace(/[\s\u00a0R]/g, '');
+  let t = String(v == null ? '' : v).replace(/[\s R]/g, '');
   if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/,/g, '');       // 8,184.00
-  else if (/^-?\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, '');             // 6,256 / 1,234,567
+  else if (/^-?\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, '');              // 6,256 / 1,234,567
   else if (t.indexOf(',') > -1) t = t.replace(',', '.');                         // pasted 8184,00
   const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
   return isFinite(n) ? n : NaN;
 }
-
 const _srNum = code => { const m = String(code || '').match(/(\d+)/); return m ? +m[1] : 0; };
+const _srFmt = (v, maxDp) => (v == null || v === '' || !isFinite(+v)) ? ''
+  : (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: maxDp || 2 });
 
-// "Areas 1 & 2", "Grades B–E", "Grade A" — contiguous runs collapse to a dash, scattered
-// members join with slashes, so the label always describes the block it actually covers.
-function _srRunLabel(items, one, many) {
-  if (!items.length) return '';
-  const codes = items.map(i => i.short);
-  if (codes.length === 1) return one + ' ' + codes[0];
-  const nums = items.map(i => i.ord);
-  const contiguous = nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
-  if (codes.length === 2) return many + ' ' + codes[0] + ' & ' + codes[1];
-  if (contiguous) return many + ' ' + codes[0] + '–' + codes[codes.length - 1];
-  return many + ' ' + codes.join('/');
-}
-
-function _srAutoLabel(cellKeys, areaById, gradeById) {
-  const areas = [], grades = [];
-  const seenA = new Set(), seenG = new Set();
-  for (const k of cellKeys) {
-    const [a, g] = k.split(':').map(Number);
-    if (!seenA.has(a) && areaById[a]) { seenA.add(a); areas.push({ short: String(_srNum(areaById[a].code)), ord: _srNum(areaById[a].code) }); }
-    if (!seenG.has(g) && gradeById[g]) { seenG.add(g); grades.push({ short: gradeById[g].code, ord: (gradeById[g].code || '').charCodeAt(0) }); }
-  }
-  areas.sort((x, y) => x.ord - y.ord); grades.sort((x, y) => x.ord - y.ord);
-  return [_srRunLabel(areas, 'Area', 'Areas'), _srRunLabel(grades, 'Grade', 'Grades')]
-    .filter(Boolean).join(' · ');
-}
-
-function _srGroupLabel(grp, keys, areaById, gradeById) {
-  if (grp && !grp.label_is_auto && grp.label) return grp.label;
-  return _srAutoLabel(keys, areaById, gradeById);
-}
+// Subtle block tints, one per combined block in paint order — matching the mock's habit of
+// giving each block its own colour so membership reads at a glance.
+const _SR_FILLS = ['#FBF0E0', '#FCE8F1', '#E2EDFB', '#E2F5E8', '#DFF1F0', '#FBF6DA', '#EFE7FA'];
 
 async function renderSalaryRateGrid() {
   pbActiveSchema = 'salary-rates';
@@ -6814,6 +6795,7 @@ async function renderSalaryRateGrid() {
     <div id="sr-page" style="padding:0 0 24px;">
       <div id="sr-top" style="margin-bottom:14px;"></div>
       <div id="sr-body"><div style="padding:20px;color:var(--text3);">Loading rates…</div></div>
+      <div id="sr-menu" style="display:none;position:fixed;z-index:100001;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.18);padding:4px;min-width:210px;"></div>
     </div></td></tr>`;
   try {
     const [rates, areas, grades] = await Promise.all([
@@ -6821,26 +6803,29 @@ async function renderSalaryRateGrid() {
       apiGet('quote_areas', 'select=*&order=display_order.asc,id.asc'),
       apiGet('quote_grades', 'select=*&order=display_order.asc,id.asc'),
     ]);
-    let groups = [], cells = [];
+    let groups = [], cells = [], areaGroups = [], areaMembers = [];
     try {
-      // NOT apiGetAll for the cells: it pages on an id column, and the cell table's key is the
-      // composite (group_id, area_id, grade_id) — no id exists, so PostgREST 400s and the page
-      // wrongly reads that as "migration missing". One grid is 4 versions x 20 cells = 80 rows,
-      // far under the 1000-row cap, so a single ordered GET is the correct fetch.
-      [groups, cells] = await Promise.all([
+      // The two composite-key tables have no id column, and apiGetAll's paging tie-break
+      // appends id.asc to any order= it is given - the exact 400 that broke v7.8.62. They are
+      // tiny (20 rows per version), so a single ordered GET is the right fetch.
+      [groups, cells, areaGroups, areaMembers] = await Promise.all([
         apiGetAll('quote_rate_groups', 'select=*'),
-        apiGet('quote_rate_group_cells', 'select=*&order=group_id.asc&limit=1000'),
+        apiGet('quote_rate_group_cells', 'select=*&order=group_id.asc'),
+        apiGetAll('quote_rate_area_groups', 'select=*'),
+        apiGet('quote_rate_area_group_members', 'select=*&order=group_id.asc'),
       ]);
     } catch (e) {
       document.getElementById('sr-body').innerHTML =
         `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
-           Rate groups need the migration — <strong>sql/add_quote_rate_groups.sql</strong>.</div>`;
+           This screen needs the migrations — <strong>sql/add_quote_rate_groups.sql</strong> and
+           <strong>sql/add_quote_rate_area_groups.sql</strong>.</div>`;
       return;
     }
-    window._srData = { rates, areas, grades, groups, cells };
-    const versions = [...new Set(rates.map(r => r.effective_date))].sort().reverse();
+    window._srData = { rates, areas, grades, groups, cells, areaGroups, areaMembers };
+    const versions = _srVersions();
     if (!_srState.version || !versions.includes(_srState.version)) _srState.version = versions[0] || null;
-    _srState.sel = new Set();
+    _srState.editing = _srState.version === versions[0];
+    _srBuildDraft();
     _srPaint();
   } catch (e) {
     document.getElementById('sr-body').innerHTML =
@@ -6848,65 +6833,119 @@ async function renderSalaryRateGrid() {
   }
 }
 
-function _srSetVersion(v) { _srState.version = v; _srState.sel = new Set(); _srPaint(); }
+function _srVersions() {
+  const d = window._srData;
+  return [...new Set([...d.rates.map(r => r.effective_date), ...d.areaGroups.map(g => g.effective_date)])]
+    .sort().reverse();
+}
 
-function _srToggleCell(areaId, gradeId) {
-  const k = _srKey(areaId, gradeId);
-  const d = window._srData; if (!d) return;
-  // Clicking an ungrouped-selection-free cell that belongs to a block picks the whole block —
-  // the common case is editing a rate, not rebuilding the grouping.
-  const grp = _srGroupOf(k);
-  if (!_srState.sel.size && grp) {
-    _srCellsOfGroup(grp.id).forEach(x => _srState.sel.add(x));
-  } else if (_srState.sel.has(k)) {
-    _srState.sel.delete(k);
-  } else {
-    _srState.sel.add(k);
+// ── Draft: the working copy the grid edits ───────────────────────────────────
+// areaGroups: [{ members:[areaId..], description, rowBlocks:[[gradeId..]..] }], plus a value map
+// per cell. Combining and typing mutate the draft; Save persists it as one action.
+function _srBuildDraft() {
+  const d = window._srData;
+  const v = _srState.version;
+  const areaOrder = d.areas.map(a => +a.id);
+  const gradeOrder = d.grades.map(g => +g.id);
+  const byAreaOrd = (x, y) => areaOrder.indexOf(x) - areaOrder.indexOf(y);
+  const byGradeOrd = (x, y) => gradeOrder.indexOf(x) - gradeOrder.indexOf(y);
+
+  // Column groups: every area sits in exactly one; areas the data doesn't cover yet become
+  // groups of one carrying their lookup description.
+  const ags = [];
+  const placed = new Set();
+  for (const g of d.areaGroups.filter(x => x.effective_date === v)) {
+    const members = d.areaMembers.filter(m => +m.group_id === +g.id).map(m => +m.area_id).sort(byAreaOrd);
+    if (!members.length) continue;
+    members.forEach(a => placed.add(a));
+    ags.push({ members, description: g.description || '' });
   }
+  for (const a of d.areas) {
+    if (!placed.has(+a.id)) ags.push({ members: [+a.id], description: a.description || '' });
+  }
+  ags.sort((x, y) => byAreaOrd(x.members[0], y.members[0]));
+
+  // Row blocks per column group, read from the cell blocks whose area footprint matches the
+  // group. Anything that doesn't line up (legacy free-form blocks) degrades to single rows.
+  for (const ag of ags) {
+    const memberSet = ag.members.slice().sort((a, b) => a - b).join(',');
+    const blocks = [];
+    const covered = new Set();
+    for (const grp of d.groups.filter(x => x.effective_date === v)) {
+      const cs = d.cells.filter(c => +c.group_id === +grp.id);
+      const areasIn = [...new Set(cs.map(c => +c.area_id))].sort((a, b) => a - b).join(',');
+      if (areasIn !== memberSet) continue;
+      const gs = [...new Set(cs.map(c => +c.grade_id))].sort(byGradeOrd);
+      if (gs.length) { blocks.push(gs); gs.forEach(g => covered.add(g)); }
+    }
+    for (const g of gradeOrder) if (!covered.has(g)) blocks.push([g]);
+    blocks.sort((x, y) => byGradeOrd(x[0], y[0]));
+    ag.rowBlocks = blocks;
+  }
+
+  // Values, one per cell, as display strings.
+  const values = {};
+  for (const a of areaOrder) for (const g of gradeOrder) {
+    const r = d.rates.find(x => x.effective_date === v && +x.area_id === a && +x.grade_id === g);
+    values[_srKey(a, g)] = r
+      ? { monthly: _srFmt(r.monthly_salary, 2), hourly: _srFmt(r.hourly_rate, 4) }
+      : { monthly: '', hourly: '' };
+  }
+  _srState.draft = { areaGroups: ags, values };
+  _srState.dirty = false;
+  _srState.selAreas = new Set(); _srState.selRowsAg = null; _srState.selRows = new Set();
+}
+
+const _srAgOf = areaId => _srState.draft.areaGroups.findIndex(ag => ag.members.includes(+areaId));
+function _srBlockOf(agIdx, gradeId) {
+  const ag = _srState.draft.areaGroups[agIdx];
+  return ag ? ag.rowBlocks.find(b => b.includes(+gradeId)) : null;
+}
+function _srEntryOf(areaId, gradeId) {
+  const agIdx = _srAgOf(areaId);
+  const ag = _srState.draft.areaGroups[agIdx];
+  const block = _srBlockOf(agIdx, gradeId);
+  return { area: ag.members[0], grade: block[0], isEntry: +areaId === ag.members[0] && +gradeId === block[0] };
+}
+
+// ── Painting ────────────────────────────────────────────────────────────────
+function _srSetVersion(v) {
+  if (v === _srState.version) return;
+  if (_srState.dirty && !confirm('Discard the unsaved changes on this version?')) return;
+  _srState.version = v;
+  _srState.editing = v === _srVersions()[0];
+  _srBuildDraft();
   _srPaint();
 }
 
-function _srGroupOf(key) {
-  const d = window._srData; if (!d) return null;
-  const [a, g] = key.split(':').map(Number);
-  const c = d.cells.find(x => x.effective_date === _srState.version && +x.area_id === a && +x.grade_id === g);
-  return c ? d.groups.find(x => +x.id === +c.group_id) : null;
-}
-function _srCellsOfGroup(groupId) {
-  const d = window._srData; if (!d) return [];
-  return d.cells.filter(x => +x.group_id === +groupId).map(x => _srKey(+x.area_id, +x.grade_id));
-}
-function _srRate(areaId, gradeId) {
-  const d = window._srData; if (!d) return null;
-  return d.rates.find(r => r.effective_date === _srState.version
-    && +r.area_id === areaId && +r.grade_id === gradeId) || null;
-}
-
-function _srClearSel() { _srState.sel = new Set(); _srPaint(); }
+function _srUnlock() { _srState.editing = true; _srPaint(); }
 
 function _srPaint() {
-  const d = window._srData;
+  const d = window._srData, st = _srState, dr = st.draft;
   const top = document.getElementById('sr-top');
   const out = document.getElementById('sr-body');
   if (!d || !top || !out) return;
   const areaById = Object.fromEntries(d.areas.map(a => [+a.id, a]));
   const gradeById = Object.fromEntries(d.grades.map(g => [+g.id, g]));
-  const versions = [...new Set(d.rates.map(r => r.effective_date))].sort().reverse();
+  const versions = _srVersions();
   const fmtDate = s => { const [y, m, dd] = String(s).split('-'); return dd + ' ' +
     ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1] + ' ' + y; };
   const today = new Date().toISOString().slice(0, 10);
   const current = versions.filter(v => v <= today)[0];
 
-  // Version tabs, each carrying its count of uncaptured cells.
-  const full = d.areas.length * d.grades.length;
+  const missing = Object.values(dr.values).filter(x => !x.monthly || !x.hourly).length;
   const tabs = versions.map(v => {
-    const n = d.rates.filter(r => r.effective_date === v).length;
-    const miss = full - n;
-    return `<button class="btn btn-sm ${v === _srState.version ? 'btn-primary' : 'btn-secondary'}"
-       onclick="_srSetVersion('${v}')" title="In force from ${fmtDate(v)}">${fmtDate(v)}${
-       v === current ? ' <span style="font-weight:400;opacity:.85;">· current</span>' : ''}${
-       miss > 0 ? ` <span style="background:var(--red);color:#fff;border-radius:8px;padding:0 5px;font-size:10px;">${miss}</span>` : ''}</button>`;
+    const n = v === st.version ? missing
+      : d.areas.length * d.grades.length - d.rates.filter(r => r.effective_date === v).length;
+    return `<button class="btn btn-sm ${v === st.version ? 'btn-primary' : 'btn-secondary'}"
+       onclick="_srSetVersion('${v}')">${fmtDate(v)}${v === current ? ' <span style="font-weight:400;opacity:.85;">· current</span>' : ''}${
+       n > 0 ? ` <span style="background:var(--red);color:#fff;border-radius:8px;padding:0 5px;font-size:10px;">${n}</span>` : ''}</button>`;
   }).join('');
+
+  // Contextual combine actions — the same set the right-click menu offers.
+  const acts = _srActions();
+  const actBtns = st.editing ? acts.map(a =>
+    `<button class="btn btn-sm btn-secondary" onclick="${a.fn}">${pbEsc(a.label)}</button>`).join('') : '';
 
   top.innerHTML = `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
@@ -6914,177 +6953,332 @@ function _srPaint() {
       <span style="display:inline-block;width:1px;height:18px;background:var(--border);"></span>
       ${tabs}
       <button class="btn btn-sm btn-secondary" onclick="_srNewVersion()">+ New version</button>
+      <span style="flex:1 1 auto;"></span>
+      ${st.editing
+        ? `${actBtns}
+           <button class="btn btn-sm btn-secondary" onclick="_srDiscard()" ${st.dirty ? '' : 'disabled'}>Discard</button>
+           <button class="btn btn-sm btn-primary" onclick="_srSave()" ${st.dirty ? '' : 'disabled'}>Save version</button>`
+        : `<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#7A5B10;background:#FEF3C7;border:1px solid #E9C46A;border-radius:10px;padding:3px 9px;">Superseded — view only</span>
+           <button class="btn btn-sm btn-secondary" onclick="_srUnlock()">Edit this version</button>`}
     </div>
     <div style="font-size:12px;color:var(--text3);">
-      Each version runs until the next one starts. Shaded blocks share one rate — editing a block
-      writes every cell in it.
+      ${st.editing
+        ? 'Type in the <span style="color:var(--red);font-weight:700;">red</span> cells — combined cells fill as you type. Click area headers or cells to select, then right-click (or use the buttons) to combine or uncombine.'
+        : 'This determination has been superseded. It opens read-only because quotes may reference it — Edit this version to make a correction.'}
     </div>`;
 
-  // The grid: areas across in pairs of Monthly / Hourly, grades down.
-  const th = (txt, extra) => `<th style="padding:8px 10px;font-size:11px;text-transform:uppercase;
-    letter-spacing:.4px;color:var(--text3);white-space:nowrap;${extra || ''}">${txt}</th>`;
-  const head1 = d.areas.map(a => th(pbEsc(a.description || a.code), 'text-align:center;border-left:1px solid var(--border);')
-    .replace('<th ', '<th colspan="2" ')).join('');
-  const head2 = d.areas.map(() => th('Monthly', 'text-align:right;border-left:1px solid var(--border);') + th('Hourly', 'text-align:right;')).join('');
+  // Colour per combined block / combined column group, in paint order.
+  let tint = 0;
+  const agTint = dr.areaGroups.map(ag => ag.members.length > 1 ? _SR_FILLS[tint++ % _SR_FILLS.length] : null);
+  const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map(b =>
+    (b.length > 1) ? _SR_FILLS[tint++ % _SR_FILLS.length] : (ag.members.length > 1 ? agTint[i] : null)));
+
+  const th = (txt, extra) => `<th style="padding:7px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);white-space:nowrap;${extra || ''}">${txt}</th>`;
+  const flatAreas = dr.areaGroups.flatMap((ag, i) => ag.members.map(a => ({ a, agIdx: i })));
+
+  // Row 1: one header per area, clickable for selection; combined groups share a tint.
+  const h1 = flatAreas.map(({ a, agIdx }) => {
+    const sel = st.selAreas.has(agIdx);
+    return th(pbEsc('Area ' + _srNum(areaById[a].code)),
+      `text-align:center;border-left:1px solid var(--border);cursor:${st.editing ? 'pointer' : 'default'};` +
+      (agTint[agIdx] ? `background:${agTint[agIdx]};` : '') +
+      (sel ? 'outline:2px solid var(--navy);outline-offset:-2px;' : ''))
+      .replace('<th ', `<th colspan="2" onclick="_srSelArea(${agIdx})" oncontextmenu="return _srMenu(event,'area',${agIdx})" `);
+  }).join('');
+
+  // Row 2: the description, one cell per column group, editable in place.
+  const h2 = dr.areaGroups.map((ag, i) => {
+    const w = ag.members.length * 2;
+    const inner = st.editing
+      ? `<input value="${pbEsc(ag.description)}" onchange="_srSetDesc(${i},this.value)"
+           style="width:95%;border:1px solid var(--border);border-radius:5px;background:var(--bg2);padding:3px 8px;font-size:12px;text-align:center;font-family:inherit;color:var(--text);">`
+      : pbEsc(ag.description || '—');
+    return `<th colspan="${w}" style="padding:5px 8px;border-left:1px solid var(--border);text-align:center;font-size:12px;font-weight:600;color:var(--text2);${agTint[i] ? `background:${agTint[i]};` : ''}">${inner}</th>`;
+  }).join('');
+
+  const h3 = flatAreas.map(() =>
+    th('Monthly', 'text-align:right;border-left:1px solid var(--border);') + th('Hourly', 'text-align:right;')).join('');
 
   const rows = d.grades.map(g => {
-    const cellsHtml = d.areas.map(a => {
-      const key = _srKey(+a.id, +g.id);
-      const grp = _srGroupOf(key);
-      const members = grp ? _srCellsOfGroup(grp.id) : [key];
-      const rate = _srRate(+a.id, +g.id);
-      const sel = _srState.sel.has(key);
-      const grouped = members.length > 1;
-      const bg = sel ? 'background:#FEF3C7;' : grouped ? 'background:var(--bg);' : '';
-      const first = grouped && members[0] === key;
-      const label = grouped && first
-        ? `<div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#8A7550;margin-top:2px;">${pbEsc(_srGroupLabel(grp, members, areaById, gradeById))}</div>`
-        : '';
-      const money = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
-        : (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const hourly = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
-        : (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
-      const td = (inner, extra) => `<td onclick="_srToggleCell(${a.id},${g.id})"
-        style="padding:8px 10px;text-align:right;cursor:pointer;font-variant-numeric:tabular-nums;
-        border-top:1px solid var(--border);${bg}${extra || ''}">${inner}</td>`;
-      return td(money(rate && rate.monthly_salary) + label, 'border-left:1px solid var(--border);')
-           + td(hourly(rate && rate.hourly_rate));
+    const cellsHtml = flatAreas.map(({ a, agIdx }) => {
+      const ag = dr.areaGroups[agIdx];
+      const block = _srBlockOf(agIdx, +g.id);
+      const bIdx = ag.rowBlocks.indexOf(block);
+      const entry = _srEntryOf(a, +g.id);
+      const val = dr.values[_srKey(a, +g.id)];
+      const fill = blockTint[agIdx][bIdx];
+      const selRow = st.selRowsAg === agIdx && st.selRows.has(+g.id);
+      const base = 'padding:6px 8px;text-align:right;border-top:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap;'
+        + (fill ? `background:${fill};` : '') + (selRow ? 'outline:2px solid var(--navy);outline-offset:-2px;' : '');
+      const handlers = `onclick="_srSelRow(${agIdx},${+g.id})" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})"`;
+      const mk = (field, maxDp) => {
+        if (st.editing && entry.isEntry) {
+          return `<td style="${base}border-left:${field === 'monthly' ? '1px solid var(--border)' : 'none'};" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})">
+            <input data-cell="${a}:${+g.id}:${field}" value="${pbEsc(val[field])}"
+              oninput="_srInput(${a},${+g.id},'${field}',this)" onblur="_srBlur(${a},${+g.id},'${field}',this)"
+              style="width:92px;border:1px solid var(--border);border-radius:5px;padding:4px 7px;text-align:right;
+                     font-family:inherit;font-size:13px;font-weight:700;color:var(--red);background:var(--bg2);"></td>`;
+        }
+        const src = _srKey(entry.area, entry.grade);
+        const shown = dr.values[src][field];
+        return `<td ${handlers} data-echo="${src}:${field}"
+          style="${base}border-left:${field === 'monthly' ? '1px solid var(--border)' : 'none'};cursor:${st.editing ? 'pointer' : 'default'};font-size:13px;">${
+          shown === '' ? '<span style="color:var(--red);font-weight:700;">missing</span>' : pbEsc(shown)}</td>`;
+      };
+      return mk('monthly') + mk('hourly', 4);
     }).join('');
-    return `<tr><td style="padding:8px 12px;font-weight:700;white-space:nowrap;border-top:1px solid var(--border);">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
+    return `<tr><td style="padding:6px 12px;font-weight:700;white-space:nowrap;border-top:1px solid var(--border);">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
   }).join('');
 
   out.innerHTML = `
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);">
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
-        <thead><tr>${th('In force from ' + fmtDate(_srState.version), 'text-align:left;')}${head1}</tr>
-               <tr>${th('')}${head2}</tr></thead>
+        <thead>
+          <tr>${th('In force from ' + fmtDate(st.version), 'text-align:left;')}${h1}</tr>
+          <tr>${th('Area description', 'text-align:left;font-weight:400;text-transform:none;letter-spacing:0;')}${h2}</tr>
+          <tr>${th('')}${h3}</tr>
+        </thead>
         <tbody>${rows}</tbody>
       </table>
-    </div>
-    <div id="sr-panel" style="margin-top:14px;">${_srPanelHtml(areaById, gradeById)}</div>`;
+    </div>`;
 }
 
-// The panel under the grid acts on whatever is selected: edit a block's figures, group a fresh
-// selection, or ungroup an existing one.
-function _srPanelHtml(areaById, gradeById) {
-  const keys = [..._srState.sel];
-  if (!keys.length) return `<div style="padding:14px 16px;color:var(--text3);font-size:12px;
-    background:var(--bg);border:1px solid var(--border);border-radius:8px;">
-    Click a cell to select it — clicking a shaded cell picks its whole block. Select two or more
-    to group them.</div>`;
+// ── Selection + the contextual actions it enables ───────────────────────────
+function _srSelArea(agIdx) {
+  if (!_srState.editing) return;
+  const st = _srState;
+  st.selRowsAg = null; st.selRows = new Set();
+  st.selAreas.has(agIdx) ? st.selAreas.delete(agIdx) : st.selAreas.add(agIdx);
+  _srPaint();
+}
+function _srSelRow(agIdx, gradeId) {
+  if (!_srState.editing) return;
+  const st = _srState;
+  st.selAreas = new Set();
+  if (st.selRowsAg !== agIdx) { st.selRowsAg = agIdx; st.selRows = new Set(); }
+  st.selRows.has(gradeId) ? st.selRows.delete(gradeId) : st.selRows.add(gradeId);
+  if (!st.selRows.size) st.selRowsAg = null;
+  _srPaint();
+}
 
-  const groupIds = [...new Set(keys.map(k => { const g = _srGroupOf(k); return g ? +g.id : 0; }))];
-  const exact = groupIds.length === 1 && groupIds[0] !== 0
-    && _srCellsOfGroup(groupIds[0]).length === keys.length
-    && _srCellsOfGroup(groupIds[0]).every(k => _srState.sel.has(k));
-  const grp = exact ? window._srData.groups.find(g => +g.id === groupIds[0]) : null;
-  const rate = (() => { const [a, g] = keys[0].split(':').map(Number); return _srRate(a, g); })();
-  const auto = _srAutoLabel(keys, areaById, gradeById);
-  const label = grp ? _srGroupLabel(grp, keys, areaById, gradeById) : auto;
-  const isAuto = !grp || grp.label_is_auto;
+// One list drives both the toolbar buttons and the right-click menu, so the two ways in can
+// never disagree about what is possible.
+function _srActions(ctx) {
+  const st = _srState, dr = st.draft;
+  const acts = [];
+  const selAreas = [...st.selAreas];
+  if (ctx && ctx.kind === 'area' && !st.selAreas.has(ctx.agIdx)) selAreas.push(ctx.agIdx);
+  if (selAreas.length >= 2) acts.push({ label: 'Combine areas', fn: `_srCombineAreas([${selAreas.join(',')}])` });
+  const uncombinable = selAreas.filter(i => dr.areaGroups[i] && dr.areaGroups[i].members.length > 1);
+  if (ctx && ctx.kind === 'area' && dr.areaGroups[ctx.agIdx].members.length > 1 && !uncombinable.includes(ctx.agIdx)) uncombinable.push(ctx.agIdx);
+  if (uncombinable.length) acts.push({ label: 'Uncombine areas', fn: `_srUncombineAreas([${uncombinable.join(',')}])` });
 
-  return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
-    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;">
-      <div style="min-width:210px;flex:1 1 210px;">
-        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">
-          Label ${isAuto ? '<span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 6px;font-size:9px;">auto</span>' : ''}
-        </label>
-        <input id="sr-label" class="form-control" value="${pbEsc(label)}" placeholder="${pbEsc(auto)}">
-      </div>
-      <div style="width:140px;">
-        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">Monthly</label>
-        <input id="sr-monthly" class="form-control" inputmode="decimal" value="${rate ? rate.monthly_salary : ''}">
-      </div>
-      <div style="width:140px;">
-        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">Hourly</label>
-        <input id="sr-hourly" class="form-control" inputmode="decimal" value="${rate ? rate.hourly_rate : ''}">
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn btn-sm btn-primary" onclick="_srSave()">${exact ? 'Save block' : keys.length > 1 ? 'Group &amp; save' : 'Save cell'}</button>
-        ${exact ? `<button class="btn btn-sm btn-secondary" onclick="_srUngroup(${grp.id})">Ungroup</button>` : ''}
-        <button class="btn btn-sm btn-ghost" onclick="_srClearSel()">Clear</button>
-      </div>
-    </div>
-    <div style="margin-top:10px;font-size:12px;color:var(--text3);">
-      ${keys.length} cell${keys.length === 1 ? '' : 's'} selected${keys.length > 1 ? ' — they will hold one rate' : ''}.
-      ${keys.map(k => { const [a, g] = k.split(':').map(Number);
-        return `<span style="display:inline-block;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 7px;margin:2px 3px 0 0;font-size:11px;font-weight:700;">A${_srNum(areaById[a].code)}·${pbEsc(gradeById[g].code)}</span>`; }).join('')}
-    </div>
-  </div>`;
+  let rowsAg = st.selRowsAg, rows = [...st.selRows];
+  if (ctx && ctx.kind === 'cell') {
+    if (rowsAg !== ctx.agIdx) { rowsAg = ctx.agIdx; rows = []; }
+    if (!rows.includes(ctx.gradeId)) rows.push(ctx.gradeId);
+  }
+  if (rowsAg != null && rows.length >= 2) acts.push({ label: 'Combine grades', fn: `_srCombineRows(${rowsAg},[${rows.join(',')}])` });
+  if (rowsAg != null && rows.some(g => (_srBlockOf(rowsAg, g) || []).length > 1))
+    acts.push({ label: 'Ungroup grades', fn: `_srUncombineRows(${rowsAg},[${rows.join(',')}])` });
+  if ((st.selAreas.size || st.selRows.size) && !ctx) acts.push({ label: 'Clear selection', fn: '_srClearSel()' });
+  return acts;
+}
+function _srClearSel() { _srState.selAreas = new Set(); _srState.selRowsAg = null; _srState.selRows = new Set(); _srPaint(); }
+
+function _srMenu(ev, kind, a, b) {
+  if (!_srState.editing) return true;
+  ev.preventDefault();
+  const ctx = kind === 'area' ? { kind, agIdx: a } : { kind, agIdx: a, gradeId: b };
+  const acts = _srActions(ctx);
+  const menu = document.getElementById('sr-menu');
+  if (!menu) return false;
+  if (!acts.length) { menu.style.display = 'none'; return false; }
+  menu.innerHTML = acts.map(x =>
+    `<div onclick="document.getElementById('sr-menu').style.display='none';${x.fn}"
+       style="padding:8px 14px;font-size:13px;cursor:pointer;border-radius:5px;"
+       onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background=''">${pbEsc(x.label)}</div>`).join('');
+  menu.style.left = Math.min(ev.clientX, (window.innerWidth || 1200) - 230) + 'px';
+  menu.style.top = ev.clientY + 'px';
+  menu.style.display = 'block';
+  if (!window._srMenuBound) {
+    window._srMenuBound = true;
+    document.addEventListener('click', () => { const m = document.getElementById('sr-menu'); if (m) m.style.display = 'none'; });
+  }
+  return false;
+}
+
+// ── Combining (draft mutations; Save persists) ──────────────────────────────
+// Merging adopts the ENTRY cells' figures immediately: the first member area's column and each
+// surviving block's top row win, and every other member becomes an echo of them.
+function _srCombineAreas(agIdxs) {
+  const dr = _srState.draft;
+  const picked = agIdxs.map(i => dr.areaGroups[i]).filter(Boolean);
+  if (picked.length < 2) return;
+  const areaOrder = window._srData.areas.map(a => +a.id);
+  const members = picked.flatMap(ag => ag.members).sort((x, y) => areaOrder.indexOf(x) - areaOrder.indexOf(y));
+  const lead = picked.find(ag => ag.members.includes(members[0]));
+  const merged = { members, description: lead.description, rowBlocks: lead.rowBlocks.map(b => b.slice()) };
+  _srState.draft.areaGroups = dr.areaGroups.filter(ag => !picked.includes(ag));
+  _srState.draft.areaGroups.push(merged);
+  _srState.draft.areaGroups.sort((x, y) => areaOrder.indexOf(x.members[0]) - areaOrder.indexOf(y.members[0]));
+  _srSyncValues();
+  _srState.dirty = true;
+  _srClearSel();
+}
+function _srUncombineAreas(agIdxs) {
+  const dr = _srState.draft;
+  const areaOrder = window._srData.areas.map(a => +a.id);
+  const targets = agIdxs.map(i => dr.areaGroups[i]).filter(ag => ag && ag.members.length > 1);
+  if (!targets.length) return;
+  for (const ag of targets) {
+    const idx = dr.areaGroups.indexOf(ag);
+    const singles = ag.members.map(a => ({ members: [a], description: ag.description,
+      rowBlocks: ag.rowBlocks.map(b => b.slice()) }));
+    dr.areaGroups.splice(idx, 1, ...singles);
+  }
+  dr.areaGroups.sort((x, y) => areaOrder.indexOf(x.members[0]) - areaOrder.indexOf(y.members[0]));
+  _srState.dirty = true;
+  _srClearSel();
+}
+function _srCombineRows(agIdx, gradeIds) {
+  const ag = _srState.draft.areaGroups[agIdx];
+  if (!ag || gradeIds.length < 2) return;
+  const gradeOrder = window._srData.grades.map(g => +g.id);
+  const set = new Set(gradeIds.map(Number));
+  const newBlock = gradeOrder.filter(g => set.has(g));
+  ag.rowBlocks = ag.rowBlocks.map(b => b.filter(g => !set.has(g))).filter(b => b.length);
+  ag.rowBlocks.push(newBlock);
+  ag.rowBlocks.sort((x, y) => gradeOrder.indexOf(x[0]) - gradeOrder.indexOf(y[0]));
+  _srSyncValues();
+  _srState.dirty = true;
+  _srClearSel();
+}
+function _srUncombineRows(agIdx, gradeIds) {
+  const ag = _srState.draft.areaGroups[agIdx];
+  if (!ag) return;
+  const gradeOrder = window._srData.grades.map(g => +g.id);
+  const set = new Set(gradeIds.map(Number));
+  const hit = ag.rowBlocks.filter(b => b.length > 1 && b.some(g => set.has(g)));
+  for (const b of hit) {
+    ag.rowBlocks.splice(ag.rowBlocks.indexOf(b), 1, ...b.map(g => [g]));
+  }
+  ag.rowBlocks.sort((x, y) => gradeOrder.indexOf(x[0]) - gradeOrder.indexOf(y[0]));
+  _srState.dirty = true;
+  _srClearSel();
+}
+function _srSetDesc(agIdx, text) {
+  const ag = _srState.draft.areaGroups[agIdx];
+  if (!ag) return;
+  ag.description = String(text || '').trim();
+  _srState.dirty = true;
+}
+
+// After any structural change, every member cell takes its entry cell's figures.
+function _srSyncValues() {
+  const dr = _srState.draft;
+  for (const ag of dr.areaGroups) for (const block of ag.rowBlocks) {
+    const src = dr.values[_srKey(ag.members[0], block[0])];
+    for (const a of ag.members) for (const g of block) {
+      dr.values[_srKey(a, g)] = { monthly: src.monthly, hourly: src.hourly };
+    }
+  }
+}
+
+// ── Typing ──────────────────────────────────────────────────────────────────
+function _srInput(areaId, gradeId, field, el) {
+  const dr = _srState.draft;
+  const ag = dr.areaGroups[_srAgOf(areaId)];
+  const block = _srBlockOf(_srAgOf(areaId), gradeId);
+  for (const a of ag.members) for (const g of block) dr.values[_srKey(a, g)][field] = el.value;
+  const echoKey = _srKey(areaId, gradeId) + ':' + field;
+  document.querySelectorAll(`[data-echo="${echoKey}"]`).forEach(td => { td.textContent = el.value; });
+  if (!_srState.dirty) { _srState.dirty = true; _srPaintButtons(); }
+}
+function _srBlur(areaId, gradeId, field, el) {
+  const n = _srParseNum(el.value);
+  const shown = el.value.trim() === '' ? '' : (isFinite(n) ? _srFmt(n, field === 'hourly' ? 4 : 2) : el.value);
+  el.value = shown;
+  _srInput(areaId, gradeId, field, el);
+}
+// Enabling Save without repainting (a full repaint mid-typing would eat the focus).
+function _srPaintButtons() {
+  const top = document.getElementById('sr-top');
+  if (!top) return;
+  top.querySelectorAll('button').forEach(b => {
+    if (b.textContent.trim() === 'Save version' || b.textContent.trim() === 'Discard') b.disabled = false;
+  });
+}
+function _srDiscard() { _srBuildDraft(); _srPaint(); }
+
+// ── Persistence ─────────────────────────────────────────────────────────────
+// The plan is computed separately from the writes so it can be tested without touching the API.
+function _srBuildSavePlan() {
+  const d = window._srData, dr = _srState.draft, v = _srState.version;
+  const plan = { ratePatches: [], ratePosts: [], areaGroups: [], cellGroups: [], skipped: 0 };
+  for (const ag of dr.areaGroups) {
+    plan.areaGroups.push({ description: ag.description || null, members: ag.members.slice() });
+    for (const block of ag.rowBlocks) {
+      const src = dr.values[_srKey(ag.members[0], block[0])];
+      const monthly = _srParseNum(src.monthly), hourly = _srParseNum(src.hourly);
+      const cellCount = ag.members.length * block.length;
+      if (cellCount > 1) plan.cellGroups.push({ areas: ag.members.slice(), grades: block.slice() });
+      if (!isFinite(monthly) || !isFinite(hourly)) { plan.skipped += cellCount; continue; }
+      const ids = [], posts = [];
+      for (const a of ag.members) for (const g of block) {
+        const r = d.rates.find(x => x.effective_date === v && +x.area_id === a && +x.grade_id === g);
+        if (r) {
+          if (+r.monthly_salary !== monthly || +r.hourly_rate !== hourly) ids.push(+r.id);
+        } else posts.push({ effective_date: v, area_id: a, grade_id: g, monthly_salary: monthly, hourly_rate: hourly });
+      }
+      if (ids.length) plan.ratePatches.push({ ids, monthly_salary: monthly, hourly_rate: hourly });
+      plan.ratePosts.push(...posts);
+    }
+  }
+  return plan;
 }
 
 async function _srSave() {
-  if (_srState.busy) return;
-  const keys = [...(_srState.sel || [])];
-  if (!keys.length) return;
-  const monthly = _srParseNum(document.getElementById('sr-monthly').value);
-  const hourly = _srParseNum(document.getElementById('sr-hourly').value);
-  if (!isFinite(monthly) || !isFinite(hourly)) { showStatus('Enter both a monthly and an hourly figure', 'error'); return; }
-  const d = window._srData;
-  const areaById = Object.fromEntries(d.areas.map(a => [+a.id, a]));
-  const gradeById = Object.fromEntries(d.grades.map(g => [+g.id, g]));
-  const typed = String(document.getElementById('sr-label').value || '').trim();
-  const auto = _srAutoLabel(keys, areaById, gradeById);
-
+  if (_srState.busy || !_srState.dirty) return;
+  const v = _srState.version;
+  const plan = _srBuildSavePlan();
   _srState.busy = true; startBusy && startBusy();
   try {
-    // Figures first: update the rows that exist, create the ones that never did.
-    const existing = [], missing = [];
-    keys.forEach(k => {
-      const [a, g] = k.split(':').map(Number);
-      const r = _srRate(a, g);
-      (r ? existing : missing).push(r || { area_id: a, grade_id: g });
-    });
-    if (existing.length) {
-      await api('quote_salary_rates', 'PATCH', { monthly_salary: monthly, hourly_rate: hourly },
-        'id=in.(' + existing.map(r => r.id).join(',') + ')');
-    }
-    if (missing.length) {
-      await api('quote_salary_rates', 'POST', missing.map(m => ({
-        effective_date: _srState.version, area_id: m.area_id, grade_id: m.grade_id,
-        monthly_salary: monthly, hourly_rate: hourly })), '');
-    }
+    for (const p of plan.ratePatches)
+      await api('quote_salary_rates', 'PATCH',
+        { monthly_salary: p.monthly_salary, hourly_rate: p.hourly_rate }, 'id=in.(' + p.ids.join(',') + ')');
+    if (plan.ratePosts.length) await api('quote_salary_rates', 'POST', plan.ratePosts, '');
 
-    // Then the grouping. A single cell needs no group; anything larger gets one, replacing
-    // whatever groups those cells previously sat in.
-    const oldIds = [...new Set(keys.map(k => { const g = _srGroupOf(k); return g ? +g.id : 0; }))].filter(Boolean);
-    for (const gid of oldIds) await api('quote_rate_groups', 'DELETE', null, 'id=eq.' + gid);
-    if (keys.length > 1) {
-      const created = await api('quote_rate_groups', 'POST', {
-        effective_date: _srState.version,
-        label: (typed && typed !== auto) ? typed : null,
-        label_is_auto: !(typed && typed !== auto),
-      }, 'select=id');
-      const gid = Array.isArray(created) ? created[0].id : created.id;
-      await api('quote_rate_group_cells', 'POST', keys.map(k => {
-        const [a, g] = k.split(':').map(Number);
-        return { group_id: gid, effective_date: _srState.version, area_id: a, grade_id: g };
-      }), '');
+    // Groupings are recreated whole for the version — simplest, and fully audit-logged.
+    await api('quote_rate_area_groups', 'DELETE', null, 'effective_date=eq.' + v);
+    for (const g of plan.areaGroups) {
+      const made = await api('quote_rate_area_groups', 'POST', { effective_date: v, description: g.description }, 'select=id');
+      const gid = Array.isArray(made) ? made[0].id : made.id;
+      await api('quote_rate_area_group_members', 'POST',
+        g.members.map(a => ({ group_id: gid, effective_date: v, area_id: a })), '');
     }
-    showStatus('Rates saved');
+    await api('quote_rate_groups', 'DELETE', null, 'effective_date=eq.' + v);
+    for (const g of plan.cellGroups) {
+      const made = await api('quote_rate_groups', 'POST',
+        { effective_date: v, label: null, label_is_auto: true }, 'select=id');
+      const gid = Array.isArray(made) ? made[0].id : made.id;
+      await api('quote_rate_group_cells', 'POST',
+        g.areas.flatMap(a => g.grades.map(gr => ({ group_id: gid, effective_date: v, area_id: a, grade_id: gr }))), '');
+    }
+    showStatus(plan.skipped ? `Saved — ${plan.skipped} cell${plan.skipped === 1 ? '' : 's'} still missing figures` : 'Version saved');
     await renderSalaryRateGrid();
   } catch (e) {
     showStatus('Could not save: ' + e.message, 'error');
   } finally { _srState.busy = false; stopBusy && stopBusy(); }
 }
 
-async function _srUngroup(groupId) {
-  if (_srState.busy) return;
-  _srState.busy = true; startBusy && startBusy();
-  try {
-    await api('quote_rate_groups', 'DELETE', null, 'id=eq.' + groupId);
-    showStatus('Block ungrouped — the cells keep their figures');
-    await renderSalaryRateGrid();
-  } catch (e) { showStatus('Could not ungroup: ' + e.message, 'error'); }
-  finally { _srState.busy = false; stopBusy && stopBusy(); }
-}
-
-// A new determination starts as a copy of the one before it — figures, blocks and labels — so
-// only what the agreement changed has to be typed.
+// A new determination starts as a copy of the newest one — figures, column groups, row blocks
+// and descriptions — so only what the agreement changed has to be typed.
 async function _srNewVersion() {
   const d = window._srData; if (!d) return;
-  const versions = [...new Set(d.rates.map(r => r.effective_date))].sort();
-  const last = versions[versions.length - 1];
+  if (_srState.dirty && !confirm('Discard the unsaved changes first?')) return;
+  const versions = _srVersions();
+  const last = versions[0];
   const suggested = last ? (String(+last.slice(0, 4) + 1) + last.slice(4)) : new Date().toISOString().slice(0, 10);
   const input = prompt('New version — in force from (YYYY-MM-DD).\n\nIt starts as a copy of ' +
     (last || 'nothing') + ', so you only change what the agreement changed.', suggested);
@@ -7096,21 +7290,28 @@ async function _srNewVersion() {
   _srState.busy = true; startBusy && startBusy();
   try {
     const src = d.rates.filter(r => r.effective_date === last);
-    if (src.length) {
-      await api('quote_salary_rates', 'POST', src.map(r => ({
-        effective_date: date, area_id: r.area_id, grade_id: r.grade_id,
-        monthly_salary: r.monthly_salary, hourly_rate: r.hourly_rate })), '');
-    }
+    if (src.length) await api('quote_salary_rates', 'POST', src.map(r => ({
+      effective_date: date, area_id: r.area_id, grade_id: r.grade_id,
+      monthly_salary: r.monthly_salary, hourly_rate: r.hourly_rate })), '');
     for (const g of d.groups.filter(x => x.effective_date === last)) {
       const members = d.cells.filter(c => +c.group_id === +g.id);
       if (members.length < 2) continue;
-      const created = await api('quote_rate_groups', 'POST', {
-        effective_date: date, label: g.label, label_is_auto: g.label_is_auto }, 'select=id');
-      const gid = Array.isArray(created) ? created[0].id : created.id;
+      const made = await api('quote_rate_groups', 'POST',
+        { effective_date: date, label: g.label, label_is_auto: g.label_is_auto }, 'select=id');
+      const gid = Array.isArray(made) ? made[0].id : made.id;
       await api('quote_rate_group_cells', 'POST', members.map(m => ({
         group_id: gid, effective_date: date, area_id: m.area_id, grade_id: m.grade_id })), '');
     }
-    showStatus('Version created from ' + last);
+    for (const g of d.areaGroups.filter(x => x.effective_date === last)) {
+      const members = d.areaMembers.filter(m => +m.group_id === +g.id);
+      if (!members.length) continue;
+      const made = await api('quote_rate_area_groups', 'POST',
+        { effective_date: date, description: g.description }, 'select=id');
+      const gid = Array.isArray(made) ? made[0].id : made.id;
+      await api('quote_rate_area_group_members', 'POST', members.map(m => ({
+        group_id: gid, effective_date: date, area_id: m.area_id })), '');
+    }
+    showStatus('Version created from ' + (last || 'scratch'));
     _srState.version = date;
     await renderSalaryRateGrid();
   } catch (e) { showStatus('Could not create the version: ' + e.message, 'error'); }
