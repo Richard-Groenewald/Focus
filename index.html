@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1566,13 +1566,37 @@ function setEnvLabel() {
 }
 async function loadEnvironment() {
   try {
-    const rows = await apiGet('settings', 'key=eq.environment&select=value');
-    if (rows && rows[0]) appSettings['environment'] = rows[0].value;
+    const r = await authCall({ action: 'env' });
+    if (r && r.environment) appSettings['environment'] = r.environment;
   } catch(e) { /* offline/login screen — leave blank */ }
   setEnvLabel();
 }
 const SB_HOST = 'kevrfdjqyuhmgziqxuvs.supabase.co';
 const FN_URL = '/.netlify/functions/sb';
+
+// ── Session ── the sb function issues a signed token at sign-in and refuses every data call
+// without one, so the login screen is no longer client-side theatre. The token lives in
+// localStorage so the PWA resumes without re-typing a password until it expires (24h).
+let focusToken = null;
+function _saveSession(token, userId) {
+  focusToken = token || null;
+  try {
+    if (token) localStorage.setItem('focus_session', JSON.stringify({ t: token, u: +userId }));
+    else localStorage.removeItem('focus_session');
+  } catch (e) {}
+}
+function _loadSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem('focus_session') || 'null');
+    if (s && s.t) { focusToken = s.t; return s; }
+  } catch (e) {}
+  return null;
+}
+function _sessionExpired() {
+  _saveSession(null);
+  try { doLogout(); } catch (e) {}
+  try { _loginMsg('Your session expired — sign in again.'); } catch (e) {}
+}
 
 // ── State ────────────────────────────────────────────────
 let currentPage = 'people';
@@ -1944,6 +1968,7 @@ async function api(table, method='GET', body=null, params='') {
   // Audit attribution: who is acting. Forwarded by the sb proxy to PostgREST,
   // where the audit_row_change trigger reads it (request.headers GUC).
   if (typeof currentUser !== 'undefined' && currentUser?.personId) opts.headers['X-Actor-Id'] = String(currentUser.personId);
+  if (focusToken) opts.headers['X-Focus-Token'] = focusToken;
   // Masquerade: the work is attributed to the person being worked as (X-Actor-Id),
   // but the audit trail also records who was really at the keyboard.
   if (typeof realUser !== 'undefined' && realUser?.personId) opts.headers['X-Real-Actor-Id'] = String(realUser.personId);
@@ -1960,6 +1985,12 @@ async function api(table, method='GET', body=null, params='') {
       clearTimeout(timer);
       if (!res.ok) {
         const err = await res.text();
+        // The session gate: a signed-out or expired token gets a uniform 401 from the
+        // function. Drop straight back to the sign-in screen rather than retrying.
+        if (res.status === 401) {
+          let j = null; try { j = JSON.parse(err); } catch (e2) {}
+          if (j && j.error === 'auth') { _sessionExpired(); throw new Error('Signed out — session expired'); }
+        }
         _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
         if (method === 'GET' && _apiTransient(null, res.status) && attempt < maxAttempts) {
           lastErr = new Error(`${res.status}: ${err}`);
@@ -9682,17 +9713,16 @@ async function saveCollaborators(dealId) {
 
 // ── Auth ─────────────────────────────────────────────────
 async function loadLoginUsers() {
+  // Served by the auth endpoint: the data tables themselves sit behind the session
+  // gate, and the sign-in list is the one thing the login screen legitimately needs.
   try {
-    const users = await apiGet('system_users', 'active=eq.true&select=id,person_id');
-    const people = await apiGet('people', 'select=id,first_name,last_name');
+    const r = await authCall({ action: 'users' });
     const sel = document.getElementById('login-user');
     sel.innerHTML = '<option value="">— select user —</option>';
-    users.forEach(u => {
-      const p = people.find(x => +x.id === +u.person_id);
-      const name = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id;
+    (r && r.users || []).forEach(u => {
       const opt = document.createElement('option');
       opt.value = u.id;
-      opt.textContent = name;
+      opt.textContent = u.name;
       sel.appendChild(opt);
     });
   } catch(e) {
@@ -9917,7 +9947,14 @@ async function submitNewPassword() {
   try {
     const r = await authCall({ action: 'set', userId: +userId, newPassword: a });
     if (!r || !r.ok) { _loginMsg((r && r.error) || 'Could not set the password'); return; }
-    // Set, then sign in with it — the password is proved once before it is trusted.
+    if (r.token) {
+      // Setting the password proved it — the server signed the session, walk in.
+      _saveSession(r.token, +userId);
+      showLoginSetPassword(false);
+      _loginMsg('');
+      try { await enterApp(+userId); } catch (e) { _loginMsg('Signed in, but loading failed: ' + e.message); }
+      return;
+    }
     showLoginSetPassword(false);
     document.getElementById('login-password').value = '';
     document.getElementById('login-password').focus();
@@ -10025,37 +10062,14 @@ async function doLogin() {
       _loginMsg((auth && auth.error) || 'Sign-in failed');
       return;
     }
+    _saveSession(auth.token, +userId);
   } catch (e) { _loginMsg('Could not reach the server — try again'); return; }
   _loginMsg('');
 
   try {
-    // Warm allData from any persisted lookup cache before we start fetching.
-    hydrateLookupCache();
-
-    const ctx = await buildUserContext(userId);
-    if (!ctx) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
-    currentUser = ctx;
-    realUser = null;            // a fresh sign-in is never a masquerade
-
-    // Show app
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('main-app').style.display = 'flex';
-    applyUserContextChrome();
-
-    // Login already made several successful calls — we're demonstrably online.
-    setOnline(true);
-    // Tail — settings, home-org members and the lookup preload all run together
-    // so the first page lands with its lookups already cached (one burst, not
-    // a fan-out on every page). setEnvLabel needs settings, so it waits.
-    await Promise.all([
-      loadAppSettings(),
-      ensureHomeOrgMembers().catch(() => {}),   // valid owners = home-org members
-      preloadLookups(),
-    ]);
-    setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
-    buildNav();
+    await enterApp(userId);
   } catch(e) {
-    errEl.textContent = 'Login failed: ' + e.message;
+    errEl.textContent = e.message === 'User not found' ? 'User not found' : 'Login failed: ' + e.message;
     errEl.style.display = 'block';
   }
 }
@@ -10318,6 +10332,7 @@ async function submitChangePassword() {
   startBusy('Changing password\u2026');
   try {
     const r = await authCall({ action: 'set', userId: +currentUser.id, password: current, newPassword: a });
+    if (r && r.ok && r.token) _saveSession(r.token, +currentUser.id);
     if (!r || !r.ok) { fail((r && r.error) || 'Could not change the password'); return; }
     closeModal();
     showStatus('Password changed');
@@ -10439,7 +10454,36 @@ function applyUserContextChrome() {
   buildNav();
 }
 
+// Everything that happens after credentials are accepted — shared by a fresh sign-in
+// and a resumed session, so the two can never drift apart.
+async function enterApp(userId) {
+  // Warm allData from any persisted lookup cache before we start fetching.
+  hydrateLookupCache();
+
+  const ctx = await buildUserContext(userId);
+  if (!ctx) throw new Error('User not found');
+  currentUser = ctx;
+  realUser = null;            // a fresh sign-in is never a masquerade
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'flex';
+  applyUserContextChrome();
+
+  setOnline(true);
+  // Tail — settings, home-org members and the lookup preload all run together
+  // so the first page lands with its lookups already cached (one burst, not
+  // a fan-out on every page). setEnvLabel needs settings, so it waits.
+  await Promise.all([
+    loadAppSettings(),
+    ensureHomeOrgMembers().catch(() => {}),   // valid owners = home-org members
+    preloadLookups(),
+  ]);
+  setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
+  buildNav();
+}
+
 function doLogout() {
+  _saveSession(null);
   currentUser = null;
   realUser = null;
   document.getElementById('main-app').style.display = 'none';
@@ -24705,6 +24749,14 @@ async function init() {
   loadEnvironment();
   // Load users for login dropdown
   await loadLoginUsers();
+
+  // A stored session resumes straight into the app — the token is judged by the
+  // SERVER on the first data call, so an expired or forged one simply lands back
+  // here at the sign-in screen.
+  const saved = _loadSession();
+  if (saved && saved.u) {
+    try { await enterApp(saved.u); } catch (e) { _saveSession(null); }
+  }
 }
 
 init();
