@@ -6952,7 +6952,7 @@ function _srPaint() {
       <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
       <span style="display:inline-block;width:1px;height:18px;background:var(--border);"></span>
       ${tabs}
-      <button class="btn btn-sm btn-secondary" onclick="_srNewVersion()">+ New version</button>
+      <button class="btn btn-sm btn-secondary" onclick="_srNewVersionOpen()">+ New version</button>
       <span style="flex:1 1 auto;"></span>
       ${st.editing
         ? `${actBtns}
@@ -6961,10 +6961,22 @@ function _srPaint() {
         : `<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#7A5B10;background:#FEF3C7;border:1px solid #E9C46A;border-radius:10px;padding:3px 9px;">Superseded — view only</span>
            <button class="btn btn-sm btn-secondary" onclick="_srUnlock()">Edit this version</button>`}
     </div>
+    ${st.newVerOpen ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+      <span style="font-size:12px;font-weight:700;color:var(--navy);">New version — in force from</span>
+      <input type="date" id="sr-newver-date" class="form-control" style="width:auto;" value="${pbEsc(st.newVerSuggest || '')}">
+      <button class="btn btn-sm btn-primary" onclick="_srCreateVersion()">Create as a copy of ${pbEsc(_srVersions()[0] || '—')}</button>
+      <button class="btn btn-sm btn-ghost" onclick="_srState.newVerOpen=false;_srPaint()">Cancel</button>
+      ${st.dirty ? '<span style="font-size:11px;color:var(--red);font-weight:700;">Unsaved changes on this version will be discarded.</span>' : ''}
+    </div>` : ''}
     <div style="font-size:12px;color:var(--text3);">
-      ${st.editing
-        ? 'Type in the <span style="color:var(--red);font-weight:700;">red</span> cells — combined cells fill as you type. Click area headers or cells to select, then right-click (or use the buttons) to combine or uncombine.'
-        : 'This determination has been superseded. It opens read-only because quotes may reference it — Edit this version to make a correction.'}
+      ${!st.editing
+        ? 'This determination has been superseded. It opens read-only because quotes may reference it — Edit this version to make a correction.'
+        : st.selAreas.size
+          ? `<strong>${st.selAreas.size} area group${st.selAreas.size === 1 ? '' : 's'} selected</strong> — right-click a header or use the buttons above to combine or uncombine. Click a header again to deselect.`
+          : st.selRows.size
+            ? `<strong>${st.selRows.size} grade${st.selRows.size === 1 ? '' : 's'} selected in ${pbEsc(dr.areaGroups[st.selRowsAg] && (dr.areaGroups[st.selRowsAg].description || 'this group'))}</strong> — Shift-click extends the range; right-click or use the buttons above to combine or ungroup.`
+            : 'Type in the <span style="color:var(--red);font-weight:700;">red</span> cells — combined cells fill as you type. Click any cell to start selecting grades (Shift-click for a range), click area headers to select areas, then right-click or use the buttons that appear.'}
     </div>`;
 
   // Colour per combined block / combined column group, in paint order.
@@ -7010,11 +7022,11 @@ function _srPaint() {
       const selRow = st.selRowsAg === agIdx && st.selRows.has(+g.id);
       const base = 'padding:6px 8px;text-align:right;border-top:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap;'
         + (fill ? `background:${fill};` : '') + (selRow ? 'outline:2px solid var(--navy);outline-offset:-2px;' : '');
-      const handlers = `onclick="_srSelRow(${agIdx},${+g.id})" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})"`;
+      const handlers = `onclick="_srSelRow(${agIdx},${+g.id},event)" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})"`;
       const mk = (field, maxDp) => {
         if (st.editing && entry.isEntry) {
-          return `<td style="${base}border-left:${field === 'monthly' ? '1px solid var(--border)' : 'none'};" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})">
-            <input data-cell="${a}:${+g.id}:${field}" value="${pbEsc(val[field])}"
+          return `<td ${handlers} style="${base}border-left:${field === 'monthly' ? '1px solid var(--border)' : 'none'};cursor:pointer;">
+            <input data-cell="${a}:${+g.id}:${field}" value="${pbEsc(val[field])}" onclick="event.stopPropagation()"
               oninput="_srInput(${a},${+g.id},'${field}',this)" onblur="_srBlur(${a},${+g.id},'${field}',this)"
               style="width:92px;border:1px solid var(--border);border-radius:5px;padding:4px 7px;text-align:right;
                      font-family:inherit;font-size:13px;font-weight:700;color:var(--red);background:var(--bg2);"></td>`;
@@ -7027,7 +7039,8 @@ function _srPaint() {
       };
       return mk('monthly') + mk('hourly', 4);
     }).join('');
-    return `<tr><td style="padding:6px 12px;font-weight:700;white-space:nowrap;border-top:1px solid var(--border);">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
+    return `<tr><td onclick="_srSelRow(${_srState.selRowsAg == null ? 0 : _srState.selRowsAg},${+g.id},event)"
+      style="padding:6px 12px;font-weight:700;white-space:nowrap;border-top:1px solid var(--border);cursor:${st.editing ? 'pointer' : 'default'};">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
   }).join('');
 
   out.innerHTML = `
@@ -7051,12 +7064,19 @@ function _srSelArea(agIdx) {
   st.selAreas.has(agIdx) ? st.selAreas.delete(agIdx) : st.selAreas.add(agIdx);
   _srPaint();
 }
-function _srSelRow(agIdx, gradeId) {
+function _srSelRow(agIdx, gradeId, ev) {
   if (!_srState.editing) return;
   const st = _srState;
   st.selAreas = new Set();
-  if (st.selRowsAg !== agIdx) { st.selRowsAg = agIdx; st.selRows = new Set(); }
-  st.selRows.has(gradeId) ? st.selRows.delete(gradeId) : st.selRows.add(gradeId);
+  if (st.selRowsAg !== agIdx) { st.selRowsAg = agIdx; st.selRows = new Set(); st.lastRow = null; }
+  if (ev && ev.shiftKey && st.lastRow != null && st.lastRow !== gradeId) {
+    const order = window._srData.grades.map(g => +g.id);
+    const a = order.indexOf(st.lastRow), b = order.indexOf(gradeId);
+    for (let i = Math.min(a, b); i <= Math.max(a, b); i++) st.selRows.add(order[i]);
+  } else {
+    st.selRows.has(gradeId) ? st.selRows.delete(gradeId) : st.selRows.add(gradeId);
+  }
+  st.lastRow = gradeId;
   if (!st.selRows.size) st.selRowsAg = null;
   _srPaint();
 }
@@ -7272,20 +7292,25 @@ async function _srSave() {
   } finally { _srState.busy = false; stopBusy && stopBusy(); }
 }
 
-// A new determination starts as a copy of the newest one — figures, column groups, row blocks
-// and descriptions — so only what the agreement changed has to be typed.
-async function _srNewVersion() {
-  const d = window._srData; if (!d) return;
-  if (_srState.dirty && !confirm('Discard the unsaved changes first?')) return;
+// A new determination starts as a copy of the newest one - figures, column groups, row blocks
+// and descriptions - so only what the agreement changed has to be typed. Opened as an inline
+// row rather than a native prompt(), which some browsers quietly refuse.
+function _srNewVersionOpen() {
+  const last = _srVersions()[0];
+  _srState.newVerSuggest = last ? (String(+last.slice(0, 4) + 1) + last.slice(4))
+                                : new Date().toISOString().slice(0, 10);
+  _srState.newVerOpen = true;
+  _srPaint();
+}
+
+async function _srCreateVersion() {
+  const d = window._srData; if (!d || _srState.busy) return;
+  const el = document.getElementById('sr-newver-date');
+  const date = String((el && el.value) || '').trim();
   const versions = _srVersions();
-  const last = versions[0];
-  const suggested = last ? (String(+last.slice(0, 4) + 1) + last.slice(4)) : new Date().toISOString().slice(0, 10);
-  const input = prompt('New version — in force from (YYYY-MM-DD).\n\nIt starts as a copy of ' +
-    (last || 'nothing') + ', so you only change what the agreement changed.', suggested);
-  if (!input) return;
-  const date = String(input).trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showStatus('Use the form YYYY-MM-DD', 'error'); return; }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showStatus('Pick the date it comes into force', 'error'); return; }
   if (versions.includes(date)) { showStatus('That version already exists', 'error'); return; }
+  const last = versions[0];
 
   _srState.busy = true; startBusy && startBusy();
   try {
@@ -7312,12 +7337,12 @@ async function _srNewVersion() {
         group_id: gid, effective_date: date, area_id: m.area_id })), '');
     }
     showStatus('Version created from ' + (last || 'scratch'));
+    _srState.newVerOpen = false;
     _srState.version = date;
     await renderSalaryRateGrid();
   } catch (e) { showStatus('Could not create the version: ' + e.message, 'error'); }
   finally { _srState.busy = false; stopBusy && stopBusy(); }
 }
-
 async function renderPbEditor(schemaId, opts) {
   // Salary rates are published as a grid per determination, not as a list of rows — they get
   // their own screen. Diverted here so every route in (tile, back, save-and-reload) lands on it.
