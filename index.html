@@ -6813,28 +6813,35 @@ async function renderSalaryRateGrid() {
       apiGet('quote_areas', 'select=*&order=display_order.asc,id.asc'),
       apiGet('quote_grades', 'select=*&order=display_order.asc,id.asc'),
     ]);
-    let groups = [], cells = [], areaGroups = [], areaMembers = [];
+    let groups = [], cells = [], areaGroups = [], areaMembers = [], versionStatus = [];
     try {
       // The two composite-key tables have no id column, and apiGetAll's paging tie-break
       // appends id.asc to any order= it is given - the exact 400 that broke v7.8.62. They are
       // tiny (20 rows per version), so a single ordered GET is the right fetch.
-      [groups, cells, areaGroups, areaMembers] = await Promise.all([
+      [groups, cells, areaGroups, areaMembers, versionStatus] = await Promise.all([
         apiGetAll('quote_rate_groups', 'select=*'),
         apiGet('quote_rate_group_cells', 'select=*&order=group_id.asc'),
         apiGetAll('quote_rate_area_groups', 'select=*'),
         apiGet('quote_rate_area_group_members', 'select=*&order=group_id.asc'),
+        apiGet('quote_rate_versions', 'select=*&order=effective_date.asc'),
       ]);
     } catch (e) {
       document.getElementById('sr-body').innerHTML =
         `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
-           This screen needs the migrations — <strong>sql/add_quote_rate_groups.sql</strong> and
-           <strong>sql/add_quote_rate_area_groups.sql</strong>.</div>`;
+           This screen needs the migrations — <strong>sql/add_quote_rate_groups.sql</strong>,
+           <strong>sql/add_quote_rate_area_groups.sql</strong> and <strong>sql/add_quote_rate_versions.sql</strong>.</div>`;
       return;
     }
-    window._srData = { rates, areas, grades, groups, cells, areaGroups, areaMembers };
+    window._srData = { rates, areas, grades, groups, cells, areaGroups, areaMembers, versionStatus, people: [] };
+    // Names for the review trail - only the people the status rows actually mention.
+    const pids = [...new Set(versionStatus.flatMap(r => [r.entered_by, r.submitted_by, r.approved_by]).filter(Boolean))];
+    if (pids.length) {
+      try { window._srData.people = await apiGet('people', 'id=in.(' + pids.join(',') + ')&select=id,first_name,last_name'); }
+      catch (e) { /* names are chrome; the ids still show */ }
+    }
     const versions = _srVersions();
     if (!_srState.version || !versions.includes(_srState.version)) _srState.version = versions[0] || null;
-    _srState.editing = _srState.version === versions[0];
+    _srState.editing = _srStatusOf(_srState.version).status === 'draft';
     _srBuildDraft();
     _srPaint();
   } catch (e) {
@@ -6845,9 +6852,21 @@ async function renderSalaryRateGrid() {
 
 function _srVersions() {
   const d = window._srData;
-  return [...new Set([...d.rates.map(r => r.effective_date), ...d.areaGroups.map(g => g.effective_date)])]
+  return [...new Set([...d.rates.map(r => r.effective_date), ...d.areaGroups.map(g => g.effective_date),
+                      ...(d.versionStatus || []).map(r => r.effective_date)])]
     .sort().reverse();
 }
+
+// The review state of a version. No row = a draft that has never entered the cycle.
+function _srStatusOf(v) {
+  return ((window._srData && window._srData.versionStatus) || []).find(r => r.effective_date === v)
+    || { effective_date: v, status: 'draft' };
+}
+function _srPersonName(id) {
+  const p = ((window._srData && window._srData.people) || []).find(x => +x.id === +id);
+  return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : (id ? 'person #' + id : '');
+}
+const _srFmtWhen = ts => ts ? String(ts).slice(0, 10) : '';
 
 // ── Draft: the working copy the grid edits ───────────────────────────────────
 // areaGroups: [{ members:[areaId..], description, rowBlocks:[[gradeId..]..] }], plus a value map
@@ -6923,12 +6942,11 @@ function _srSetVersion(v) {
   if (v === _srState.version) return;
   if (_srState.dirty && !confirm('Discard the unsaved changes on this version?')) return;
   _srState.version = v;
-  _srState.editing = v === _srVersions()[0];
+  _srState.editing = _srStatusOf(v).status === 'draft';
+  _srState.declineOpen = false;
   _srBuildDraft();
   _srPaint();
 }
-
-function _srUnlock() { _srState.editing = true; _srPaint(); }
 
 function _srPaint() {
   const d = window._srData, st = _srState, dr = st.draft;
@@ -6967,10 +6985,17 @@ function _srPaint() {
       ${st.editing
         ? `${actBtns}
            <button class="btn btn-sm btn-secondary" onclick="_srDiscard()" ${st.dirty ? '' : 'disabled'}>Discard</button>
-           <button class="btn btn-sm btn-primary" onclick="_srSave()" ${st.dirty ? '' : 'disabled'}>Save version</button>`
-        : `<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:#7A5B10;background:#FEF3C7;border:1px solid #E9C46A;border-radius:10px;padding:3px 9px;">Superseded — view only</span>
-           <button class="btn btn-sm btn-secondary" onclick="_srUnlock()">Edit this version</button>`}
+           <button class="btn btn-sm btn-primary" onclick="_srSave()" ${st.dirty ? '' : 'disabled'}>Save version</button>
+           <button class="btn btn-sm btn-secondary" onclick="_srSubmit()" ${st.dirty ? 'disabled title="Save the version first"' : ''}>Submit for review</button>`
+        : _srStatusBarHtml()}
     </div>
+    ${st.declineOpen ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+      <span style="font-size:12px;font-weight:700;color:var(--red);">Decline — tell the enterer what needs fixing</span>
+      <input id="sr-decline-note" class="form-control" style="flex:1 1 260px;" placeholder="Reason">
+      <button class="btn btn-sm btn-primary" onclick="_srDecline()">Decline &amp; return to draft</button>
+      <button class="btn btn-sm btn-ghost" onclick="_srState.declineOpen=false;_srPaint()">Cancel</button>
+    </div>` : ''}
     ${st.newVerOpen ? `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <span style="font-size:12px;font-weight:700;color:var(--navy);">New version — in force from</span>
@@ -6981,12 +7006,16 @@ function _srPaint() {
     </div>` : ''}
     <div style="font-size:12px;color:var(--text3);">
       ${!st.editing
-        ? 'This determination has been superseded. It opens read-only because quotes may reference it — Edit this version to make a correction.'
-        : st.selAreas.size
+        ? (_srStatusOf(st.version).status === 'submitted'
+            ? 'Locked while awaiting review — it can be approved, or declined back to draft.'
+            : 'Approved and locked. Reopen for correction to change it — it will need review and approval again.')
+        : (_srStatusOf(st.version).note && String(_srStatusOf(st.version).note).indexOf('Declined:') === 0
+            ? '<span style="color:var(--red);font-weight:700;">' + pbEsc(_srStatusOf(st.version).note) + '</span> — fix and resubmit. '
+            : '') + (st.selAreas.size
           ? `<strong>${st.selAreas.size} area group${st.selAreas.size === 1 ? '' : 's'} selected</strong> — right-click a header or use the buttons above to combine or uncombine. Click a header again to deselect.`
           : st.selRows.size
             ? `<strong>${st.selRows.size} grade${st.selRows.size === 1 ? '' : 's'} selected in ${pbEsc(dr.areaGroups[st.selRowsAg] && (dr.areaGroups[st.selRowsAg].description || 'this group'))}</strong> — Shift-click extends the range; right-click or use the buttons above to combine or ungroup.`
-            : 'Type in the <span style="color:var(--red);font-weight:700;">red</span> cells — combined cells fill as you type. Click any cell to start selecting grades (Shift-click for a range), click area headers to select areas, then right-click or use the buttons that appear.'}
+            : 'Type in the <span style="color:var(--red);font-weight:700;">red</span> cells — combined cells fill as you type. Click any cell to start selecting grades (Shift-click for a range), click area headers to select areas, then right-click or use the buttons that appear.')}
     </div>`;
 
   // Colour per combined block / combined column group, in paint order.
@@ -7005,8 +7034,11 @@ function _srPaint() {
   const agTint = dr.areaGroups.map(ag => ag.members.length > 1
     ? pick(_srNum(areaById[ag.members[0]].code) - 1) : null);
   const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map((b, bi) => {
-    if (b.length > 1) return pick(_srNum(areaById[ag.members[0]].code) + 2 + bi);
-    return ag.members.length > 1 ? _srLighten(agTint[i], 0.55) : null;
+    // Every block spanning more than one CELL is its own combined unit and owns a colour -
+    // including a single grade row echoed across combined areas. Grade A and Grade B under
+    // Urban are separate units, so they must never share a shade. One-cell blocks stay plain.
+    if (ag.members.length * b.length > 1) return pick(_srNum(areaById[ag.members[0]].code) + 2 + bi);
+    return null;
   }));
 
   // Compact grid: thin dividing lines on every cell, a heavier edge where each area group
@@ -7363,12 +7395,95 @@ async function _srCreateVersion() {
       await api('quote_rate_area_group_members', 'POST', members.map(m => ({
         group_id: gid, effective_date: date, area_id: m.area_id })), '');
     }
-    showStatus('Version created from ' + (last || 'scratch'));
+    await api('quote_rate_versions', 'POST', { effective_date: date, status: 'draft',
+      entered_by: +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null }, '');
+    showStatus('Version created from ' + (last || 'scratch') + ' — a draft until it is approved');
     _srState.newVerOpen = false;
     _srState.version = date;
     await renderSalaryRateGrid();
   } catch (e) { showStatus('Could not create the version: ' + e.message, 'error'); }
   finally { _srState.busy = false; stopBusy && stopBusy(); }
+}
+
+// ── Review and lock ────────────────────────────────────────────────
+// Maker-checker on a version: one senior person enters and submits, a DIFFERENT senior person
+// (holding approve_salary_rates) approves - or declines with a reason, which reopens the draft.
+// Approved means locked; Reopen for correction restarts the cycle. All of it is app-layer,
+// like every Focus authorisation, and every transition lands in the audit log.
+function _srStatusBarHtml() {
+  const row = _srStatusOf(_srState.version);
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0);
+  const chip = (bg, bd, fg, txt) =>
+    `<span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:${fg};background:${bg};border:1px solid ${bd};border-radius:10px;padding:3px 9px;">${txt}</span>`;
+  if (row.status === 'submitted') {
+    const mine = +row.submitted_by === me;
+    const mayApprove = (typeof can === 'function' ? can('approve_salary_rates') : false) && !mine;
+    return chip('#FEF3C7', '#E9C46A', '#7A5B10',
+        'Awaiting review — submitted by ' + pbEsc(_srPersonName(row.submitted_by) || 'unknown')
+        + (row.submitted_at ? ' on ' + _srFmtWhen(row.submitted_at) : ''))
+      + (mayApprove
+        ? ` <button class="btn btn-sm btn-primary" onclick="_srApprove()">Approve</button>
+            <button class="btn btn-sm btn-secondary" onclick="_srDeclineOpen()">Decline…</button>`
+        : mine
+          ? ` <span style="font-size:11px;color:var(--text3);">You submitted this — a different senior person must approve it.</span>
+              <button class="btn btn-sm btn-ghost" onclick="_srReopen()">Withdraw to draft</button>`
+          : '');
+  }
+  if (row.status === 'approved') {
+    return chip('#DCFCE7', '#86EFAC', '#14532D',
+        'Approved' + (row.approved_by ? ' by ' + pbEsc(_srPersonName(row.approved_by)) : '')
+        + (row.approved_at ? ' on ' + _srFmtWhen(row.approved_at) : '')
+        + (!row.approved_by && row.note ? ' — ' + pbEsc(row.note) : ''))
+      + ` <button class="btn btn-sm btn-secondary" onclick="_srReopen()">Reopen for correction</button>`;
+  }
+  return chip('var(--bg)', 'var(--border)', 'var(--text3)', 'Draft');
+}
+
+async function _srSetStatus(patch, msg) {
+  if (_srState.busy) return;
+  _srState.busy = true; startBusy && startBusy();
+  try {
+    await api('quote_rate_versions', 'PATCH', patch, 'effective_date=eq.' + _srState.version);
+    showStatus(msg);
+    await renderSalaryRateGrid();
+  } catch (e) { showStatus('Could not update the review status: ' + e.message, 'error'); }
+  finally { _srState.busy = false; stopBusy && stopBusy(); }
+}
+
+async function _srSubmit() {
+  if (_srState.dirty) { showStatus('Save the version first', 'error'); return; }
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  await _srSetStatus({ status: 'submitted', submitted_by: me, submitted_at: new Date().toISOString(), note: null },
+    'Submitted for review');
+}
+
+async function _srApprove() {
+  const row = _srStatusOf(_srState.version);
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0);
+  if (+row.submitted_by === me) {
+    showStatus('You submitted this version — a different senior person must approve it', 'error'); return;
+  }
+  if (typeof can === 'function' && !can('approve_salary_rates')) {
+    showStatus('Approving needs the approve_salary_rates permission', 'error'); return;
+  }
+  await _srSetStatus({ status: 'approved', approved_by: me || null, approved_at: new Date().toISOString() },
+    'Version approved and locked');
+}
+
+function _srDeclineOpen() { _srState.declineOpen = true; _srPaint(); }
+
+async function _srDecline() {
+  const el = document.getElementById('sr-decline-note');
+  const note = String((el && el.value) || '').trim();
+  if (!note) { showStatus('Give the enterer a reason', 'error'); return; }
+  _srState.declineOpen = false;
+  await _srSetStatus({ status: 'draft', note: 'Declined: ' + note, approved_by: null, approved_at: null },
+    'Declined — back to draft');
+}
+
+async function _srReopen() {
+  await _srSetStatus({ status: 'draft', submitted_by: null, submitted_at: null, approved_by: null, approved_at: null },
+    'Reopened as a draft — it will need approval again');
 }
 async function renderPbEditor(schemaId, opts) {
   // Salary rates are published as a grid per determination, not as a list of rows — they get
