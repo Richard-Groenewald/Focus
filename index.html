@@ -6783,7 +6783,10 @@ const _srFmt = (v, maxDp) => (v == null || v === '' || !isFinite(+v)) ? ''
 
 // Subtle block tints, one per combined block in paint order — matching the mock's habit of
 // giving each block its own colour so membership reads at a glance.
-const _SR_FILLS = ['#FBF0E0', '#FCE8F1', '#E2EDFB', '#E2F5E8', '#DFF1F0', '#FBF6DA', '#EFE7FA'];
+// Seven hue families spread across the wheel - orange, blue, green, purple, yellow, cyan,
+// pink - so no two combined units ever look alike. Headings wear the full tint; body rows a
+// lightened shade of the same family.
+const _SR_FILLS = ['#F4BE7D', '#85B6E8', '#8FD59A', '#C9A3E8', '#F0DE6F', '#7BD4D8', '#F2A3C5'];
 // Blend a fill toward white - body rows wear a lighter shade of their group's colour, so the
 // heading and the row beneath it are visibly different while still reading as one family.
 function _srLighten(hex, f) {
@@ -6987,18 +6990,22 @@ function _srPaint() {
     </div>`;
 
   // Colour per combined block / combined column group, in paint order.
-  // A combined group's colour is keyed to its LEAD AREA, not to paint order, so uncombining
-  // one group never recolours another. Row blocks rotate through the rest of the palette.
+  // Every combined unit - area group or grade block - takes a UNIQUE colour from the palette.
+  // The preferred slot comes from the unit's identity (lead area, block position), so colours
+  // stay put when something ELSE is uncombined; a collision probes forward to the next free
+  // slot, so no two units on screen ever share a family.
+  const used = new Set();
+  const _L = _SR_FILLS.length;
+  const pick = pref => {
+    let i = ((pref % _L) + _L) % _L;
+    while (used.has(i)) i = (i + 1) % _L;
+    if (used.size < _L) used.add(i);
+    return _SR_FILLS[i];
+  };
   const agTint = dr.areaGroups.map(ag => ag.members.length > 1
-    ? _SR_FILLS[(_srNum(areaById[ag.members[0]].code) + _SR_FILLS.length - 1) % _SR_FILLS.length]
-    : null);
-  let tint = 2;
-  const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map(b => {
-    if (b.length > 1) {
-      let f = _SR_FILLS[tint++ % _SR_FILLS.length];
-      if (f === agTint[i]) f = _SR_FILLS[tint++ % _SR_FILLS.length];   // never the group's own header colour
-      return f;
-    }
+    ? pick(_srNum(areaById[ag.members[0]].code) - 1) : null);
+  const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map((b, bi) => {
+    if (b.length > 1) return pick(_srNum(areaById[ag.members[0]].code) + 2 + bi);
     return ag.members.length > 1 ? _srLighten(agTint[i], 0.55) : null;
   }));
 
