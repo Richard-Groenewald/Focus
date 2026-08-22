@@ -65,7 +65,7 @@ const FORM_PAGE = `<!doctype html><html><head><meta charset="utf-8">
   <span class="sub" id="page-sub"></span>
   <label class="sub" style="margin-left:auto;">Acting as
     <select id="acting-as" class="form-control" style="font-size:12px;padding:3px 6px;"
-      onchange="currentUser.personId = +this.value; renderSalaryRateGrid();">
+      onchange="currentUser.personId = +this.value; currentUser.isAdmin = this.value === '1'; renderSalaryRateGrid();">
       <option value="1">Richard Groenewald</option>
       <option value="4105">Lesley-Anne Kleyn</option>
     </select></label>
@@ -77,7 +77,7 @@ const FORM_PAGE = `<!doctype html><html><head><meta charset="utf-8">
   // Just enough of the app for the module to run - same api() semantics, no login, no sidebar.
   const FN_URL = '/.netlify/functions/sb';
   let pbActiveSchema = null;
-  const currentUser = { personId: 1 };            // PEOPLE id (not system_users id) - switchable above
+  const currentUser = { personId: 1, isAdmin: true };   // PEOPLE id; Richard=admin, Lesley=Executive
   const can = () => true;                         // harness: every permission granted
   const pbEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g,
     c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));

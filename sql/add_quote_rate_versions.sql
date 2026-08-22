@@ -41,6 +41,26 @@ select 'approve_salary_rates',
        'different person from the submitter (enforced in the app).'
 where not exists (select 1 from permissions where name = 'approve_salary_rates');
 
+-- The superuser right: an APPROVED version is locked for everyone else. Grant this to almost
+-- nobody - reopening approved statutory rates is the thing the whole mechanism exists to stop
+-- happening casually.
+insert into permissions (name, description)
+select 'reopen_approved_salary_rates',
+       'May reopen an APPROVED salary rate version for correction, sending it back to draft '
+       'and through review again. A deliberately rare right.'
+where not exists (select 1 from permissions where name = 'reopen_approved_salary_rates');
+
+-- Richard's governance (2026-08-22): the Administrator creates the new year's version (and may
+-- discard drafts - enforced in the app), and ANYONE IN EXECUTIVE can approve, so the checker's
+-- right is granted to the Executive role here. The submitter-is-not-approver rule still applies
+-- on top.
+insert into role_permissions (role_id, permission_id)
+select r.id, p.id
+  from roles r cross join permissions p
+ where r.name = 'Executive' and p.name = 'approve_salary_rates'
+   and not exists (select 1 from role_permissions x
+                    where x.role_id = r.id and x.permission_id = p.id);
+
 -- Backfill: every captured determination is approved history.
 insert into quote_rate_versions (effective_date, status, note)
 select distinct effective_date, 'approved', 'Historic determination - captured before the review mechanism'

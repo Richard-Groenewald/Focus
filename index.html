@@ -6784,9 +6784,9 @@ const _srFmt = (v, maxDp) => (v == null || v === '' || !isFinite(+v)) ? ''
 // Subtle block tints, one per combined block in paint order — matching the mock's habit of
 // giving each block its own colour so membership reads at a glance.
 // Seven hue families spread across the wheel - orange, blue, green, purple, yellow, cyan,
-// pink - so no two combined units ever look alike. Headings wear the full tint; body rows a
-// lightened shade of the same family.
-const _SR_FILLS = ['#F4BE7D', '#85B6E8', '#8FD59A', '#C9A3E8', '#F0DE6F', '#7BD4D8', '#F2A3C5'];
+// pink - distinct but MUTED: the colour exists only to show which cells are combined, not to
+// decorate. The unique allocator keeps any two units apart.
+const _SR_FILLS = ['#EED9B8', '#C3D8EE', '#CBE5CF', '#DECFEE', '#EDE6BD', '#C4E1E3', '#EFD0DF'];
 // Blend a fill toward white - body rows wear a lighter shade of their group's colour, so the
 // heading and the row beneath it are visibly different while still reading as one family.
 function _srLighten(hex, f) {
@@ -6867,6 +6867,13 @@ function _srPersonName(id) {
   return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : (id ? 'person #' + id : '');
 }
 const _srFmtWhen = ts => ts ? String(ts).slice(0, 10) : '';
+// Creating and discarding versions is the Administrator's job (Richard's rule: administrator
+// creates the new year, Executive approves). Approval itself is the approve_salary_rates
+// permission, granted to the Executive role by the migration.
+function _srIsAdmin() {
+  return !!(typeof currentUser !== 'undefined' && currentUser
+    && (currentUser.isAdmin || (currentUser.permissions || []).includes('all')));
+}
 
 // ── Draft: the working copy the grid edits ───────────────────────────────────
 // areaGroups: [{ members:[areaId..], description, rowBlocks:[[gradeId..]..] }], plus a value map
@@ -6944,6 +6951,7 @@ function _srSetVersion(v) {
   _srState.version = v;
   _srState.editing = _srStatusOf(v).status === 'draft';
   _srState.declineOpen = false;
+  _srState.confirmDelete = false;
   _srBuildDraft();
   _srPaint();
 }
@@ -6980,15 +6988,22 @@ function _srPaint() {
       <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
       <span style="display:inline-block;width:1px;height:18px;background:var(--border);"></span>
       ${tabs}
-      <button class="btn btn-sm btn-secondary" onclick="_srNewVersionOpen()">+ New version</button>
+      ${_srIsAdmin() ? `<button class="btn btn-sm btn-secondary" onclick="_srNewVersionOpen()">+ New version</button>` : ''}
       <span style="flex:1 1 auto;"></span>
       ${st.editing
         ? `${actBtns}
            <button class="btn btn-sm btn-secondary" onclick="_srDiscard()" ${st.dirty ? '' : 'disabled'}>Discard</button>
            <button class="btn btn-sm btn-primary" onclick="_srSave()" ${st.dirty ? '' : 'disabled'}>Save version</button>
-           <button class="btn btn-sm btn-secondary" onclick="_srSubmit()" ${st.dirty ? 'disabled title="Save the version first"' : ''}>Submit for review</button>`
+           <button class="btn btn-sm btn-secondary" onclick="_srSubmit()" ${st.dirty ? 'disabled title="Save the version first"' : ''}>Submit for review</button>
+           ${_srIsAdmin() ? `<button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_srState.confirmDelete=true;_srPaint()">Discard draft…</button>` : ''}`
         : _srStatusBarHtml()}
     </div>
+    ${st.confirmDelete ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:#FDE7E8;border:1px solid var(--red);border-radius:8px;">
+      <span style="font-size:12px;font-weight:700;color:var(--red);">Delete the ${pbEsc(st.version || '')} draft entirely — its figures, combining and status? This cannot be undone.</span>
+      <button class="btn btn-sm" style="background:var(--red);border-color:var(--red);color:#fff;" onclick="_srDeleteVersion()">Delete draft</button>
+      <button class="btn btn-sm btn-ghost" onclick="_srState.confirmDelete=false;_srPaint()">Cancel</button>
+    </div>` : ''}
     ${st.declineOpen ? `
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <span style="font-size:12px;font-weight:700;color:var(--red);">Decline — tell the enterer what needs fixing</span>
@@ -7000,7 +7015,11 @@ function _srPaint() {
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
       <span style="font-size:12px;font-weight:700;color:var(--navy);">New version — in force from</span>
       <input type="date" id="sr-newver-date" class="form-control" style="width:auto;" value="${pbEsc(st.newVerSuggest || '')}">
-      <button class="btn btn-sm btn-primary" onclick="_srCreateVersion()">Create as a copy of ${pbEsc(_srVersions()[0] || '—')}</button>
+      <label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:5px;">
+        <input type="checkbox" id="sr-newver-copygroups" checked>
+        Use ${pbEsc(_srVersions()[0] || 'the previous version')}'s combining and descriptions (never its values)
+      </label>
+      <button class="btn btn-sm btn-primary" onclick="_srCreateVersion()">Create empty version</button>
       <button class="btn btn-sm btn-ghost" onclick="_srState.newVerOpen=false;_srPaint()">Cancel</button>
       ${st.dirty ? '<span style="font-size:11px;color:var(--red);font-weight:700;">Unsaved changes on this version will be discarded.</span>' : ''}
     </div>` : ''}
@@ -7008,7 +7027,9 @@ function _srPaint() {
       ${!st.editing
         ? (_srStatusOf(st.version).status === 'submitted'
             ? 'Locked while awaiting review — it can be approved, or declined back to draft.'
-            : 'Approved and locked. Reopen for correction to change it — it will need review and approval again.')
+            : (typeof can === 'function' && can('reopen_approved_salary_rates')
+                ? 'Approved and locked. Reopen for correction to change it — it will need review and approval again.'
+                : 'Approved and locked. Changing it needs the reopen_approved_salary_rates right — speak to the administrator.'))
         : (_srStatusOf(st.version).note && String(_srStatusOf(st.version).note).indexOf('Declined:') === 0
             ? '<span style="color:var(--red);font-weight:700;">' + pbEsc(_srStatusOf(st.version).note) + '</span> — fix and resubmit. '
             : '') + (st.selAreas.size
@@ -7043,9 +7064,9 @@ function _srPaint() {
 
   // Compact grid: thin dividing lines on every cell, a heavier edge where each area group
   // starts, and a table that hugs its content instead of stretching across the page.
-  const th = (txt, extra) => `<th style="padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);white-space:nowrap;border:1px solid var(--border);${extra || ''}">${txt}</th>`;
+  const th = (txt, extra) => `<th style="padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);white-space:nowrap;border:1px solid #000;${extra || ''}">${txt}</th>`;
   const flatAreas = dr.areaGroups.flatMap((ag, i) => ag.members.map(a => ({ a, agIdx: i, lead: a === ag.members[0] })));
-  const AG_EDGE = '2px solid var(--border)';
+  const AG_EDGE = '2px solid #000';
 
   const h1 = flatAreas.map(({ a, agIdx, lead }) => {
     const sel = st.selAreas.has(agIdx);
@@ -7064,10 +7085,14 @@ function _srPaint() {
     return `<th colspan="${w}" style="padding:3px 6px;border:1px solid var(--border);border-left:${AG_EDGE};text-align:center;font-size:11px;font-weight:600;color:var(--text2);background:${agTint[i] || 'var(--bg)'};">${inner}</th>`;
   }).join('');
 
+  const INK1 = 'background:#000;color:#fff;font-size:12px;letter-spacing:0;text-transform:none;border:1px solid var(--border);';
+  const INK2 = 'background:#333;color:#fff;font-size:12px;letter-spacing:0;text-transform:none;border:1px solid var(--border);';
+  const CORNER = 'border:none;background:transparent;';
   const h3 = flatAreas.map(({ lead }) =>
-    th('Monthly', `text-align:center;${lead ? 'border-left:' + AG_EDGE + ';' : ''}`) + th('Hourly', 'text-align:center;')).join('');
+    th('Monthly', `text-align:center;${INK1}${lead ? 'border-left:' + AG_EDGE + ';' : ''}`)
+    + th('Hourly', 'text-align:center;' + INK2)).join('');
 
-  const rows = d.grades.map(g => {
+  const rows = d.grades.map((g, gi) => {
     const cellsHtml = flatAreas.map(({ a, agIdx, lead }) => {
       const ag = dr.areaGroups[agIdx];
       const block = _srBlockOf(agIdx, +g.id);
@@ -7076,7 +7101,7 @@ function _srPaint() {
       const val = dr.values[_srKey(a, +g.id)];
       const fill = blockTint[agIdx][bIdx];
       const selRow = st.selRowsAg === agIdx && st.selRows.has(+g.id);
-      const base = 'padding:2px 6px;height:27px;box-sizing:border-box;text-align:right;border:1px solid var(--border);font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px;'
+      const base = 'padding:2px 6px;height:27px;box-sizing:border-box;text-align:right;border:1px solid #000;font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12px;'
         + (fill ? `background:${fill};` : '') + (selRow ? 'outline:2px solid var(--navy);outline-offset:-2px;' : '');
       const handlers = `onclick="_srSelRow(${agIdx},${+g.id},event)" oncontextmenu="return _srMenu(event,'cell',${agIdx},${+g.id})"`;
       const mk = (field) => {
@@ -7097,7 +7122,7 @@ function _srPaint() {
       return mk('monthly') + mk('hourly');
     }).join('');
     return `<tr><td onclick="_srSelRow(${_srState.selRowsAg == null ? 0 : _srState.selRowsAg},${+g.id},event)"
-      style="padding:3px 10px;font-weight:700;white-space:nowrap;border:1px solid var(--border);font-size:12px;text-align:right;cursor:${st.editing ? 'pointer' : 'default'};">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
+      style="padding:3px 10px;font-weight:700;white-space:nowrap;border:1px solid var(--border);font-size:12px;text-align:right;background:${gi % 2 ? '#333' : '#000'};color:#fff;cursor:${st.editing ? 'pointer' : 'default'};">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
   }).join('');
 
   out.innerHTML = `
@@ -7106,9 +7131,9 @@ function _srPaint() {
       <table style="border-collapse:collapse;font-size:12px;table-layout:fixed;">
         <colgroup><col style="width:118px;">${flatAreas.map(() => '<col style="width:82px;"><col style="width:82px;">').join('')}</colgroup>
         <thead>
-          <tr>${th('', 'background:var(--bg);')}${h1}</tr>
-          <tr>${th('Area Description →', 'text-align:right;font-weight:400;text-transform:none;letter-spacing:0;background:var(--bg);')}${h2}</tr>
-          <tr>${th('')}${h3}</tr>
+          <tr>${th('', CORNER)}${h1}</tr>
+          <tr>${th('Area Description →', 'text-align:right;font-weight:400;text-transform:none;letter-spacing:0;' + CORNER)}${h2}</tr>
+          <tr>${th('', CORNER)}${h3}</tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>
@@ -7371,13 +7396,13 @@ async function _srCreateVersion() {
   if (versions.includes(date)) { showStatus('That version already exists', 'error'); return; }
   const last = versions[0];
 
+  const copyGroups = !!(document.getElementById('sr-newver-copygroups') || {}).checked;
   _srState.busy = true; startBusy && startBusy();
   try {
-    const src = d.rates.filter(r => r.effective_date === last);
-    if (src.length) await api('quote_salary_rates', 'POST', src.map(r => ({
-      effective_date: date, area_id: r.area_id, grade_id: r.grade_id,
-      monthly_salary: r.monthly_salary, hourly_rate: r.hourly_rate })), '');
-    for (const g of d.groups.filter(x => x.effective_date === last)) {
+    // A new determination starts EMPTY: no figures are ever carried over - every cell reads
+    // "missing" until the enterer types the published values. Only the combining structure
+    // and descriptions come across, and only when asked for.
+    for (const g of (copyGroups ? d.groups.filter(x => x.effective_date === last) : [])) {
       const members = d.cells.filter(c => +c.group_id === +g.id);
       if (members.length < 2) continue;
       const made = await api('quote_rate_groups', 'POST',
@@ -7386,7 +7411,7 @@ async function _srCreateVersion() {
       await api('quote_rate_group_cells', 'POST', members.map(m => ({
         group_id: gid, effective_date: date, area_id: m.area_id, grade_id: m.grade_id })), '');
     }
-    for (const g of d.areaGroups.filter(x => x.effective_date === last)) {
+    for (const g of (copyGroups ? d.areaGroups.filter(x => x.effective_date === last) : [])) {
       const members = d.areaMembers.filter(m => +m.group_id === +g.id);
       if (!members.length) continue;
       const made = await api('quote_rate_area_groups', 'POST',
@@ -7397,7 +7422,7 @@ async function _srCreateVersion() {
     }
     await api('quote_rate_versions', 'POST', { effective_date: date, status: 'draft',
       entered_by: +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null }, '');
-    showStatus('Version created from ' + (last || 'scratch') + ' — a draft until it is approved');
+    showStatus('Empty draft created — type the published values, save, then submit for review');
     _srState.newVerOpen = false;
     _srState.version = date;
     await renderSalaryRateGrid();
@@ -7430,11 +7455,14 @@ function _srStatusBarHtml() {
           : '');
   }
   if (row.status === 'approved') {
+    const mayReopen = typeof can === 'function' && can('reopen_approved_salary_rates');
     return chip('#DCFCE7', '#86EFAC', '#14532D',
         'Approved' + (row.approved_by ? ' by ' + pbEsc(_srPersonName(row.approved_by)) : '')
         + (row.approved_at ? ' on ' + _srFmtWhen(row.approved_at) : '')
         + (!row.approved_by && row.note ? ' — ' + pbEsc(row.note) : ''))
-      + ` <button class="btn btn-sm btn-secondary" onclick="_srReopen()">Reopen for correction</button>`;
+      + (mayReopen
+        ? ` <button class="btn btn-sm btn-secondary" onclick="_srReopen()">Reopen for correction</button>`
+        : ` <span style="font-size:11px;color:var(--text3);">Locked — reopening an approved version needs the reopen_approved_salary_rates right.</span>`);
   }
   return chip('var(--bg)', 'var(--border)', 'var(--text3)', 'Draft');
 }
@@ -7479,6 +7507,27 @@ async function _srDecline() {
   _srState.declineOpen = false;
   await _srSetStatus({ status: 'draft', note: 'Declined: ' + note, approved_by: null, approved_at: null },
     'Declined — back to draft');
+}
+
+// Discarding a draft removes the whole version - rates, combining, status. Only drafts:
+// submitted versions are withdrawn first, approved ones are locked behind the reopen right.
+async function _srDeleteVersion() {
+  const v = _srState.version;
+  if (_srStatusOf(v).status !== 'draft') { showStatus('Only a draft can be discarded', 'error'); return; }
+  if (_srVersions().length <= 1) { showStatus('The last remaining version cannot be discarded', 'error'); return; }
+  if (_srState.busy) return;
+  _srState.busy = true; startBusy && startBusy();
+  try {
+    await api('quote_salary_rates', 'DELETE', null, 'effective_date=eq.' + v);
+    await api('quote_rate_groups', 'DELETE', null, 'effective_date=eq.' + v);
+    await api('quote_rate_area_groups', 'DELETE', null, 'effective_date=eq.' + v);
+    await api('quote_rate_versions', 'DELETE', null, 'effective_date=eq.' + v);
+    showStatus('Draft ' + v + ' discarded');
+    _srState.version = null;
+    _srState.confirmDelete = false;
+    await renderSalaryRateGrid();
+  } catch (e) { showStatus('Could not discard the draft: ' + e.message, 'error'); }
+  finally { _srState.busy = false; stopBusy && stopBusy(); }
 }
 
 async function _srReopen() {
