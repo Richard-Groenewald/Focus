@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.61 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.62 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.61 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.62 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6742,7 +6742,378 @@ async function renderPbPlaceholderPage(label) {
 function pbOpenSchema(id) { pbActiveSchema = id; pbEditingRowId = null; renderPbEditor(id, { withBack: true }); }
 function pbBackToHrGrid() { pbActiveSchema = null; pbEditingRowId = null; renderPbHumanResourcesPage(); }
 
+// ── Statutory Salary Rates — the version grid ────────────────────────────────
+// Replaces the flat row editor for this one tile. Sectoral wage tables are published as a grid
+// per determination, with blocks of areas and grades sharing a rate, and that is the shape people
+// check their work against.
+//
+// A VERSION is one effective date, running until the next starts. A rate GROUP is a block of
+// cells sharing one monthly and one hourly figure under a label; it belongs to its version,
+// because the blocks change between determinations. Groups are DECLARED, never inferred from
+// equal figures — in Areas 3 & 4 Grade B has carried the same rate as C/D/E in every captured
+// year, while in Areas 1 & 2 it stands alone, so equal figures prove nothing on their own.
+//
+// Underneath, quote_salary_rates is untouched: one row per area × grade × effective date, with a
+// group's figures written across every member row. See sql/add_quote_rate_groups.sql.
+let _srState = { version: null, sel: new Set(), busy: false };
+
+const _srKey = (areaId, gradeId) => areaId + ':' + gradeId;
+
+// Reads back what the grid shows. en-ZA writes 8 184,00 — comma decimal, space thousands — so
+// stripping non-digits would turn that into 818400 and quietly hundred-fold a wage.
+function _srParseNum(v) {
+  let t = String(v == null ? '' : v).replace(/[\s R]/g, '');
+  if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/,/g, '');   // comma = thousands
+  else if (t.indexOf(',') > -1) t = t.replace(',', '.');                     // comma = decimal
+  const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
+  return isFinite(n) ? n : NaN;
+}
+const _srNum = code => { const m = String(code || '').match(/(\d+)/); return m ? +m[1] : 0; };
+
+// "Areas 1 & 2", "Grades B–E", "Grade A" — contiguous runs collapse to a dash, scattered
+// members join with slashes, so the label always describes the block it actually covers.
+function _srRunLabel(items, one, many) {
+  if (!items.length) return '';
+  const codes = items.map(i => i.short);
+  if (codes.length === 1) return one + ' ' + codes[0];
+  const nums = items.map(i => i.ord);
+  const contiguous = nums.every((n, i) => i === 0 || n === nums[i - 1] + 1);
+  if (codes.length === 2) return many + ' ' + codes[0] + ' & ' + codes[1];
+  if (contiguous) return many + ' ' + codes[0] + '–' + codes[codes.length - 1];
+  return many + ' ' + codes.join('/');
+}
+
+function _srAutoLabel(cellKeys, areaById, gradeById) {
+  const areas = [], grades = [];
+  const seenA = new Set(), seenG = new Set();
+  for (const k of cellKeys) {
+    const [a, g] = k.split(':').map(Number);
+    if (!seenA.has(a) && areaById[a]) { seenA.add(a); areas.push({ short: String(_srNum(areaById[a].code)), ord: _srNum(areaById[a].code) }); }
+    if (!seenG.has(g) && gradeById[g]) { seenG.add(g); grades.push({ short: gradeById[g].code, ord: (gradeById[g].code || '').charCodeAt(0) }); }
+  }
+  areas.sort((x, y) => x.ord - y.ord); grades.sort((x, y) => x.ord - y.ord);
+  return [_srRunLabel(areas, 'Area', 'Areas'), _srRunLabel(grades, 'Grade', 'Grades')]
+    .filter(Boolean).join(' · ');
+}
+
+function _srGroupLabel(grp, keys, areaById, gradeById) {
+  if (grp && !grp.label_is_auto && grp.label) return grp.label;
+  return _srAutoLabel(keys, areaById, gradeById);
+}
+
+async function renderSalaryRateGrid() {
+  pbActiveSchema = 'salary-rates';
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  document.getElementById('page-sub').textContent = 'Statutory Salary Rates';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div id="sr-page" style="padding:0 0 24px;">
+      <div id="sr-top" style="margin-bottom:14px;"></div>
+      <div id="sr-body"><div style="padding:20px;color:var(--text3);">Loading rates…</div></div>
+    </div></td></tr>`;
+  try {
+    const [rates, areas, grades] = await Promise.all([
+      apiGetAll('quote_salary_rates', 'select=*'),
+      apiGet('quote_areas', 'select=*&order=display_order.asc,id.asc'),
+      apiGet('quote_grades', 'select=*&order=display_order.asc,id.asc'),
+    ]);
+    let groups = [], cells = [];
+    try {
+      [groups, cells] = await Promise.all([
+        apiGetAll('quote_rate_groups', 'select=*'),
+        apiGetAll('quote_rate_group_cells', 'select=*'),
+      ]);
+    } catch (e) {
+      document.getElementById('sr-body').innerHTML =
+        `<div style="padding:40px 20px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;">
+           Rate groups need the migration — <strong>sql/add_quote_rate_groups.sql</strong>.</div>`;
+      return;
+    }
+    window._srData = { rates, areas, grades, groups, cells };
+    const versions = [...new Set(rates.map(r => r.effective_date))].sort().reverse();
+    if (!_srState.version || !versions.includes(_srState.version)) _srState.version = versions[0] || null;
+    _srState.sel = new Set();
+    _srPaint();
+  } catch (e) {
+    document.getElementById('sr-body').innerHTML =
+      `<div style="padding:20px;color:var(--red);">Couldn't load the rates: ${pbEsc(e.message)}</div>`;
+  }
+}
+
+function _srSetVersion(v) { _srState.version = v; _srState.sel = new Set(); _srPaint(); }
+
+function _srToggleCell(areaId, gradeId) {
+  const k = _srKey(areaId, gradeId);
+  const d = window._srData; if (!d) return;
+  // Clicking an ungrouped-selection-free cell that belongs to a block picks the whole block —
+  // the common case is editing a rate, not rebuilding the grouping.
+  const grp = _srGroupOf(k);
+  if (!_srState.sel.size && grp) {
+    _srCellsOfGroup(grp.id).forEach(x => _srState.sel.add(x));
+  } else if (_srState.sel.has(k)) {
+    _srState.sel.delete(k);
+  } else {
+    _srState.sel.add(k);
+  }
+  _srPaint();
+}
+
+function _srGroupOf(key) {
+  const d = window._srData; if (!d) return null;
+  const [a, g] = key.split(':').map(Number);
+  const c = d.cells.find(x => x.effective_date === _srState.version && +x.area_id === a && +x.grade_id === g);
+  return c ? d.groups.find(x => +x.id === +c.group_id) : null;
+}
+function _srCellsOfGroup(groupId) {
+  const d = window._srData; if (!d) return [];
+  return d.cells.filter(x => +x.group_id === +groupId).map(x => _srKey(+x.area_id, +x.grade_id));
+}
+function _srRate(areaId, gradeId) {
+  const d = window._srData; if (!d) return null;
+  return d.rates.find(r => r.effective_date === _srState.version
+    && +r.area_id === areaId && +r.grade_id === gradeId) || null;
+}
+
+function _srClearSel() { _srState.sel = new Set(); _srPaint(); }
+
+function _srPaint() {
+  const d = window._srData;
+  const top = document.getElementById('sr-top');
+  const out = document.getElementById('sr-body');
+  if (!d || !top || !out) return;
+  const areaById = Object.fromEntries(d.areas.map(a => [+a.id, a]));
+  const gradeById = Object.fromEntries(d.grades.map(g => [+g.id, g]));
+  const versions = [...new Set(d.rates.map(r => r.effective_date))].sort().reverse();
+  const fmtDate = s => { const [y, m, dd] = String(s).split('-'); return dd + ' ' +
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1] + ' ' + y; };
+  const today = new Date().toISOString().slice(0, 10);
+  const current = versions.filter(v => v <= today)[0];
+
+  // Version tabs, each carrying its count of uncaptured cells.
+  const full = d.areas.length * d.grades.length;
+  const tabs = versions.map(v => {
+    const n = d.rates.filter(r => r.effective_date === v).length;
+    const miss = full - n;
+    return `<button class="btn btn-sm ${v === _srState.version ? 'btn-primary' : 'btn-secondary'}"
+       onclick="_srSetVersion('${v}')" title="In force from ${fmtDate(v)}">${fmtDate(v)}${
+       v === current ? ' <span style="font-weight:400;opacity:.85;">· current</span>' : ''}${
+       miss > 0 ? ` <span style="background:var(--red);color:#fff;border-radius:8px;padding:0 5px;font-size:10px;">${miss}</span>` : ''}</button>`;
+  }).join('');
+
+  top.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
+      <span style="display:inline-block;width:1px;height:18px;background:var(--border);"></span>
+      ${tabs}
+      <button class="btn btn-sm btn-secondary" onclick="_srNewVersion()">+ New version</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);">
+      Each version runs until the next one starts. Shaded blocks share one rate — editing a block
+      writes every cell in it.
+    </div>`;
+
+  // The grid: areas across in pairs of Monthly / Hourly, grades down.
+  const th = (txt, extra) => `<th style="padding:8px 10px;font-size:11px;text-transform:uppercase;
+    letter-spacing:.4px;color:var(--text3);white-space:nowrap;${extra || ''}">${txt}</th>`;
+  const head1 = d.areas.map(a => th(pbEsc(a.description || a.code), 'text-align:center;border-left:1px solid var(--border);')
+    .replace('<th ', '<th colspan="2" ')).join('');
+  const head2 = d.areas.map(() => th('Monthly', 'text-align:right;border-left:1px solid var(--border);') + th('Hourly', 'text-align:right;')).join('');
+
+  const rows = d.grades.map(g => {
+    const cellsHtml = d.areas.map(a => {
+      const key = _srKey(+a.id, +g.id);
+      const grp = _srGroupOf(key);
+      const members = grp ? _srCellsOfGroup(grp.id) : [key];
+      const rate = _srRate(+a.id, +g.id);
+      const sel = _srState.sel.has(key);
+      const grouped = members.length > 1;
+      const bg = sel ? 'background:#FEF3C7;' : grouped ? 'background:var(--bg);' : '';
+      const first = grouped && members[0] === key;
+      const label = grouped && first
+        ? `<div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#8A7550;margin-top:2px;">${pbEsc(_srGroupLabel(grp, members, areaById, gradeById))}</div>`
+        : '';
+      const money = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
+        : (+v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const hourly = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
+        : (+v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      const td = (inner, extra) => `<td onclick="_srToggleCell(${a.id},${g.id})"
+        style="padding:8px 10px;text-align:right;cursor:pointer;font-variant-numeric:tabular-nums;
+        border-top:1px solid var(--border);${bg}${extra || ''}">${inner}</td>`;
+      return td(money(rate && rate.monthly_salary) + label, 'border-left:1px solid var(--border);')
+           + td(hourly(rate && rate.hourly_rate));
+    }).join('');
+    return `<tr><td style="padding:8px 12px;font-weight:700;white-space:nowrap;border-top:1px solid var(--border);">Grade ${pbEsc(g.code)}</td>${cellsHtml}</tr>`;
+  }).join('');
+
+  out.innerHTML = `
+    <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;background:var(--bg2);">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead><tr>${th('In force from ' + fmtDate(_srState.version), 'text-align:left;')}${head1}</tr>
+               <tr>${th('')}${head2}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div id="sr-panel" style="margin-top:14px;">${_srPanelHtml(areaById, gradeById)}</div>`;
+}
+
+// The panel under the grid acts on whatever is selected: edit a block's figures, group a fresh
+// selection, or ungroup an existing one.
+function _srPanelHtml(areaById, gradeById) {
+  const keys = [..._srState.sel];
+  if (!keys.length) return `<div style="padding:14px 16px;color:var(--text3);font-size:12px;
+    background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+    Click a cell to select it — clicking a shaded cell picks its whole block. Select two or more
+    to group them.</div>`;
+
+  const groupIds = [...new Set(keys.map(k => { const g = _srGroupOf(k); return g ? +g.id : 0; }))];
+  const exact = groupIds.length === 1 && groupIds[0] !== 0
+    && _srCellsOfGroup(groupIds[0]).length === keys.length
+    && _srCellsOfGroup(groupIds[0]).every(k => _srState.sel.has(k));
+  const grp = exact ? window._srData.groups.find(g => +g.id === groupIds[0]) : null;
+  const rate = (() => { const [a, g] = keys[0].split(':').map(Number); return _srRate(a, g); })();
+  const auto = _srAutoLabel(keys, areaById, gradeById);
+  const label = grp ? _srGroupLabel(grp, keys, areaById, gradeById) : auto;
+  const isAuto = !grp || grp.label_is_auto;
+
+  return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:16px;">
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;">
+      <div style="min-width:210px;flex:1 1 210px;">
+        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">
+          Label ${isAuto ? '<span style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 6px;font-size:9px;">auto</span>' : ''}
+        </label>
+        <input id="sr-label" class="form-control" value="${pbEsc(label)}" placeholder="${pbEsc(auto)}">
+      </div>
+      <div style="width:140px;">
+        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">Monthly</label>
+        <input id="sr-monthly" class="form-control" inputmode="decimal" value="${rate ? rate.monthly_salary : ''}">
+      </div>
+      <div style="width:140px;">
+        <label style="display:block;font-size:11px;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);margin-bottom:4px;">Hourly</label>
+        <input id="sr-hourly" class="form-control" inputmode="decimal" value="${rate ? rate.hourly_rate : ''}">
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-sm btn-primary" onclick="_srSave()">${exact ? 'Save block' : keys.length > 1 ? 'Group &amp; save' : 'Save cell'}</button>
+        ${exact ? `<button class="btn btn-sm btn-secondary" onclick="_srUngroup(${grp.id})">Ungroup</button>` : ''}
+        <button class="btn btn-sm btn-ghost" onclick="_srClearSel()">Clear</button>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:12px;color:var(--text3);">
+      ${keys.length} cell${keys.length === 1 ? '' : 's'} selected${keys.length > 1 ? ' — they will hold one rate' : ''}.
+      ${keys.map(k => { const [a, g] = k.split(':').map(Number);
+        return `<span style="display:inline-block;background:var(--bg);border:1px solid var(--border);border-radius:5px;padding:1px 7px;margin:2px 3px 0 0;font-size:11px;font-weight:700;">A${_srNum(areaById[a].code)}·${pbEsc(gradeById[g].code)}</span>`; }).join('')}
+    </div>
+  </div>`;
+}
+
+async function _srSave() {
+  if (_srState.busy) return;
+  const keys = [...(_srState.sel || [])];
+  if (!keys.length) return;
+  const monthly = _srParseNum(document.getElementById('sr-monthly').value);
+  const hourly = _srParseNum(document.getElementById('sr-hourly').value);
+  if (!isFinite(monthly) || !isFinite(hourly)) { showStatus('Enter both a monthly and an hourly figure', 'error'); return; }
+  const d = window._srData;
+  const areaById = Object.fromEntries(d.areas.map(a => [+a.id, a]));
+  const gradeById = Object.fromEntries(d.grades.map(g => [+g.id, g]));
+  const typed = String(document.getElementById('sr-label').value || '').trim();
+  const auto = _srAutoLabel(keys, areaById, gradeById);
+
+  _srState.busy = true; startBusy && startBusy();
+  try {
+    // Figures first: update the rows that exist, create the ones that never did.
+    const existing = [], missing = [];
+    keys.forEach(k => {
+      const [a, g] = k.split(':').map(Number);
+      const r = _srRate(a, g);
+      (r ? existing : missing).push(r || { area_id: a, grade_id: g });
+    });
+    if (existing.length) {
+      await api('quote_salary_rates', 'PATCH', { monthly_salary: monthly, hourly_rate: hourly },
+        'id=in.(' + existing.map(r => r.id).join(',') + ')');
+    }
+    if (missing.length) {
+      await api('quote_salary_rates', 'POST', missing.map(m => ({
+        effective_date: _srState.version, area_id: m.area_id, grade_id: m.grade_id,
+        monthly_salary: monthly, hourly_rate: hourly })), '');
+    }
+
+    // Then the grouping. A single cell needs no group; anything larger gets one, replacing
+    // whatever groups those cells previously sat in.
+    const oldIds = [...new Set(keys.map(k => { const g = _srGroupOf(k); return g ? +g.id : 0; }))].filter(Boolean);
+    for (const gid of oldIds) await api('quote_rate_groups', 'DELETE', null, 'id=eq.' + gid);
+    if (keys.length > 1) {
+      const created = await api('quote_rate_groups', 'POST', {
+        effective_date: _srState.version,
+        label: (typed && typed !== auto) ? typed : null,
+        label_is_auto: !(typed && typed !== auto),
+      }, 'select=id');
+      const gid = Array.isArray(created) ? created[0].id : created.id;
+      await api('quote_rate_group_cells', 'POST', keys.map(k => {
+        const [a, g] = k.split(':').map(Number);
+        return { group_id: gid, effective_date: _srState.version, area_id: a, grade_id: g };
+      }), '');
+    }
+    showStatus('Rates saved');
+    await renderSalaryRateGrid();
+  } catch (e) {
+    showStatus('Could not save: ' + e.message, 'error');
+  } finally { _srState.busy = false; stopBusy && stopBusy(); }
+}
+
+async function _srUngroup(groupId) {
+  if (_srState.busy) return;
+  _srState.busy = true; startBusy && startBusy();
+  try {
+    await api('quote_rate_groups', 'DELETE', null, 'id=eq.' + groupId);
+    showStatus('Block ungrouped — the cells keep their figures');
+    await renderSalaryRateGrid();
+  } catch (e) { showStatus('Could not ungroup: ' + e.message, 'error'); }
+  finally { _srState.busy = false; stopBusy && stopBusy(); }
+}
+
+// A new determination starts as a copy of the one before it — figures, blocks and labels — so
+// only what the agreement changed has to be typed.
+async function _srNewVersion() {
+  const d = window._srData; if (!d) return;
+  const versions = [...new Set(d.rates.map(r => r.effective_date))].sort();
+  const last = versions[versions.length - 1];
+  const suggested = last ? (String(+last.slice(0, 4) + 1) + last.slice(4)) : new Date().toISOString().slice(0, 10);
+  const input = prompt('New version — in force from (YYYY-MM-DD).\n\nIt starts as a copy of ' +
+    (last || 'nothing') + ', so you only change what the agreement changed.', suggested);
+  if (!input) return;
+  const date = String(input).trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showStatus('Use the form YYYY-MM-DD', 'error'); return; }
+  if (versions.includes(date)) { showStatus('That version already exists', 'error'); return; }
+
+  _srState.busy = true; startBusy && startBusy();
+  try {
+    const src = d.rates.filter(r => r.effective_date === last);
+    if (src.length) {
+      await api('quote_salary_rates', 'POST', src.map(r => ({
+        effective_date: date, area_id: r.area_id, grade_id: r.grade_id,
+        monthly_salary: r.monthly_salary, hourly_rate: r.hourly_rate })), '');
+    }
+    for (const g of d.groups.filter(x => x.effective_date === last)) {
+      const members = d.cells.filter(c => +c.group_id === +g.id);
+      if (members.length < 2) continue;
+      const created = await api('quote_rate_groups', 'POST', {
+        effective_date: date, label: g.label, label_is_auto: g.label_is_auto }, 'select=id');
+      const gid = Array.isArray(created) ? created[0].id : created.id;
+      await api('quote_rate_group_cells', 'POST', members.map(m => ({
+        group_id: gid, effective_date: date, area_id: m.area_id, grade_id: m.grade_id })), '');
+    }
+    showStatus('Version created from ' + last);
+    _srState.version = date;
+    await renderSalaryRateGrid();
+  } catch (e) { showStatus('Could not create the version: ' + e.message, 'error'); }
+  finally { _srState.busy = false; stopBusy && stopBusy(); }
+}
+
 async function renderPbEditor(schemaId, opts) {
+  // Salary rates are published as a grid per determination, not as a list of rows — they get
+  // their own screen. Diverted here so every route in (tile, back, save-and-reload) lands on it.
+  if (schemaId === 'salary-rates') { await renderSalaryRateGrid(); return; }
   const schema = PB_SCHEMAS[schemaId];
   if (!schema) return;
 
