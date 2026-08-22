@@ -6784,6 +6784,13 @@ const _srFmt = (v, maxDp) => (v == null || v === '' || !isFinite(+v)) ? ''
 // Subtle block tints, one per combined block in paint order — matching the mock's habit of
 // giving each block its own colour so membership reads at a glance.
 const _SR_FILLS = ['#FBF0E0', '#FCE8F1', '#E2EDFB', '#E2F5E8', '#DFF1F0', '#FBF6DA', '#EFE7FA'];
+// Blend a fill toward white - body rows wear a lighter shade of their group's colour, so the
+// heading and the row beneath it are visibly different while still reading as one family.
+function _srLighten(hex, f) {
+  const h = String(hex).replace('#', '');
+  const c = i => Math.round(parseInt(h.substr(i, 2), 16) * (1 - f) + 255 * f);
+  return `rgb(${c(0)}, ${c(2)}, ${c(4)})`;
+}
 
 async function renderSalaryRateGrid() {
   pbActiveSchema = 'salary-rates';
@@ -6986,8 +6993,14 @@ function _srPaint() {
     ? _SR_FILLS[(_srNum(areaById[ag.members[0]].code) + _SR_FILLS.length - 1) % _SR_FILLS.length]
     : null);
   let tint = 2;
-  const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map(b =>
-    (b.length > 1) ? _SR_FILLS[tint++ % _SR_FILLS.length] : (ag.members.length > 1 ? agTint[i] : null)));
+  const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map(b => {
+    if (b.length > 1) {
+      let f = _SR_FILLS[tint++ % _SR_FILLS.length];
+      if (f === agTint[i]) f = _SR_FILLS[tint++ % _SR_FILLS.length];   // never the group's own header colour
+      return f;
+    }
+    return ag.members.length > 1 ? _srLighten(agTint[i], 0.55) : null;
+  }));
 
   // Compact grid: thin dividing lines on every cell, a heavier edge where each area group
   // starts, and a table that hugs its content instead of stretching across the page.
