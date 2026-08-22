@@ -6980,8 +6980,12 @@ function _srPaint() {
     </div>`;
 
   // Colour per combined block / combined column group, in paint order.
-  let tint = 0;
-  const agTint = dr.areaGroups.map(ag => ag.members.length > 1 ? _SR_FILLS[tint++ % _SR_FILLS.length] : null);
+  // A combined group's colour is keyed to its LEAD AREA, not to paint order, so uncombining
+  // one group never recolours another. Row blocks rotate through the rest of the palette.
+  const agTint = dr.areaGroups.map(ag => ag.members.length > 1
+    ? _SR_FILLS[(_srNum(areaById[ag.members[0]].code) + _SR_FILLS.length - 1) % _SR_FILLS.length]
+    : null);
+  let tint = 2;
   const blockTint = dr.areaGroups.map((ag, i) => ag.rowBlocks.map(b =>
     (b.length > 1) ? _SR_FILLS[tint++ % _SR_FILLS.length] : (ag.members.length > 1 ? agTint[i] : null)));
 
@@ -6994,7 +6998,7 @@ function _srPaint() {
   const h1 = flatAreas.map(({ a, agIdx, lead }) => {
     const sel = st.selAreas.has(agIdx);
     return th(pbEsc('Area ' + _srNum(areaById[a].code)),
-      `text-align:center;${lead ? 'border-left:' + AG_EDGE + ';' : ''}cursor:${st.editing ? 'pointer' : 'default'};background:var(--bg);` +
+      `text-align:center;${lead ? 'border-left:' + AG_EDGE + ';' : ''}cursor:${st.editing ? 'pointer' : 'default'};background:${agTint[agIdx] || 'var(--bg)'};` +
       (sel ? 'outline:2px solid var(--navy);outline-offset:-2px;' : ''))
       .replace('<th ', `<th colspan="2" onclick="_srSelArea(${agIdx})" oncontextmenu="return _srMenu(event,'area',${agIdx})" `);
   }).join('');
@@ -7005,7 +7009,7 @@ function _srPaint() {
       ? `<input value="${pbEsc(ag.description)}" onchange="_srSetDesc(${i},this.value)"
            style="width:95%;max-width:170px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);padding:2px 6px;font-size:11px;text-align:center;font-family:inherit;color:var(--text);">`
       : pbEsc(ag.description || '—');
-    return `<th colspan="${w}" style="padding:3px 6px;border:1px solid var(--border);border-left:${AG_EDGE};text-align:center;font-size:11px;font-weight:600;color:var(--text2);background:var(--bg);">${inner}</th>`;
+    return `<th colspan="${w}" style="padding:3px 6px;border:1px solid var(--border);border-left:${AG_EDGE};text-align:center;font-size:11px;font-weight:600;color:var(--text2);background:${agTint[i] || 'var(--bg)'};">${inner}</th>`;
   }).join('');
 
   const h3 = flatAreas.map(({ lead }) =>
