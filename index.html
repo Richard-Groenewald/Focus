@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.62 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.63 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.62 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.63 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6820,9 +6820,13 @@ async function renderSalaryRateGrid() {
     ]);
     let groups = [], cells = [];
     try {
+      // NOT apiGetAll for the cells: it pages on an id column, and the cell table's key is the
+      // composite (group_id, area_id, grade_id) — no id exists, so PostgREST 400s and the page
+      // wrongly reads that as "migration missing". One grid is 4 versions x 20 cells = 80 rows,
+      // far under the 1000-row cap, so a single ordered GET is the correct fetch.
       [groups, cells] = await Promise.all([
         apiGetAll('quote_rate_groups', 'select=*'),
-        apiGetAll('quote_rate_group_cells', 'select=*'),
+        apiGet('quote_rate_group_cells', 'select=*&order=group_id.asc&limit=1000'),
       ]);
     } catch (e) {
       document.getElementById('sr-body').innerHTML =
