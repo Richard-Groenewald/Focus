@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.61 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.61 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12053,6 +12053,36 @@ function leadSiteLabel(l) {
   return (l.site_name || '').trim();
 }
 
+// A lead's CLIENT, resolved the same way the client bands resolve it — one
+// function so the column and the band can never disagree about who a lead
+// belongs to:
+//   1. the linked organisation (target_org_id)
+//   2. else the organisation behind its linked site
+//   3. else the typed free-text name, case-folded for the band key so that
+//      "PAR", "par" and "Par " collapse into one client
+//   4. else nothing, and the lead never bands
+// Display prefers the trading name. Focus shows leads site-first, so until now
+// the list never displayed this at all — which is what made bands look like
+// they were grouping on a field that had not been filled in.
+function leadClientOf(l, orgs, sites) {
+  const O = orgs || allData['organisations'] || [];
+  const S = sites || allData['sites'] || [];
+  const of = o => ({ key: 'o' + o.id, label: o.trading_name || o.name || '' });
+  if (l && l.target_org_id) {
+    const o = O.find(x => +x.id === +l.target_org_id);
+    if (o) return of(o);
+  }
+  if (l && l.site_id) {
+    const s = S.find(x => +x.id === +l.site_id);
+    const o = (s && s.organisation_id) ? O.find(x => +x.id === +s.organisation_id) : null;
+    if (o) return of(o);
+  }
+  const nm = ((l && l.target_org_name) || '').trim();
+  if (nm) return { key: 'n' + nm.toLowerCase(), label: nm };
+  return { key: 'none', label: '' };
+}
+const leadClientLabel = (l, orgs, sites) => leadClientOf(l, orgs, sites).label;
+
 // Lead display label outside the leads page (engagement modal, dashboard,
 // history, contacts admin) — site-first like the leads list: embedded
 // sites(name) from the fetch, else leadSiteLabel, else the organisation, else
@@ -12207,6 +12237,7 @@ async function renderLeadsPage() {
 
     const cols = [
       { key: 'source', label: 'Source',      get: l => (sources.find(s => +s.id === +l.source_id)?.name) || '' },
+      { key: 'client', label: 'Client',      get: l => leadClientLabel(l, orgs, sites) },
       { key: 'target', label: 'Site',        get: l => targetName(l) },
       { key: 'region', label: 'Region',      get: l => (regions.find(r => +r.id === +l.region_id)?.name) || '' },
       { key: 'branch', label: 'Branch',      get: l => ((allData['branches']||[]).find(b => +b.id === +l.branch_id)?.name) || '' },
@@ -12224,24 +12255,10 @@ async function renderLeadsPage() {
     // clients and clientless leads stay plain rows; bands form from the
     // filtered+sorted rows in order of first appearance, so the user's column
     // sort still decides band order.
-    const leadClientOf = (l) => {
-      if (l.target_org_id) {
-        const o = orgs.find(x => +x.id === +l.target_org_id);
-        if (o) return { key: 'o' + o.id, label: o.trading_name || o.name };
-      }
-      if (l.site_id) {
-        const s = sites.find(x => +x.id === +l.site_id);
-        const o = (s && s.organisation_id) ? orgs.find(x => +x.id === +s.organisation_id) : null;
-        if (o) return { key: 'o' + o.id, label: o.trading_name || o.name };
-      }
-      const nm = (l.target_org_name || '').trim();
-      if (nm) return { key: 'n' + nm.toLowerCase(), label: nm };
-      return { key: 'none', label: '' };
-    };
     const leadsGroupRenderer = (rows) => {
       const bands = new Map(); const order = [];
       rows.forEach(l => {
-        const c = leadClientOf(l);
+        const c = leadClientOf(l, orgs, sites);
         const key = c.key === 'none' ? 'x' + l.id : c.key;   // clientless leads never band
         let b = bands.get(key);
         if (!b) { b = { key, label: c.label, rows: [] }; bands.set(key, b); order.push(b); }
@@ -12362,6 +12379,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
 
   return `<tr onclick="openLead(${l.id})" style="cursor:pointer;${rowBorder}">
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
+    <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
