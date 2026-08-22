@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.63 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.63 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5471,7 +5471,7 @@ function pbCostPerOfficer(p) {
   return { A: 18500, B: 16500, C: 14800, D: 12300, E: 11000 }[code] || 12000;
 }
 function pbPostSummaryCost(p) { return pbCostPerOfficer(p) * pbOfficersForPost(p); }
-function pbFmtRand(n) { return 'R ' + n.toLocaleString('en-ZA', { maximumFractionDigits: 0 }).replace(/,/g, ' '); }
+function pbFmtRand(n) { return 'R ' + n.toLocaleString('en-US', { maximumFractionDigits: 0 }); }
 function pbTotals() {
   let posts = 0, peak = 0, needed = 0, hours = 0, cost = 0;
   pbHeadings.forEach(h => h.posts.forEach(p => {
@@ -5710,7 +5710,7 @@ function renderPeopleSection() {
       '<div class="pb-totals">' +
         '<div class="field"><span class="label">Posts</span><span class="value">' + t.posts + '</span></div>' +
         '<div class="field"><span class="label">Peak on duty</span><span class="value">' + t.peak + '</span></div>' +
-        '<div class="field"><span class="label">Monthly hrs</span><span class="value">' + t.hours.toFixed(0) + '</span></div>' +
+        '<div class="field"><span class="label">Monthly hrs</span><span class="value">' + t.hours.toLocaleString('en-US', { maximumFractionDigits: 0 }) + '</span></div>' +
         '<div class="field"><span class="label">Officers needed</span><span class="value">' + t.needed.toFixed(2) + '<br><span style="font-size:11px;font-weight:normal;color:rgba(255,255,255,0.7);">round up: ' + pbHeadings.reduce((a,h) => a + h.posts.reduce((b,p) => b + pbOfficersForPost(p), 0), 0) + '</span></span></div>' +
         '<div class="field"><span class="label">People cost /mo*</span><span class="value">' + pbFmtRand(t.cost) + '</span></div>' +
         '<div class="field"><span class="label">Selling /mo</span><span class="value" style="font-size:11px;color:rgba(255,255,255,0.5);font-style:italic;font-weight:normal;">— TBD —</span></div>' +
@@ -5843,7 +5843,7 @@ function renderShiftReadout(p) {
   const sn = pbSundayBoundOfficers(p);
   const need = pbOfficersNeeded(p);
   const binding = sn > gn && sn > 0;
-  return '<div class="pb-shift-readout"><div>Monthly officer-hours: <strong>' + mh.toFixed(1) + '</strong>&nbsp;·&nbsp;Officers needed: <strong>' + need.toFixed(2) + '</strong> <span class="cp-muted">(round up to ' + Math.ceil(need) + ')</span></div>' +
+  return '<div class="pb-shift-readout"><div>Monthly officer-hours: <strong>' + mh.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + '</strong>&nbsp;·&nbsp;Officers needed: <strong>' + need.toFixed(2) + '</strong> <span class="cp-muted">(round up to ' + Math.ceil(need) + ')</span></div>' +
     '<div class="cp-muted" style="margin-top:3px;">General: ' + gn.toFixed(2) + ' ÷ ' + PB_HOURS_PER_OFFICER_PER_MONTH + ' hrs/officer/mo (SD6)&nbsp;·&nbsp;Sunday-bound: ' + sn.toFixed(2) + ' ÷ ' + PB_SUNDAY_HRS_PER_OFFICER_PER_MONTH + ' hrs/officer/mo' +
     (binding ? '<strong style="color:var(--red);">&nbsp;(Sunday cap is binding)</strong>' : '') + '<br>SD6 ceiling: 48 hr/wk ordinary + 10 hr/wk OT; Sunday work ≤ 12 hr/wk</div></div>';
 }
@@ -6759,15 +6759,18 @@ let _srState = { version: null, sel: new Set(), busy: false };
 
 const _srKey = (areaId, gradeId) => areaId + ':' + gradeId;
 
-// Reads back what the grid shows. en-ZA writes 8 184,00 — comma decimal, space thousands — so
-// stripping non-digits would turn that into 818400 and quietly hundred-fold a wage.
+// Reads back what the grid shows — the house standard, 8,184.00 — while still surviving a
+// value pasted from the agreement PDF in en-ZA form (8 184,00), where a naive strip of the
+// comma's neighbours would hundred-fold a wage. A comma is thousands only when it looks like it.
 function _srParseNum(v) {
-  let t = String(v == null ? '' : v).replace(/[\s R]/g, '');
-  if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/,/g, '');   // comma = thousands
-  else if (t.indexOf(',') > -1) t = t.replace(',', '.');                     // comma = decimal
+  let t = String(v == null ? '' : v).replace(/[\s\u00a0R]/g, '');
+  if (t.indexOf(',') > -1 && t.indexOf('.') > -1) t = t.replace(/,/g, '');       // 8,184.00
+  else if (/^-?\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, '');             // 6,256 / 1,234,567
+  else if (t.indexOf(',') > -1) t = t.replace(',', '.');                         // pasted 8184,00
   const n = parseFloat(t.replace(/[^0-9.\-]/g, ''));
   return isFinite(n) ? n : NaN;
 }
+
 const _srNum = code => { const m = String(code || '').match(/(\d+)/); return m ? +m[1] : 0; };
 
 // "Areas 1 & 2", "Grades B–E", "Grade A" — contiguous runs collapse to a dash, scattered
@@ -6938,9 +6941,9 @@ function _srPaint() {
         ? `<div style="font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#8A7550;margin-top:2px;">${pbEsc(_srGroupLabel(grp, members, areaById, gradeById))}</div>`
         : '';
       const money = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
-        : (+v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        : (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
       const hourly = v => v == null ? '<span style="color:var(--red);font-weight:700;">missing</span>'
-        : (+v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+        : (+v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
       const td = (inner, extra) => `<td onclick="_srToggleCell(${a.id},${g.id})"
         style="padding:8px 10px;text-align:right;cursor:pointer;font-variant-numeric:tabular-nums;
         border-top:1px solid var(--border);${bg}${extra || ''}">${inner}</td>`;
@@ -7187,7 +7190,7 @@ function pbRenderViewCell(col, value) {
   if (value == null || value === '') return '<span style="color:var(--text3);">—</span>';
   switch (col.type) {
     case 'date':    return pbEsc(String(value));
-    case 'decimal': return pbEsc((col.prefix || '') + (+value).toFixed(2));
+    case 'decimal': return pbEsc((col.prefix || '') + (+value).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
     case 'int':     return pbEsc(String(value));
     case 'bool':    return value ? '<span style="color:#16a34a;font-weight:600;">Yes</span>' : '<span style="color:var(--text3);">No</span>';
     case 'lookup': {
@@ -11438,7 +11441,7 @@ const RPP = (function () {
   function toggleLin(mid){ linOpen.has(+mid) ? linOpen.delete(+mid) : linOpen.add(+mid); paint(); }
 
   // ── helpers ──
-  const fmt = n => n ? 'R ' + (n/1000).toLocaleString('en-ZA',{maximumFractionDigits:0}) + ' k' : '–';
+  const fmt = n => n ? 'R ' + (n/1000).toLocaleString('en-US',{maximumFractionDigits:0}) + ' k' : '–';
   const monLabel = ym => MABBR[(+ym.split('-')[1]) - 1];
   function fyOfMonth(ym){
     const [Y,M] = ym.split('-').map(Number);
@@ -13278,7 +13281,7 @@ function cockpitFunnelStrip(c, targets, leads) {
                           .reduce((sum, l) => sum + (+l.est_value || 0), 0);
 
   const pct = (n, d) => d > 0 ? Math.round((n / d) * 100) + '%' : '—';
-  const money = v => 'R' + (v || 0).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
+  const money = v => 'R' + (v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
   const vsTarget = (val, tgt) => tgt != null
     ? `<div style="font-size:10px;color:var(--text3);margin-top:2px;">of ${tgt} target · ${pct(val, tgt)}</div>`
     : `<div style="font-size:10px;color:var(--text3);margin-top:2px;">&nbsp;</div>`;
@@ -13552,7 +13555,7 @@ function cockpitResultsHtml() {
   const qualified = leads.filter(l => l.status === 'Qualified');
   const promoted  = leads.filter(l => l.status === 'Promoted');
   const dead      = leads.filter(l => l.status === 'Dead');
-  const money = v => 'R' + (+v || 0).toLocaleString('en-ZA', { maximumFractionDigits: 0 });
+  const money = v => 'R' + (+v || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
   const promotedValue = promoted.reduce((s, l) => s + (+l.est_value || 0), 0);
 
   const list = (title, arr, accent, showValue) => {
