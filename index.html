@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.67 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.67 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5636,11 +5636,17 @@ async function openQuote(id) {
       const postIds = posts.map(p => p.id).join(',');
       const all = await apiGet('quote_post_shifts', 'post_id=in.(' + postIds + ')&select=*');
       const statTicks = await apiGet('quote_post_statutory_allowances', 'post_id=in.(' + postIds + ')&select=*&order=post_id.asc');
+      const discAmts = await apiGet('quote_post_discretionary_allowances', 'post_id=in.(' + postIds + ')&select=*&order=post_id.asc');
+      const incAmts = await apiGet('quote_post_discretionary_incentives', 'post_id=in.(' + postIds + ')&select=*&order=post_id.asc');
       posts.forEach(p => {
         p.statAllow = {};
         statTicks.filter(t => +t.post_id === +p.id).forEach(t => {
           p.statAllow[+t.statutory_allowance_id] = { state: t.state || 'on', reason: t.override_reason || '' };
         });
+        p.discAllow = {};
+        discAmts.filter(t => +t.post_id === +p.id).forEach(t => { p.discAllow[+t.discretionary_allowance_id] = t.rate_amount; });
+        p.incAllow = {};
+        incAmts.filter(t => +t.post_id === +p.id).forEach(t => { p.incAllow[+t.discretionary_incentive_id] = t.rate_amount; });
         p.shifts = {};
         all.filter(s => s.post_id === p.id).forEach(s => {
           p.shifts[pbKey(s.shift_index, s.day_type)] = { num: s.num_officers, start: (s.start_time || '').slice(0,5), end: (s.end_time || '').slice(0,5) };
@@ -5832,6 +5838,12 @@ function pbToggleDetail(postId, sec) {
 // The lookups are effective-dated: several rows can share a code, each starting on its own
 // date. For display, a code's CURRENT row is the newest effective_date that has arrived;
 // rows dated in the future wait their turn.
+// The validity window is judged by the quote's CONTRACT START DATE - the allowance is a cost
+// of the contract period - falling back to the quote date.
+function pbQuoteAsAt() {
+  return (pbQ && (pbQ.contract_start_date || pbQ.quote_date)) || new Date().toISOString().slice(0, 10);
+}
+
 // Richard's night rule for this round, exactly as chosen: a shift COUNTS as night when it
 // crosses midnight - its end time is on the following day. An 18:00-23:00 evening shift does
 // not; 22:00-06:00 and 18:00-06:00 do. Only staffed shifts (officers > 0) count.
@@ -5896,21 +5908,53 @@ async function pbStatAllowOverrideConfirm(postId, allowanceId) {
   renderQuoteEditor();
 }
 
+// Amount = inclusion: a typed amount saves the link row, a cleared field deletes it. The
+// house parser reads back what the field shows (R 1,234.56) and survives pasted forms.
+async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  if (!p) return;
+  const raw = String(el.value || '').trim();
+  const where = 'post_id=eq.' + postId + '&' + idCol + '=eq.' + itemId;
+  try {
+    if (!raw) {
+      if ((p[mapKey] || {})[+itemId] != null) { await api(table, 'DELETE', null, where); delete p[mapKey][+itemId]; }
+      el.value = '';
+      return;
+    }
+    const n = _srParseNum(raw);
+    if (!isFinite(n) || n < 0) { showStatus('Enter an amount — e.g. 450.00', 'error'); el.focus(); return; }
+    if ((p[mapKey] || {})[+itemId] != null) await api(table, 'DELETE', null, where);
+    const row = { post_id: postId, rate_amount: n };
+    row[idCol] = itemId;
+    await api(table, 'POST', row, '');
+    p[mapKey] = p[mapKey] || {};
+    p[mapKey][+itemId] = n;
+    el.value = 'R ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } catch (e) { showStatus('Could not save the amount: ' + e.message, 'error'); }
+}
+function pbDiscAmtChange(postId, itemId, el) {
+  return pbAmtSave(postId, itemId, el, 'quote_post_discretionary_allowances', 'discretionary_allowance_id', 'discAllow');
+}
+function pbIncAmtChange(postId, itemId, el) {
+  return pbAmtSave(postId, itemId, el, 'quote_post_discretionary_incentives', 'discretionary_incentive_id', 'incAllow');
+}
+
 function pbStatAllowOverrideCancel(postId) {
   const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
   if (p) p._statOvrPending = null;
   renderQuoteEditor();
 }
 
-function pbCurrentByCode(rows) {
-  const today = new Date().toISOString().slice(0, 10);
+function pbCurrentByCode(rows, asAt) {
+  const at = asAt || new Date().toISOString().slice(0, 10);
   const best = {};
   (rows || []).forEach(r => {
-    if (r.effective_date && String(r.effective_date) > today) return;
+    if (r.effective_date && String(r.effective_date) > at) return;
     const k = r.code || r.name || String(r.id);
     if (!best[k] || String(r.effective_date || '') > String(best[k].effective_date || '')) best[k] = r;
   });
-  return Object.values(best);
+  // An item whose retirement has arrived by the as-at date is out of its window and gone.
+  return Object.values(best).filter(r => !r.retired_date || String(r.retired_date) > at);
 }
 
 // Allowances and Incentives: three side-by-side columns (Richard's layout, 2026-08-23), each
@@ -5930,7 +5974,8 @@ function pbAllowanceCols(p) {
     '</div>';
 
   const night = pbPostHasMidnightShift(p);
-  const stat = pbCurrentByCode(allData['quote_statutory_allowances'])
+  const asAt = pbQuoteAsAt();
+  const stat = pbCurrentByCode(allData['quote_statutory_allowances'], asAt)
     .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
     .map(r => {
       const saved = (p.statAllow || {})[+r.id];
@@ -5944,7 +5989,7 @@ function pbAllowanceCols(p) {
       if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="Ticks itself: this post has a shift crossing midnight">auto</span>';
       if (overridden) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:#FEF3C7;border:1px solid #E9C46A;border-radius:8px;padding:0 5px;color:#7A5B10;" title="' + pbEsc(saved.reason) + '">overridden</span>';
       return { html:
-        '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;">' +
+        '<label' + (r.help_text ? ' title="' + pbEsc(r.help_text) + '"' : '') + ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;">' +
           '<input type="checkbox"' + (on ? ' checked' : '') +
             ' onchange="pbStatAllowToggle(' + p.id + ',' + r.id + ',' + (auto ? 'true' : 'false') + ', this)">' +
           '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.description || r.code) + chips + '</span>' +
@@ -5959,19 +6004,30 @@ function pbAllowanceCols(p) {
             '</div>'
           : '') };
     });
-  const disc = pbCurrentByCode(allData['quote_discretionary_allowances'])
+  // Discretionary allowances and incentives: an AMOUNT field each - typing an amount includes
+  // the item on this post, clearing it excludes it. Hover help comes from the admin lookup.
+  const amtItem = (r, saved, fnName) => ({ html:
+    '<div' + (r.help_text || r.description ? ' title="' + pbEsc(r.help_text || r.description) + '"' : '') +
+      ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;">' +
+      '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name || r.description || r.code) + '</span>' +
+      '<input value="' + (saved != null && saved !== '' ? pbEsc('R ' + Number(saved).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '') + '"' +
+        ' placeholder="—" onclick="event.stopPropagation()"' +
+        ' onchange="' + fnName + '(' + p.id + ',' + r.id + ', this)"' +
+        ' style="margin-left:auto;width:86px;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 5px;text-align:right;font-family:inherit;font-size:12px;background:var(--bg2);color:var(--text);">' +
+    '</div>' });
+  const disc = pbCurrentByCode(allData['quote_discretionary_allowances'], asAt)
     .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
-    .map(r => ({ label: r.name || r.description || r.code }));
-  const inc = pbCurrentByCode(allData['quote_discretionary_incentives'])
+    .map(r => amtItem(r, (p.discAllow || {})[+r.id], 'pbDiscAmtChange'));
+  const inc = pbCurrentByCode(allData['quote_discretionary_incentives'], asAt)
     .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
-    .map(r => ({ label: r.name || r.description || r.code }));
+    .map(r => amtItem(r, (p.incAllow || {})[+r.id], 'pbIncAmtChange'));
 
   return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;">' +
       col('Statutory Allowances', stat, 'None defined — add them under Human Resources.') +
       col('Discretionary Allowances', disc, 'None defined — add them under Human Resources.') +
       col('Incentives', inc, 'None defined — add them under Human Resources.') +
     '</div>' +
-    '<div class="pb-placeholder-text" style="margin-top:8px;">Statutory ticks save as you click; Night Shift ticks itself when a shift crosses midnight, and unticking it asks for a reason. Pricing joins in the costing round.</div>';
+    '<div class="pb-placeholder-text" style="margin-top:8px;">Statutory ticks save as you click; Night Shift ticks itself when a shift crosses midnight, and unticking it asks for a reason. An amount on a discretionary item includes it — clear the amount to exclude it. Items show only while the quote\'s contract start falls inside their effective window. Pricing joins in the costing round.</div>';
 }
 
 function renderPostDetail(p, h, others) {
@@ -6790,7 +6846,9 @@ const PB_SCHEMAS = {
       { key:'effective_date', label:'Effective Date', type:'date' },
       { key:'code',           label:'Code',           type:'text' },
       { key:'name',           label:'Name',           type:'text' },
-      { key:'description',    label:'Description',    type:'text' }
+      { key:'description',    label:'Description',    type:'text' },
+      { key:'retired_date',   label:'Retired',        type:'date' },
+      { key:'help_text',      label:'Help (hover)',   type:'text' }
     ]
   },
   'extraordinary-hours-rates': {
@@ -6814,7 +6872,9 @@ const PB_SCHEMAS = {
       { key:'description',     label:'Description',    type:'text' },
       { key:'rate',            label:'Rate',           type:'decimal', prefix:'R ' },
       { key:'occurrence_type', label:'Occurrence',     type:'enum',
-        options:[{value:'shift',label:'Shift'},{value:'monthly',label:'Monthly'}] }
+        options:[{value:'shift',label:'Shift'},{value:'monthly',label:'Monthly'}] },
+      { key:'retired_date',    label:'Retired',        type:'date' },
+      { key:'help_text',       label:'Help (hover)',   type:'text' }
     ]
   },
   'discretionary-incentives': {
@@ -6825,7 +6885,9 @@ const PB_SCHEMAS = {
       { key:'effective_date', label:'Effective Date', type:'date' },
       { key:'code',           label:'Code',           type:'text' },
       { key:'name',           label:'Name',           type:'text' },
-      { key:'description',    label:'Description',    type:'text' }
+      { key:'description',    label:'Description',    type:'text' },
+      { key:'retired_date',   label:'Retired',        type:'date' },
+      { key:'help_text',      label:'Help (hover)',   type:'text' }
     ]
   },
   'leave-allocation': {
