@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.67 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.68 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.67 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.68 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5953,8 +5953,10 @@ function pbCurrentByCode(rows, asAt) {
     const k = r.code || r.name || String(r.id);
     if (!best[k] || String(r.effective_date || '') > String(best[k].effective_date || '')) best[k] = r;
   });
-  // An item whose retirement has arrived by the as-at date is out of its window and gone.
-  return Object.values(best).filter(r => !r.retired_date || String(r.retired_date) > at);
+  // retired_date is the LAST ACTIVE day, inclusive: the item still applies ON that date and
+  // is gone after it. A NULL rate is a year captured but not yet priced — also kept off posts.
+  return Object.values(best).filter(r => (!r.retired_date || String(r.retired_date) >= at)
+    && !(r.rate === null && 'rate' in r));
 }
 
 // Allowances and Incentives: three side-by-side columns (Richard's layout, 2026-08-23), each
@@ -6847,7 +6849,7 @@ const PB_SCHEMAS = {
       { key:'code',           label:'Code',           type:'text' },
       { key:'name',           label:'Name',           type:'text' },
       { key:'description',    label:'Description',    type:'text' },
-      { key:'retired_date',   label:'Retired',        type:'date' },
+      { key:'retired_date',   label:'Last Active',    type:'date' },
       { key:'help_text',      label:'Help (hover)',   type:'text' }
     ]
   },
@@ -6873,7 +6875,7 @@ const PB_SCHEMAS = {
       { key:'rate',            label:'Rate',           type:'decimal', prefix:'R ' },
       { key:'occurrence_type', label:'Occurrence',     type:'enum',
         options:[{value:'shift',label:'Shift'},{value:'monthly',label:'Monthly'}] },
-      { key:'retired_date',    label:'Retired',        type:'date' },
+      { key:'retired_date',    label:'Last Active',    type:'date' },
       { key:'help_text',       label:'Help (hover)',   type:'text' }
     ]
   },
@@ -6886,7 +6888,7 @@ const PB_SCHEMAS = {
       { key:'code',           label:'Code',           type:'text' },
       { key:'name',           label:'Name',           type:'text' },
       { key:'description',    label:'Description',    type:'text' },
-      { key:'retired_date',   label:'Retired',        type:'date' },
+      { key:'retired_date',   label:'Last Active',    type:'date' },
       { key:'help_text',      label:'Help (hover)',   type:'text' }
     ]
   },
@@ -7780,10 +7782,195 @@ async function _srReopen() {
   await _srSetStatus({ status: 'draft', submitted_by: null, submitted_at: null, approved_by: null, approved_at: null },
     'Reopened as a draft — it will need approval again');
 }
+// ── Statutory Allowances — a table per year ──────────────────────────────────
+// Statutory allowances change annually the way salaries do, so the admin screen works the way
+// the salary grid does: one tab per effective date, that year's set as a table, and "+ New
+// year" cloning the current items with EMPTY rates to be typed when the determination
+// publishes. Obsolescence is a LAST ACTIVE date (inclusive): the item still applies on that
+// date, stops showing on posts after it, and does not clone into new years.
+let _saState = { version: null, newOpen: false, busy: false };
+
+async function renderStatAllowGrid() {
+  pbActiveSchema = 'statutory-allowances';
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  document.getElementById('page-sub').textContent = 'Statutory Allowances — a table per year';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div id="sa-page" style="padding:0 0 24px;">
+      <div id="sa-top" style="margin-bottom:12px;"></div>
+      <div id="sa-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
+    </div></td></tr>`;
+  try {
+    window._saRows = await apiGetAll('quote_statutory_allowances', 'select=*');
+    const versions = _saVersions();
+    if (!_saState.version || !versions.includes(_saState.version)) _saState.version = versions[0] || null;
+    _saPaint();
+  } catch (e) {
+    document.getElementById('sa-body').innerHTML =
+      `<div style="padding:20px;color:var(--red);">Couldn't load the allowances: ${pbEsc(e.message)}</div>`;
+  }
+}
+
+function _saVersions() {
+  return [...new Set((window._saRows || []).map(r => r.effective_date))].sort().reverse();
+}
+
+const _saFmtDate = s => { const [y, m, d] = String(s).split('-'); return d + ' ' +
+  ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1] + ' ' + y; };
+
+function _saSetVersion(v) { _saState.version = v; _saState.newOpen = false; _saPaint(); }
+
+function _saPaint() {
+  const top = document.getElementById('sa-top');
+  const out = document.getElementById('sa-body');
+  if (!top || !out) return;
+  const rows = (window._saRows || []).filter(r => r.effective_date === _saState.version)
+    .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)));
+  const versions = _saVersions();
+  const missing = rows.filter(r => r.rate == null || r.rate === '').length;
+
+  const tabs = versions.map(v => {
+    const miss = (window._saRows || []).filter(r => r.effective_date === v && (r.rate == null || r.rate === '')).length;
+    return `<button class="btn btn-sm ${v === _saState.version ? 'btn-primary' : 'btn-secondary'}"
+      onclick="_saSetVersion('${v}')">${_saFmtDate(v)}${miss ? ` <span style="background:var(--red);color:#fff;border-radius:8px;padding:0 5px;font-size:10px;">${miss}</span>` : ''}</button>`;
+  }).join('');
+
+  top.innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
+      <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
+      <span style="display:inline-block;width:1px;height:18px;background:var(--border);"></span>
+      ${tabs}
+      ${typeof _srIsAdmin === 'function' && _srIsAdmin()
+        ? `<button class="btn btn-sm btn-secondary" onclick="_saState.newOpen=true;_saPaint()">+ New year</button>` : ''}
+    </div>
+    ${_saState.newOpen ? `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;">
+      <span style="font-size:12px;font-weight:700;color:var(--navy);">New year — effective from</span>
+      <input type="date" id="sa-new-date" class="form-control" style="width:auto;" value="${pbEsc(_saNextYearDefault())}">
+      <button class="btn btn-sm btn-primary" onclick="_saCreateYear()">Create with empty rates</button>
+      <button class="btn btn-sm btn-ghost" onclick="_saState.newOpen=false;_saPaint()">Cancel</button>
+      <span style="font-size:11px;color:var(--text3);">Copies the current items — retired ones stay behind — with the rates left to type.</span>
+    </div>` : ''}
+    <div style="font-size:12px;color:var(--text3);">
+      Edits save as you leave a field. <strong>Last Active</strong> is the final day an allowance applies —
+      it still shows on posts that day and disappears after, and it will not copy into new years.
+    </div>`;
+
+  const th = t => `<th style="padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:#fff;background:#000;border:1px solid var(--border);white-space:nowrap;text-align:left;">${t}</th>`;
+  const inp = (r, field, val, extra) =>
+    `<input value="${pbEsc(val == null ? '' : val)}" onchange="_saPatch(${r.id},'${field}',this)" ${extra || ''}
+       style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;background:var(--bg2);color:var(--text);">`;
+
+  out.innerHTML = `
+    <div style="overflow-x:auto;max-width:100%;display:inline-block;border:1px solid var(--border);border-radius:8px;background:var(--bg2);">
+    <table style="border-collapse:collapse;font-size:12px;table-layout:fixed;">
+      <colgroup><col style="width:230px;"><col style="width:110px;"><col style="width:110px;"><col style="width:240px;"><col style="width:130px;"></colgroup>
+      <thead><tr>${th('Allowance')}${th('Rate')}${th('Occurrence')}${th('Help (hover on posts)')}${th('Last Active')}</tr></thead>
+      <tbody>${rows.map(r => {
+        const retired = !!r.retired_date;
+        const rate = r.rate == null || r.rate === ''
+          ? inp(r, 'rate', '', 'placeholder="missing" ')
+          : inp(r, 'rate', 'R ' + Number(r.rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+        return `<tr style="${retired ? 'opacity:.55;' : ''}">
+          <td style="padding:3px 6px;border:1px solid var(--border);">${inp(r, 'description', r.description)}</td>
+          <td style="padding:3px 6px;border:1px solid var(--border);${r.rate == null ? 'outline:2px solid var(--red);outline-offset:-2px;' : ''}">${rate}</td>
+          <td style="padding:3px 6px;border:1px solid var(--border);">
+            <select onchange="_saPatch(${r.id},'occurrence_type',this)"
+              style="width:100%;border:1px solid var(--border);border-radius:4px;padding:3px 4px;font-family:inherit;font-size:12px;background:var(--bg2);color:var(--text);">
+              <option value="shift"${r.occurrence_type === 'shift' ? ' selected' : ''}>Per shift</option>
+              <option value="monthly"${r.occurrence_type === 'monthly' ? ' selected' : ''}>Monthly</option>
+            </select></td>
+          <td style="padding:3px 6px;border:1px solid var(--border);">${inp(r, 'help_text', r.help_text)}</td>
+          <td style="padding:3px 6px;border:1px solid var(--border);">
+            <input type="date" value="${pbEsc(r.retired_date || '')}" onchange="_saPatch(${r.id},'retired_date',this)"
+              style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:2px 4px;font-family:inherit;font-size:12px;background:var(--bg2);color:var(--text);">
+            ${retired ? `<div style="font-size:10px;color:var(--text3);">last active ${pbEsc(_saFmtDate(r.retired_date))}</div>` : ''}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>
+    <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <input id="sa-add-desc" class="form-control" placeholder="New allowance — description" style="flex:1 1 220px;font-size:12px;">
+      <select id="sa-add-occ" class="form-control" style="font-size:12px;"><option value="shift">Per shift</option><option value="monthly">Monthly</option></select>
+      <button class="btn btn-sm btn-secondary" onclick="_saAdd()">Add to ${pbEsc(_saFmtDate(_saState.version || ''))}</button>
+      ${missing ? `<span style="font-size:11px;color:var(--red);font-weight:700;">${missing} rate${missing === 1 ? '' : 's'} still missing — a missing rate never reaches a post's figures.</span>` : ''}
+    </div>`;
+}
+
+async function _saPatch(id, field, el) {
+  const r = (window._saRows || []).find(x => +x.id === +id);
+  if (!r) return;
+  let val = String(el.value || '').trim();
+  if (field === 'rate') {
+    if (val === '') val = null;
+    else {
+      const n = _srParseNum(val);
+      if (!isFinite(n) || n < 0) { showStatus('Enter a rate — e.g. 10.50', 'error'); el.focus(); return; }
+      val = n;
+    }
+  }
+  if (field === 'retired_date' && val === '') val = null;
+  try {
+    await api('quote_statutory_allowances', 'PATCH', { [field]: val }, 'id=eq.' + id);
+    r[field] = val;
+    _saPaint();
+  } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
+}
+
+function _saNextYearDefault() {
+  const last = _saVersions()[0];
+  return last ? (String(+last.slice(0, 4) + 1) + last.slice(4)) : new Date().toISOString().slice(0, 10);
+}
+
+// The clone plan is computed apart from the writes so it can be tested without an API.
+function _saBuildYearPlan(date) {
+  const last = _saVersions()[0];
+  const src = (window._saRows || []).filter(r => r.effective_date === last && !r.retired_date);
+  return src.map(r => ({ effective_date: date, code: r.code, description: r.description,
+    occurrence_type: r.occurrence_type, auto_rule: r.auto_rule || 'none',
+    help_text: r.help_text || null, rate: null, retired_date: null }));
+}
+
+async function _saCreateYear() {
+  if (_saState.busy) return;
+  const el = document.getElementById('sa-new-date');
+  const date = String((el && el.value) || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) { showStatus('Pick the date the new rates take effect', 'error'); return; }
+  if (_saVersions().includes(date)) { showStatus('That year already exists', 'error'); return; }
+  const plan = _saBuildYearPlan(date);
+  if (!plan.length) { showStatus('Nothing to copy — the newest year has no active allowances', 'error'); return; }
+  _saState.busy = true; startBusy && startBusy();
+  try {
+    await api('quote_statutory_allowances', 'POST', plan, '');
+    showStatus('Year created — type the new determination’s rates');
+    _saState.newOpen = false;
+    _saState.version = date;
+    await renderStatAllowGrid();
+  } catch (e) { showStatus('Could not create the year: ' + e.message, 'error'); }
+  finally { _saState.busy = false; stopBusy && stopBusy(); }
+}
+
+async function _saAdd() {
+  const desc = String((document.getElementById('sa-add-desc') || {}).value || '').trim();
+  const occ = String((document.getElementById('sa-add-occ') || {}).value || 'shift');
+  if (!desc) { showStatus('Give the allowance a description', 'error'); return; }
+  if (!_saState.version) { showStatus('Pick a year first', 'error'); return; }
+  const code = desc.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || 'allowance';
+  try {
+    await api('quote_statutory_allowances', 'POST', {
+      effective_date: _saState.version, code, description: desc,
+      occurrence_type: occ === 'monthly' ? 'monthly' : 'shift', rate: null, auto_rule: 'none' }, '');
+    showStatus('Added — now give it a rate');
+    await renderStatAllowGrid();
+  } catch (e) { showStatus('Could not add it: ' + e.message, 'error'); }
+}
+
 async function renderPbEditor(schemaId, opts) {
   // Salary rates are published as a grid per determination, not as a list of rows — they get
   // their own screen. Diverted here so every route in (tile, back, save-and-reload) lands on it.
   if (schemaId === 'salary-rates') { await renderSalaryRateGrid(); return; }
+  // Statutory allowances change annually the way salaries do — same treatment.
+  if (schemaId === 'statutory-allowances') { await renderStatAllowGrid(); return; }
   const schema = PB_SCHEMAS[schemaId];
   if (!schema) return;
 
