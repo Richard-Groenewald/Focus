@@ -5635,7 +5635,12 @@ async function openQuote(id) {
     if (posts.length) {
       const postIds = posts.map(p => p.id).join(',');
       const all = await apiGet('quote_post_shifts', 'post_id=in.(' + postIds + ')&select=*');
+      const statTicks = await apiGet('quote_post_statutory_allowances', 'post_id=in.(' + postIds + ')&select=*&order=post_id.asc');
       posts.forEach(p => {
+        p.statAllow = {};
+        statTicks.filter(t => +t.post_id === +p.id).forEach(t => {
+          p.statAllow[+t.statutory_allowance_id] = { state: t.state || 'on', reason: t.override_reason || '' };
+        });
         p.shifts = {};
         all.filter(s => s.post_id === p.id).forEach(s => {
           p.shifts[pbKey(s.shift_index, s.day_type)] = { num: s.num_officers, start: (s.start_time || '').slice(0,5), end: (s.end_time || '').slice(0,5) };
@@ -5827,6 +5832,76 @@ function pbToggleDetail(postId, sec) {
 // The lookups are effective-dated: several rows can share a code, each starting on its own
 // date. For display, a code's CURRENT row is the newest effective_date that has arrived;
 // rows dated in the future wait their turn.
+// Richard's night rule for this round, exactly as chosen: a shift COUNTS as night when it
+// crosses midnight - its end time is on the following day. An 18:00-23:00 evening shift does
+// not; 22:00-06:00 and 18:00-06:00 do. Only staffed shifts (officers > 0) count.
+function pbPostHasMidnightShift(p) {
+  return Object.values((p && p.shifts) || {}).some(s =>
+    s && +s.num > 0 && s.start && s.end && s.end <= s.start);
+}
+
+async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  if (!p) return;
+  p.statAllow = p.statAllow || {};
+  const saved = p.statAllow[+allowanceId];
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  const where = 'post_id=eq.' + postId + '&statutory_allowance_id=eq.' + allowanceId;
+  try {
+    if (el.checked) {
+      // Ticking. An auto item that was overridden just loses its override row; a manual item
+      // gains its 'on' row.
+      if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
+      if (!isAuto) {
+        await api('quote_post_statutory_allowances', 'POST',
+          { post_id: postId, statutory_allowance_id: allowanceId, state: 'on', created_by: me }, '');
+        p.statAllow[+allowanceId] = { state: 'on', reason: '' };
+      }
+      renderQuoteEditor();
+      return;
+    }
+    // Unticking.
+    if (!isAuto) {
+      if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
+      renderQuoteEditor();
+      return;
+    }
+    // Unticking an AUTO item needs a reason - never silently, and never via a native
+    // prompt() dialog (browsers quietly block those; the New-version button taught us).
+    // An inline reason row opens under the item instead.
+    p._statOvrPending = +allowanceId;
+    renderQuoteEditor();
+  } catch (e) {
+    showStatus('Could not save the allowance: ' + e.message, 'error');
+    renderQuoteEditor();
+  }
+}
+
+async function pbStatAllowOverrideConfirm(postId, allowanceId) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  const el = document.getElementById('pb-statovr-' + postId + '-' + allowanceId);
+  const reason = String((el && el.value) || '').trim();
+  if (!reason) { showStatus('Give a reason - a statutory item is being switched off', 'error'); return; }
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  const where = 'post_id=eq.' + postId + '&statutory_allowance_id=eq.' + allowanceId;
+  try {
+    if ((p.statAllow || {})[+allowanceId]) await api('quote_post_statutory_allowances', 'DELETE', null, where);
+    await api('quote_post_statutory_allowances', 'POST',
+      { post_id: postId, statutory_allowance_id: allowanceId, state: 'off',
+        override_reason: reason, created_by: me }, '');
+    p.statAllow = p.statAllow || {};
+    p.statAllow[+allowanceId] = { state: 'off', reason };
+  } catch (e) { showStatus('Could not save the override: ' + e.message, 'error'); }
+  p._statOvrPending = null;
+  renderQuoteEditor();
+}
+
+function pbStatAllowOverrideCancel(postId) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  if (p) p._statOvrPending = null;
+  renderQuoteEditor();
+}
+
 function pbCurrentByCode(rows) {
   const today = new Date().toISOString().slice(0, 10);
   const best = {};
@@ -5846,7 +5921,7 @@ function pbAllowanceCols(p) {
   const col = (title, items, empty) => '<div style="min-width:0;">' +
     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
     (items.length
-      ? '<div style="display:flex;flex-direction:column;gap:3px;">' + items.map(x =>
+      ? '<div style="display:flex;flex-direction:column;gap:3px;">' + items.map(x => x.html ||
           '<div style="font-size:12px;color:var(--text2);display:flex;justify-content:space-between;gap:8px;">' +
             '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(x.label) + '</span>' +
             (x.right ? '<span style="white-space:nowrap;color:var(--text3);">' + pbEsc(x.right) + '</span>' : '') +
@@ -5854,11 +5929,36 @@ function pbAllowanceCols(p) {
       : '<div class="pb-placeholder-text">' + empty + '</div>') +
     '</div>';
 
+  const night = pbPostHasMidnightShift(p);
   const stat = pbCurrentByCode(allData['quote_statutory_allowances'])
     .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
-    .map(r => ({ label: r.description || r.code,
-                 right: [money(r.rate), r.occurrence_type === 'shift' ? 'per shift' : r.occurrence_type === 'monthly' ? 'monthly' : '']
-                        .filter(Boolean).join(' · ') }));
+    .map(r => {
+      const saved = (p.statAllow || {})[+r.id];
+      const auto = r.auto_rule === 'night_shift' && night;
+      // Ticked when: the rule applies and has not been overridden away, or a manual tick is saved.
+      const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
+      const overridden = auto && saved && saved.state === 'off';
+      const rate = [money(r.rate), r.occurrence_type === 'shift' ? 'per shift' : r.occurrence_type === 'monthly' ? 'monthly' : '']
+        .filter(Boolean).join(' · ');
+      let chips = '';
+      if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="Ticks itself: this post has a shift crossing midnight">auto</span>';
+      if (overridden) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:#FEF3C7;border:1px solid #E9C46A;border-radius:8px;padding:0 5px;color:#7A5B10;" title="' + pbEsc(saved.reason) + '">overridden</span>';
+      return { html:
+        '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;">' +
+          '<input type="checkbox"' + (on ? ' checked' : '') +
+            ' onchange="pbStatAllowToggle(' + p.id + ',' + r.id + ',' + (auto ? 'true' : 'false') + ', this)">' +
+          '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.description || r.code) + chips + '</span>' +
+          '<span style="margin-left:auto;white-space:nowrap;color:var(--text3);">' + pbEsc(rate) + '</span>' +
+        '</label>' +
+        (overridden ? '<div style="font-size:11px;color:#7A5B10;margin:-1px 0 2px 22px;">' + pbEsc(saved.reason) + '</div>' : '') +
+        (p._statOvrPending === +r.id
+          ? '<div style="display:flex;gap:6px;margin:2px 0 4px 22px;align-items:center;" onclick="event.stopPropagation()">' +
+              '<input id="pb-statovr-' + p.id + '-' + r.id + '" class="form-control" style="flex:1 1 140px;font-size:11px;padding:3px 6px;" placeholder="Why is this off? (required)">' +
+              '<button class="pb-btn xs" onclick="pbStatAllowOverrideConfirm(' + p.id + ',' + r.id + ')">Confirm</button>' +
+              '<button class="pb-btn xs" onclick="pbStatAllowOverrideCancel(' + p.id + ')">Cancel</button>' +
+            '</div>'
+          : '') };
+    });
   const disc = pbCurrentByCode(allData['quote_discretionary_allowances'])
     .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
     .map(r => ({ label: r.name || r.description || r.code }));
@@ -5871,7 +5971,7 @@ function pbAllowanceCols(p) {
       col('Discretionary Allowances', disc, 'None defined — add them under Human Resources.') +
       col('Incentives', inc, 'None defined — add them under Human Resources.') +
     '</div>' +
-    '<div class="pb-placeholder-text" style="margin-top:8px;">[ Per-post toggles and pricing — to be wired in a later round ]</div>';
+    '<div class="pb-placeholder-text" style="margin-top:8px;">Statutory ticks save as you click; Night Shift ticks itself when a shift crosses midnight, and unticking it asks for a reason. Pricing joins in the costing round.</div>';
 }
 
 function renderPostDetail(p, h, others) {
