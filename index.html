@@ -627,7 +627,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.74 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.75 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -663,7 +663,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.74 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.75 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5672,6 +5672,10 @@ async function openQuote(id) {
     allData['quote_statutory_allowances'] = await apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc');
     allData['quote_discretionary_allowances'] = await apiGet('quote_discretionary_allowances', 'select=*&order=effective_date.asc,id.asc');
     allData['quote_discretionary_incentives'] = await apiGet('quote_discretionary_incentives', 'select=*&order=effective_date.asc,id.asc');
+    try {
+      allData['quote_allowance_rules'] = await apiGetAll('quote_allowance_rules', 'select=*');
+      allData['quote_allowance_rule_members'] = await apiGet('quote_allowance_rule_members', 'select=*&order=rule_id.asc');
+    } catch (e) { allData['quote_allowance_rules'] = []; allData['quote_allowance_rule_members'] = []; }
     if (!pbCachedPostNames.length) pbCachedPostNames = (await apiGet('quote_standard_post_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     if (!pbCachedHeadingNames.length) pbCachedHeadingNames = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     pbHeadings = pbGroupPostsByHeading(posts);
@@ -5874,6 +5878,13 @@ async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
   const where = 'post_id=eq.' + postId + '&statutory_allowance_id=eq.' + allowanceId;
   try {
     if (el.checked) {
+      const rSt = pbCurrentByCode(allData['quote_statutory_allowances'], pbQuoteAsAt()).find(x => +x.id === +allowanceId);
+      const clash = rSt && pbRuleConflict(p, 'statutory', rSt.code);
+      if (clash) {
+        el.checked = false;
+        showStatus('Blocked by the "' + clash.rule + '" condition — ' + clash.other + ' is already active on this post', 'error');
+        return;
+      }
       // Ticking. An auto item that was overridden just loses its override row; a manual item
       // gains its 'on' row.
       if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
@@ -5936,6 +5947,17 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
     }
     const n = _srParseNum(raw);
     if (!isFinite(n) || n < 0) { showStatus('Enter an amount — e.g. 450.00', 'error'); el.focus(); return; }
+    if ((p[mapKey] || {})[+itemId] == null) {
+      const kindOf = mapKey === 'discAllow' ? 'discretionary' : 'incentive';
+      const tableOf = mapKey === 'discAllow' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
+      const rIt = pbCurrentByCode(allData[tableOf], pbQuoteAsAt()).find(x => +x.id === +itemId);
+      const clash = rIt && pbRuleConflict(p, kindOf, rIt.code);
+      if (clash) {
+        el.value = '';
+        showStatus('Blocked by the "' + clash.rule + '" condition — ' + clash.other + ' is already active on this post', 'error');
+        return;
+      }
+    }
     if ((p[mapKey] || {})[+itemId] != null) await api(table, 'DELETE', null, where);
     const row = { post_id: postId, rate_amount: n };
     row[idCol] = itemId;
@@ -6813,6 +6835,7 @@ const PB_HR_TILES = [
   { id: 'discretionary-allowances',  label: 'Discretionary Allowances' },
   { id: 'extraordinary-hours-rates', label: 'Extraordinary Hours Rates' },
   { id: 'statutory-allowances',      label: 'Statutory Allowances' },
+  { id: 'allowance-rules',           label: 'Allowance Conditions' },
   { id: 'discretionary-incentives',  label: 'Discretionary Incentives' },
   { id: 'leave-allocation',          label: 'Leave Allocation' },
   { id: 'health-insurance',          label: 'Health Insurance' },
@@ -7994,12 +8017,225 @@ async function _saAdd() {
   } catch (e) { showStatus('Could not add it: ' + e.message, 'error'); }
 }
 
+// ── Allowance conditions ─────────────────────────────────────────────────────
+// Admin-defined rules between allowances and incentives. The first type, 'exclusive', says at
+// most one member of the group may be active on a post - Richard's example: an officer is
+// armed response OR armed security, never both. Members reference KIND + CODE so a rule
+// survives the annual versions; enforcement happens at the moment of choosing, with a message
+// naming the rule and the item already in the way.
+
+// What is currently ACTIVE on a post, as 'kind:code' - ticked statutory (auto night included,
+// unless overridden off), and any discretionary/incentive carrying an amount.
+function pbActiveAllowSet(p) {
+  const out = new Set();
+  const asAt = pbQuoteAsAt();
+  const night = pbPostHasMidnightShift(p);
+  pbCurrentByCode(allData['quote_statutory_allowances'], asAt).forEach(r => {
+    const saved = (p.statAllow || {})[+r.id];
+    const auto = r.auto_rule === 'night_shift' && night;
+    const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
+    if (on) out.add('statutory:' + r.code);
+  });
+  pbCurrentByCode(allData['quote_discretionary_allowances'], asAt).forEach(r => {
+    if ((p.discAllow || {})[+r.id] != null) out.add('discretionary:' + r.code);
+  });
+  pbCurrentByCode(allData['quote_discretionary_incentives'], asAt).forEach(r => {
+    if ((p.incAllow || {})[+r.id] != null) out.add('incentive:' + r.code);
+  });
+  return out;
+}
+
+function pbAllowLabelFor(kind, code) {
+  const table = kind === 'statutory' ? 'quote_statutory_allowances'
+    : kind === 'discretionary' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
+  const r = pbCurrentByCode(allData[table], pbQuoteAsAt()).find(x => x.code === code)
+    || (allData[table] || []).find(x => x.code === code);
+  return r ? (r.name || r.description || r.code) : code;
+}
+
+// Would activating (kind, code) on this post break an exclusive rule? Returns the conflict -
+// the rule's name and the member already active - or null.
+function pbRuleConflict(p, kind, code) {
+  const active = pbActiveAllowSet(p);
+  const rules = allData['quote_allowance_rules'] || [];
+  const members = allData['quote_allowance_rule_members'] || [];
+  for (const rule of rules) {
+    if (rule.active === false || rule.rule_type !== 'exclusive') continue;
+    const mem = members.filter(m => +m.rule_id === +rule.id);
+    if (!mem.some(m => m.kind === kind && m.code === code)) continue;
+    const clash = mem.find(m => !(m.kind === kind && m.code === code) && active.has(m.kind + ':' + m.code));
+    if (clash) return { rule: rule.name, other: pbAllowLabelFor(clash.kind, clash.code) };
+  }
+  return null;
+}
+
+// ── The admin screen: Human Resources → Allowance Conditions ────────────────
+let _arState = { editing: null };   // null | 'new' | rule id
+
+async function renderAllowRules() {
+  pbActiveSchema = 'allowance-rules';
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  document.getElementById('page-sub').textContent = 'Conditions between allowances and incentives';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div id="ar-page" style="padding:0 0 24px;max-width:860px;">
+      <div id="ar-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
+    </div></td></tr>`;
+  try {
+    const [rules, members, stat, disc, inc] = await Promise.all([
+      apiGetAll('quote_allowance_rules', 'select=*'),
+      apiGet('quote_allowance_rule_members', 'select=*&order=rule_id.asc'),
+      apiGetAll('quote_statutory_allowances', 'select=*'),
+      apiGetAll('quote_discretionary_allowances', 'select=*'),
+      apiGetAll('quote_discretionary_incentives', 'select=*'),
+    ]);
+    allData['quote_allowance_rules'] = rules;
+    allData['quote_allowance_rule_members'] = members;
+    allData['quote_statutory_allowances'] = stat;
+    allData['quote_discretionary_allowances'] = disc;
+    allData['quote_discretionary_incentives'] = inc;
+    _arPaint();
+  } catch (e) {
+    document.getElementById('ar-body').innerHTML =
+      `<div style="padding:20px;color:var(--red);">Couldn't load the conditions: ${pbEsc(e.message)}${
+        /404/.test(e.message) ? ' — needs sql/add_allowance_rules.sql.' : ''}</div>`;
+  }
+}
+
+function _arItems() {
+  const today = new Date().toISOString().slice(0, 10);
+  return [
+    { kind: 'statutory', title: 'Statutory Allowances', rows: pbCurrentByCode(allData['quote_statutory_allowances'], today) },
+    { kind: 'discretionary', title: 'Discretionary Allowances', rows: pbCurrentByCode(allData['quote_discretionary_allowances'], today) },
+    { kind: 'incentive', title: 'Incentives', rows: pbCurrentByCode(allData['quote_discretionary_incentives'], today) },
+  ];
+}
+
+function _arPaint() {
+  const out = document.getElementById('ar-body');
+  if (!out) return;
+  const rules = allData['quote_allowance_rules'] || [];
+  const members = allData['quote_allowance_rule_members'] || [];
+  const st = _arState;
+
+  const chips = rid => members.filter(m => +m.rule_id === +rid)
+    .map(m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`)
+    .join(' <span style="color:var(--text3);font-size:10px;font-weight:700;">OR</span> ');
+
+  const list = rules.length ? rules.map(r => `
+    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;${r.active === false ? 'opacity:.55;' : ''}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <strong style="font-size:13px;color:var(--navy);">${pbEsc(r.name)}</strong>
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">only one may be active</span>
+        <span style="flex:1 1 auto;"></span>
+        <button class="btn btn-sm btn-secondary" onclick="_arEdit(${r.id})">Edit</button>
+        <button class="btn btn-sm btn-secondary" onclick="_arToggle(${r.id}, ${r.active === false})">${r.active === false ? 'Enable' : 'Disable'}</button>
+        <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_arDelete(${r.id})">Delete</button>
+      </div>
+      <div style="margin-top:7px;">${chips(r.id) || '<span style="color:var(--text3);font-size:12px;">no members yet</span>'}</div>
+    </div>`).join('')
+    : `<div style="padding:24px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;margin-bottom:10px;">No conditions yet.</div>`;
+
+  let editor = '';
+  if (st.editing != null) {
+    const rule = st.editing === 'new' ? null : rules.find(r => +r.id === +st.editing);
+    const mine = rule ? new Set(members.filter(m => +m.rule_id === +rule.id).map(m => m.kind + ':' + m.code)) : new Set();
+    editor = `
+    <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
+        <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
+        <input id="ar-name" class="form-control" placeholder="Name — e.g. Armed role" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
+        <span style="font-size:11px;color:var(--text3);">Pick the items that may never be active together — only one of them will be allowed per post.</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">
+        ${_arItems().map(g => `
+          <div style="min-width:0;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:3px;margin-bottom:5px;">${g.title}</div>
+            ${g.rows.map(r => `
+              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);padding:1px 0;cursor:pointer;">
+                <input type="checkbox" class="ar-member" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(g.kind + ':' + r.code) ? 'checked' : ''}>
+                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pbEsc(r.name || r.description || r.code)}</span>
+              </label>`).join('')}
+          </div>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button class="btn btn-sm btn-primary" onclick="_arSave(${rule ? rule.id : 'null'})">Save condition</button>
+        <button class="btn btn-sm btn-ghost" onclick="_arState.editing=null;_arPaint()">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  out.innerHTML = `
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+      <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
+      <span style="flex:1 1 auto;"></span>
+      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_arState.editing='new';_arPaint()">+ New condition</button>` : ''}
+    </div>
+    ${editor}${list}
+    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
+      Conditions apply the moment someone ticks an allowance or types an incentive amount on a post:
+      the second member of a group is refused with a message naming the rule.
+    </div>`;
+}
+
+function _arEdit(id) { _arState.editing = id; _arPaint(); }
+
+async function _arSave(id) {
+  const name = String((document.getElementById('ar-name') || {}).value || '').trim();
+  if (!name) { showStatus('Give the condition a name', 'error'); return; }
+  const picked = [...document.querySelectorAll('.ar-member:checked')]
+    .map(el => ({ kind: el.dataset.kind, code: el.dataset.code }));
+  if (picked.length < 2) { showStatus('Pick at least two items — a condition needs something to be exclusive WITH', 'error'); return; }
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  try {
+    let rid = id;
+    if (rid == null) {
+      const made = await api('quote_allowance_rules', 'POST',
+        { rule_type: 'exclusive', name, created_by: me }, 'select=id');
+      rid = Array.isArray(made) ? made[0].id : made.id;
+    } else {
+      await api('quote_allowance_rules', 'PATCH', { name }, 'id=eq.' + rid);
+      await api('quote_allowance_rule_members', 'DELETE', null, 'rule_id=eq.' + rid);
+    }
+    await api('quote_allowance_rule_members', 'POST',
+      picked.map(m => ({ rule_id: rid, kind: m.kind, code: m.code })), '');
+    showStatus('Condition saved');
+    _arState.editing = null;
+    await renderAllowRules();
+  } catch (e) { showStatus('Could not save the condition: ' + e.message, 'error'); }
+}
+
+async function _arToggle(id, on) {
+  try {
+    await api('quote_allowance_rules', 'PATCH', { active: !!on }, 'id=eq.' + id);
+    showStatus(on ? 'Condition enabled' : 'Condition disabled — it no longer blocks anything');
+    await renderAllowRules();
+  } catch (e) { showStatus('Could not update it: ' + e.message, 'error'); }
+}
+
+async function _arDelete(id) {
+  if (_arState._confirmDel !== id) {
+    _arState._confirmDel = id;
+    showStatus('Click Delete again to remove this condition permanently', 'error');
+    return;
+  }
+  _arState._confirmDel = null;
+  try {
+    await api('quote_allowance_rules', 'DELETE', null, 'id=eq.' + id);
+    showStatus('Condition deleted');
+    await renderAllowRules();
+  } catch (e) { showStatus('Could not delete it: ' + e.message, 'error'); }
+}
+
 async function renderPbEditor(schemaId, opts) {
   // Salary rates are published as a grid per determination, not as a list of rows — they get
   // their own screen. Diverted here so every route in (tile, back, save-and-reload) lands on it.
   if (schemaId === 'salary-rates') { await renderSalaryRateGrid(); return; }
   // Statutory allowances change annually the way salaries do — same treatment.
   if (schemaId === 'statutory-allowances') { await renderStatAllowGrid(); return; }
+  // Conditions between allowances and incentives get their own screen.
+  if (schemaId === 'allowance-rules') { await renderAllowRules(); return; }
   const schema = PB_SCHEMAS[schemaId];
   if (!schema) return;
 
