@@ -117,10 +117,12 @@ tr:hover td{background:#F8FAFC;}
 .pb-allow-row{padding:3px 6px;margin:0 -6px;border-radius:4px;cursor:pointer;position:relative;}
 .pb-allow-row:hover{background:#DCE6F0;}
 .pb-allow-row input:not([type=checkbox]){cursor:text;}
-.pb-allow-row[data-help]:hover::after{content:attr(data-help);position:absolute;bottom:calc(100% + 5px);left:0;
+.pb-allow-row[data-help]:hover::after{content:attr(data-help);position:absolute;bottom:calc(100% + 5px);
+  left:var(--tip-x, 16px);transform:translateX(-50%);
   background:var(--navy);color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;line-height:1.45;
   width:max-content;max-width:280px;white-space:normal;z-index:60;box-shadow:0 3px 10px rgba(0,0,0,0.25);pointer-events:none;}
-.pb-allow-row[data-help]:hover::before{content:'';position:absolute;bottom:calc(100% - 1px);left:16px;
+.pb-allow-row[data-help]:hover::before{content:'';position:absolute;bottom:calc(100% - 1px);
+  left:var(--tip-x, 16px);transform:translateX(-50%);
   border:6px solid transparent;border-top-color:var(--navy);z-index:60;pointer-events:none;}
 .empty-row td{text-align:center;padding:40px;color:var(--text3);}
 
@@ -625,7 +627,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.72 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.73 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -661,7 +663,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.72 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.73 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5973,7 +5975,22 @@ function pbCurrentByCode(rows, asAt) {
 // Allowances and Incentives: three side-by-side columns (Richard's layout, 2026-08-23), each
 // listing the current items from its Human Resources lookup. The per-post toggles and pricing
 // wire in a later round — the shape and the data are real, the switches are not here yet.
+// The help bubble follows the mouse: one delegated listener writes the cursor's x within the
+// row into a CSS variable the bubble centres on, clamped so it never slides off the row's ends.
+function _pbBindTip() {
+  if (window._pbTipBound) return;
+  window._pbTipBound = true;
+  document.addEventListener('mousemove', e => {
+    const row = e.target && e.target.closest && e.target.closest('.pb-allow-row[data-help]');
+    if (!row) return;
+    const r = row.getBoundingClientRect();
+    const x = Math.max(24, Math.min(e.clientX - r.left, r.width - 24));
+    row.style.setProperty('--tip-x', x + 'px');
+  });
+}
+
 function pbAllowanceCols(p) {
+  _pbBindTip();
   const money = v => v == null || v === '' ? '' : 'R ' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const col = (title, items, empty) => '<div style="min-width:0;">' +
     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
