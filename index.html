@@ -113,6 +113,7 @@ th{background:var(--bg);font-size:11px;font-weight:700;letter-spacing:0.05em;tex
 td{padding:12px 14px;border-bottom:1px solid var(--border);color:var(--text);font-size:13px;vertical-align:middle;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#F8FAFC;}
+#sr-page tr:hover td, #sa-page tr:hover td, .pb-post-detail tr:hover td{background:transparent;}
 .empty-row td{text-align:center;padding:40px;color:var(--text3);}
 
 /* ── Badges ────────────────────────────────────────────── */
@@ -616,7 +617,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.69 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.70 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +653,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.69 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.70 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5656,9 +5657,11 @@ async function openQuote(id) {
     }
     if (!allData['quote_grades']) allData['quote_grades'] = await apiGet('quote_grades', 'select=*&order=display_order');
     if (!allData['quote_areas']) allData['quote_areas'] = await apiGet('quote_areas', 'select=*&order=display_order');
-    if (!allData['quote_statutory_allowances']) allData['quote_statutory_allowances'] = await apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc');
-    if (!allData['quote_discretionary_allowances']) allData['quote_discretionary_allowances'] = await apiGet('quote_discretionary_allowances', 'select=*&order=effective_date.asc,id.asc');
-    if (!allData['quote_discretionary_incentives']) allData['quote_discretionary_incentives'] = await apiGet('quote_discretionary_incentives', 'select=*&order=effective_date.asc,id.asc');
+    // Always fresh: help text and windows edited under Human Resources must reach a quote
+    // opened a minute later, so these three never trust the session cache.
+    allData['quote_statutory_allowances'] = await apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc');
+    allData['quote_discretionary_allowances'] = await apiGet('quote_discretionary_allowances', 'select=*&order=effective_date.asc,id.asc');
+    allData['quote_discretionary_incentives'] = await apiGet('quote_discretionary_incentives', 'select=*&order=effective_date.asc,id.asc');
     if (!pbCachedPostNames.length) pbCachedPostNames = (await apiGet('quote_standard_post_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     if (!pbCachedHeadingNames.length) pbCachedHeadingNames = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     pbHeadings = pbGroupPostsByHeading(posts);
@@ -5991,7 +5994,7 @@ function pbAllowanceCols(p) {
       if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="Ticks itself: this post has a shift crossing midnight">auto</span>';
       if (overridden) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:#FEF3C7;border:1px solid #E9C46A;border-radius:8px;padding:0 5px;color:#7A5B10;" title="' + pbEsc(saved.reason) + '">overridden</span>';
       return { html:
-        '<label' + (r.help_text ? ' title="' + pbEsc(r.help_text) + '"' : '') + ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;">' +
+        '<label' + (r.help_text ? ' title="' + pbEsc(r.help_text) + '"' : '') + ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:' + (r.help_text ? 'help' : 'pointer') + ';">' +
           '<input type="checkbox"' + (on ? ' checked' : '') +
             ' onchange="pbStatAllowToggle(' + p.id + ',' + r.id + ',' + (auto ? 'true' : 'false') + ', this)">' +
           '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.description || r.code) + chips + '</span>' +
@@ -6009,8 +6012,8 @@ function pbAllowanceCols(p) {
   // Discretionary allowances and incentives: an AMOUNT field each - typing an amount includes
   // the item on this post, clearing it excludes it. Hover help comes from the admin lookup.
   const amtItem = (r, saved, fnName) => ({ html:
-    '<div' + (r.help_text || r.description ? ' title="' + pbEsc(r.help_text || r.description) + '"' : '') +
-      ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;">' +
+    '<div' + (r.help_text || r.description ? ' title="' + pbEsc(r.help_text || r.description) + '" ' : '') +
+      ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;' + (r.help_text || r.description ? 'cursor:help;' : '') + '">' +
       '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name || r.description || r.code) + '</span>' +
       '<input value="' + (saved != null && saved !== '' ? pbEsc('R ' + Number(saved).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '') + '"' +
         ' placeholder="—" onclick="event.stopPropagation()"' +
