@@ -5645,6 +5645,9 @@ async function openQuote(id) {
     }
     if (!allData['quote_grades']) allData['quote_grades'] = await apiGet('quote_grades', 'select=*&order=display_order');
     if (!allData['quote_areas']) allData['quote_areas'] = await apiGet('quote_areas', 'select=*&order=display_order');
+    if (!allData['quote_statutory_allowances']) allData['quote_statutory_allowances'] = await apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc');
+    if (!allData['quote_discretionary_allowances']) allData['quote_discretionary_allowances'] = await apiGet('quote_discretionary_allowances', 'select=*&order=effective_date.asc,id.asc');
+    if (!allData['quote_discretionary_incentives']) allData['quote_discretionary_incentives'] = await apiGet('quote_discretionary_incentives', 'select=*&order=effective_date.asc,id.asc');
     if (!pbCachedPostNames.length) pbCachedPostNames = (await apiGet('quote_standard_post_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     if (!pbCachedHeadingNames.length) pbCachedHeadingNames = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     pbHeadings = pbGroupPostsByHeading(posts);
@@ -5821,6 +5824,56 @@ function pbToggleDetail(postId, sec) {
   renderQuoteEditor();
 }
 
+// The lookups are effective-dated: several rows can share a code, each starting on its own
+// date. For display, a code's CURRENT row is the newest effective_date that has arrived;
+// rows dated in the future wait their turn.
+function pbCurrentByCode(rows) {
+  const today = new Date().toISOString().slice(0, 10);
+  const best = {};
+  (rows || []).forEach(r => {
+    if (r.effective_date && String(r.effective_date) > today) return;
+    const k = r.code || r.name || String(r.id);
+    if (!best[k] || String(r.effective_date || '') > String(best[k].effective_date || '')) best[k] = r;
+  });
+  return Object.values(best);
+}
+
+// Allowances and Incentives: three side-by-side columns (Richard's layout, 2026-08-23), each
+// listing the current items from its Human Resources lookup. The per-post toggles and pricing
+// wire in a later round — the shape and the data are real, the switches are not here yet.
+function pbAllowanceCols(p) {
+  const money = v => v == null || v === '' ? '' : 'R ' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const col = (title, items, empty) => '<div style="min-width:0;">' +
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
+    (items.length
+      ? '<div style="display:flex;flex-direction:column;gap:3px;">' + items.map(x =>
+          '<div style="font-size:12px;color:var(--text2);display:flex;justify-content:space-between;gap:8px;">' +
+            '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(x.label) + '</span>' +
+            (x.right ? '<span style="white-space:nowrap;color:var(--text3);">' + pbEsc(x.right) + '</span>' : '') +
+          '</div>').join('') + '</div>'
+      : '<div class="pb-placeholder-text">' + empty + '</div>') +
+    '</div>';
+
+  const stat = pbCurrentByCode(allData['quote_statutory_allowances'])
+    .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
+    .map(r => ({ label: r.description || r.code,
+                 right: [money(r.rate), r.occurrence_type === 'shift' ? 'per shift' : r.occurrence_type === 'monthly' ? 'monthly' : '']
+                        .filter(Boolean).join(' · ') }));
+  const disc = pbCurrentByCode(allData['quote_discretionary_allowances'])
+    .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
+    .map(r => ({ label: r.name || r.description || r.code }));
+  const inc = pbCurrentByCode(allData['quote_discretionary_incentives'])
+    .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
+    .map(r => ({ label: r.name || r.description || r.code }));
+
+  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;">' +
+      col('Statutory Allowances', stat, 'None defined — add them under Human Resources.') +
+      col('Discretionary Allowances', disc, 'None defined — add them under Human Resources.') +
+      col('Incentives', inc, 'None defined — add them under Human Resources.') +
+    '</div>' +
+    '<div class="pb-placeholder-text" style="margin-top:8px;">[ Per-post toggles and pricing — to be wired in a later round ]</div>';
+}
+
 function renderPostDetail(p, h, others) {
   const sec = (key, label, body) => {
     const open = pbDetailOpen(p.id, key);
@@ -5831,7 +5884,7 @@ function renderPostDetail(p, h, others) {
   return '<div class="pb-post-detail" onclick="event.stopPropagation()">' +
     sec('shift', 'Shift schedule', renderShiftTable(p)) +
     (pbDetailOpen(p.id, 'shift') ? sec('hours', 'Hours summary', renderShiftReadout(p)) : '') +
-    sec('allowances', 'Allowances', '<div class="pb-placeholder-text">[ Allowances grid + statutory toggles — to be wired in next round ]</div>') +
+    sec('allowances', 'Allowances and Incentives', pbAllowanceCols(p)) +
     sec('accessories', 'Accessories', '<div class="pb-placeholder-text">[ ~21 accessory toggles — to be wired in next round ]</div>') +
     sec('training', 'Training', '<div class="pb-placeholder-text">[ ~12 training toggles — to be wired in next round ]</div>') +
     (others.length ? '<div class="pb-move-row"><span>Move this post to:</span><select onchange="pbMovePostToHeading(' + p.id + ', this.value)"><option value="">(stay in ' + pbEsc(h.isUngrouped ? 'Ungrouped' : h.name) + ')</option>' +
