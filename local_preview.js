@@ -92,6 +92,10 @@ const FORM_PAGE = `<!doctype html><html><head><meta charset="utf-8">
     const opts = { method, headers: { 'Content-Type': 'application/json',
       'Prefer': (method === 'POST' || method === 'PATCH') ? 'return=representation' : '',
       'X-Actor-Id': String(currentUser.personId) } };
+    // Same-origin as the full app: sign in once at http://localhost:8765/ and the bench
+    // reuses that session token automatically.
+    try { const sess = JSON.parse(localStorage.getItem('focus_session') || 'null');
+          if (sess && sess.t) opts.headers['X-Focus-Token'] = sess.t; } catch (e) {}
     if (body) opts.body = JSON.stringify(body);
     const res = await fetch(FN_URL + '/' + table + (params ? '?' + params : ''), opts);
     if (!res.ok) throw new Error(res.status + ': ' + (await res.text()).slice(0, 180));
