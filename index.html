@@ -616,7 +616,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -652,7 +652,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1566,13 +1566,37 @@ function setEnvLabel() {
 }
 async function loadEnvironment() {
   try {
-    const rows = await apiGet('settings', 'key=eq.environment&select=value');
-    if (rows && rows[0]) appSettings['environment'] = rows[0].value;
+    const r = await authCall({ action: 'env' });
+    if (r && r.environment) appSettings['environment'] = r.environment;
   } catch(e) { /* offline/login screen — leave blank */ }
   setEnvLabel();
 }
 const SB_HOST = 'kevrfdjqyuhmgziqxuvs.supabase.co';
 const FN_URL = '/.netlify/functions/sb';
+
+// ── Session ── the sb function issues a signed token at sign-in and refuses every data call
+// without one, so the login screen is no longer client-side theatre. The token lives in
+// localStorage so the PWA resumes without re-typing a password until it expires (24h).
+let focusToken = null;
+function _saveSession(token, userId) {
+  focusToken = token || null;
+  try {
+    if (token) localStorage.setItem('focus_session', JSON.stringify({ t: token, u: +userId }));
+    else localStorage.removeItem('focus_session');
+  } catch (e) {}
+}
+function _loadSession() {
+  try {
+    const s = JSON.parse(localStorage.getItem('focus_session') || 'null');
+    if (s && s.t) { focusToken = s.t; return s; }
+  } catch (e) {}
+  return null;
+}
+function _sessionExpired() {
+  _saveSession(null);
+  try { doLogout(); } catch (e) {}
+  try { _loginMsg('Your session expired — sign in again.'); } catch (e) {}
+}
 
 // ── State ────────────────────────────────────────────────
 let currentPage = 'people';
@@ -1944,6 +1968,7 @@ async function api(table, method='GET', body=null, params='') {
   // Audit attribution: who is acting. Forwarded by the sb proxy to PostgREST,
   // where the audit_row_change trigger reads it (request.headers GUC).
   if (typeof currentUser !== 'undefined' && currentUser?.personId) opts.headers['X-Actor-Id'] = String(currentUser.personId);
+  if (focusToken) opts.headers['X-Focus-Token'] = focusToken;
   // Masquerade: the work is attributed to the person being worked as (X-Actor-Id),
   // but the audit trail also records who was really at the keyboard.
   if (typeof realUser !== 'undefined' && realUser?.personId) opts.headers['X-Real-Actor-Id'] = String(realUser.personId);
@@ -1960,6 +1985,12 @@ async function api(table, method='GET', body=null, params='') {
       clearTimeout(timer);
       if (!res.ok) {
         const err = await res.text();
+        // The session gate: a signed-out or expired token gets a uniform 401 from the
+        // function. Drop straight back to the sign-in screen rather than retrying.
+        if (res.status === 401) {
+          let j = null; try { j = JSON.parse(err); } catch (e2) {}
+          if (j && j.error === 'auth') { _sessionExpired(); throw new Error('Signed out — session expired'); }
+        }
         _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
         if (method === 'GET' && _apiTransient(null, res.status) && attempt < maxAttempts) {
           lastErr = new Error(`${res.status}: ${err}`);
@@ -5604,7 +5635,12 @@ async function openQuote(id) {
     if (posts.length) {
       const postIds = posts.map(p => p.id).join(',');
       const all = await apiGet('quote_post_shifts', 'post_id=in.(' + postIds + ')&select=*');
+      const statTicks = await apiGet('quote_post_statutory_allowances', 'post_id=in.(' + postIds + ')&select=*&order=post_id.asc');
       posts.forEach(p => {
+        p.statAllow = {};
+        statTicks.filter(t => +t.post_id === +p.id).forEach(t => {
+          p.statAllow[+t.statutory_allowance_id] = { state: t.state || 'on', reason: t.override_reason || '' };
+        });
         p.shifts = {};
         all.filter(s => s.post_id === p.id).forEach(s => {
           p.shifts[pbKey(s.shift_index, s.day_type)] = { num: s.num_officers, start: (s.start_time || '').slice(0,5), end: (s.end_time || '').slice(0,5) };
@@ -5614,6 +5650,9 @@ async function openQuote(id) {
     }
     if (!allData['quote_grades']) allData['quote_grades'] = await apiGet('quote_grades', 'select=*&order=display_order');
     if (!allData['quote_areas']) allData['quote_areas'] = await apiGet('quote_areas', 'select=*&order=display_order');
+    if (!allData['quote_statutory_allowances']) allData['quote_statutory_allowances'] = await apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc');
+    if (!allData['quote_discretionary_allowances']) allData['quote_discretionary_allowances'] = await apiGet('quote_discretionary_allowances', 'select=*&order=effective_date.asc,id.asc');
+    if (!allData['quote_discretionary_incentives']) allData['quote_discretionary_incentives'] = await apiGet('quote_discretionary_incentives', 'select=*&order=effective_date.asc,id.asc');
     if (!pbCachedPostNames.length) pbCachedPostNames = (await apiGet('quote_standard_post_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     if (!pbCachedHeadingNames.length) pbCachedHeadingNames = (await apiGet('quote_standard_heading_names', 'select=name&active=eq.true&order=display_order')).map(r => r.name);
     pbHeadings = pbGroupPostsByHeading(posts);
@@ -5790,6 +5829,151 @@ function pbToggleDetail(postId, sec) {
   renderQuoteEditor();
 }
 
+// The lookups are effective-dated: several rows can share a code, each starting on its own
+// date. For display, a code's CURRENT row is the newest effective_date that has arrived;
+// rows dated in the future wait their turn.
+// Richard's night rule for this round, exactly as chosen: a shift COUNTS as night when it
+// crosses midnight - its end time is on the following day. An 18:00-23:00 evening shift does
+// not; 22:00-06:00 and 18:00-06:00 do. Only staffed shifts (officers > 0) count.
+function pbPostHasMidnightShift(p) {
+  return Object.values((p && p.shifts) || {}).some(s =>
+    s && +s.num > 0 && s.start && s.end && s.end <= s.start);
+}
+
+async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  if (!p) return;
+  p.statAllow = p.statAllow || {};
+  const saved = p.statAllow[+allowanceId];
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  const where = 'post_id=eq.' + postId + '&statutory_allowance_id=eq.' + allowanceId;
+  try {
+    if (el.checked) {
+      // Ticking. An auto item that was overridden just loses its override row; a manual item
+      // gains its 'on' row.
+      if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
+      if (!isAuto) {
+        await api('quote_post_statutory_allowances', 'POST',
+          { post_id: postId, statutory_allowance_id: allowanceId, state: 'on', created_by: me }, '');
+        p.statAllow[+allowanceId] = { state: 'on', reason: '' };
+      }
+      renderQuoteEditor();
+      return;
+    }
+    // Unticking.
+    if (!isAuto) {
+      if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
+      renderQuoteEditor();
+      return;
+    }
+    // Unticking an AUTO item needs a reason - never silently, and never via a native
+    // prompt() dialog (browsers quietly block those; the New-version button taught us).
+    // An inline reason row opens under the item instead.
+    p._statOvrPending = +allowanceId;
+    renderQuoteEditor();
+  } catch (e) {
+    showStatus('Could not save the allowance: ' + e.message, 'error');
+    renderQuoteEditor();
+  }
+}
+
+async function pbStatAllowOverrideConfirm(postId, allowanceId) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  const el = document.getElementById('pb-statovr-' + postId + '-' + allowanceId);
+  const reason = String((el && el.value) || '').trim();
+  if (!reason) { showStatus('Give a reason - a statutory item is being switched off', 'error'); return; }
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  const where = 'post_id=eq.' + postId + '&statutory_allowance_id=eq.' + allowanceId;
+  try {
+    if ((p.statAllow || {})[+allowanceId]) await api('quote_post_statutory_allowances', 'DELETE', null, where);
+    await api('quote_post_statutory_allowances', 'POST',
+      { post_id: postId, statutory_allowance_id: allowanceId, state: 'off',
+        override_reason: reason, created_by: me }, '');
+    p.statAllow = p.statAllow || {};
+    p.statAllow[+allowanceId] = { state: 'off', reason };
+  } catch (e) { showStatus('Could not save the override: ' + e.message, 'error'); }
+  p._statOvrPending = null;
+  renderQuoteEditor();
+}
+
+function pbStatAllowOverrideCancel(postId) {
+  const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
+  if (p) p._statOvrPending = null;
+  renderQuoteEditor();
+}
+
+function pbCurrentByCode(rows) {
+  const today = new Date().toISOString().slice(0, 10);
+  const best = {};
+  (rows || []).forEach(r => {
+    if (r.effective_date && String(r.effective_date) > today) return;
+    const k = r.code || r.name || String(r.id);
+    if (!best[k] || String(r.effective_date || '') > String(best[k].effective_date || '')) best[k] = r;
+  });
+  return Object.values(best);
+}
+
+// Allowances and Incentives: three side-by-side columns (Richard's layout, 2026-08-23), each
+// listing the current items from its Human Resources lookup. The per-post toggles and pricing
+// wire in a later round — the shape and the data are real, the switches are not here yet.
+function pbAllowanceCols(p) {
+  const money = v => v == null || v === '' ? '' : 'R ' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const col = (title, items, empty) => '<div style="min-width:0;">' +
+    '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
+    (items.length
+      ? '<div style="display:flex;flex-direction:column;gap:3px;">' + items.map(x => x.html ||
+          '<div style="font-size:12px;color:var(--text2);display:flex;justify-content:space-between;gap:8px;">' +
+            '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(x.label) + '</span>' +
+            (x.right ? '<span style="white-space:nowrap;color:var(--text3);">' + pbEsc(x.right) + '</span>' : '') +
+          '</div>').join('') + '</div>'
+      : '<div class="pb-placeholder-text">' + empty + '</div>') +
+    '</div>';
+
+  const night = pbPostHasMidnightShift(p);
+  const stat = pbCurrentByCode(allData['quote_statutory_allowances'])
+    .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
+    .map(r => {
+      const saved = (p.statAllow || {})[+r.id];
+      const auto = r.auto_rule === 'night_shift' && night;
+      // Ticked when: the rule applies and has not been overridden away, or a manual tick is saved.
+      const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
+      const overridden = auto && saved && saved.state === 'off';
+      const rate = [money(r.rate), r.occurrence_type === 'shift' ? 'per shift' : r.occurrence_type === 'monthly' ? 'monthly' : '']
+        .filter(Boolean).join(' · ');
+      let chips = '';
+      if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="Ticks itself: this post has a shift crossing midnight">auto</span>';
+      if (overridden) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:#FEF3C7;border:1px solid #E9C46A;border-radius:8px;padding:0 5px;color:#7A5B10;" title="' + pbEsc(saved.reason) + '">overridden</span>';
+      return { html:
+        '<label style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;cursor:pointer;">' +
+          '<input type="checkbox"' + (on ? ' checked' : '') +
+            ' onchange="pbStatAllowToggle(' + p.id + ',' + r.id + ',' + (auto ? 'true' : 'false') + ', this)">' +
+          '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.description || r.code) + chips + '</span>' +
+          '<span style="margin-left:auto;white-space:nowrap;color:var(--text3);">' + pbEsc(rate) + '</span>' +
+        '</label>' +
+        (overridden ? '<div style="font-size:11px;color:#7A5B10;margin:-1px 0 2px 22px;">' + pbEsc(saved.reason) + '</div>' : '') +
+        (p._statOvrPending === +r.id
+          ? '<div style="display:flex;gap:6px;margin:2px 0 4px 22px;align-items:center;" onclick="event.stopPropagation()">' +
+              '<input id="pb-statovr-' + p.id + '-' + r.id + '" class="form-control" style="flex:1 1 140px;font-size:11px;padding:3px 6px;" placeholder="Why is this off? (required)">' +
+              '<button class="pb-btn xs" onclick="pbStatAllowOverrideConfirm(' + p.id + ',' + r.id + ')">Confirm</button>' +
+              '<button class="pb-btn xs" onclick="pbStatAllowOverrideCancel(' + p.id + ')">Cancel</button>' +
+            '</div>'
+          : '') };
+    });
+  const disc = pbCurrentByCode(allData['quote_discretionary_allowances'])
+    .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
+    .map(r => ({ label: r.name || r.description || r.code }));
+  const inc = pbCurrentByCode(allData['quote_discretionary_incentives'])
+    .sort((a, b) => String(a.name || a.description || a.code).localeCompare(String(b.name || b.description || b.code)))
+    .map(r => ({ label: r.name || r.description || r.code }));
+
+  return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;">' +
+      col('Statutory Allowances', stat, 'None defined — add them under Human Resources.') +
+      col('Discretionary Allowances', disc, 'None defined — add them under Human Resources.') +
+      col('Incentives', inc, 'None defined — add them under Human Resources.') +
+    '</div>' +
+    '<div class="pb-placeholder-text" style="margin-top:8px;">Statutory ticks save as you click; Night Shift ticks itself when a shift crosses midnight, and unticking it asks for a reason. Pricing joins in the costing round.</div>';
+}
+
 function renderPostDetail(p, h, others) {
   const sec = (key, label, body) => {
     const open = pbDetailOpen(p.id, key);
@@ -5800,7 +5984,7 @@ function renderPostDetail(p, h, others) {
   return '<div class="pb-post-detail" onclick="event.stopPropagation()">' +
     sec('shift', 'Shift schedule', renderShiftTable(p)) +
     (pbDetailOpen(p.id, 'shift') ? sec('hours', 'Hours summary', renderShiftReadout(p)) : '') +
-    sec('allowances', 'Allowances', '<div class="pb-placeholder-text">[ Allowances grid + statutory toggles — to be wired in next round ]</div>') +
+    sec('allowances', 'Allowances and Incentives', pbAllowanceCols(p)) +
     sec('accessories', 'Accessories', '<div class="pb-placeholder-text">[ ~21 accessory toggles — to be wired in next round ]</div>') +
     sec('training', 'Training', '<div class="pb-placeholder-text">[ ~12 training toggles — to be wired in next round ]</div>') +
     (others.length ? '<div class="pb-move-row"><span>Move this post to:</span><select onchange="pbMovePostToHeading(' + p.id + ', this.value)"><option value="">(stay in ' + pbEsc(h.isUngrouped ? 'Ungrouped' : h.name) + ')</option>' +
@@ -9682,17 +9866,16 @@ async function saveCollaborators(dealId) {
 
 // ── Auth ─────────────────────────────────────────────────
 async function loadLoginUsers() {
+  // Served by the auth endpoint: the data tables themselves sit behind the session
+  // gate, and the sign-in list is the one thing the login screen legitimately needs.
   try {
-    const users = await apiGet('system_users', 'active=eq.true&select=id,person_id');
-    const people = await apiGet('people', 'select=id,first_name,last_name');
+    const r = await authCall({ action: 'users' });
     const sel = document.getElementById('login-user');
     sel.innerHTML = '<option value="">— select user —</option>';
-    users.forEach(u => {
-      const p = people.find(x => +x.id === +u.person_id);
-      const name = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id;
+    (r && r.users || []).forEach(u => {
       const opt = document.createElement('option');
       opt.value = u.id;
-      opt.textContent = name;
+      opt.textContent = u.name;
       sel.appendChild(opt);
     });
   } catch(e) {
@@ -9917,7 +10100,14 @@ async function submitNewPassword() {
   try {
     const r = await authCall({ action: 'set', userId: +userId, newPassword: a });
     if (!r || !r.ok) { _loginMsg((r && r.error) || 'Could not set the password'); return; }
-    // Set, then sign in with it — the password is proved once before it is trusted.
+    if (r.token) {
+      // Setting the password proved it — the server signed the session, walk in.
+      _saveSession(r.token, +userId);
+      showLoginSetPassword(false);
+      _loginMsg('');
+      try { await enterApp(+userId); } catch (e) { _loginMsg('Signed in, but loading failed: ' + e.message); }
+      return;
+    }
     showLoginSetPassword(false);
     document.getElementById('login-password').value = '';
     document.getElementById('login-password').focus();
@@ -10025,37 +10215,14 @@ async function doLogin() {
       _loginMsg((auth && auth.error) || 'Sign-in failed');
       return;
     }
+    _saveSession(auth.token, +userId);
   } catch (e) { _loginMsg('Could not reach the server — try again'); return; }
   _loginMsg('');
 
   try {
-    // Warm allData from any persisted lookup cache before we start fetching.
-    hydrateLookupCache();
-
-    const ctx = await buildUserContext(userId);
-    if (!ctx) { errEl.textContent = 'User not found'; errEl.style.display = 'block'; return; }
-    currentUser = ctx;
-    realUser = null;            // a fresh sign-in is never a masquerade
-
-    // Show app
-    document.getElementById('login-screen').style.display = 'none';
-    document.getElementById('main-app').style.display = 'flex';
-    applyUserContextChrome();
-
-    // Login already made several successful calls — we're demonstrably online.
-    setOnline(true);
-    // Tail — settings, home-org members and the lookup preload all run together
-    // so the first page lands with its lookups already cached (one burst, not
-    // a fan-out on every page). setEnvLabel needs settings, so it waits.
-    await Promise.all([
-      loadAppSettings(),
-      ensureHomeOrgMembers().catch(() => {}),   // valid owners = home-org members
-      preloadLookups(),
-    ]);
-    setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
-    buildNav();
+    await enterApp(userId);
   } catch(e) {
-    errEl.textContent = 'Login failed: ' + e.message;
+    errEl.textContent = e.message === 'User not found' ? 'User not found' : 'Login failed: ' + e.message;
     errEl.style.display = 'block';
   }
 }
@@ -10318,6 +10485,7 @@ async function submitChangePassword() {
   startBusy('Changing password\u2026');
   try {
     const r = await authCall({ action: 'set', userId: +currentUser.id, password: current, newPassword: a });
+    if (r && r.ok && r.token) _saveSession(r.token, +currentUser.id);
     if (!r || !r.ok) { fail((r && r.error) || 'Could not change the password'); return; }
     closeModal();
     showStatus('Password changed');
@@ -10439,7 +10607,36 @@ function applyUserContextChrome() {
   buildNav();
 }
 
+// Everything that happens after credentials are accepted — shared by a fresh sign-in
+// and a resumed session, so the two can never drift apart.
+async function enterApp(userId) {
+  // Warm allData from any persisted lookup cache before we start fetching.
+  hydrateLookupCache();
+
+  const ctx = await buildUserContext(userId);
+  if (!ctx) throw new Error('User not found');
+  currentUser = ctx;
+  realUser = null;            // a fresh sign-in is never a masquerade
+
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('main-app').style.display = 'flex';
+  applyUserContextChrome();
+
+  setOnline(true);
+  // Tail — settings, home-org members and the lookup preload all run together
+  // so the first page lands with its lookups already cached (one burst, not
+  // a fan-out on every page). setEnvLabel needs settings, so it waits.
+  await Promise.all([
+    loadAppSettings(),
+    ensureHomeOrgMembers().catch(() => {}),   // valid owners = home-org members
+    preloadLookups(),
+  ]);
+  setEnvLabel();   // settings (incl. environment) now loaded → refresh the sidebar label
+  buildNav();
+}
+
 function doLogout() {
+  _saveSession(null);
   currentUser = null;
   realUser = null;
   document.getElementById('main-app').style.display = 'none';
@@ -24705,6 +24902,14 @@ async function init() {
   loadEnvironment();
   // Load users for login dropdown
   await loadLoginUsers();
+
+  // A stored session resumes straight into the app — the token is judged by the
+  // SERVER on the first data call, so an expired or forged one simply lands back
+  // here at the sign-in screen.
+  const saved = _loadSession();
+  if (saved && saved.u) {
+    try { await enterApp(saved.u); } catch (e) { _saveSession(null); }
+  }
 }
 
 init();
