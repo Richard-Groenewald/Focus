@@ -118,7 +118,7 @@ tr:hover td{background:#F8FAFC;}
 .pb-allow-row:hover{background:#DCE6F0;}
 .pb-allow-row input:not([type=checkbox]){cursor:text;}
 .pb-allow-row[data-help]:hover::after{content:attr(data-help);position:absolute;bottom:calc(100% + 5px);
-  left:var(--tip-x, 16px);transform:translateX(-50%);
+  left:var(--bubble-x, var(--tip-x, 16px));transform:translateX(-50%);
   background:var(--navy);color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;line-height:1.45;
   width:max-content;max-width:280px;white-space:normal;z-index:60;box-shadow:0 3px 10px rgba(0,0,0,0.25);pointer-events:none;}
 .pb-allow-row[data-help]:hover::before{content:'';position:absolute;bottom:calc(100% - 1px);
@@ -129,6 +129,11 @@ tr:hover td{background:#F8FAFC;}
   width:max-content;max-width:300px;white-space:normal;z-index:70;box-shadow:0 3px 10px rgba(0,0,0,0.3);pointer-events:none;}
 .pb-row-err::before{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);
   border:6px solid transparent;border-top-color:var(--red);}
+.pb-allow-row.tip-below[data-help]:hover::after{bottom:auto;top:calc(100% + 5px);}
+.pb-allow-row.tip-below[data-help]:hover::before{bottom:auto;top:calc(100% - 7px);
+  border-top-color:transparent;border-bottom-color:var(--navy);}
+.pb-row-err.pb-err-below{bottom:auto;top:calc(100% + 5px);}
+.pb-row-err.pb-err-below::before{top:auto;bottom:100%;border-top-color:transparent;border-bottom-color:var(--red);}
 .empty-row td{text-align:center;padding:40px;color:var(--text3);}
 
 /* ── Badges ────────────────────────────────────────────── */
@@ -632,7 +637,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.76 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -668,7 +673,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.76 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6013,6 +6018,15 @@ function _pbBindTip() {
     const r = row.getBoundingClientRect();
     const x = Math.max(24, Math.min(e.clientX - r.left, r.width - 24));
     row.style.setProperty('--tip-x', x + 'px');
+    // Keep the bubble on screen: slide it sideways off the cursor when a viewport edge would
+    // clip it (the arrow stays on the cursor), and flip it below the row near the top edge.
+    const half = 150;
+    const centre = r.left + x;
+    let bx = x;
+    if (centre - half < 6) bx = x + (6 + half - centre);
+    else if (centre + half > window.innerWidth - 6) bx = x - (centre + half - (window.innerWidth - 6));
+    row.style.setProperty('--bubble-x', bx + 'px');
+    row.classList.toggle('tip-below', r.top < 96);
   });
 }
 
@@ -8041,6 +8055,17 @@ function pbRowFlash(el, msg) {
   b.className = 'pb-row-err';
   b.textContent = msg;
   row.appendChild(b);
+  // Measure, then reposition: flip below when clipped by the top of the screen, slide
+  // sideways when clipped by either side.
+  requestAnimationFrame(() => {
+    const br = b.getBoundingClientRect();
+    if (br.top < 4) b.classList.add('pb-err-below');
+    const over = br.right - (window.innerWidth - 6);
+    const under = 6 - br.left;
+    const base = parseFloat(getComputedStyle(row).getPropertyValue('--tip-x')) || 16;
+    if (over > 0) b.style.left = (base - over) + 'px';
+    else if (under > 0) b.style.left = (base + under) + 'px';
+  });
   setTimeout(() => { b.remove(); }, 4500);
 }
 
