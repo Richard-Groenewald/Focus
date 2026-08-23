@@ -124,6 +124,11 @@ tr:hover td{background:#F8FAFC;}
 .pb-allow-row[data-help]:hover::before{content:'';position:absolute;bottom:calc(100% - 1px);
   left:var(--tip-x, 16px);transform:translateX(-50%);
   border:6px solid transparent;border-top-color:var(--navy);z-index:60;pointer-events:none;}
+.pb-row-err{position:absolute;bottom:calc(100% + 5px);left:var(--tip-x, 16px);transform:translateX(-50%);
+  background:var(--red);color:#fff;padding:6px 10px;border-radius:6px;font-size:11px;font-weight:700;line-height:1.45;
+  width:max-content;max-width:300px;white-space:normal;z-index:70;box-shadow:0 3px 10px rgba(0,0,0,0.3);pointer-events:none;}
+.pb-row-err::before{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);
+  border:6px solid transparent;border-top-color:var(--red);}
 .empty-row td{text-align:center;padding:40px;color:var(--text3);}
 
 /* ── Badges ────────────────────────────────────────────── */
@@ -627,7 +632,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.75 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.76 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -663,7 +668,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.75 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.76 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5882,7 +5887,7 @@ async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
       const clash = rSt && pbRuleConflict(p, 'statutory', rSt.code);
       if (clash) {
         el.checked = false;
-        showStatus('Blocked by the "' + clash.rule + '" condition — ' + clash.other + ' is already active on this post', 'error');
+        pbRowFlash(el, 'Blocked by "' + clash.rule + '" — ' + clash.other + ' is already active on this post');
         return;
       }
       // Ticking. An auto item that was overridden just loses its override row; a manual item
@@ -5946,7 +5951,7 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
       return;
     }
     const n = _srParseNum(raw);
-    if (!isFinite(n) || n < 0) { showStatus('Enter an amount — e.g. 450.00', 'error'); el.focus(); return; }
+    if (!isFinite(n) || n < 0) { pbRowFlash(el, 'Enter an amount — e.g. 450.00'); el.focus(); return; }
     if ((p[mapKey] || {})[+itemId] == null) {
       const kindOf = mapKey === 'discAllow' ? 'discretionary' : 'incentive';
       const tableOf = mapKey === 'discAllow' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
@@ -5954,7 +5959,7 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
       const clash = rIt && pbRuleConflict(p, kindOf, rIt.code);
       if (clash) {
         el.value = '';
-        showStatus('Blocked by the "' + clash.rule + '" condition — ' + clash.other + ' is already active on this post', 'error');
+        pbRowFlash(el, 'Blocked by "' + clash.rule + '" — ' + clash.other + ' is already active on this post');
         return;
       }
     }
@@ -8026,6 +8031,19 @@ async function _saAdd() {
 
 // What is currently ACTIVE on a post, as 'kind:code' - ticked statutory (auto night included,
 // unless overridden off), and any discretionary/incentive carrying an amount.
+// A refusal belongs where the click happened, not in a screen corner: a red bubble above the
+// row itself, gone after a few seconds or on the next repaint.
+function pbRowFlash(el, msg) {
+  const row = el && el.closest && el.closest('.pb-allow-row');
+  if (!row) { showStatus(msg, 'error'); return; }
+  const old = row.querySelector('.pb-row-err'); if (old) old.remove();
+  const b = document.createElement('div');
+  b.className = 'pb-row-err';
+  b.textContent = msg;
+  row.appendChild(b);
+  setTimeout(() => { b.remove(); }, 4500);
+}
+
 function pbActiveAllowSet(p) {
   const out = new Set();
   const asAt = pbQuoteAsAt();
