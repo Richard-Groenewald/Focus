@@ -9,12 +9,15 @@
 > final sign-off, not yet built): the Qualified stage is *displayed* as **Review**; a two-band
 > umbrella ("In Qualification" / "Qualified") sits over the stages; Hold and Nurture entry no
 > longer require approval — **promotion is the only approval gate**.
+>
+> **Revised 2026-08-24:** the New stage is *displayed* as **Raw** (stored value stays `New` —
+> display-map only, same convention as Review).
 
 ## Stages (7)
 
 | Stage | Meaning | How you get in | Live? |
 |---|---|---|---|
-| **New** | Captured, not yet worked | Lead creation (any source) | Yes |
+| **Raw** *(stored as `New`)* | Captured, not yet worked | Lead creation (any source) | Yes |
 | **Working** | Being actively qualified via FACT | Auto: completeness **and** first logged engagement | Yes |
 | **Review** *(stored as `Qualified`)* | Promotion-ready, awaiting approval | **Auto**: FACT all green + service category set + organisation (linked or typed) | Yes |
 | **Hold** | Right profile, waiting for its moment | Owner/SM, **direct** — F/A/C green; **wake date mandatory**; a green Trigger is turned **Weak (amber)** on entry | Yes — engagements + FACT edits allowed |
@@ -26,6 +29,8 @@
   code; the UI label is **Review** (label subject to change — display-map only, never a data
   migration). The word **"Qualified"** in UI and reporting refers to the *band* below, not the
   stage. Do not conflate the two when reading code.
+- **Naming (2026-08-24):** likewise the stored stage value remains `New`; the UI label is
+  **Raw** (`LEAD_STAGE_RAW`, rendered via `leadStageLabel()`).
 - No estimate of value is required anywhere in the lead lifecycle.
 - `lead_sources` lookup stays as-is (the diagram's source list is illustrative, not a spec).
 
@@ -36,7 +41,7 @@ the stage (`leadStageGroup()`), never stored.
 
 | Band | Stages | Meaning |
 |---|---|---|
-| **In Qualification** | New, Working | The lead's fate is still being established |
+| **In Qualification** | Raw, Working | The lead's fate is still being established |
 | **Qualified** | Nurture, Hold, Review, Promoted | A deliberate decision has been made about the lead |
 
 Dead sits outside both bands (off-pipeline).
@@ -65,7 +70,7 @@ Entry bars by stage (each parked stage's bar matches its meaning):
 
 | From → To | Trigger | Approval |
 |---|---|---|
-| New → Working | Completeness (source, description, site, contact, next action) **and** first engagement — organisation **not** required here | None (auto) |
+| Raw → Working | Completeness (source, description, site, contact, next action) **and** first engagement — organisation **not** required here | None (auto) |
 | Working → Review | FACT all green + service category + organisation | None (auto) |
 | Review → Promoted | SM approves | **Sales management — the only approval gate in the lifecycle** |
 | Working/Review → Hold | Owner or SM, **direct action**; F/A/C green; wake date mandatory. If Trigger is green (i.e. coming from Review), it is downgraded to **Weak (amber)** on entry | None |
@@ -117,7 +122,7 @@ blocked** until the verdict is Ignore or the flag is removed.
 |---|---|
 | **Hold** | Mandatory wake date → auto back to Working + top-of-dashboard reminders (owner + SM) |
 | **Nurture** | Per-lead recurring cadence → each tick creates a **next-action obligation** (campaign-cadence machinery) |
-| **New** | Untouched X days → escalation to owner + SM |
+| **Raw** | Untouched X days → escalation to owner + SM |
 | **Working** | No touch Y days → escalation to owner + SM |
 
 X and Y are Admin → Settings values, **overridable per user by the sales manager**.
@@ -151,6 +156,7 @@ future approval types join the same widget.
 - Hold/Nurture entry approval + declined-Hold/Nurture path (2026-08-12 — entry is direct)
 - Open "any time" Nurture entry (2026-08-12 — F/A green bar)
 - "Qualified" as the stage's display label (2026-08-12 — stage displays as **Review**; "Qualified" = the band)
+- "New" as the stage's display label (2026-08-24 — stage displays as **Raw**; stored value unchanged)
 - Nurture-as-focus-stage (v7.8.15)
 - Red-flag auto-death
 - Dead-is-permanent (no-reopen)
