@@ -637,7 +637,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.82 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -673,7 +673,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.82 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1195,7 +1195,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
               <button type="button" class="btn btn-secondary btn-sm" id="lead-target-org-change-btn" onclick="changeLeadTargetOrg()">Change</button>
               <span id="lead-target-org-chosen-name" style="font-weight:600;"></span>
             </div>
-            <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation name" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
+            <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation — the name everyone uses" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
             <div id="lead-target-org-matches" style="margin-top:8px;"></div>
             <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
           </div>
@@ -2476,7 +2476,7 @@ const ORG_DETAIL_FIELDS = [
   { key: 'legal_name',    label: 'Legal Name' },
   { key: 'legal_form',    label: 'Legal Form', type: 'select', options: ['', '(Pty) Ltd', 'Close Corporation (CC)', 'Sole Proprietor', 'Trust', 'Partnership', 'NPC', 'Inc', 'Public (Ltd)', 'Other'] },
   { key: 'account_no',    label: 'Account No (Pastel)', placeholder: 'Set if on Pastel' },
-  { key: 'client_status', label: 'Client Status', type: 'select', options: ['', 'Active', 'Standing', 'Dormant'] },
+  { key: 'client_status', label: 'Client Status', type: 'select', options: ['', 'Prospect', 'Active', 'Standing', 'Dormant'] },
   { key: 'client_since',  label: 'Client Since', type: 'date' },
   { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
   { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
@@ -2682,6 +2682,7 @@ const PAGES = {
     columns: [
       { key: 'name',                label: 'Name' },
       { key: 'legal_name',          label: 'Legal Name' },
+      { key: 'client_status',       label: 'Status', render: v => v === 'Prospect' ? '<span class="badge" style="background:#FFEDD5;color:#9A3412;">Prospect</span>' : (v || '') },
       { key: 'website',             label: 'Website' },
       { key: 'home_organisation',   label: 'Home Org', render: v => v ? '<span class="badge badge-blue">Home</span>' : '' },
       { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
@@ -8998,6 +8999,15 @@ async function saveOpportunity() {
   // Stage before this save — drives the secure-contract handler below.
   const prevStageId = oppData.id ? (+oppData.stage_id || null) : null;
 
+  // Securing gate (v7.8.82): contracts are signed with the registered legal
+  // entity, so a deal cannot move INTO Secured until its organisation carries a
+  // legal name. Capture stays colloquial; this is the one enforcement point —
+  // the prompt PATCHes the org and resumes this save.
+  if (+stageId === 5 && +prevStageId !== 5) {
+    const gateOrg = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (gateOrg && !String(gateOrg.legal_name || '').trim()) { openSecureLegalNamePrompt(gateOrg); return; }
+  }
+
   const payload = {
     name,
     org_id: +orgId || null,
@@ -9109,6 +9119,16 @@ async function runSecuredProcess(deal, prevStageId) {
   try {
     if (!deal || +deal.stage_id !== SECURED_STAGE_ID || +prevStageId === SECURED_STAGE_ID) return;
 
+    // 0. Securing makes a client: a capture-born Prospect organisation flips to
+    //    Active with client_since stamped. (is_client stays a manual flag — the
+    //    Clients page population is unchanged.)
+    const secOrg = (allData['organisations'] || []).find(o => +o.id === +deal.org_id);
+    if (secOrg && secOrg.client_status === 'Prospect') {
+      const orgPatch = { client_status: 'Active', client_since: secOrg.client_since || new Date().toISOString().slice(0, 10) };
+      await api('organisations', 'PATCH', orgPatch, 'id=eq.' + secOrg.id);
+      Object.assign(secOrg, orgPatch);
+    }
+
     // 1. Lock probability to 100%.
     if (+deal.probability !== 100) {
       await api('deals', 'PATCH', { probability: 100 }, 'id=eq.' + deal.id);
@@ -9140,6 +9160,44 @@ async function runSecuredProcess(deal, prevStageId) {
   } catch (e) {
     showStatus('Secured process note: ' + e.message, 'error');
   }
+}
+
+// The securing gate's capture step: one field, PATCHes organisations.legal_name,
+// then resumes the interrupted saveOpportunity() — the gate now passes.
+function openSecureLegalNamePrompt(org) {
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Formal name needed to secure</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">Contracts are signed with the registered legal entity, and <strong>${cEsc(org.name)}</strong> doesn't have one on record yet. Capture it to secure this deal — it is saved on the organisation itself.</div>
+          <div class="form-group">
+            <label class="form-label">Full / legal name <span style="color:var(--red)">*</span></label>
+            <input type="text" id="secure-legal-name" class="form-control" value="${String(org.name || '').replace(/"/g, '&quot;')}">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmSecureLegalName(${org.id})">Save &amp; secure →</button>
+        </div>
+      </div>
+    </div>`);
+  setTimeout(() => document.getElementById('secure-legal-name')?.select(), 50);
+}
+
+async function confirmSecureLegalName(orgId) {
+  const val = (document.getElementById('secure-legal-name')?.value || '').trim();
+  if (!val) { showStatus('The legal name is required to secure', 'error'); return; }
+  try {
+    await api('organisations', 'PATCH', { legal_name: val }, 'id=eq.' + orgId);
+    const org = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (org) org.legal_name = val;
+    closeModal();
+    saveOpportunity();
+  } catch (e) { showStatus('Could not save the legal name: ' + e.message, 'error'); }
 }
 
 // ── Secure-contract handler (simple v1) ───────────────────
@@ -11502,7 +11560,7 @@ async function renderOpportunitiesPage() {
         const bits = [members.length + ' opportunities'];
         if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
         bits.push(pbFmtRand(Math.round(tcv)) + ' TCV');
-        return _clientBandRow('opps', k, open, org?.trading_name || org?.name || '(No organisation)', 'opportunities', bits.join(' · '), 5)
+        return _clientBandRow('opps', k, open, org?.name || '(No organisation)', 'opportunities', bits.join(' · '), 5)
              + (open ? familiesHtml(members, true) : '');
       }).join('');
     };
@@ -13649,7 +13707,8 @@ function leadSiteLabel(l) {
 function leadClientOf(l, orgs, sites) {
   const O = orgs || allData['organisations'] || [];
   const S = sites || allData['sites'] || [];
-  const of = o => ({ key: 'o' + o.id, label: o.trading_name || o.name || '' });
+  // Colloquial name convention (v7.8.82): sales surfaces show organisations.name.
+  const of = o => ({ key: 'o' + o.id, label: o.name || '' });
   if (l && l.target_org_id) {
     const o = O.find(x => +x.id === +l.target_org_id);
     if (o) return of(o);
@@ -19778,6 +19837,35 @@ function _findOrgMatches(colloquial, legal, limit = 5) {
   return { exact: exact ? exact.org : null, shortlist };
 }
 
+// Organisations are born at capture (v7.8.82): a committed colloquial name on
+// the lead form becomes a real organisations row the moment the lead is saved —
+// client_status 'Prospect' keeps it out of client-facing lists (the Clients page
+// filters is_client, which stays a manual flag; securing flips Prospect→Active).
+// Find-or-create on a normalized exact match (name/trading/legal, non-home), so
+// retyping a known name links instead of duplicating. Returns the organisations
+// row, or null on any failure — the caller then falls back to the legacy
+// free-text column; capture must never block on this.
+async function findOrCreateProspectOrg(name) {
+  const norm = s => String(s || '').trim().toLowerCase();
+  const n = norm(name);
+  if (!n) return null;
+  try {
+    if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
+    const hit = (allData['organisations'] || []).find(o => !o.home_organisation
+      && (norm(o.name) === n || norm(o.trading_name) === n || norm(o.legal_name) === n));
+    if (hit) return hit;
+    const created = await api('organisations', 'POST', { name: String(name).trim(), client_status: 'Prospect' }, 'select=*');
+    const org = created && created[0];
+    if (!org) return null;
+    allData['organisations'].push(org);
+    delete allData['_org_idf'];   // match corpus changed → rebuild on next match
+    return org;
+  } catch (e) {
+    console.warn('findOrCreateProspectOrg failed, keeping free text:', e);
+    return null;
+  }
+}
+
 async function openPromoteOrgConfirm() {
   // Initial state — pre-fill from existing linked org if any, else from free text
   const orgs = allData['organisations'] || [];
@@ -19806,32 +19894,55 @@ async function openPromoteOrgConfirm() {
   _renderPromoteOrgScreen1();
 }
 
-function _renderPromoteOrgScreen1() {
+// One strip for both renderers: the lead's own organisation (usually a
+// capture-born Prospect, v7.8.82) pinned on top — confirming and completing it
+// is the normal path — then the exact match and the fuzzy shortlist.
+function _promoteOrgMatchStripHtml() {
   const s = window._promoteOrgState;
-  const { exact, shortlist } = _findOrgMatches(s.colloquial, s.legal);
-
-  let matchHtml = '';
+  let { exact, shortlist } = _findOrgMatches(s.colloquial, s.legal);
+  const linkedId = (typeof leadData !== 'undefined' && leadData && leadData.target_org_id) ? +leadData.target_org_id : null;
+  const linked = linkedId ? (allData['organisations'] || []).find(o => +o.id === linkedId) : null;
+  if (linked) {
+    if (exact && +exact.id === linkedId) exact = null;
+    shortlist = shortlist.filter(o => +o.id !== linkedId);
+  }
+  const namePair = o => `${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);font-weight:400;">(${o.legal_name})</span>` : ''}`;
+  let html = '';
+  if (linked) {
+    html += `
+      <div style="padding:10px 12px;border:2px solid #1e40af;border-radius:var(--radius);background:#EFF6FF;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+        <div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#1e40af;">This lead's organisation${linked.client_status === 'Prospect' ? ' · Prospect' : ''}</div>
+          <div style="font-weight:700;font-size:14px;margin-top:2px;">${namePair(linked)}</div>
+        </div>
+        <button class="btn btn-primary" onclick="promoteOrgPickExisting(${linked.id})">Use this →</button>
+      </div>`;
+  }
   if (exact) {
-    matchHtml += `
+    html += `
       <div style="padding:10px 12px;border:2px solid #16a34a;border-radius:var(--radius);background:#F0FDF4;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div>
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#166534;">Exact match</div>
-          <div style="font-weight:700;font-size:14px;margin-top:2px;">${exact.name}${exact.legal_name && exact.legal_name !== exact.name ? ` <span style="color:var(--text3);font-weight:400;">(${exact.legal_name})</span>` : ''}</div>
+          <div style="font-weight:700;font-size:14px;margin-top:2px;">${namePair(exact)}</div>
         </div>
         <button class="btn btn-primary" onclick="promoteOrgPickExisting(${exact.id})">Use this →</button>
       </div>`;
   }
   if (shortlist.length) {
-    matchHtml += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:10px 0 6px;">Possible matches</div>`;
-    matchHtml += shortlist.map(o => `
+    html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:10px 0 6px;">Possible matches</div>`;
+    html += shortlist.map(o => `
       <div style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:white;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
         <div style="font-size:13px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
         <button class="btn btn-secondary btn-sm" onclick="promoteOrgPickExisting(${o.id})">Use</button>
       </div>`).join('');
   }
-  if (!exact && !shortlist.length) {
-    matchHtml = `<div style="font-size:12px;color:var(--text3);padding:10px 0;">No existing organisations match these names.</div>`;
-  }
+  if (!html) html = `<div style="font-size:12px;color:var(--text3);padding:10px 0;">No existing organisations match these names.</div>`;
+  return html;
+}
+
+function _renderPromoteOrgScreen1() {
+  const s = window._promoteOrgState;
+  const matchHtml = _promoteOrgMatchStripHtml();
 
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
@@ -19841,14 +19952,14 @@ function _renderPromoteOrgScreen1() {
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body" style="overflow-y:auto;">
-          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Confirm the client's names. If they already exist in your Organisations list, link to that record; otherwise create a new one.</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Confirm the client's names — and add the <strong>full / legal name</strong> now if you know it (it becomes mandatory when a deal is secured). Link to the record already on file, or create a new one.</div>
           <div class="form-row">
             <div class="form-group">
-              <label class="form-label">Colloquial name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+              <label class="form-label">Colloquial name <span class="lead-req-star" style="color:var(--red)">*</span></label>
               <input type="text" id="promote-org-colloquial" class="form-control" value="${(s.colloquial || '').replace(/"/g,'&quot;')}" oninput="_onPromoteOrgNameInput()">
             </div>
             <div class="form-group">
-              <label class="form-label">Full / legal name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+              <label class="form-label">Full / legal name <span style="font-weight:400;color:var(--text3);font-size:11px;">(required at securing)</span></label>
               <input type="text" id="promote-org-legal" class="form-control" value="${(s.legal || '').replace(/"/g,'&quot;')}" oninput="_onPromoteOrgNameInput()">
             </div>
           </div>
@@ -19868,30 +19979,7 @@ function _onPromoteOrgNameInput() {
   s.colloquial = document.getElementById('promote-org-colloquial').value;
   s.legal      = document.getElementById('promote-org-legal').value;
   // Just re-render the match strip, not the inputs (preserves focus)
-  const { exact, shortlist } = _findOrgMatches(s.colloquial, s.legal);
-  let html = '';
-  if (exact) {
-    html += `
-      <div style="padding:10px 12px;border:2px solid #16a34a;border-radius:var(--radius);background:#F0FDF4;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div>
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#166534;">Exact match</div>
-          <div style="font-weight:700;font-size:14px;margin-top:2px;">${exact.name}${exact.legal_name && exact.legal_name !== exact.name ? ` <span style="color:var(--text3);font-weight:400;">(${exact.legal_name})</span>` : ''}</div>
-        </div>
-        <button class="btn btn-primary" onclick="promoteOrgPickExisting(${exact.id})">Use this →</button>
-      </div>`;
-  }
-  if (shortlist.length) {
-    html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:10px 0 6px;">Possible matches</div>`;
-    html += shortlist.map(o => `
-      <div style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:white;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div style="font-size:13px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
-        <button class="btn btn-secondary btn-sm" onclick="promoteOrgPickExisting(${o.id})">Use</button>
-      </div>`).join('');
-  }
-  if (!exact && !shortlist.length) {
-    html = `<div style="font-size:12px;color:var(--text3);padding:10px 0;">No existing organisations match these names.</div>`;
-  }
-  document.getElementById('promote-org-matches').innerHTML = html;
+  document.getElementById('promote-org-matches').innerHTML = _promoteOrgMatchStripHtml();
 }
 
 function promoteOrgPickExisting(orgId) {
@@ -19914,7 +20002,7 @@ function promoteOrgPickCreateNew() {
   s.colloquial = (document.getElementById('promote-org-colloquial')?.value || '').trim();
   s.legal      = (document.getElementById('promote-org-legal')?.value      || '').trim();
   if (!s.colloquial) { showStatus('Colloquial name is required', 'error'); return; }
-  if (!s.legal)      { showStatus('Full / legal name is required', 'error'); return; }
+  // Legal name is PROMPTED here, ENFORCED at securing (2026-08-25 decision).
   s.selectedOrgId = null;
   s.isNew = true;
   s.website = '';
@@ -20527,7 +20615,7 @@ async function commitPromotion(s) {
     let orgId = s.selectedOrgId;
     if (s.isNew) {
       const createdOrg = await api('organisations', 'POST', {
-        name: s.colloquial, legal_name: s.legal,
+        name: s.colloquial, legal_name: s.legal || null,
         website: s.website || null, physical_line1: s.address || null,
       }, 'select=*');
       orgId = createdOrg[0].id;
@@ -21556,6 +21644,36 @@ async function saveLead(opts) {
   const deadReason = (document.getElementById('lead-dead-reason-value')?.value || '').trim() || null;
   const deadNotes  = (document.getElementById('lead-dead-notes-value')?.value  || '').trim() || null;
 
+  // Prospect org materialisation (v7.8.82): a committed colloquial name becomes
+  // a real organisation at save (find-or-create, see findOrCreateProspectOrg).
+  // A field still holding focus is mid-type — leave it as free text this save
+  // (same protection the site typeahead uses); it materialises on the next one.
+  // On failure the free-text column keeps working exactly as before.
+  let targetOrgId = +document.getElementById('lead-target-org-id').value || null;
+  const _tgtOrgNameEl = document.getElementById('lead-target-org-name');
+  let typedOrgName = (_tgtOrgNameEl?.value || '').trim();
+  if (!targetOrgId && typedOrgName.length >= 2 && document.activeElement !== _tgtOrgNameEl) {
+    const org = await findOrCreateProspectOrg(typedOrgName);
+    if (org) {
+      targetOrgId = +org.id;
+      typedOrgName = '';
+      // Reflect the link in the form so this session continues on the FK: add the
+      // org to the dropdown if absent, select it, and collapse the free-text UI.
+      window._leadPopulating = true;
+      try {
+        const dd = document.getElementById('lead-target-org-id');
+        if (dd && !Array.from(dd.options).some(op => +op.value === +org.id)) {
+          const opt = document.createElement('option');
+          opt.value = String(org.id); opt.textContent = org.name;
+          dd.appendChild(opt);
+        }
+        if (dd) dd.value = String(org.id);
+        if (_tgtOrgNameEl) _tgtOrgNameEl.value = '';
+        onLeadTargetOrgChange();
+      } finally { window._leadPopulating = false; }
+    }
+  }
+
   // Build payload — only include source-specific FK based on source type
   const sources = allData['lead_sources'] || [];
   const source = sources.find(s => +s.id === +sourceId);
@@ -21580,8 +21698,8 @@ async function saveLead(opts) {
     source_detail: (sourceName !== 'Referral' && sourceName !== 'Client Expansion' && sourceName !== 'Research')
       ? (document.getElementById('lead-source-detail').value.trim() || null) : null,
 
-    target_org_id:      +document.getElementById('lead-target-org-id').value || null,
-    target_org_name:    document.getElementById('lead-target-org-name').value.trim() || null,
+    target_org_id:      targetOrgId,
+    target_org_name:    typedOrgName || null,
     // Site: an existing site_id (hidden), or a typed new-site name that materialises
     // on promote. Mutually exclusive — the typeahead sets exactly one.
     site_id:   +document.getElementById('lead-site-id')?.value || null,
@@ -22315,7 +22433,7 @@ async function _rptActivity(st) {
   const qualRows = [];
   const orgLabel = l => {
     const o = l.target_org_id ? orgById[+l.target_org_id] : null;
-    return (o && (o.trading_name || o.name)) || (l.target_org_name || '').trim() || '(no client)';
+    return (o && o.name) || (l.target_org_name || '').trim() || '(no client)';
   };
   for (const s of stageEvents) {
     const day = String(s.at || '').slice(0, 10);
@@ -22565,7 +22683,7 @@ async function renderMilestonesPage() {
     const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
 
     const gById = Object.fromEntries((allData['milestone_groups'] || []).map(g => [+g.id, g]));
-    const orgLabel = o => (o.trading_name || o.name || '').trim();
+    const orgLabel = o => (o.name || '').trim();
     const items = [];
     for (const m of rows) {
       const e = engById[+m.engagement_id]; if (!e) continue;
@@ -24826,6 +24944,11 @@ async function renderSettingsPage() {
   body.innerHTML = '<tr><td style="padding:0;border:none;"></td></tr>';
 
   await loadAppSettings();
+  // Merge Organisations card needs the full org list for its pickers.
+  if (!allData['organisations']) {
+    try { allData['organisations'] = await apiGet('organisations', 'select=*'); }
+    catch (e) { allData['organisations'] = []; }
+  }
 
   const fy = appSettings['fy_start_month'] || 'April';
   const esc = appSettings['escalation_month'] || 'April';
@@ -24999,11 +25122,115 @@ async function renderSettingsPage() {
           </div>
         </div>
       </div>
+      <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Merge Organisations</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Fold a duplicate organisation into the one that should survive — every reference (leads, sites, opportunities, affiliations, campaigns, quotes) is repointed, then the duplicate is deleted. Use it when a capture-born Prospect turns out to already be on file under another name. This cannot be undone.</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Duplicate — will be deleted</label>
+            <select id="merge-org-dup" class="form-control" onchange="document.getElementById('merge-org-go').style.display='none';">
+              <option value="">— pick the duplicate —</option>
+              ${(allData['organisations'] || []).filter(o => !o.home_organisation).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map(o => `<option value="${o.id}">${cEsc(o.name)}${o.client_status === 'Prospect' ? ' (Prospect)' : ''}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Survivor — keeps everything</label>
+            <select id="merge-org-keep" class="form-control" onchange="document.getElementById('merge-org-go').style.display='none';">
+              <option value="">— pick the survivor —</option>
+              ${(allData['organisations'] || []).filter(o => !o.home_organisation).slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).map(o => `<option value="${o.id}">${cEsc(o.name)}${o.client_status === 'Prospect' ? ' (Prospect)' : ''}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div id="merge-org-preview" style="font-size:12px;color:var(--text2);margin:2px 0 10px;"></div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-secondary" onclick="previewOrgMerge()">Preview</button>
+          <button class="btn" id="merge-org-go" style="background:var(--red);color:#fff;display:none;" onclick="runOrgMerge()">Merge →</button>
+        </div>
+      </div>
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
     </div>
   </td></tr>`;
+}
+
+// ── Merge Organisations (Admin → Settings, v7.8.82) ──────────────────────────
+// The safety valve for capture-born Prospect duplicates. Repoints every FK that
+// references organisations(id) — the list was verified against the live schema
+// (2026-08-25) — then deletes the duplicate. sales_campaign_organisations is a
+// unique (campaign, org) pair, so would-be duplicate rows are deleted instead of
+// repointed. home_organisation_members is deliberately absent: home orgs cannot
+// be merged away at all, and only home orgs have member rows.
+const ORG_MERGE_REFS = [
+  ['leads', 'target_org_id', 'lead targets'],
+  ['leads', 'source_org_id', 'lead sources'],
+  ['sites', 'organisation_id', 'sites'],
+  ['deals', 'org_id', 'opportunities/contracts'],
+  ['person_organisation_roles', 'org_id', 'affiliations'],
+  ['campaign_targets', 'organisation_id', 'campaign targets'],
+  ['quote_sites', 'organisation_id', 'quote sites'],
+  ['work_projects', 'organisation_id', 'work projects'],
+  ['organisations', 'parent_org_id', 'child organisations'],
+];
+
+async function previewOrgMerge() {
+  const dupId = +document.getElementById('merge-org-dup')?.value || 0;
+  const keepId = +document.getElementById('merge-org-keep')?.value || 0;
+  const el = document.getElementById('merge-org-preview');
+  const go = document.getElementById('merge-org-go');
+  if (go) go.style.display = 'none';
+  if (!el) return;
+  if (!dupId || !keepId) { el.textContent = 'Pick both organisations first.'; return; }
+  if (dupId === keepId) { el.textContent = 'Those are the same organisation — pick two different ones.'; return; }
+  el.textContent = 'Counting references…';
+  try {
+    const counts = await Promise.all(ORG_MERGE_REFS.map(async ([t, c, label]) =>
+      [label, (await apiGet(t, `${c}=eq.${dupId}&select=id`)).length]));
+    counts.push(['research-study participations', (await apiGet('sales_campaign_organisations', `organisation_id=eq.${dupId}&select=id`)).length]);
+    const bits = counts.filter(([, n]) => n > 0).map(([label, n]) => `<strong>${n}</strong> ${label}`);
+    el.innerHTML = bits.length
+      ? 'Will repoint ' + bits.join(' · ') + ' — then delete the duplicate.'
+      : 'Nothing references the duplicate — it will simply be deleted.';
+    if (go) go.style.display = '';
+  } catch (e) { el.textContent = 'Preview failed: ' + e.message; }
+}
+
+async function runOrgMerge() {
+  const dupId = +document.getElementById('merge-org-dup')?.value || 0;
+  const keepId = +document.getElementById('merge-org-keep')?.value || 0;
+  if (!dupId || !keepId || dupId === keepId) { showStatus('Pick two different organisations', 'error'); return; }
+  const orgs = allData['organisations'] || [];
+  const dup = orgs.find(o => +o.id === dupId), keep = orgs.find(o => +o.id === keepId);
+  if (!dup || !keep) { showStatus('Organisation not found — reload and retry', 'error'); return; }
+  if (dup.home_organisation) { showStatus('A home organisation cannot be merged away', 'error'); return; }
+  if (!await confirmDialog({
+    title: 'Merge organisations',
+    confirmLabel: 'Merge',
+    message: `Fold "${dup.name}" into "${keep.name}"? Every reference is repointed to "${keep.name}" and "${dup.name}" is deleted. This cannot be undone.`,
+  })) return;
+  const btn = document.getElementById('merge-org-go'); if (btn) btn.disabled = true;
+  try {
+    // Unique-pair table first: delete collisions, repoint the rest.
+    const scoDup = await apiGet('sales_campaign_organisations', `organisation_id=eq.${dupId}&select=id,sales_campaign_id`);
+    const keepCamps = new Set((await apiGet('sales_campaign_organisations', `organisation_id=eq.${keepId}&select=sales_campaign_id`)).map(r => +r.sales_campaign_id));
+    for (const r of scoDup) {
+      if (keepCamps.has(+r.sales_campaign_id)) await api('sales_campaign_organisations', 'DELETE', null, 'id=eq.' + r.id);
+      else await api('sales_campaign_organisations', 'PATCH', { organisation_id: keepId }, 'id=eq.' + r.id);
+    }
+    for (const [t, c] of ORG_MERGE_REFS) {
+      await api(t, 'PATCH', { [c]: keepId }, `${c}=eq.${dupId}`);
+    }
+    await api('organisations', 'DELETE', null, 'id=eq.' + dupId);
+    allData['organisations'] = orgs.filter(o => +o.id !== dupId);
+    delete allData['_org_idf'];
+    allData['sites'] = null;   // repointed rows — refetch on next use
+    showStatus(`Merged — "${dup.name}" folded into "${keep.name}"`);
+    await renderSettingsPage();
+  } catch (e) {
+    // Each repoint is independent and idempotent: whatever moved stays moved,
+    // and re-running the same merge finishes the remainder.
+    showStatus('Merge stopped midway: ' + e.message + ' — re-run the same merge to finish.', 'error');
+  } finally { if (btn) btn.disabled = false; }
 }
 
 async function saveSettings() {
