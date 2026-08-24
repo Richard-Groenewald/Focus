@@ -637,7 +637,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.78 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -673,7 +673,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.78 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2550,6 +2550,7 @@ const PAGES = {
   eng_hist_contract: { title: 'Engagement History — Contract', custom: true, readOnly: true, columns: [], fields: [] },
   eng_hist_project:  { title: 'Engagement History — Project',  custom: true, readOnly: true, columns: [], fields: [] },
   milestones:        { title: 'Milestones', custom: true, readOnly: true, columns: [], fields: [] },
+  attention:         { title: 'Needs Attention', custom: true, readOnly: true, columns: [], fields: [] },
   reports:           { title: 'Reports', custom: true, readOnly: true, columns: [], fields: [] },
   proposal_sandbox:         { title: 'Proposal Sandbox', custom: true, columns: [], fields: [] },
   pb_human_resources:       { title: 'Proposal Builder — Human Resources', custom: true, columns: [], fields: [] },
@@ -3432,6 +3433,7 @@ async function loadTable(page) {
     if (page === 'eng_hist_contract') { await renderEngagementHistory('Contract'); return; }
     if (page === 'eng_hist_project')  { await renderEngagementHistory('Project');  return; }
     if (page === 'milestones') { await renderMilestonesPage(); return; }
+    if (page === 'attention') { await renderAttentionPage(); return; }
     if (page === 'reports') { await renderReportsPage(); return; }
     if (page === 'internal_activity') { await renderInternalActivityPage(); return; }
     if (page === 'proposal_sandbox')          { await renderProposalSandboxPage(); return; }
@@ -4292,7 +4294,7 @@ const HELP_CONTENT = {
         { h: 'Hold & Nurture', body: 'Both live on the <strong>Lead Progression</strong> tab as <strong>direct actions</strong> for the owner or a manager — no approval; each entry is recorded on the audit trail. The entry bar matches the stage\'s meaning:<ul><li><strong>Hold</strong> — needs Fit, Access and Capacity all Strong and a mandatory <strong>wake date</strong>. A green Trigger drops to Weak on entry (holding a lead means its moment is not now). The lead stays live while held; on the wake date it returns to Working, and if the moment arrives early, re-greening everything flips it straight to Review.</li><li><strong>Nurture</strong> — needs Fit and Access Strong, with a mandatory per-lead <strong>touch cadence</strong>. Each logged touch pre-fills the next one a cadence out.</li></ul>Leaving works the same way: the owner or a manager releases the lead directly from the Lead Progression tab and it lands on <strong>Review</strong> or <strong>Working</strong> off its data.' },
         { h: 'Red flags', body: 'Raise a flag (Lead Progression tab or the promote wizard) the moment a disqualifying concern appears — payment risk, ethics, conflict, capacity. The lead <strong>stays where it is</strong> and keeps being worked, but <strong>cannot be promoted</strong> until an <strong>Executive</strong> rules: <strong>Kill</strong> (lead closes, flag preserved on record) or <strong>Ignore</strong> (lead continues; flag left visible or cleared). Reasons are mandatory.' },
         { h: 'Declining & Dead', body: '<strong>Decline…</strong> closes a lead immediately with a category + reason — but the death itself is reviewed: it sits in Dead <em>awaiting sales-management oversight</em> until confirmed, or rejected back to Working. A confirmed Dead can later be <strong>reopened</strong> by sales management or an Executive (reason required) — it lands in Working with its four gates reset.' },
-        { h: 'Nothing sleeps forgotten', body: 'Held leads wake automatically; woken leads and aging ones (New untouched or Working with no touch beyond the configured day limits — a Working lead with an open next action due today or later stays quiet until that action falls overdue) surface in the <strong>Leads needing attention</strong> banner on the dashboard — the owner sees their own, sales management sees everyone’s. Approvers get an <strong>Approvals Outstanding</strong> dashboard card collecting everything awaiting their decision.' },
+        { h: 'Nothing sleeps forgotten', body: 'Held leads wake automatically; woken leads and aging ones (New untouched or Working with no touch beyond the configured day limits — a Working lead with an open next action due today or later stays quiet until that action falls overdue) surface in the <strong>Leads needing attention</strong> banner on the dashboard — the owner sees their own, sales management sees everyone’s — and the full workable list lives on the <strong>Needs Attention</strong> page (Sales Management). Approvers get an <strong>Approvals Outstanding</strong> dashboard card collecting everything awaiting their decision.' },
         { h: 'Contacts', body: 'One list — the <strong>first is the primary</strong>. Type a name and it is checked against people we already know:<ul><li><strong>New contact</strong> — nobody similar on file.</li><li><strong>Existing · Affiliated</strong> — already a contact at this organisation.</li><li><strong>Existing · not affiliated</strong> — known to us elsewhere; you are asked if they have <em>moved here</em> (applied on promote).</li></ul>Click a contact to expand it, then use <strong>Edit</strong>, <strong>Make primary</strong> or <strong>Delete</strong>.' },
         { h: 'Milestones', body: 'Mark an engagement that represents a <strong>significant event</strong> — tick its milestones in the engagement form (the list offers only types that apply to this area; admin curates them under Admin → Settings → Milestones). A designation is <strong>proposed</strong> (hollow amber ★) until <strong>sales management approves</strong> it (solid ★) — managers\' own tags apply immediately, declines carry a reason, and you can withdraw your own pending proposal by clicking its badge. Approved milestones light up the engagement lists, the Engagement History <strong>★ Milestones only</strong> filter and the <strong>Recent Milestones</strong> dashboard card.' },
         { h: 'Where things live', body: '<strong>Overview</strong> — the facts of the lead. <strong>Qualification</strong> — the four gates and readiness. <strong>Lead Progression</strong> — every lifecycle action (Hold / Nurture / Promote / Decline / Delete), the promotion approval panel, red flags and strategic decisions. <strong>Engagements</strong> — the touch history, next actions and milestone stars. What you can see and do is driven by your rights.' },
@@ -4311,7 +4313,7 @@ const HELP_CONTENT = {
       { h: 'The stage tabs', body: `The tabs mirror the map's columns, each with a live count, grouped so each band's stages sit together: ${helpChip('New')} ${helpChip('Working')} · ${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')} · ${helpChip('Dead')}. Tab colours match the stage badge colours used across Focus. <strong>Hold</strong> only appears while leads are actually held; <strong>Dead</strong> sits apart on the far right — it is the off-pipeline bucket, not a stage you work. (Review is the stage formerly labelled Qualified — the word Qualified now names the band.)` },
       { h: 'Whose leads you see', body: 'The view bar switches scope: <strong>Own</strong> (default) shows leads you own; <strong>Team</strong> (managers) adds your region/branch; <strong>All</strong> needs the view-all-leads right. The subtitle under the page title shows the count in the current view.' },
       { h: 'Working the list', body: 'Click any row to open the lead. Column headers <strong>sort and filter</strong> (admin sets the default sort under Admin → Settings). <strong>+ New Lead</strong> (top right) captures a new one. Opening the register also does the housekeeping: eligible New leads flip to Working, and held leads whose wake date has arrived come back into play.' },
-      { h: 'Nothing sleeps forgotten', body: 'Aging New/Working leads and freshly-woken holds surface in the <strong>Leads needing attention</strong> banner on the dashboard; approvers get an <strong>Approvals Outstanding</strong> card collecting everything awaiting a decision. For the full stage-by-stage workflow, open any lead and press the green <strong>?</strong> there — the Lead Workflow Guide picks up where this page leaves off.' },
+      { h: 'Nothing sleeps forgotten', body: 'Aging New/Working leads and freshly-woken holds surface in the <strong>Leads needing attention</strong> banner on the dashboard, and the full list is workable on the <strong>Needs Attention</strong> page under Sales Management; approvers get an <strong>Approvals Outstanding</strong> card collecting everything awaiting a decision. For the full stage-by-stage workflow, open any lead and press the green <strong>?</strong> there — the Lead Workflow Guide picks up where this page leaves off.' },
     ],
   }),
 
@@ -4357,7 +4359,7 @@ const HELP_CONTENT = {
       { note: '<strong>What appears here is role-driven.</strong> Admin curates which cards each role sees (Admin → Settings → Dashboards); you see the union of your roles\' cards.' },
       { h: 'Mine / Team / All', body: 'The scope switch (top right) cuts the ownership-scoped cards — Outstanding Actions, Leads, Opportunities, Pipeline, Campaigns, Interactions, Recent Milestones — to <strong>Mine</strong> (records you own or engagements you logged), <strong>Team</strong> (Sales Managers: your region/branch) or <strong>All</strong> (view-all rights). Each card\'s chip states the scope it is showing, and your choice is remembered between logins. The switch only appears when your rights offer more than one option.' },
       { h: 'Arrange it your way', body: 'Drag any card to reorder — the layout is remembered for you personally, and <strong>↺ Reset layout</strong> returns to your role\'s standard arrangement.' },
-      { h: 'The action cards', body: '<strong>Outstanding Actions</strong> — open next actions across leads and opportunities, overdue first; click a row to open the engagement. <strong>Approvals Outstanding</strong> (approvers only) — everything awaiting <em>your</em> decision: promotions, dead reviews, red flags (Executives) and proposed ★ milestones; click a row to act. <strong>Leads</strong> — the two umbrella-band counts (In Qualification vs Qualified) with the full stage composition and your overdue follow-up count. <strong>Leads needing attention</strong> (banner) — woken holds and aging leads.' },
+      { h: 'The action cards', body: '<strong>Outstanding Actions</strong> — open next actions across leads and opportunities, overdue first; click a row to open the engagement. <strong>Approvals Outstanding</strong> (approvers only) — everything awaiting <em>your</em> decision: promotions, dead reviews, red flags (Executives) and proposed ★ milestones; click a row to act. <strong>Leads</strong> — the two umbrella-band counts (In Qualification vs Qualified) with the full stage composition and your overdue follow-up count. <strong>Leads needing attention</strong> (banner) — woken holds and aging leads; its <strong>Manage →</strong> button opens the Needs Attention page, where the full lead list and every open action are workable.' },
       { h: 'The activity cards', body: '<strong>Interactions</strong> — engagements per week/month, stacked by category, with its own Mine/All toggle and the per-person target line. <strong>Recent Milestones</strong> — the latest approved ★ milestones in your scope. <strong>Pipeline</strong> — weighted and total open value, computed from revenue streams.' },
       { h: 'Announcements', body: 'A navy (notice) or red (urgent) banner across the top is a <strong>broadcast</strong> from admin — e.g. a deploy warning. Dismiss it with the ×; it disappears everywhere once it expires or is ended.' },
     ],
@@ -4660,6 +4662,12 @@ const MENU = [
         icon: '<path d="M8 14V6M5 9l3-3 3 3" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M3 14h10" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'opportunities',    label: 'Opportunities', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      // The working register behind the dashboard nags: the full aging/woke
+      // lead list (the banner shows six) and every open next action (the
+      // Outstanding Actions card shows five). Sits under the two registers
+      // it draws from.
+      { page: 'attention', label: 'Needs Attention', permission: 'manage_leads',
+        icon: '<path d="M8 2a3.5 3.5 0 0 0-3.5 3.5c0 2.4-.9 3.5-1.5 4.1h10c-.6-.6-1.5-1.7-1.5-4.1A3.5 3.5 0 0 0 8 2z" stroke="white" stroke-width="1.4" fill="none" stroke-linejoin="round"/><path d="M6.6 12.2a1.5 1.5 0 0 0 2.8 0" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
       { page: 'revenue_pipeline', label: 'Revenue Pipeline', permission: 'view_revenue_pipeline',
         icon: '<path d="M2 14V2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="8" width="2.5" height="5"/><rect x="8" y="5" width="2.5" height="8"/><rect x="12" y="3" width="2.5" height="10"/>' },
       { page: 'proposal_sandbox', label: 'Proposal Sandbox', permission: 'manage_opportunities',
@@ -11680,42 +11688,55 @@ function agingDaysFor(personId, kind) {
   return g > 0 ? g : 0;
 }
 
+// Shared collector for the dashboard banner and the Needs Attention page:
+// every lead currently flagged — back from Hold (woke_at set), or aging
+// New/Working past its owner's threshold. Returns items UNSCOPED, worst
+// first; each surface applies its own scope rule.
+async function _attentionLeadItems() {
+  const leads = await apiGet('leads',
+    'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,description,site_id,site_name,next_action_date,sites(name)');
+  await sweepHoldWake(leads);   // wake due leads now, so their reminders show immediately
+  const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
+  const items = [];
+  for (const l of leads) {
+    if (l.status === 'Dead' || l.status === 'Promoted') continue;
+    const label = leadEngLabel(l) || ('Lead #' + l.id);
+    if (l.woke_at) {
+      items.push({ lead: l, id: l.id, label, kind: 'wake', wokeAt: String(l.woke_at).slice(0, 10),
+        msg: 'Back from Hold (woke ' + String(l.woke_at).slice(0, 10) + ') — pick it up', wake: true, order: 0 });
+      continue;
+    }
+    if (l.status === 'New') {
+      const x = agingDaysFor(l.owner_id, 'new');
+      const days = daysSince(l.last_touch_date || l.created_at);
+      if (x > 0 && days != null && days >= x) items.push({ lead: l, id: l.id, label, kind: 'new', days, limit: x,
+        msg: 'New lead untouched for ' + days + ' days (limit ' + x + ')', order: 1 });
+    } else if (l.status === 'Working') {
+      // A future-dated open next action is a committed plan, not neglect — the
+      // aging nag stays quiet until the due date passes (Outstanding Actions
+      // then reports the overdue action, and this escalation resumes).
+      const planned = l.next_action_date && String(l.next_action_date).slice(0, 10) >= new Date().toISOString().slice(0, 10);
+      const y = agingDaysFor(l.owner_id, 'working');
+      const days = daysSince(l.last_touch_date || l.created_at);
+      if (!planned && y > 0 && days != null && days >= y) items.push({ lead: l, id: l.id, label, kind: 'working', days, limit: y,
+        msg: 'Working lead with no touch for ' + days + ' days (limit ' + y + ')', order: 1 });
+    }
+  }
+  items.sort((a, b) => a.order - b.order || (b.days || 0) - (a.days || 0));
+  return items;
+}
+
 // Top-of-dashboard reminder banner: leads back from Hold (woke_at set) + aging
 // New/Working escalations. Owner sees their own; sales management sees all.
+// The full workable list lives on the Needs Attention page (Sales Management).
 async function _dashRemindersHtml() {
   try {
     const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const isSM = !!(currentUser && (currentUser.isAdmin
       || currentUser.permissions.includes('all') || currentUser.permissions.includes('promote_lead')));
-    const leads = await apiGet('leads',
-      'select=id,owner_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,description,site_id,site_name,next_action_date,sites(name)');
-    await sweepHoldWake(leads);   // wake due leads now, so their reminders show immediately
     const inScope = l => isSM || +l.owner_id === +(currentUser?.personId || 0);
-    const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
-    const items = [];
-    for (const l of leads) {
-      if (!inScope(l) || l.status === 'Dead' || l.status === 'Promoted') continue;
-      const label = leadEngLabel(l) || ('Lead #' + l.id);
-      if (l.woke_at) {
-        items.push({ id: l.id, label, msg: 'Back from Hold (woke ' + String(l.woke_at).slice(0, 10) + ') — pick it up', wake: true, order: 0 });
-        continue;
-      }
-      if (l.status === 'New') {
-        const x = agingDaysFor(l.owner_id, 'new');
-        const days = daysSince(l.last_touch_date || l.created_at);
-        if (x > 0 && days != null && days >= x) items.push({ id: l.id, label, msg: 'New lead untouched for ' + days + ' days (limit ' + x + ')', order: 1 });
-      } else if (l.status === 'Working') {
-        // A future-dated open next action is a committed plan, not neglect — the
-        // aging nag stays quiet until the due date passes (Outstanding Actions
-        // then reports the overdue action, and this escalation resumes).
-        const planned = l.next_action_date && String(l.next_action_date).slice(0, 10) >= new Date().toISOString().slice(0, 10);
-        const y = agingDaysFor(l.owner_id, 'working');
-        const days = daysSince(l.last_touch_date || l.created_at);
-        if (!planned && y > 0 && days != null && days >= y) items.push({ id: l.id, label, msg: 'Working lead with no touch for ' + days + ' days (limit ' + y + ')', order: 1 });
-      }
-    }
+    const items = (await _attentionLeadItems()).filter(r => inScope(r.lead));
     if (!items.length) return '';
-    items.sort((a, b) => a.order - b.order);
     const rows = items.slice(0, 6).map(r => `
       <div style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12px;">
         <div style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
@@ -11725,9 +11746,12 @@ async function _dashRemindersHtml() {
         <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openLeadForm(${r.id})">Open</button>
         ${r.wake ? `<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="dismissWokeReminder(${r.id})" title="Clear this reminder">✕</button>` : ''}
       </div>`).join('');
-    const more = items.length > 6 ? `<div style="font-size:11px;color:var(--text3);padding-top:4px;">+ ${items.length - 6} more on the Leads Register</div>` : '';
+    const more = items.length > 6 ? `<div onclick="_attnState.tab='leads';showPage('attention')" style="font-size:11px;color:#7A4F0E;font-weight:700;padding-top:4px;cursor:pointer;text-decoration:underline;">+ ${items.length - 6} more — open Needs Attention</div>` : '';
     return `<div style="margin-bottom:14px;padding:10px 16px;background:#FFF7E6;border:1px solid #E8A33D;border-left:4px solid #E8A33D;border-radius:var(--radius);">
-      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7A4F0E;margin-bottom:4px;">⏰ Leads needing attention (${items.length})</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px;">
+        <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#7A4F0E;">⏰ Leads needing attention (${items.length})</div>
+        <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="_attnState.tab='leads';showPage('attention')" title="The full list, workable — Sales Management → Needs Attention">Manage →</button>
+      </div>
       ${rows}${more}</div>`;
   } catch (e) { return ''; }   // never let the banner break the dashboard
 }
@@ -11735,7 +11759,7 @@ async function _dashRemindersHtml() {
 async function dismissWokeReminder(leadId) {
   try {
     await api('leads', 'PATCH', { woke_at: null, updated_at: new Date().toISOString() }, 'id=eq.' + leadId);
-    renderDashboard();
+    if (currentPage === 'attention') renderAttentionPage(); else renderDashboard();
   } catch (e) { showStatus('Could not dismiss: ' + e.message, 'error'); }
 }
 
@@ -11889,9 +11913,10 @@ async function _dashApprovals() {
 // Outstanding actions across leads AND opportunities — one source now that
 // engagements is unified: rows whose next-action isn't done, scoped to records
 // the user owns (or their team's). Each row opens its parent.
-async function _dashActions() {
-  const scope = _dashScope();
-  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+// Open next actions (one per stream — the newest is the real obligation),
+// joined to their lead/deal parent. Returns rows UNSCOPED in due-date order;
+// each caller (Outstanding Actions card, Needs Attention page) applies scope.
+async function _attentionActionRows() {
   let acts;
   try {
     acts = await apiGet('engagements',
@@ -11915,18 +11940,25 @@ async function _dashActions() {
   const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
-  const today = new Date().toISOString().slice(0, 10);
-  const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const rows = [];
   for (const a of acts) {
     let parent, kind;
     if (a.lead_id != null) { parent = leadById[+a.lead_id]; kind = 'lead'; }
     else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
-    if (!parent || !_dashInScope(parent, scope)) continue;
+    if (!parent) continue;
     const label = kind === 'lead' ? (leadEngLabel(parent) || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
-    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date });
+    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date, parent });
   }
   rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
+  return rows;
+}
+
+async function _dashActions() {
+  const scope = _dashScope();
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = (await _attentionActionRows()).filter(r => _dashInScope(r.parent, scope));
+  const today = new Date().toISOString().slice(0, 10);
+  const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const overdue = rows.filter(r => r.due < today).length;
   const dueSoon = rows.filter(r => r.due >= today && r.due <= soon).length;
   const chip = `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine'}</span>`;
@@ -11945,7 +11977,7 @@ async function _dashActions() {
     </div>
     <div style="padding:16px;">
       <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('Overdue', overdue, overdue > 0 ? 'red' : null)}${kpi('Due ≤ 7 days', dueSoon)}${kpi('Total open', rows.length)}</div>
-      ${rows.length ? `<div style="margin-top:10px;">${list}</div>${rows.length > 5 ? `<div style="margin-top:8px;color:var(--text3);font-size:11px;">+ ${rows.length - 5} more</div>` : ''}`
+      ${rows.length ? `<div style="margin-top:10px;">${list}</div>${rows.length > 5 ? `<div onclick="_attnState.tab='actions';showPage('attention')" style="margin-top:8px;color:var(--navy);font-weight:700;font-size:11px;cursor:pointer;text-decoration:underline;">+ ${rows.length - 5} more — open Needs Attention</div>` : ''}`
                     : `<div style="margin-top:12px;color:var(--text3);font-size:12px;">Nothing outstanding — you're clear.</div>`}
     </div></div>`;
 }
@@ -21845,6 +21877,131 @@ async function withdrawMilestone(id) {
     await _milAfterChange();
   } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
   finally { stopBusy(); }
+}
+
+// ── Needs Attention (Sales Management) ───────────────────────────────────────
+// The working register behind the two dashboard nags. Tab 1: the full aging/
+// woke lead list the banner caps at six. Tab 2: every open next action (one
+// per stream) the Outstanding Actions card caps at five. Both tabs read the
+// SAME collectors as the dashboard (_attentionLeadItems/_attentionActionRows),
+// so this page and the nags can never disagree about what needs attention.
+let _attnState = { tab: 'leads', scope: 'own', overdueOnly: false, group: false };
+
+async function renderAttentionPage() {
+  const head = document.getElementById('table-head');
+  const body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = `<tr><td style="padding:0;border:none;">
+    <div style="padding:0 0 24px;">
+      <div id="attn-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
+      <div id="attn-results"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
+    </div></td></tr>`;
+  try {
+    const [leadItems, actionRows] = await Promise.all([_attentionLeadItems(), _attentionActionRows()]);
+    // Owner names for just the people on the lists — a whole-table people
+    // fetch would risk the PostgREST 1000-row cap.
+    const pids = [...new Set([...leadItems.map(i => +i.lead.owner_id || 0), ...actionRows.map(r => +(r.parent.owner_id || 0))].filter(Boolean))];
+    const ppl = pids.length ? await apiGet('people', `id=in.(${pids.join(',')})&select=id,first_name,last_name`) : [];
+    window._attnPName = Object.fromEntries(ppl.map(p => [+p.id, [p.first_name, p.last_name].filter(Boolean).join(' ')]));
+    window._attnLeadItems = leadItems;
+    window._attnActionRows = actionRows;
+    _attnApply();
+  } catch (e) {
+    const el = document.getElementById('attn-results');
+    if (el) el.innerHTML = `<div style="padding:20px;color:var(--red);">Error loading: ${e.message}</div>`;
+  }
+}
+
+function _attnSet(k, v) { _attnState[k] = v; _attnApply(); }
+
+function _attnApply() {
+  const st = _attnState;
+  const controls = document.getElementById('attn-controls');
+  const out = document.getElementById('attn-results');
+  if (!controls || !out) return;
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const pName = id => (window._attnPName && window._attnPName[+id]) || ('Person #' + id);
+  const scopeOpts = _dashScopeOptions();
+  if (!scopeOpts.includes(st.scope)) st.scope = 'own';
+  const leadsAll = (window._attnLeadItems || []).filter(i => _dashInScope(i.lead, st.scope));
+  const actsAll = (window._attnActionRows || []).filter(r => _dashInScope(r.parent, st.scope));
+  const today = new Date().toISOString().slice(0, 10);
+
+  const btn = (on, click, label) => `<button class="btn btn-sm ${on ? 'btn-primary' : 'btn-secondary'}" onclick="${click}">${label}</button>`;
+  const div = `<span style="display:inline-block;width:1px;height:18px;background:var(--border);margin:0 6px;vertical-align:middle;"></span>`;
+  let html = '';
+  if (scopeOpts.length > 1) html += scopeOpts.map(o => btn(st.scope === o, `_attnSet('scope','${o}')`, o === 'own' ? 'Mine' : o === 'team' ? 'Team' : 'All')).join('') + div;
+  html += btn(st.tab === 'leads', "_attnSet('tab','leads')", `Leads needing attention (${leadsAll.length})`)
+        + btn(st.tab === 'actions', "_attnSet('tab','actions')", `Outstanding actions (${actsAll.length})`);
+  if (st.tab === 'leads' && st.scope !== 'own') html += div + btn(st.group, `_attnSet('group',${!st.group})`, 'Group by owner');
+  if (st.tab === 'actions') html += div + btn(st.overdueOnly, `_attnSet('overdueOnly',${!st.overdueOnly})`, `Overdue only (${actsAll.filter(r => r.due < today).length})`);
+  controls.innerHTML = html;
+
+  const kpi = (label, val, red) => `<div><div style="font-size:26px;font-weight:800;color:${red ? 'var(--red)' : 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
+  const th = t => `<th style="text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);border-bottom:2px solid var(--border);white-space:nowrap;">${t}</th>`;
+  const td = (c, extra) => `<td style="padding:9px 12px;font-size:12px;border-bottom:1px solid var(--border);vertical-align:middle;${extra || ''}">${c}</td>`;
+  const pill = (text, style) => `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:11px;font-weight:700;white-space:nowrap;${style}">${text}</span>`;
+
+  if (st.tab === 'leads') {
+    const wake = leadsAll.filter(i => i.kind === 'wake');
+    const aNew = leadsAll.filter(i => i.kind === 'new');
+    const aWork = leadsAll.filter(i => i.kind === 'working');
+    const row = i => {
+      const l = i.lead;
+      const reason = i.kind === 'wake'
+        ? pill('Back from Hold', 'background:#E0F2FE;color:#075985;') + ` <span style="color:var(--text3);">woke ${i.wokeAt}</span>`
+        : pill('Untouched ' + i.days + 'd', 'background:#FEE2E2;color:#991B1B;') + ` <span style="color:var(--text3);">limit ${i.limit}d</span>`;
+      return `<tr>
+        ${td(`<span style="font-weight:700;color:var(--navy);">${esc(i.label)}</span>`)}
+        ${td(esc(pName(l.owner_id)))}
+        ${td(pill(leadStageLabel(l.status || 'New'), LEAD_STATUS_STYLES[l.status] || LEAD_STATUS_STYLES['New']))}
+        ${td(reason)}
+        ${td(l.last_touch_date ? String(l.last_touch_date).slice(0, 10) : '—', 'white-space:nowrap;')}
+        ${td(`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openLeadForm(${i.id})">Open</button>` +
+             (i.kind === 'wake' ? ` <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="dismissWokeReminder(${i.id})" title="Clear this reminder">✕</button>` : ''), 'white-space:nowrap;text-align:right;')}
+      </tr>`;
+    };
+    let rowsHtml = '';
+    if (st.group && st.scope !== 'own') {
+      const byOwner = new Map();
+      leadsAll.forEach(i => { const k = +i.lead.owner_id || 0; if (!byOwner.has(k)) byOwner.set(k, []); byOwner.get(k).push(i); });
+      const groups = [...byOwner.entries()].sort((a, b) => pName(a[0]).localeCompare(pName(b[0])));
+      rowsHtml = groups.map(([oid, list]) =>
+        `<tr><td colspan="6" style="padding:12px 12px 6px;font-size:12px;font-weight:800;color:var(--navy);border-bottom:1px solid var(--border);background:var(--bg2);">${esc(pName(oid))} (${list.length})</td></tr>` + list.map(row).join('')).join('');
+    } else rowsHtml = leadsAll.map(row).join('');
+    out.innerHTML = `<div class="card" style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:4px;">${kpi('Back from Hold', wake.length)}${kpi('Aging New', aNew.length, aNew.length > 0)}${kpi('Aging Working', aWork.length, aWork.length > 0)}</div>
+      ${leadsAll.length ? `<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;">
+          <thead><tr>${th('Lead')}${th('Owner')}${th('Stage')}${th("Why it's here")}${th('Last touch')}${th('')}</tr></thead>
+          <tbody>${rowsHtml}</tbody></table></div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3);">Logging an engagement bumps a lead's last touch and clears it from this list; a Working lead with a future-dated next action stays off it until that action falls overdue.</div>`
+      : `<div style="padding:28px 0 12px;color:var(--text3);font-size:13px;">Nothing needs attention — you're clear.</div>`}
+    </div>`;
+  } else {
+    const rows = st.overdueOnly ? actsAll.filter(r => r.due < today) : actsAll;
+    const overdue = actsAll.filter(r => r.due < today).length;
+    const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    const dueSoon = actsAll.filter(r => r.due >= today && r.due <= soon).length;
+    const rowsHtml = rows.map(r => {
+      const od = r.due < today;
+      return `<tr>
+        ${td(`<span style="font-weight:700;color:${od ? 'var(--red)' : 'var(--navy)'};">${r.due}</span>`, 'white-space:nowrap;')}
+        ${td(esc(r.action))}
+        ${td(`<span style="font-weight:700;color:var(--navy);">${esc(r.label)}</span> ` + pill(r.kind === 'lead' ? 'Lead' : 'Opportunity', r.kind === 'lead' ? 'background:#FFEDD5;color:#9A3412;' : 'background:#DBEAFE;color:#1E40AF;'))}
+        ${td(esc(pName(r.parent.owner_id)))}
+        ${td(`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openEngagement(${r.eng})">Engagement</button>
+              <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="${r.kind === 'lead' ? 'openLeadForm' : 'openOpportunity'}(${r.id})">Open ${r.kind === 'lead' ? 'lead' : 'opp'}</button>`, 'white-space:nowrap;text-align:right;')}
+      </tr>`;
+    }).join('');
+    out.innerHTML = `<div class="card" style="padding:16px;">
+      <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:4px;">${kpi('Overdue', overdue, overdue > 0)}${kpi('Due ≤ 7 days', dueSoon)}${kpi('Total open', actsAll.length)}</div>
+      ${rows.length ? `<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;">
+          <thead><tr>${th('Due')}${th('Next action')}${th('On')}${th('Owner')}${th('')}</tr></thead>
+          <tbody>${rowsHtml}</tbody></table></div>
+        <div style="margin-top:10px;font-size:11px;color:var(--text3);">One row per open stream — the newest open action is the live obligation. Mark it done (or supersede it) from the engagement.</div>`
+      : `<div style="padding:28px 0 12px;color:var(--text3);font-size:13px;">${st.overdueOnly ? 'No overdue actions in this scope.' : "No open actions in this scope — you're clear."}</div>`}
+    </div>`;
+  }
 }
 
 // ── Reports (Sales Management → Reports) ─────────────────────────────────────
