@@ -608,20 +608,21 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <div class="brand-wordmark" role="img" aria-label="Focus — Business Intelligence Workflow" style="height:200px;width:178px;margin:0 auto 14px;"></div>
     <div style="font-size:13px;color:var(--text3);margin-bottom:28px;">Sign in to continue</div>
     <div style="text-align:left;margin-bottom:16px;">
-      <label class="form-label">Select User</label>
-      <select id="login-user" class="form-control" style="font-size:14px;" onchange="onLoginUserChange()">
-        <option value="">— loading users —</option>
-      </select>
+      <label class="form-label">Username</label>
+      <input type="text" id="login-username" class="form-control" style="font-size:14px;" autocomplete="username"
+             autocapitalize="none" spellcheck="false" placeholder="your first name"
+             oninput="onLoginUsernameInput()"
+             onkeydown="if(event.key==='Enter'){document.getElementById('login-setpw').style.display!=='none'?submitNewPassword():doLogin()}">
     </div>
     <div id="login-pw-wrap" style="text-align:left;margin-bottom:16px;">
       <label class="form-label">Password</label>
       <input type="password" id="login-password" class="form-control" style="font-size:14px;" autocomplete="current-password"
              onkeydown="if(event.key==='Enter')doLogin()">
     </div>
-    <!-- First sign-in after the password release: choose one before going further. -->
+    <!-- First sign-in (or after an admin reset): choose a policy-compliant password. -->
     <div id="login-setpw" style="display:none;text-align:left;margin-bottom:16px;">
       <div style="padding:9px 11px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;margin-bottom:12px;">
-        <strong>Choose a password.</strong> Focus now needs one to sign in. Any length for now — letters, numbers and symbols all welcome. Pick something you will remember; length rules come later.
+        <strong>Choose your password.</strong> At least <strong>8 characters</strong>, including a lowercase letter, an uppercase letter, a number and a special character.
       </div>
       <label class="form-label">New password</label>
       <input type="password" id="login-newpw" class="form-control" style="font-size:14px;margin-bottom:10px;" autocomplete="new-password"
@@ -637,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -673,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10489,23 +10490,8 @@ async function saveCollaborators(dealId) {
 }
 
 // ── Auth ─────────────────────────────────────────────────
-async function loadLoginUsers() {
-  // Served by the auth endpoint: the data tables themselves sit behind the session
-  // gate, and the sign-in list is the one thing the login screen legitimately needs.
-  try {
-    const r = await authCall({ action: 'users' });
-    const sel = document.getElementById('login-user');
-    sel.innerHTML = '<option value="">— select user —</option>';
-    (r && r.users || []).forEach(u => {
-      const opt = document.createElement('option');
-      opt.value = u.id;
-      opt.textContent = u.name;
-      sel.appendChild(opt);
-    });
-  } catch(e) {
-    document.getElementById('login-user').innerHTML = '<option value="">Error loading users</option>';
-  }
-}
+// (The pre-login user roster is gone since v7.8.86 — sign-in is by typed
+// username, and no endpoint enumerates accounts to the world.)
 
 // ── PWA install (login page) ──────────────────────────────────────────────────
 // Chrome/Edge fire beforeinstallprompt when the app is installable; stash it so
@@ -10672,10 +10658,21 @@ function openInstallGuide() {
 // password per user, PBKDF2-hashed and verified inside the Netlify function so
 // the hash never reaches the browser. No sessions — currentUser lives in memory,
 // so a refresh is already a logout. Tightened with the wider permissions work.
-// Minimum password length. Deliberately low for now (see sb.js MIN_PASSWORD_LENGTH,
-// which is the one that actually enforces it — this copy only drives the wording
-// and the client-side nudge). Keep the two in step.
-const PW_MIN = 1;
+// Password policy (Richard, 2026-08-26): 8+ characters with a lowercase letter,
+// an uppercase letter, a number and a special character. sb.js passwordPolicyError
+// is the one that actually enforces it — this copy only drives the wording and
+// the live client-side nudge. Keep the two in step.
+const PW_MIN = 8;
+function pwPolicyProblems(p) {
+  p = String(p || '');
+  const missing = [];
+  if (p.length < PW_MIN) missing.push(`${PW_MIN}+ characters`);
+  if (!/[a-z]/.test(p)) missing.push('a lowercase letter');
+  if (!/[A-Z]/.test(p)) missing.push('an uppercase letter');
+  if (!/[0-9]/.test(p)) missing.push('a number');
+  if (!/[^A-Za-z0-9]/.test(p)) missing.push('a special character');
+  return missing;
+}
 
 async function authCall(payload) {
   const res = await fetch(`${FN_URL}/auth`, {
@@ -10706,30 +10703,34 @@ function renderLoginPwStrength() {
   if (!el) return;
   const a = document.getElementById('login-newpw')?.value || '';
   const b = document.getElementById('login-newpw2')?.value || '';
-  if (!a) { el.textContent = PW_MIN > 1 ? `At least ${PW_MIN} characters.` : 'Any password will do for now.'; el.style.color = 'var(--text3)'; return; }
-  if (a.length < PW_MIN) { el.textContent = `${PW_MIN - a.length} more character${PW_MIN - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
+  if (!a) { el.textContent = `At least ${PW_MIN} characters, with a lowercase letter, an uppercase letter, a number and a special character.`; el.style.color = 'var(--text3)'; return; }
+  const missing = pwPolicyProblems(a);
+  if (missing.length) { el.textContent = 'Still needs: ' + missing.join(', ') + '.'; el.style.color = 'var(--red)'; return; }
   if (b && a !== b) { el.textContent = 'The two entries do not match.'; el.style.color = 'var(--red)'; return; }
-  el.textContent = b ? 'Ready.' : 'Long enough — confirm it below.';
+  el.textContent = b ? 'Ready.' : 'Policy met — confirm it below.';
   el.style.color = b ? '#166534' : 'var(--text3)';
 }
 
 async function submitNewPassword() {
-  const userId = document.getElementById('login-user').value;
+  const uname = (document.getElementById('login-username')?.value || '').trim();
   const a = document.getElementById('login-newpw').value || '';
   const b = document.getElementById('login-newpw2').value || '';
-  if (!userId) { _loginMsg('Please select a user'); return; }
-  if (a.length < PW_MIN) { _loginMsg(PW_MIN > 1 ? `Password must be at least ${PW_MIN} characters` : 'Enter a password'); return; }
+  if (!uname) { _loginMsg('Enter your username'); return; }
+  const missing = pwPolicyProblems(a);
+  if (missing.length) { _loginMsg('Password still needs: ' + missing.join(', ')); return; }
   if (a !== b) { _loginMsg('The two entries do not match'); return; }
   _loginMsg('');
   try {
-    const r = await authCall({ action: 'set', userId: +userId, newPassword: a });
+    const r = await authCall({ action: 'set', username: uname,
+      password: window._loginTempPw || undefined, newPassword: a });
     if (!r || !r.ok) { _loginMsg((r && r.error) || 'Could not set the password'); return; }
+    window._loginTempPw = null;
     if (r.token) {
       // Setting the password proved it — the server signed the session, walk in.
-      _saveSession(r.token, +userId);
+      _saveSession(r.token, +r.userId);
       showLoginSetPassword(false);
       _loginMsg('');
-      try { await enterApp(+userId); } catch (e) { _loginMsg('Signed in, but loading failed: ' + e.message); }
+      try { await enterApp(+r.userId); } catch (e) { _loginMsg('Signed in, but loading failed: ' + e.message); }
       return;
     }
     showLoginSetPassword(false);
@@ -10739,17 +10740,12 @@ async function submitNewPassword() {
   } catch (e) { _loginMsg('Could not reach the server — try again'); }
 }
 
-// When the selected user changes, ask whether they still need to choose one, so
-// the card shows the right thing before they type.
-async function onLoginUserChange() {
-  const userId = document.getElementById('login-user').value;
+// Editing the username resets the card back to the plain sign-in state — the
+// set-password panel only appears once the server says THIS account must set one.
+function onLoginUsernameInput() {
   _loginMsg('');
-  document.getElementById('login-password').value = '';
-  if (!userId) { showLoginSetPassword(false); return; }
-  try {
-    const r = await authCall({ action: 'check', userId: +userId });
-    showLoginSetPassword(!!(r && r.ok && r.mustSet));
-  } catch (e) { showLoginSetPassword(false); }
+  window._loginTempPw = null;
+  showLoginSetPassword(false);
 }
 
 // Everything that defines a user's identity, permissions and scope. Used by
@@ -10818,28 +10814,40 @@ async function buildUserContext(userId) {
 }
 
 async function doLogin() {
-  const sel = document.getElementById('login-user');
-  const userId = sel.value;
+  const uname = (document.getElementById('login-username')?.value || '').trim();
   const errEl = document.getElementById('login-error');
   errEl.style.display = 'none';
 
-  if (!userId) {
-    errEl.textContent = 'Please select a user';
-    errEl.style.display = 'block';
+  if (!uname) { _loginMsg('Enter your username — your first name'); return; }
+
+  const password = document.getElementById('login-password')?.value || '';
+  if (!password) {
+    // Empty password: quietly ask whether this account still needs to choose one
+    // (first sign-in / after an admin reset) so the card shows the right panel.
+    try {
+      const r = await authCall({ action: 'check', username: uname });
+      if (r && r.ok && r.mustSet) { window._loginTempPw = ''; showLoginSetPassword(true); _loginMsg('First sign-in — choose your password below'); return; }
+    } catch (e) { /* fall through to the plain nudge */ }
+    _loginMsg('Enter your password');
     return;
   }
-
-  // Password first: nothing about the user is loaded until it checks out.
-  const password = document.getElementById('login-password')?.value || '';
-  if (!password) { _loginMsg('Enter your password'); return; }
+  let userId;
   try {
-    const auth = await authCall({ action: 'login', userId: +userId, password });
+    const auth = await authCall({ action: 'login', username: uname, password });
     if (!auth || !auth.ok) {
-      if (auth && auth.mustSet) { showLoginSetPassword(true); _loginMsg('Choose a password to continue'); return; }
+      if (auth && auth.mustSet) {
+        // The temp/current password just verified — keep it for the 'set' call,
+        // which requires it whenever a stored password exists.
+        window._loginTempPw = password;
+        showLoginSetPassword(true);
+        _loginMsg('Password accepted — now choose your own below');
+        return;
+      }
       _loginMsg((auth && auth.error) || 'Sign-in failed');
       return;
     }
-    _saveSession(auth.token, +userId);
+    userId = +auth.userId;
+    _saveSession(auth.token, userId);
   } catch (e) { _loginMsg('Could not reach the server — try again'); return; }
   _loginMsg('');
 
@@ -11088,10 +11096,11 @@ function renderCpwHint() {
   if (!el) return;
   const a = document.getElementById('cpw-new')?.value || '';
   const b = document.getElementById('cpw-new2')?.value || '';
-  if (!a) { el.textContent = PW_MIN > 1 ? `At least ${PW_MIN} characters.` : 'Any password will do for now.'; el.style.color = 'var(--text3)'; return; }
-  if (a.length < PW_MIN) { el.textContent = `${PW_MIN - a.length} more character${PW_MIN - a.length === 1 ? '' : 's'} needed.`; el.style.color = 'var(--red)'; return; }
+  if (!a) { el.textContent = `At least ${PW_MIN} characters, with a lowercase letter, an uppercase letter, a number and a special character.`; el.style.color = 'var(--text3)'; return; }
+  const missing = pwPolicyProblems(a);
+  if (missing.length) { el.textContent = 'Still needs: ' + missing.join(', ') + '.'; el.style.color = 'var(--red)'; return; }
   if (b && a !== b) { el.textContent = 'The two entries do not match.'; el.style.color = 'var(--red)'; return; }
-  el.textContent = b ? 'Ready.' : 'Confirm it below.';
+  el.textContent = b ? 'Ready.' : 'Policy met — confirm it below.';
   el.style.color = b ? '#166534' : 'var(--text3)';
 }
 
@@ -11103,7 +11112,8 @@ async function submitChangePassword() {
   const b = document.getElementById('cpw-new2')?.value || '';
   if (err) err.style.display = 'none';
   if (!current) { fail('Enter your current password'); return; }
-  if (a.length < PW_MIN) { fail(PW_MIN > 1 ? `New password must be at least ${PW_MIN} characters` : 'Enter a new password'); return; }
+  const missing = pwPolicyProblems(a);
+  if (missing.length) { fail('New password still needs: ' + missing.join(', ')); return; }
   if (a !== b) { fail('The two new entries do not match'); return; }
   if (a === current) { fail('The new password is the same as the current one'); return; }
   startBusy('Changing password\u2026');
@@ -11265,7 +11275,7 @@ function doLogout() {
   realUser = null;
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('login-user').value = '';
+  const un = document.getElementById('login-username'); if (un) un.value = '';
   const pw = document.getElementById('login-password'); if (pw) pw.value = '';
   showLoginSetPassword(false);
   _loginMsg('');
@@ -25928,8 +25938,6 @@ async function init() {
   // Environment label comes from the connected DB (settings.environment) — fetch it
   // up front so the login screen already shows Production vs Development.
   loadEnvironment();
-  // Load users for login dropdown
-  await loadLoginUsers();
 
   // A stored session resumes straight into the app — the token is judged by the
   // SERVER on the first data call, so an expired or forged one simply lands back
