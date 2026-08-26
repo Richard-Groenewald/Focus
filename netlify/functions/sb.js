@@ -32,12 +32,21 @@ function passwordMatches(password, salt, expectedHex) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-// Minimum length, and nothing else: any letters, digits or punctuation are fine.
-// Set to 1 on 19 Aug 2026 at Richard's instruction ("for now") — which means the
-// length check is effectively decorative until it goes back up. Raise it HERE and
-// in PW_MIN in index.html; those two are the only places the number lives.
-const MIN_PASSWORD_LENGTH = 1;
-const passwordAcceptable = (p) => typeof p === 'string' && p.length >= MIN_PASSWORD_LENGTH && p.length <= 200;
+// Password policy (Richard, 2026-08-26): at least 8 characters with a lowercase
+// letter, an uppercase letter, a number and a special character. Enforced HERE —
+// the client-side copy in index.html (PW_MIN + pwPolicyProblems) only drives the
+// wording and the live nudge. Keep the two in step.
+// Rate limiting (Richard, 2026-08-27): 5 wrong passwords lock the account for
+// 15 minutes. Counters live on system_users (failed_login_count, locked_until —
+// sql/usernames_password_policy.sql adds them).
+const MAX_LOGIN_FAILURES = 5, LOCK_MINUTES = 15;
+const PASSWORD_POLICY_MSG = 'Password needs at least 8 characters, with a lowercase letter, an uppercase letter, a number and a special character';
+function passwordPolicyError(p) {
+  if (typeof p !== 'string' || p.length > 200) return PASSWORD_POLICY_MSG;
+  if (p.length < 8) return PASSWORD_POLICY_MSG;
+  if (!/[a-z]/.test(p) || !/[A-Z]/.test(p) || !/[0-9]/.test(p) || !/[^A-Za-z0-9]/.test(p)) return PASSWORD_POLICY_MSG;
+  return null;
+}
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 // The proxy runs on the service key, and Focus has no RLS — so before this,
@@ -124,35 +133,22 @@ const authReply = (statusCode, obj) => ({
 });
 
 // POST /.netlify/functions/sb/auth
-//   { action: 'users' }                                -> [{id, name}] for the sign-in list
-//   { action: 'env' }                                  -> the environment label
-//   { action: 'check', userId }                        -> does this user still need to choose one?
-//   { action: 'login', userId, password }              -> verify; returns a session token
-//   { action: 'set',   userId, password, newPassword } -> first-time set (password ignored) or
-//                                                         change; returns a fresh token
-// Never returns a hash, a salt, or any hint about which half of a wrong pair was
-// wrong. Failures are deliberately uniform.
+//   { action: 'env' }                                    -> the environment label
+//   { action: 'check', username|userId }                 -> does this user still need to choose one?
+//   { action: 'login', username|userId, password }       -> verify; returns a session token
+//   { action: 'set',   username|userId, password, newPassword }
+//                                                        -> first-time set (password ignored) or
+//                                                           change; returns a fresh token
+// Sign-in is by TYPED username (= first name, case-insensitive) since v7.8.86 —
+// the public 'users' roster action is gone; nothing pre-login enumerates accounts.
+// The userId form remains for in-app flows (change password) that already hold a
+// session. Never returns a hash, a salt, or any hint about which half of a wrong
+// pair was wrong. Failures are deliberately uniform.
 async function handleAuth(event, key) {
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch (e) { return authReply(400, { ok: false, error: 'Bad request' }); }
 
-  // The two pre-login lookups the login screen needs, served here so the data
-  // tables themselves can stay behind the session gate.
-  if (body.action === 'users') {
-    try {
-      const users = await sbRest(key, 'GET', '/system_users?active=eq.true&select=id,person_id');
-      const ids = [...new Set(users.map(u => u.person_id).filter(x => x != null))];
-      const people = ids.length
-        ? await sbRest(key, 'GET', '/people?id=in.(' + ids.join(',') + ')&select=id,first_name,last_name')
-        : [];
-      const list = users.map(u => {
-        const p = people.find(x => +x.id === +u.person_id);
-        return { id: u.id, name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id };
-      }).sort((a, b) => a.name.localeCompare(b.name));
-      return authReply(200, { ok: true, users: list });
-    } catch (e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
-  }
-
+  // The one pre-login lookup the login screen still needs.
   if (body.action === 'env') {
     try {
       const rows = await sbRest(key, 'GET', '/settings?key=eq.environment&select=value');
@@ -160,33 +156,61 @@ async function handleAuth(event, key) {
     } catch (e) { return authReply(200, { ok: true, environment: '' }); }
   }
 
-  const userId = parseInt(body.userId, 10);
-  if (!userId) return authReply(400, { ok: false, error: 'Bad request' });
-
+  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until';
   let rows;
   try {
-    rows = await sbRest(key, 'GET',
-      `/system_users?id=eq.${userId}&select=id,person_id,active,password_hash,password_salt,must_set_password`);
+    const uname = String(body.username || '').trim();
+    if (uname) {
+      if (uname.length > 80) return authReply(400, { ok: false, error: 'Bad request' });
+      // ilike without wildcards = case-insensitive equality.
+      rows = await sbRest(key, 'GET', `/system_users?username=ilike.${encodeURIComponent(uname)}&${SELECT}`);
+    } else {
+      const userId = parseInt(body.userId, 10);
+      if (!userId) return authReply(400, { ok: false, error: 'Bad request' });
+      rows = await sbRest(key, 'GET', `/system_users?id=eq.${userId}&${SELECT}`);
+    }
   } catch (e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
 
   const user = rows && rows[0];
   if (!user || user.active === false) return authReply(200, { ok: false, error: 'Sign-in failed' });
-  const mustSet = !!user.must_set_password || !user.password_hash;
+  const userId = +user.id;
+  const hasPw = !!user.password_hash;
+  const mustSet = !!user.must_set_password || !hasPw;
 
-  if (body.action === 'check') return authReply(200, { ok: true, mustSet });
+  // Account lock: MAX_LOGIN_FAILURES wrong passwords lock the account for
+  // LOCK_MINUTES. Counted on login AND on a wrong current-password in 'set'
+  // (both are guessing surfaces); any successful verify clears the slate.
+  const locked = user.locked_until && Date.parse(user.locked_until) > Date.now();
+  const LOCK_MSG = 'Too many failed attempts — try again in a few minutes';
+  const registerFailure = async () => {
+    const fails = (+user.failed_login_count || 0) + 1;
+    const patch = fails >= MAX_LOGIN_FAILURES
+      ? { failed_login_count: 0, locked_until: new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() }
+      : { failed_login_count: fails };
+    try { await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, patch); } catch (e) {}
+  };
+  const clearFailures = async () => {
+    if (!(+user.failed_login_count || 0) && !user.locked_until) return;
+    try { await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, { failed_login_count: 0, locked_until: null }); } catch (e) {}
+  };
+
+  // 'check' drives the login card's panel choice. Only a TRULY passwordless
+  // account may see the set panel unverified; an account holding a temp (or
+  // current) password reaches the set panel through 'login', which verifies it.
+  if (body.action === 'check') return authReply(200, { ok: true, mustSet: mustSet && !hasPw });
 
   if (body.action === 'set') {
-    // Changing an existing password requires the current one. A first-time set
-    // (must_set_password, straight after the migration) does not.
-    if (!mustSet && !passwordMatches(String(body.password || ''), user.password_salt, user.password_hash)) {
+    if (locked) return authReply(200, { ok: false, error: LOCK_MSG });
+    // The current password is required whenever one EXISTS — including a
+    // must_set account holding an admin-issued temp password. Only a truly
+    // passwordless first-time set may skip it.
+    if (hasPw && !passwordMatches(String(body.password || ''), user.password_salt, user.password_hash)) {
+      await registerFailure();
       return authReply(200, { ok: false, error: 'Current password is incorrect' });
     }
     const next = String(body.newPassword || '');
-    if (!passwordAcceptable(next)) {
-      return authReply(200, { ok: false, error: MIN_PASSWORD_LENGTH > 1
-        ? `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
-        : 'Enter a password' });
-    }
+    const policyError = passwordPolicyError(next);
+    if (policyError) return authReply(200, { ok: false, error: policyError });
     const salt = crypto.randomBytes(16).toString('hex');
     try {
       await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, {
@@ -194,6 +218,8 @@ async function handleAuth(event, key) {
         password_salt: salt,
         password_set_at: new Date().toISOString(),
         must_set_password: false,
+        failed_login_count: 0,
+        locked_until: null,
       });
     } catch (e) { return authReply(500, { ok: false, error: 'Could not save the password' }); }
     // Setting a password IS proving you hold it — sign the session straight away.
@@ -202,11 +228,18 @@ async function handleAuth(event, key) {
   }
 
   if (body.action === 'login') {
-    if (mustSet) return authReply(200, { ok: false, mustSet: true, error: 'Choose a password to continue' });
+    if (locked) return authReply(200, { ok: false, error: LOCK_MSG });
+    if (mustSet && !hasPw) return authReply(200, { ok: false, mustSet: true, error: 'Choose a password to continue' });
     const ok = passwordMatches(String(body.password || ''), user.password_salt, user.password_hash);
-    return authReply(200, ok
-      ? { ok: true, token: issueToken(key, userId, user.person_id), userId, personId: user.person_id }
-      : { ok: false, error: 'Sign-in failed' });
+    if (!ok) { await registerFailure(); return authReply(200, { ok: false, error: 'Sign-in failed' }); }
+    if (mustSet) {
+      // Temp (or pre-reset) password verified — now they choose their own.
+      // No session yet: the token comes from completing 'set'.
+      await clearFailures();
+      return authReply(200, { ok: false, mustSet: true, error: 'Choose your own password to continue' });
+    }
+    await clearFailures();
+    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id), userId, personId: user.person_id });
   }
 
   return authReply(400, { ok: false, error: 'Bad request' });
