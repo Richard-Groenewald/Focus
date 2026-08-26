@@ -10721,8 +10721,10 @@ async function submitNewPassword() {
   if (a !== b) { _loginMsg('The two entries do not match'); return; }
   _loginMsg('');
   try {
-    const r = await authCall({ action: 'set', username: uname, newPassword: a });
+    const r = await authCall({ action: 'set', username: uname,
+      password: window._loginTempPw || undefined, newPassword: a });
     if (!r || !r.ok) { _loginMsg((r && r.error) || 'Could not set the password'); return; }
+    window._loginTempPw = null;
     if (r.token) {
       // Setting the password proved it — the server signed the session, walk in.
       _saveSession(r.token, +r.userId);
@@ -10742,6 +10744,7 @@ async function submitNewPassword() {
 // set-password panel only appears once the server says THIS account must set one.
 function onLoginUsernameInput() {
   _loginMsg('');
+  window._loginTempPw = null;
   showLoginSetPassword(false);
 }
 
@@ -10823,7 +10826,7 @@ async function doLogin() {
     // (first sign-in / after an admin reset) so the card shows the right panel.
     try {
       const r = await authCall({ action: 'check', username: uname });
-      if (r && r.ok && r.mustSet) { showLoginSetPassword(true); _loginMsg('First sign-in — choose your password below'); return; }
+      if (r && r.ok && r.mustSet) { window._loginTempPw = ''; showLoginSetPassword(true); _loginMsg('First sign-in — choose your password below'); return; }
     } catch (e) { /* fall through to the plain nudge */ }
     _loginMsg('Enter your password');
     return;
@@ -10832,7 +10835,14 @@ async function doLogin() {
   try {
     const auth = await authCall({ action: 'login', username: uname, password });
     if (!auth || !auth.ok) {
-      if (auth && auth.mustSet) { showLoginSetPassword(true); _loginMsg('First sign-in — choose your password below'); return; }
+      if (auth && auth.mustSet) {
+        // The temp/current password just verified — keep it for the 'set' call,
+        // which requires it whenever a stored password exists.
+        window._loginTempPw = password;
+        showLoginSetPassword(true);
+        _loginMsg('Password accepted — now choose your own below');
+        return;
+      }
       _loginMsg((auth && auth.error) || 'Sign-in failed');
       return;
     }

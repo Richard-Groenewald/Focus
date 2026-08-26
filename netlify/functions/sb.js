@@ -36,6 +36,10 @@ function passwordMatches(password, salt, expectedHex) {
 // letter, an uppercase letter, a number and a special character. Enforced HERE —
 // the client-side copy in index.html (PW_MIN + pwPolicyProblems) only drives the
 // wording and the live nudge. Keep the two in step.
+// Rate limiting (Richard, 2026-08-27): 5 wrong passwords lock the account for
+// 15 minutes. Counters live on system_users (failed_login_count, locked_until —
+// sql/usernames_password_policy.sql adds them).
+const MAX_LOGIN_FAILURES = 5, LOCK_MINUTES = 15;
 const PASSWORD_POLICY_MSG = 'Password needs at least 8 characters, with a lowercase letter, an uppercase letter, a number and a special character';
 function passwordPolicyError(p) {
   if (typeof p !== 'string' || p.length > 200) return PASSWORD_POLICY_MSG;
@@ -152,7 +156,7 @@ async function handleAuth(event, key) {
     } catch (e) { return authReply(200, { ok: true, environment: '' }); }
   }
 
-  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password';
+  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until';
   let rows;
   try {
     const uname = String(body.username || '').trim();
@@ -170,14 +174,38 @@ async function handleAuth(event, key) {
   const user = rows && rows[0];
   if (!user || user.active === false) return authReply(200, { ok: false, error: 'Sign-in failed' });
   const userId = +user.id;
-  const mustSet = !!user.must_set_password || !user.password_hash;
+  const hasPw = !!user.password_hash;
+  const mustSet = !!user.must_set_password || !hasPw;
 
-  if (body.action === 'check') return authReply(200, { ok: true, mustSet });
+  // Account lock: MAX_LOGIN_FAILURES wrong passwords lock the account for
+  // LOCK_MINUTES. Counted on login AND on a wrong current-password in 'set'
+  // (both are guessing surfaces); any successful verify clears the slate.
+  const locked = user.locked_until && Date.parse(user.locked_until) > Date.now();
+  const LOCK_MSG = 'Too many failed attempts — try again in a few minutes';
+  const registerFailure = async () => {
+    const fails = (+user.failed_login_count || 0) + 1;
+    const patch = fails >= MAX_LOGIN_FAILURES
+      ? { failed_login_count: 0, locked_until: new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() }
+      : { failed_login_count: fails };
+    try { await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, patch); } catch (e) {}
+  };
+  const clearFailures = async () => {
+    if (!(+user.failed_login_count || 0) && !user.locked_until) return;
+    try { await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, { failed_login_count: 0, locked_until: null }); } catch (e) {}
+  };
+
+  // 'check' drives the login card's panel choice. Only a TRULY passwordless
+  // account may see the set panel unverified; an account holding a temp (or
+  // current) password reaches the set panel through 'login', which verifies it.
+  if (body.action === 'check') return authReply(200, { ok: true, mustSet: mustSet && !hasPw });
 
   if (body.action === 'set') {
-    // Changing an existing password requires the current one. A first-time set
-    // (must_set_password, straight after the migration) does not.
-    if (!mustSet && !passwordMatches(String(body.password || ''), user.password_salt, user.password_hash)) {
+    if (locked) return authReply(200, { ok: false, error: LOCK_MSG });
+    // The current password is required whenever one EXISTS — including a
+    // must_set account holding an admin-issued temp password. Only a truly
+    // passwordless first-time set may skip it.
+    if (hasPw && !passwordMatches(String(body.password || ''), user.password_salt, user.password_hash)) {
+      await registerFailure();
       return authReply(200, { ok: false, error: 'Current password is incorrect' });
     }
     const next = String(body.newPassword || '');
@@ -190,6 +218,8 @@ async function handleAuth(event, key) {
         password_salt: salt,
         password_set_at: new Date().toISOString(),
         must_set_password: false,
+        failed_login_count: 0,
+        locked_until: null,
       });
     } catch (e) { return authReply(500, { ok: false, error: 'Could not save the password' }); }
     // Setting a password IS proving you hold it — sign the session straight away.
@@ -198,11 +228,18 @@ async function handleAuth(event, key) {
   }
 
   if (body.action === 'login') {
-    if (mustSet) return authReply(200, { ok: false, mustSet: true, error: 'Choose a password to continue' });
+    if (locked) return authReply(200, { ok: false, error: LOCK_MSG });
+    if (mustSet && !hasPw) return authReply(200, { ok: false, mustSet: true, error: 'Choose a password to continue' });
     const ok = passwordMatches(String(body.password || ''), user.password_salt, user.password_hash);
-    return authReply(200, ok
-      ? { ok: true, token: issueToken(key, userId, user.person_id), userId, personId: user.person_id }
-      : { ok: false, error: 'Sign-in failed' });
+    if (!ok) { await registerFailure(); return authReply(200, { ok: false, error: 'Sign-in failed' }); }
+    if (mustSet) {
+      // Temp (or pre-reset) password verified — now they choose their own.
+      // No session yet: the token comes from completing 'set'.
+      await clearFailures();
+      return authReply(200, { ok: false, mustSet: true, error: 'Choose your own password to continue' });
+    }
+    await clearFailures();
+    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id), userId, personId: user.person_id });
   }
 
   return authReply(400, { ok: false, error: 'Bad request' });
