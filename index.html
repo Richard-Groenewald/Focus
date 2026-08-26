@@ -637,7 +637,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.84 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -673,7 +673,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.84 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -23183,6 +23183,7 @@ function _liTimeRowHtml(i, dis, forceInternal) {
 
 function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
   const fullyLocked = !!locked;   // Promoted/Dead/non-owner lead: nothing editable here.
+  window._liNfaAutoSet = false;   // fresh modal: no No-Further-Action auto-state yet
   const title = mode === 'edit' ? 'Edit Engagement' : mode === 'view' ? 'View Engagement' : 'Log Engagement';
   const isView = mode === 'view';
   const i = interaction || {};
@@ -23280,7 +23281,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
           <div class="form-row">
             <div class="form-group">
               <label class="form-label">Next Action</label>
-              <select id="li-next-action" class="form-control" ${dis}>
+              <select id="li-next-action" class="form-control" ${dis} onchange="onLiNextActionChange()">
                 <option value="">— select —</option>
               </select>
             </div>
@@ -23935,6 +23936,41 @@ async function bumpLeadLastTouch(leadId, extraPatch) {
     'id=eq.' + leadId);
 }
 
+// "No Further Action" (v7.8.85, replaces the retired 'Note'): a TERMINAL next
+// action — nothing is owed after this engagement. Selecting it forces the due
+// date to today and ticks the action complete (both locked while selected), so
+// it can never become an open obligation — the way 'Note' polluted Outstanding
+// Actions with 30 commitments to nothing. Matched by NAME, not id, so the same
+// code works against each environment's lookup rows.
+function liSelectedNextActionIsNFA() {
+  const sel = document.getElementById('li-next-action');
+  if (!sel || !sel.value) return false;
+  return (sel.options[sel.selectedIndex]?.textContent || '').trim().toLowerCase() === 'no further action';
+}
+function onLiNextActionChange() {
+  const dateEl = document.getElementById('li-next-date');
+  const doneEl = document.getElementById('li-next-done');
+  const noteWrap = document.getElementById('li-completion-note-wrap');
+  if (!dateEl || !doneEl) return;
+  if (liSelectedNextActionIsNFA()) {
+    dateEl.value = new Date().toISOString().slice(0, 10);
+    doneEl.checked = true;
+    dateEl.disabled = true;
+    doneEl.disabled = true;
+    if (noteWrap) noteWrap.style.display = 'block';
+    window._liNfaAutoSet = true;
+  } else if (window._liNfaAutoSet) {
+    // Switching away from NFA: undo the auto-state so a real action doesn't
+    // silently inherit done-today.
+    dateEl.value = '';
+    doneEl.checked = false;
+    dateEl.disabled = false;
+    doneEl.disabled = false;
+    if (noteWrap) noteWrap.style.display = 'none';
+    window._liNfaAutoSet = false;
+  }
+}
+
 async function saveLeadInteraction(editId) {
   const date = document.getElementById('li-date').value;
   const typeSel = document.getElementById('li-type');
@@ -23948,6 +23984,7 @@ async function saveLeadInteraction(editId) {
   const nextActionText = naVal
     ? (naSel.options[naSel.selectedIndex]?.textContent || '').trim()
     : '';
+  const isNfaEngagement = nextActionText.toLowerCase() === 'no further action';
   const actionDetails = document.getElementById('li-action-details')?.value || '';
   const nextDate = document.getElementById('li-next-date')?.value || '';
   const nextDone = document.getElementById('li-next-done')?.checked || false;
@@ -24116,6 +24153,22 @@ async function saveLeadInteraction(editId) {
       renderLeadInteractions();
       // Triggers may have updated next_action / status — refetch + repopulate the form.
       await reloadLeadAfterServerChange();
+      // No Further Action on a lead still being worked is a fork in the road:
+      // either it's deliberately staying in play (it will resurface through
+      // aging if untouched — nothing sleeps forgotten), or it's going nowhere
+      // and should be declined honestly. Ask — never auto-kill: on Nurture/Hold
+      // leads and satellites "nothing owed here" is a legitimate steady state.
+      if (isNfaEngagement && ['New', 'Working'].includes(leadData.status)) {
+        const decline = await confirmDialog({
+          title: 'Nothing further on this lead?',
+          confirmLabel: 'Decline lead…',
+          cancelLabel: 'Keep working',
+          message: 'You logged No Further Action. The lead stays in ' + leadStageLabel(leadData.status)
+            + ' with no open obligation, and will surface again through aging if it goes untouched.\n\n'
+            + 'If it is actually going nowhere, decline it instead — category and reason; sales management reviews the death.',
+        });
+        if (decline) openDeclineModal();
+      }
     }
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
