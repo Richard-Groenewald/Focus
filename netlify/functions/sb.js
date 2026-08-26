@@ -32,12 +32,17 @@ function passwordMatches(password, salt, expectedHex) {
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected);
 }
 
-// Minimum length, and nothing else: any letters, digits or punctuation are fine.
-// Set to 1 on 19 Aug 2026 at Richard's instruction ("for now") — which means the
-// length check is effectively decorative until it goes back up. Raise it HERE and
-// in PW_MIN in index.html; those two are the only places the number lives.
-const MIN_PASSWORD_LENGTH = 1;
-const passwordAcceptable = (p) => typeof p === 'string' && p.length >= MIN_PASSWORD_LENGTH && p.length <= 200;
+// Password policy (Richard, 2026-08-26): at least 8 characters with a lowercase
+// letter, an uppercase letter, a number and a special character. Enforced HERE —
+// the client-side copy in index.html (PW_MIN + pwPolicyProblems) only drives the
+// wording and the live nudge. Keep the two in step.
+const PASSWORD_POLICY_MSG = 'Password needs at least 8 characters, with a lowercase letter, an uppercase letter, a number and a special character';
+function passwordPolicyError(p) {
+  if (typeof p !== 'string' || p.length > 200) return PASSWORD_POLICY_MSG;
+  if (p.length < 8) return PASSWORD_POLICY_MSG;
+  if (!/[a-z]/.test(p) || !/[A-Z]/.test(p) || !/[0-9]/.test(p) || !/[^A-Za-z0-9]/.test(p)) return PASSWORD_POLICY_MSG;
+  return null;
+}
 
 // ── Sessions ─────────────────────────────────────────────────────────────────
 // The proxy runs on the service key, and Focus has no RLS — so before this,
@@ -124,35 +129,22 @@ const authReply = (statusCode, obj) => ({
 });
 
 // POST /.netlify/functions/sb/auth
-//   { action: 'users' }                                -> [{id, name}] for the sign-in list
-//   { action: 'env' }                                  -> the environment label
-//   { action: 'check', userId }                        -> does this user still need to choose one?
-//   { action: 'login', userId, password }              -> verify; returns a session token
-//   { action: 'set',   userId, password, newPassword } -> first-time set (password ignored) or
-//                                                         change; returns a fresh token
-// Never returns a hash, a salt, or any hint about which half of a wrong pair was
-// wrong. Failures are deliberately uniform.
+//   { action: 'env' }                                    -> the environment label
+//   { action: 'check', username|userId }                 -> does this user still need to choose one?
+//   { action: 'login', username|userId, password }       -> verify; returns a session token
+//   { action: 'set',   username|userId, password, newPassword }
+//                                                        -> first-time set (password ignored) or
+//                                                           change; returns a fresh token
+// Sign-in is by TYPED username (= first name, case-insensitive) since v7.8.86 —
+// the public 'users' roster action is gone; nothing pre-login enumerates accounts.
+// The userId form remains for in-app flows (change password) that already hold a
+// session. Never returns a hash, a salt, or any hint about which half of a wrong
+// pair was wrong. Failures are deliberately uniform.
 async function handleAuth(event, key) {
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch (e) { return authReply(400, { ok: false, error: 'Bad request' }); }
 
-  // The two pre-login lookups the login screen needs, served here so the data
-  // tables themselves can stay behind the session gate.
-  if (body.action === 'users') {
-    try {
-      const users = await sbRest(key, 'GET', '/system_users?active=eq.true&select=id,person_id');
-      const ids = [...new Set(users.map(u => u.person_id).filter(x => x != null))];
-      const people = ids.length
-        ? await sbRest(key, 'GET', '/people?id=in.(' + ids.join(',') + ')&select=id,first_name,last_name')
-        : [];
-      const list = users.map(u => {
-        const p = people.find(x => +x.id === +u.person_id);
-        return { id: u.id, name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'User #' + u.person_id };
-      }).sort((a, b) => a.name.localeCompare(b.name));
-      return authReply(200, { ok: true, users: list });
-    } catch (e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
-  }
-
+  // The one pre-login lookup the login screen still needs.
   if (body.action === 'env') {
     try {
       const rows = await sbRest(key, 'GET', '/settings?key=eq.environment&select=value');
@@ -160,17 +152,24 @@ async function handleAuth(event, key) {
     } catch (e) { return authReply(200, { ok: true, environment: '' }); }
   }
 
-  const userId = parseInt(body.userId, 10);
-  if (!userId) return authReply(400, { ok: false, error: 'Bad request' });
-
+  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password';
   let rows;
   try {
-    rows = await sbRest(key, 'GET',
-      `/system_users?id=eq.${userId}&select=id,person_id,active,password_hash,password_salt,must_set_password`);
+    const uname = String(body.username || '').trim();
+    if (uname) {
+      if (uname.length > 80) return authReply(400, { ok: false, error: 'Bad request' });
+      // ilike without wildcards = case-insensitive equality.
+      rows = await sbRest(key, 'GET', `/system_users?username=ilike.${encodeURIComponent(uname)}&${SELECT}`);
+    } else {
+      const userId = parseInt(body.userId, 10);
+      if (!userId) return authReply(400, { ok: false, error: 'Bad request' });
+      rows = await sbRest(key, 'GET', `/system_users?id=eq.${userId}&${SELECT}`);
+    }
   } catch (e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
 
   const user = rows && rows[0];
   if (!user || user.active === false) return authReply(200, { ok: false, error: 'Sign-in failed' });
+  const userId = +user.id;
   const mustSet = !!user.must_set_password || !user.password_hash;
 
   if (body.action === 'check') return authReply(200, { ok: true, mustSet });
@@ -182,11 +181,8 @@ async function handleAuth(event, key) {
       return authReply(200, { ok: false, error: 'Current password is incorrect' });
     }
     const next = String(body.newPassword || '');
-    if (!passwordAcceptable(next)) {
-      return authReply(200, { ok: false, error: MIN_PASSWORD_LENGTH > 1
-        ? `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
-        : 'Enter a password' });
-    }
+    const policyError = passwordPolicyError(next);
+    if (policyError) return authReply(200, { ok: false, error: policyError });
     const salt = crypto.randomBytes(16).toString('hex');
     try {
       await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, {
