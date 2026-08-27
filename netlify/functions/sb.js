@@ -305,9 +305,11 @@ exports.handler = async (event) => {
       req.on('error', e => {
         // Stale keep-alive socket: Supabase's LB closes idle connections, and a
         // warm invocation that reuses one gets ECONNRESET / "socket hang up"
-        // before the request was processed. Retry ONCE on a fresh socket —
-        // only for reused-socket connection errors, so real outages still fail.
-        const stale = req.reusedSocket && (e.code === 'ECONNRESET' || /socket hang up/i.test(e.message));
+        // before the request was processed. Retry ONCE on a fresh socket — but
+        // ONLY for GET (v7.8.87): a write whose socket died may still have
+        // landed, and retrying it server-side is a duplicate-row machine.
+        const stale = event.httpMethod === 'GET'
+          && req.reusedSocket && (e.code === 'ECONNRESET' || /socket hang up/i.test(e.message));
         if (attempt === 0 && stale) return doReq(1);
         resolve({ statusCode: 500, body: JSON.stringify({ error: e.message }) });
       });
