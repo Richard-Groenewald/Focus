@@ -638,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.87 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.87 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -23963,6 +23963,9 @@ function onLiNextActionChange() {
   const noteWrap = document.getElementById('li-completion-note-wrap');
   if (!dateEl || !doneEl) return;
   if (liSelectedNextActionIsNFA()) {
+    // Remember what the user had — switching away must RESTORE it, not blank it
+    // (v7.8.87: clearing here ate a hand-typed due date on a cadence lead).
+    if (!window._liNfaAutoSet) window._liNfaPrev = { date: dateEl.value, done: doneEl.checked };
     dateEl.value = new Date().toISOString().slice(0, 10);
     doneEl.checked = true;
     dateEl.disabled = true;
@@ -23970,14 +23973,15 @@ function onLiNextActionChange() {
     if (noteWrap) noteWrap.style.display = 'block';
     window._liNfaAutoSet = true;
   } else if (window._liNfaAutoSet) {
-    // Switching away from NFA: undo the auto-state so a real action doesn't
-    // silently inherit done-today.
-    dateEl.value = '';
-    doneEl.checked = false;
+    // Switching away from NFA: put back exactly what was there before.
+    const prev = window._liNfaPrev || { date: '', done: false };
+    dateEl.value = prev.date;
+    doneEl.checked = prev.done;
     dateEl.disabled = false;
     doneEl.disabled = false;
-    if (noteWrap) noteWrap.style.display = 'none';
+    if (noteWrap) noteWrap.style.display = prev.done ? 'block' : 'none';
     window._liNfaAutoSet = false;
+    window._liNfaPrev = null;
   }
 }
 
@@ -24019,6 +24023,48 @@ async function saveLeadInteraction(editId) {
     ? (prev?.next_action_completed_at || new Date().toISOString())
     : null;
   const completionNote = nextDone ? (completionNoteInput || null) : null;
+
+  // Re-entrancy guard (v7.8.87): one save at a time — a second click while the
+  // first is on the wire must not double-log.
+  if (window._liSaveInFlight) return;
+  window._liSaveInFlight = true;
+
+  // Phantom-failure duplicate shield (v7.8.87, Les's Milco pair + four older
+  // pairs found in prod): when a save's response is lost the row still LANDS —
+  // the natural retry then doubles it. Before POSTing a NEW engagement, look for
+  // an identical row saved minutes ago and ask instead of silently duplicating.
+  if (!editId) {
+    try {
+      const par0 = window._engParent || {};
+      const parentFilter = (par0.kind === 'deal' && par0.id) ? `deal_id=eq.${+par0.id}`
+        : (par0.kind === 'project' && par0.id) ? `work_project_id=eq.${+par0.id}`
+        : `lead_id=eq.${+((par0.kind === 'lead' && par0.id) ? par0.id : leadData.id)}`;
+      const recent = await apiGet('engagements',
+        `${parentFilter}&engagement_date=eq.${date}&select=id,notes,engagement_type,created_at&order=created_at.desc&limit=5`);
+      const twin = (recent || []).find(r =>
+        String(r.notes || '') === String(notes || '')
+        && String(r.engagement_type || '') === String(type || '')
+        && (Date.now() - new Date(r.created_at).getTime()) < 5 * 60000);
+      if (twin) {
+        const secondsAgo = Math.max(1, Math.round((Date.now() - new Date(twin.created_at).getTime()) / 1000));
+        const again = await confirmDialog({
+          title: 'Already saved?',
+          confirmLabel: 'Save another copy',
+          cancelLabel: 'Don’t save again',
+          message: 'An identical engagement was saved ' + secondsAgo + ' seconds ago — most likely a save that looked like it failed but actually landed.\n\nSave another copy anyway?',
+        });
+        if (!again) {
+          window._liSaveInFlight = false;
+          closeModal();
+          if (window._liQuickLogContext) { window._liQuickLogContext = null; await renderResearchCampaignCockpit(); }
+          else if (window._engStandalone) { window._engStandalone = false; if (currentPage === 'dashboard') await renderDashboard(); }
+          else if (par0.kind === 'deal' && typeof oppData !== 'undefined' && oppData && +oppData.id === +par0.id) { await loadEngagements(par0.id); }
+          else if (leadData && leadData.id) { await loadLeadInteractions(leadData.id); renderLeadInteractions(); }
+          return;
+        }
+      }
+    } catch (e) { /* the shield is best-effort — never block a save because the check failed */ }
+  }
 
   startBusy(editId ? 'Updating engagement…' : 'Logging engagement…');
   try {
@@ -24183,6 +24229,7 @@ async function saveLeadInteraction(editId) {
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
   } finally {
+    window._liSaveInFlight = false;
     stopBusy();
   }
 }
