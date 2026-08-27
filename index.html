@@ -638,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.90 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.91 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.90 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.91 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1048,7 +1048,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <label class="form-label">Referred by <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <!-- Hidden FK: set only when an existing person is matched & chosen -->
             <input type="hidden" id="lead-source-person-id" value="">
-            <input type="text" id="lead-source-person-name" class="form-control" placeholder="Name of the person who referred this lead" oninput="onLeadSourcePersonNameInput()">
+            <input type="text" id="lead-source-person-name" class="form-control" autocomplete="off" placeholder="Name of the person who referred this lead" oninput="onLeadSourcePersonNameInput()">
             <div id="lead-source-person-matches" style="margin-top:8px;"></div>
             <!-- Existing-person confirmation (shown after a match is chosen) -->
             <div id="lead-source-person-selected" style="display:none;margin-top:8px;"></div>
@@ -1196,7 +1196,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
               <button type="button" class="btn btn-secondary btn-sm" id="lead-target-org-change-btn" onclick="changeLeadTargetOrg()">Change</button>
               <span id="lead-target-org-chosen-name" style="font-weight:600;"></span>
             </div>
-            <input type="text" id="lead-target-org-name" class="form-control" placeholder="New organisation — the name everyone uses" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
+            <input type="text" id="lead-target-org-name" class="form-control" autocomplete="off" placeholder="New organisation — the name everyone uses" style="margin-top:8px;" oninput="onLeadTargetOrgNameInput()">
             <div id="lead-target-org-matches" style="margin-top:8px;"></div>
             <div id="lead-target-org-hint" style="font-size:11px;color:var(--text3);margin-top:4px;">We'll warn you if it seems a similar organisation exists in our database.</div>
           </div>
@@ -1230,7 +1230,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             </div>
             <div id="lead-contact-entry" style="display:none;border:1px dashed var(--border);border-radius:8px;padding:10px;">
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-                <input type="text" id="lead-contact-name" class="form-control" placeholder="First and last name" oninput="onLeadContactNameInput()" onblur="onLeadContactNameBlur()" onkeydown="if(event.key==='Enter'){event.preventDefault();onLeadContactNameBlur();}">
+                <input type="text" id="lead-contact-name" class="form-control" autocomplete="off" placeholder="First and last name" oninput="onLeadContactNameInput()" onblur="onLeadContactNameBlur()" onkeydown="if(event.key==='Enter'){event.preventDefault();onLeadContactNameBlur();}">
                 <input type="text" id="lead-contact-title" class="form-control" placeholder="Job title (optional)">
                 <input type="email" id="lead-contact-email" class="form-control" placeholder="Email" onblur="validateLeadEmail(this)">
                 <input type="tel" id="lead-contact-phone" class="form-control" placeholder="Cellphone">
@@ -15921,6 +15921,15 @@ async function openLeadForm(id) {
   try {
     const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
     leadData = rows[0] || { id };
+    // If the lead's own site row isn't in the cache (deactivated, or paged out of a
+    // capped load), populate used to fall through and silently swap in the org's
+    // PRIMARY site — and the next autosave persisted the swap. Fetch the real one.
+    if (leadData.site_id && !(allData['sites'] || []).some(s => +s.id === +leadData.site_id)) {
+      try {
+        const srows = await apiGet('sites', 'id=eq.' + leadData.site_id + '&select=*');
+        if (srows[0]) (allData['sites'] = allData['sites'] || []).push(srows[0]);
+      } catch (e) { /* populate falls back exactly as before */ }
+    }
     // Description threading is decided ONCE per open: an existing description makes
     // this session append-only (add-a-note); a blank one stays a normal editable box
     // that becomes the thread's "Original". See leadIsAppendMode.
@@ -16452,6 +16461,18 @@ async function leadAutoSaveNow() {
   // A save is already on the wire: don't drop this tick — retry shortly, so edits
   // made during the in-flight save (e.g. rapid qualification-dot clicks) persist.
   if (_leadAutoSaveInFlight) { _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 800); return; }
+  // NEVER save out from under active typing (Richard 2026-08-27, phone numbers the
+  // repeat offender): a mid-keystroke PATCH commits half-typed values, and the save
+  // flush paths can re-render the very box being typed in. Wait for focus to leave a
+  // typing field — blur fires change → markLeadDirty reschedules, and the close /
+  // leave-guard flush calls saveLead directly so nothing is lost on exit. Selects,
+  // checkboxes and buttons still save on the normal tick (their value is complete).
+  const _ae = document.activeElement;
+  if (_ae && _ae.closest && _ae.closest('#lead-page') && (_ae.tagName === 'TEXTAREA'
+      || (_ae.tagName === 'INPUT' && !['checkbox','radio','button','submit','hidden','range'].includes(_ae.type)))) {
+    _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1000);
+    return;
+  }
   // Capture-always: NO completeness gate here. Filled fields (qualification dots,
   // red flags, comments…) persist immediately; the status engine — not the save
   // path — decides whether the lead is ready to progress to Working.
@@ -17308,6 +17329,20 @@ function populateLeadForm() {
     clearLeadSiteField();
     if (leadData.site_id && (allData['sites'] || []).some(s => +s.id === +leadData.site_id)) {
       selectLeadSite(+leadData.site_id);
+      // An org-less site derives no organisation — restore the lead's OWN org so
+      // both show (the register showed site + org; the form used to show only the
+      // site, and the save round-trip then nulled the organisation).
+      const _st = (allData['sites'] || []).find(s => +s.id === +leadData.site_id);
+      if (_st && !_st.organisation_id) {
+        if (leadData.target_org_id) {
+          document.getElementById('lead-target-org-id').value = leadData.target_org_id;
+          onLeadTargetOrgChange();
+        } else if ((leadData.target_org_name || '').trim()) {
+          document.getElementById('lead-target-org-name').value = leadData.target_org_name;
+          onLeadTargetOrgNameInput();
+          confirmLeadTargetOrgNew();
+        }
+      }
     } else if ((leadData.site_name || '').trim()) {
       document.getElementById('lead-site-search').value = leadData.site_name;
       chooseNewLeadSite();                         // sets new-site chip + reveals org sub-picker
@@ -17534,13 +17569,13 @@ function onLeadSiteInput() {
   matchEl.style.display = '';
 }
 
-// Enter picks the top row (a match, or the add-new row when there are none);
-// Escape closes the strip.
+// Enter and Escape both CLOSE the strip without picking anything (Richard
+// 2026-08-27: a suggestion must never be committed by dismissal — only an
+// explicit Use / Add-new click chooses). The typed text stays put; the save
+// flush captures it as a new-site name once the user moves on.
 function onLeadSiteKeydown(e) {
-  if (e.key === 'Enter') {
+  if (e.key === 'Enter' || e.key === 'Escape') {
     e.preventDefault();
-    document.querySelector('#lead-site-matches button')?.click();
-  } else if (e.key === 'Escape') {
     const matchEl = document.getElementById('lead-site-matches');
     if (matchEl) { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
   }
@@ -17561,14 +17596,24 @@ function selectLeadSite(id) {
   document.getElementById('lead-site-name').value = '';
   const orgDd = document.getElementById('lead-target-org-id');
   const orgNm = document.getElementById('lead-target-org-name');
-  if (orgDd) orgDd.value = site.organisation_id ? String(site.organisation_id) : '';
-  if (orgNm) orgNm.value = '';
   const orgGroup = document.getElementById('lead-target-org-group');
-  if (orgGroup) orgGroup.style.display = 'none';
+  if (site.organisation_id) {
+    if (orgDd) orgDd.value = String(site.organisation_id);
+    if (orgNm) orgNm.value = '';
+    if (orgGroup) orgGroup.style.display = 'none';
+  } else {
+    // Org-less site (progressive capture): the site can't tell us the organisation,
+    // so KEEP whatever org the lead already has and show the org sub-picker instead
+    // of hiding it — hiding blanked target_org_id in the DOM, the form then showed
+    // a site but no organisation, and the next autosave nulled the org for real.
+    if (orgGroup) orgGroup.style.display = '';
+    onLeadTargetOrgChange();
+  }
   _showLeadSiteChosen(site.name, on, false);
   renderLeadContacts();
   // Live-sync so the all-green readiness highlight reacts without waiting for save.
-  if (leadData) { leadData.target_org_id = site.organisation_id ? +site.organisation_id : null; updateLeadReadiness(); }
+  // An org-less site derives nothing — the lead's own org stands.
+  if (leadData) { if (site.organisation_id) leadData.target_org_id = +site.organisation_id; updateLeadReadiness(); }
   if (!window._leadPopulating) markLeadDirty();
 }
 
@@ -21648,8 +21693,11 @@ async function saveLead(opts) {
   // provisional contact, EXCEPT while the user is still typing in the box (autosave
   // firing mid-entry) or a person-match modal is awaiting their decision.
   const ctEntryName = (document.getElementById('lead-contact-name')?.value || '').trim();
-  const ctEntryFocused = ['lead-contact-name','lead-contact-title','lead-contact-email','lead-contact-phone']
-    .includes(document.activeElement && document.activeElement.id);
+  // Container check, not an id list: FocusPhone swaps the phone inputs for id-less
+  // enhanced fields, which the old id list missed — an autosave mid-phone-number
+  // then committed the half-typed contact and yanked the entry box away.
+  const ctEntryFocused = !!(document.activeElement && document.activeElement.closest
+    && document.activeElement.closest('#lead-contact-entry'));
   if (ctEntryName && !ctEntryFocused && !window._leadContactCommitting
       && !(document.getElementById('modal-root')?.innerHTML || '').trim()) {
     leadContacts.push({
