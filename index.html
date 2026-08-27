@@ -638,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -14026,11 +14026,20 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     </div>`;
   }
 
-  // Last touch — colour by age
+  // Last touch — colour TIED to the owner's aging escalation thresholds
+  // (Admin → Settings → Lead Lifecycle, per-user overrides included): orange
+  // from HALF the limit, red from the limit — so the register's colour language
+  // always agrees with what the attention banner/workbench will escalate.
+  // Was hardcoded 14/30 until v7.8.89. Only Raw and Working age; other stages
+  // stay neutral (Nurture/Hold run on their own clocks), as does aging = off.
   let lastTouchCell = '—';
   if (l.last_touch_date) {
     const days = Math.floor((Date.now() - new Date(l.last_touch_date).getTime()) / 86400000);
-    const col = days > 30 ? 'color:var(--red);' : days > 14 ? 'color:#f59e0b;' : '';
+    const kind = l.status === 'New' ? 'new' : l.status === 'Working' ? 'working' : null;
+    const limit = kind ? agingDaysFor(l.owner_id, kind) : 0;
+    const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
+              : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
+              : '';
     lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
   }
 
