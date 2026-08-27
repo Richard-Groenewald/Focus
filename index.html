@@ -638,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.87 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.87 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10804,6 +10804,7 @@ async function buildUserContext(userId) {
     roles,
     permissions,
     isAdmin: roles.some(r => r.name === 'Admin'),
+    mustSetPassword: !!user.must_set_password,   // a pending forced reset (enterApp refuses resume)
   };
   // If admin and no permissions set yet, grant all
   if (ctx.isAdmin && !permissions.length) ctx.permissions = ['all'];
@@ -11249,6 +11250,19 @@ async function enterApp(userId) {
 
   const ctx = await buildUserContext(userId);
   if (!ctx) throw new Error('User not found');
+  // A pending forced reset outranks a still-valid token (v7.8.88, Les's report:
+  // the 24h session resume walked her straight past "choose a new password").
+  // Drop the stored session and land on the sign-in screen instead. A fresh
+  // login can never reach here with the flag set — the server answers mustSet
+  // before issuing a token, and completing 'set' clears the flag.
+  if (ctx.mustSetPassword) {
+    _saveSession(null);
+    currentUser = null;
+    document.getElementById('main-app').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'flex';
+    try { _loginMsg('A new password is required — sign in with your current one to choose it.'); } catch (e) {}
+    return;
+  }
   currentUser = ctx;
   realUser = null;            // a fresh sign-in is never a masquerade
 
