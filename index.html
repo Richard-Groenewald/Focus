@@ -108,6 +108,23 @@ a{color:inherit;text-decoration:none;}
 
 /* ── Table ─────────────────────────────────────────────── */
 .table-wrap{overflow-x:auto;}
+/* Sticky list chrome: register pages (showPage puts .sticky-lists on #content)
+   pin their tab/control bar and the column-header row to the top of the
+   scrolling content while the list scrolls beneath. .content is the scroll
+   container; an ancestor .table-wrap with overflow-x:auto would capture
+   position:sticky instead (a scroll container in any axis becomes the sticky
+   anchor, and .table-wrap never scrolls vertically — so nothing would pin), so
+   sticky pages release it. Their tables fit the card width; admin registers
+   stay out of the set and keep the horizontal scrollbar for wide tables.
+   Collapsed table borders don't travel with stuck cells (Chromium), so pinned
+   header rows swap border-bottom for an identical 1px box-shadow line. */
+.content.sticky-lists .table-wrap{overflow-x:visible;}
+.list-sticky-bar{position:sticky;top:0;z-index:20;background:var(--bg2);}
+.content.sticky-lists #table-head tr:last-child th,
+.content.sticky-lists #leads-thead tr:last-child th{position:sticky;top:0;z-index:15;border-bottom:none;box-shadow:0 1px 0 var(--border);}
+/* Leads: the column headers pin BELOW the sticky tab bar; the bar's real height
+   (band headings can wrap) is measured into --leads-head-top by _leadsSyncStickyTop. */
+.content.sticky-lists #leads-thead tr:last-child th{top:var(--leads-head-top,96px);}
 table{width:100%;border-collapse:collapse;}
 th{background:var(--bg);font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text3);padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);}
 td{padding:12px 14px;border-bottom:1px solid var(--border);color:var(--text);font-size:13px;vertical-align:middle;}
@@ -638,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3324,6 +3341,15 @@ function showPage(page) {
     if (sidebar) sidebar.style.display = '';
     if (sidebarToggle) sidebarToggle.style.display = 'none';
   }
+
+  // Sticky list chrome: these register pages pin their tab/control bar (and the
+  // column-header row) while the list scrolls — the class also releases
+  // .table-wrap's overflow-x so position:sticky anchors to the scrolling
+  // .content (see the CSS note). Wide admin tables stay out of the set so they
+  // keep the horizontal scrollbar.
+  const stickyLists = ['leads', 'opportunities', 'deal_administration',
+                       'research_campaign_cockpit', 'attention', 'internal_activity'];
+  document.getElementById('content').classList.toggle('sticky-lists', stickyLists.includes(page));
 
   // Show/hide and wire add button
   const addBtn = document.getElementById('add-btn');
@@ -13782,10 +13808,12 @@ async function renderLeadsPage() {
   // Build view-tab bar + table into the body cell (consistent with settings/role_permissions pattern)
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div id="leads-container" style="padding:0 0 24px 0;">
-      <div id="leads-tabs" class="opp-tabs" style="margin-bottom:10px;"></div>
-      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
-        <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(true)" title="Open every client group">⌄ Expand all</button>
-        <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(false)" title="Close every client group">› Collapse all</button>
+      <div id="leads-sticky" class="list-sticky-bar">
+        <div id="leads-tabs" class="opp-tabs" style="margin-bottom:10px;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
+          <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(true)" title="Open every client group">⌄ Expand all</button>
+          <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(false)" title="Close every client group">› Collapse all</button>
+        </div>
       </div>
       <div id="leads-table-wrap"><div style="padding:20px;color:var(--text3);">Loading leads…</div></div>
     </div>
@@ -13972,12 +14000,25 @@ async function renderLeadsPage() {
       defaultSortKey: appSettings['leads_default_sort_key'] || null,
       defaultSortDir: appSettings['leads_default_sort_dir'] || 'asc',
     });
+    _leadsSyncStickyTop();        // column headers pin just below the sticky tab bar
     startEditCountdownTicker();   // drive any New-lane / lane-header countdown chips
   } catch(e) {
     document.getElementById('leads-table-wrap').innerHTML =
       `<div style="padding:20px;color:var(--red);">Error loading leads: ${e.message}</div>`;
   }
 }
+
+// Sticky column headers (leads register): the header row pins BELOW the sticky
+// tab bar, so its sticky `top` must equal the bar's rendered height — which
+// varies (band headings wrap on narrow windows). Measured into a CSS var on the
+// container; re-run on every page render and on window resize. No-ops silently
+// once another page has replaced the leads DOM.
+function _leadsSyncStickyTop() {
+  const bar = document.getElementById('leads-sticky');
+  const cont = document.getElementById('leads-container');
+  if (bar && cont) cont.style.setProperty('--leads-head-top', bar.offsetHeight + 'px');
+}
+window.addEventListener('resize', _leadsSyncStickyTop);
 
 // Helper: render a single lead row
 function renderLeadRow(l, sources, regions, people, orgs) {
@@ -14527,7 +14568,7 @@ async function renderResearchCampaignCockpit() {
         </div>
         ${cockpitMissionHeader(campaign, regions, services, people)}
         ${cockpitFunnelStrip(campaign, targets, leads)}
-        ${cockpitTabBar(targets, leads)}
+        <div id="cockpit-tabbar-wrap" class="list-sticky-bar">${cockpitTabBar(targets, leads)}</div>
         <div id="cockpit-tab-body" style="margin-top:16px;"></div>
       </div>
     </td></tr>`;
@@ -14637,9 +14678,10 @@ function cockpitTabBar(targets, leads) {
 
 function cockpitSwitchTab(key) {
   cockpitTab = key;
-  // Refresh the tab bar active state without a full reload
-  const bar = document.querySelector('#cockpit-tab-body')?.previousElementSibling;
-  if (bar) bar.outerHTML = cockpitTabBar(cockpitData.targets || [], cockpitData.leads || []);
+  // Refresh the tab bar active state without a full reload. Rebuild INSIDE the
+  // sticky wrapper (replacing the wrapper's outerHTML would strip the pinning).
+  const wrap = document.getElementById('cockpit-tabbar-wrap');
+  if (wrap) wrap.innerHTML = cockpitTabBar(cockpitData.targets || [], cockpitData.leads || []);
   renderCockpitTabBody();
 }
 
@@ -22202,7 +22244,7 @@ async function renderAttentionPage() {
   head.innerHTML = '';
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div style="padding:0 0 24px;">
-      <div id="attn-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
+      <div id="attn-controls" class="list-sticky-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
       <div id="attn-results"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
     </div></td></tr>`;
   try {
@@ -24408,7 +24450,7 @@ async function renderInternalActivityPage() {
   if (head) head.innerHTML = '';
   if (body) body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div style="padding:0 0 24px;">
-      <div id="ia-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;"></div>
+      <div id="ia-controls" class="list-sticky-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;"></div>
       <div id="ia-kpis"></div>
       <div id="ia-results"><div style="padding:20px;color:var(--text3);">Loading internal activity...</div></div>
     </div></td></tr>`;
