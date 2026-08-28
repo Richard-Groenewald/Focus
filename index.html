@@ -108,6 +108,23 @@ a{color:inherit;text-decoration:none;}
 
 /* ── Table ─────────────────────────────────────────────── */
 .table-wrap{overflow-x:auto;}
+/* Sticky list chrome: register pages (showPage puts .sticky-lists on #content)
+   pin their tab/control bar and the column-header row to the top of the
+   scrolling content while the list scrolls beneath. .content is the scroll
+   container; an ancestor .table-wrap with overflow-x:auto would capture
+   position:sticky instead (a scroll container in any axis becomes the sticky
+   anchor, and .table-wrap never scrolls vertically — so nothing would pin), so
+   sticky pages release it. Their tables fit the card width; admin registers
+   stay out of the set and keep the horizontal scrollbar for wide tables.
+   Collapsed table borders don't travel with stuck cells (Chromium), so pinned
+   header rows swap border-bottom for an identical 1px box-shadow line. */
+.content.sticky-lists .table-wrap{overflow-x:visible;}
+.list-sticky-bar{position:sticky;top:0;z-index:20;background:var(--bg2);}
+.content.sticky-lists #table-head tr:last-child th,
+.content.sticky-lists #leads-thead tr:last-child th{position:sticky;top:0;z-index:15;border-bottom:none;box-shadow:0 1px 0 var(--border);}
+/* Leads: the column headers pin BELOW the sticky tab bar; the bar's real height
+   (band headings can wrap) is measured into --leads-head-top by _leadsSyncStickyTop. */
+.content.sticky-lists #leads-thead tr:last-child th{top:var(--leads-head-top,96px);}
 table{width:100%;border-collapse:collapse;}
 th{background:var(--bg);font-size:11px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:var(--text3);padding:10px 14px;text-align:left;border-bottom:1px solid var(--border);}
 td{padding:12px 14px;border-bottom:1px solid var(--border);color:var(--text);font-size:13px;vertical-align:middle;}
@@ -638,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3324,6 +3341,15 @@ function showPage(page) {
     if (sidebar) sidebar.style.display = '';
     if (sidebarToggle) sidebarToggle.style.display = 'none';
   }
+
+  // Sticky list chrome: these register pages pin their tab/control bar (and the
+  // column-header row) while the list scrolls — the class also releases
+  // .table-wrap's overflow-x so position:sticky anchors to the scrolling
+  // .content (see the CSS note). Wide admin tables stay out of the set so they
+  // keep the horizontal scrollbar.
+  const stickyLists = ['leads', 'opportunities', 'deal_administration',
+                       'research_campaign_cockpit', 'attention', 'internal_activity'];
+  document.getElementById('content').classList.toggle('sticky-lists', stickyLists.includes(page));
 
   // Show/hide and wire add button
   const addBtn = document.getElementById('add-btn');
@@ -11377,6 +11403,9 @@ function setLeadBandsAll(open) {
 // Shared client-band header row (leads + opportunities lists). Key is
 // URI-encoded (plus %27 for quotes) so free-text client names survive the
 // inline onclick attribute.
+// v7.8.96: no longer called — replaced by the column-aligned _leadBandRowHtml /
+// dealBandRow. KEPT deliberately so the band redesign can be unbuilt by simply
+// restoring the two group-renderer call sites (memory: client-band-rows-v7896).
 function _clientBandRow(page, key, open, label, word, bits, colspan) {
   const enc = encodeURIComponent(key).replace(/'/g, '%27');
   return `<tr onclick="toggleClientBand('${page}','${enc}')" style="cursor:pointer;">
@@ -11570,31 +11599,48 @@ async function renderOpportunitiesPage() {
       return html;
     };
 
-    // Client roll-up, always on: deals sharing an organisation auto-collapse
-    // under a client band heading, CLOSED by default — click the heading to
-    // open/close. One-deal clients and org-less deals stay plain rows. Bands
-    // form from the filtered+sorted rows in order of first appearance, so the
-    // user's column sort still decides band order; lineage families nest
-    // within their band. Heading label prefers the org's trading name; the
-    // stats carry deal count, distinct sites, and client TCV (from streams).
+    // Client roll-up, always on: deals sharing an organisational FAMILY
+    // (dealBandOf: the deal's org walked to its ultimate parent) auto-collapse
+    // under a client band row, CLOSED by default — click the row to open/close.
+    // One-deal clients and org-less deals stay plain rows. Bands form from the
+    // filtered+sorted rows in order of first appearance, so the user's column
+    // sort still decides band order; lineage families nest within their band.
+    // CLIENT BAND ROW (opps, v7.8.96): column-aligned like the deal rows it
+    // collapses. Deal Name carries the roll-up (count + TCV from streams — the
+    // only source of financials); Order Date is the FIRST-LOADED (earliest-
+    // created) deal's, current value; Stage = the most advanced in the band
+    // (Lost counts only if everything is lost); Probability = the highest.
+    const dealBandRow = (k, open, label, members) => {
+      const first = [...members].sort((x, y) => new Date(x.created_at || 0) - new Date(y.created_at || 0))[0];
+      const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
+      const rank = d => +d.stage_id === 6 ? -1 : (+d.stage_id || 0);
+      const adv = members.reduce((a, d) => rank(d) > rank(a) ? d : a, members[0]);
+      const advStage = stages.find(s => +s.id === +adv.stage_id);
+      const prob = members.reduce((a, d) => Math.max(a, +d.probability || 0), 0);
+      const enc = encodeURIComponent(k).replace(/'/g, '%27');
+      return `<tr onclick="toggleClientBand('opps','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
+        <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span></td>
+        <td>${members.length} deals · ${pbFmtRand(Math.round(tcv))} TCV</td>
+        <td>${first.order_date ? new Date(first.order_date).toLocaleDateString('en-ZA') : '—'}</td>
+        <td>${advStage ? `<span class="badge badge-blue">${advStage.name}</span>` : '—'}</td>
+        <td style="text-align:right;">${prob ? prob + '%' : '—'}</td>
+      </tr>`;
+    };
+
     const groupRenderer = (filtered) => {
-      const byOrg = new Map(); const order = [];
+      const byOrg = new Map(); const order = []; const labels = new Map();
       filtered.forEach(d => {
-        const k = d.org_id != null ? 'o' + (+d.org_id) : 'x' + d.id;   // org-less deals never band
-        if (!byOrg.has(k)) { byOrg.set(k, []); order.push(k); }
+        // Family band key (v7.8.96): the deal's org walked to its ultimate parent.
+        const bk = dealBandOf(d, orgs);
+        const k = bk.key;
+        if (!byOrg.has(k)) { byOrg.set(k, []); order.push(k); labels.set(k, bk.label); }
         byOrg.get(k).push(d);
       });
       return order.map(k => {
         const members = byOrg.get(k);
         if (members.length === 1) return familiesHtml(members, false);
-        const org = orgs.find(o => 'o' + o.id === k);
         const open = _clientOpen.has('opps:' + k);
-        const nSites = new Set(members.filter(d => d.site_id).map(d => +d.site_id)).size;
-        const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
-        const bits = [members.length + ' opportunities'];
-        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
-        bits.push(pbFmtRand(Math.round(tcv)) + ' TCV');
-        return _clientBandRow('opps', k, open, org?.name || '(No organisation)', 'opportunities', bits.join(' · '), 5)
+        return dealBandRow(k, open, labels.get(k) || '(No organisation)', members)
              + (open ? familiesHtml(members, true) : '');
       }).join('');
     };
@@ -13758,6 +13804,53 @@ function leadClientOf(l, orgs, sites) {
 }
 const leadClientLabel = (l, orgs, sites) => leadClientOf(l, orgs, sites).label;
 
+// ── Client band identity (v7.8.96) ────────────────────────────────────────────
+// Register bands group by ORGANISATIONAL FAMILY, not the raw org record:
+//   1. resolve the record's org (leadClientOf rules / deals.org_id, unchanged);
+//   2. a free-text lead name that case-folds equal to an existing organisation's
+//      colloquial name ADOPTS that organisation, so a typed "Kargo Group" lead
+//      bands with the linked Kargo Group leads instead of sitting apart;
+//   3. walk parent_org_id to the ULTIMATE parent (cycle/self-reference guarded —
+//      prod has three self-referencing rows), so the day the family-linking data
+//      pass populates parents, whole families band automatically with no code
+//      change. With no parents linked (today) this is exactly per-org banding.
+// The per-row Client COLUMN stays leadClientOf (the lead's own organisation) —
+// under a family band the column may legitimately differ from the band heading.
+// UNBUILD: memory note client-band-rows-v7896 — revert the v7.8.96 commit, or by
+// hand: group renderers back to leadClientOf / 'o'+org_id keys + _clientBandRow.
+function _ultimateParentOrg(org, orgs) {
+  const seen = new Set();
+  let cur = org;
+  while (cur && cur.parent_org_id && !seen.has(+cur.id)) {
+    seen.add(+cur.id);
+    const p = (orgs || []).find(x => +x.id === +cur.parent_org_id);
+    if (!p || seen.has(+p.id) || +p.id === +cur.id) break;
+    cur = p;
+  }
+  return cur || org;
+}
+function leadBandOf(l, orgs, sites) {
+  const O = orgs || allData['organisations'] || [];
+  const c = leadClientOf(l, O, sites);
+  if (c.key === 'none') return c;   // clientless — and 'none' must not read as an 'n' name key
+  let org = null;
+  if (c.key[0] === 'o') org = O.find(x => 'o' + x.id === c.key) || null;
+  else if (c.key[0] === 'n') {
+    const nm = c.key.slice(1);   // leadClientOf already case-folded the typed name
+    org = O.find(x => (x.name || '').trim().toLowerCase() === nm) || null;
+  }
+  if (!org) return c;
+  const top = _ultimateParentOrg(org, O);
+  return { key: 'o' + top.id, label: top.name || c.label };
+}
+function dealBandOf(d, orgs) {
+  const O = orgs || allData['organisations'] || [];
+  const org = d.org_id != null ? O.find(o => +o.id === +d.org_id) : null;
+  if (!org) return { key: 'x' + d.id, label: '(No organisation)' };
+  const top = _ultimateParentOrg(org, O);
+  return { key: 'o' + top.id, label: top.name || '(No organisation)' };
+}
+
 // Lead display label outside the leads page (engagement modal, dashboard,
 // history, contacts admin) — site-first like the leads list: embedded
 // sites(name) from the fetch, else leadSiteLabel, else the organisation, else
@@ -13782,10 +13875,12 @@ async function renderLeadsPage() {
   // Build view-tab bar + table into the body cell (consistent with settings/role_permissions pattern)
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div id="leads-container" style="padding:0 0 24px 0;">
-      <div id="leads-tabs" class="opp-tabs" style="margin-bottom:10px;"></div>
-      <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
-        <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(true)" title="Open every client group">⌄ Expand all</button>
-        <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(false)" title="Close every client group">› Collapse all</button>
+      <div id="leads-sticky" class="list-sticky-bar">
+        <div id="leads-tabs" class="opp-tabs" style="margin-bottom:10px;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px;">
+          <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(true)" title="Open every client group">⌄ Expand all</button>
+          <button class="btn btn-ghost btn-sm" style="padding:3px 10px;font-size:11px;" onclick="setLeadBandsAll(false)" title="Close every client group">› Collapse all</button>
+        </div>
       </div>
       <div id="leads-table-wrap"><div style="padding:20px;color:var(--text3);">Loading leads…</div></div>
     </div>
@@ -13938,7 +14033,8 @@ async function renderLeadsPage() {
     const leadsGroupRenderer = (rows) => {
       const bands = new Map(); const order = [];
       rows.forEach(l => {
-        const c = leadClientOf(l, orgs, sites);
+        // Family band key (v7.8.96): parent-aware + free-text-name merge.
+        const c = leadBandOf(l, orgs, sites);
         const key = c.key === 'none' ? 'x' + l.id : c.key;   // clientless leads never band
         let b = bands.get(key);
         if (!b) { b = { key, label: c.label, rows: [] }; bands.set(key, b); order.push(b); }
@@ -13947,12 +14043,7 @@ async function renderLeadsPage() {
       return order.map(b => {
         if (b.rows.length === 1) return renderLeadRow(b.rows[0], sources, regions, people, orgs);
         const open = _leadBandsDefaultOpen !== _clientOpen.has('leads:' + b.key);
-        const nSites = new Set(b.rows
-          .map(l => l.site_id ? 'id' + l.site_id : (leadSiteLabel(l) || '').toLowerCase())
-          .filter(Boolean)).size;
-        const bits = [b.rows.length + ' leads'];
-        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
-        return _clientBandRow('leads', b.key, open, b.label, 'leads', bits.join(' · '), cols.length)
+        return _leadBandRowHtml(b, open, sources, regions, people, orgs)
              + (open ? b.rows.map(l =>
                  renderLeadRow(l, sources, regions, people, orgs).replace('<tr ', '<tr class="client-band-child" ')
                ).join('') : '');
@@ -13972,12 +14063,25 @@ async function renderLeadsPage() {
       defaultSortKey: appSettings['leads_default_sort_key'] || null,
       defaultSortDir: appSettings['leads_default_sort_dir'] || 'asc',
     });
+    _leadsSyncStickyTop();        // column headers pin just below the sticky tab bar
     startEditCountdownTicker();   // drive any New-lane / lane-header countdown chips
   } catch(e) {
     document.getElementById('leads-table-wrap').innerHTML =
       `<div style="padding:20px;color:var(--red);">Error loading leads: ${e.message}</div>`;
   }
 }
+
+// Sticky column headers (leads register): the header row pins BELOW the sticky
+// tab bar, so its sticky `top` must equal the bar's rendered height — which
+// varies (band headings wrap on narrow windows). Measured into a CSS var on the
+// container; re-run on every page render and on window resize. No-ops silently
+// once another page has replaced the leads DOM.
+function _leadsSyncStickyTop() {
+  const bar = document.getElementById('leads-sticky');
+  const cont = document.getElementById('leads-container');
+  if (bar && cont) cont.style.setProperty('--leads-head-top', bar.offsetHeight + 'px');
+}
+window.addEventListener('resize', _leadsSyncStickyTop);
 
 // Helper: render a single lead row
 function renderLeadRow(l, sources, regions, people, orgs) {
@@ -14070,6 +14174,78 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
     <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
+    <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
+    <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
+    <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
+    <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
+    <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
+  </tr>`;
+}
+
+// CLIENT BAND ROW (leads, v7.8.96): column-aligned like the child rows it
+// collapses (Richard 2026-08-28), replacing the old full-width text strip.
+// Identity columns — Source, Region, Branch, Owner — come from the band's
+// FIRST-LOADED lead (earliest created_at), showing its CURRENT values (no
+// snapshot). Site shows the one shared site name, else a count. FACT shows the
+// band's best score as that lead's dots. Next Action = the soonest due in the
+// band; Last Touch = the most recent, aging-coloured by that lead's own
+// owner/status thresholds. Click toggles the band, exactly like the old strip.
+function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
+  const rows = b.rows;
+  const first = [...rows].sort((x, y) => new Date(x.created_at || 0) - new Date(y.created_at || 0))[0];
+  const source = sources.find(s => +s.id === +first.source_id);
+  const region = regions.find(r => +r.id === +first.region_id);
+  const branch = (allData['branches'] || []).find(x => +x.id === +first.branch_id);
+  const owner  = people.find(p => +p.id === +first.owner_id);
+  const ownerDisplay = owner
+    ? [owner.first_name, owner.last_name].filter(Boolean).join(' ')
+    : '<span style="color:var(--text3);font-style:italic;">Shared</span>';
+  // Site: the one shared site name, else how many distinct sites the band spans.
+  const siteLabels = [...new Set(rows.map(l => (leadSiteLabel(l) || '').trim()).filter(Boolean))];
+  const siteCell = siteLabels.length === 1 ? cEsc(siteLabels[0])
+                 : siteLabels.length ? siteLabels.length + ' sites'
+                 : '—';
+  // FACT: the band's best score, rendered as that lead's dots (same order/colours
+  // as renderLeadRow: F=fit, A=access, C=capacity, T=trigger).
+  const factOf = l => (+l.fit || 0) + (+l.trigger_score || 0) + (+l.access || 0) + (+l.capacity || 0);
+  const best = rows.reduce((a, l) => factOf(l) > factOf(a) ? l : a, rows[0]);
+  const dotColour = (n) => n === 2 ? '#16a34a' : n === 1 ? '#f59e0b' : '#cbd5e1';
+  const qualDots = ['F','A','C','T'].map((letter, i) => {
+    const val = [best.fit, best.access, best.capacity, best.trigger_score][i];
+    return `<span title="Best in group — ${letter}: ${val===2?'Strong':val===1?'Weak':'Unknown'}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColour(val)};margin:0 1px;"></span>`;
+  }).join('');
+  // Next action: soonest due (dated ones win), else the first captured text.
+  const dated = rows.filter(l => l.next_action && l.next_action_date)
+                    .sort((x, y) => new Date(x.next_action_date) - new Date(y.next_action_date));
+  const na = dated[0] || rows.find(l => l.next_action) || null;
+  let nextActionCell = '—';
+  if (na) {
+    const isOverdue = na.next_action_date && new Date(na.next_action_date) < new Date(new Date().toDateString());
+    const dateLabel = na.next_action_date ? new Date(na.next_action_date).toLocaleDateString('en-ZA') : '';
+    nextActionCell = `<div style="${isOverdue ? 'color:var(--red);font-weight:600;' : ''}">
+      ${na.next_action}${dateLabel ? `<div style="font-size:11px;opacity:0.7;">${dateLabel}</div>` : ''}
+    </div>`;
+  }
+  // Last touch: the band's most recent, coloured by THAT lead's aging thresholds.
+  const touched = rows.filter(l => l.last_touch_date)
+                      .sort((x, y) => new Date(y.last_touch_date) - new Date(x.last_touch_date));
+  let lastTouchCell = '—';
+  if (touched.length) {
+    const t = touched[0];
+    const days = Math.floor((Date.now() - new Date(t.last_touch_date).getTime()) / 86400000);
+    const kind = t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null;
+    const limit = kind ? agingDaysFor(t.owner_id, kind) : 0;
+    const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
+              : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
+              : '';
+    lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
+  }
+  const enc = encodeURIComponent(b.key).replace(/'/g, '%27');
+  return `<tr onclick="toggleClientBand('leads','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
+    <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(b.label)} <span style="font-weight:500;color:var(--text2);">(${rows.length})</span></td>
+    <td style="padding:10px 12px;font-size:13px;">${siteCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
@@ -14527,7 +14703,7 @@ async function renderResearchCampaignCockpit() {
         </div>
         ${cockpitMissionHeader(campaign, regions, services, people)}
         ${cockpitFunnelStrip(campaign, targets, leads)}
-        ${cockpitTabBar(targets, leads)}
+        <div id="cockpit-tabbar-wrap" class="list-sticky-bar">${cockpitTabBar(targets, leads)}</div>
         <div id="cockpit-tab-body" style="margin-top:16px;"></div>
       </div>
     </td></tr>`;
@@ -14637,9 +14813,10 @@ function cockpitTabBar(targets, leads) {
 
 function cockpitSwitchTab(key) {
   cockpitTab = key;
-  // Refresh the tab bar active state without a full reload
-  const bar = document.querySelector('#cockpit-tab-body')?.previousElementSibling;
-  if (bar) bar.outerHTML = cockpitTabBar(cockpitData.targets || [], cockpitData.leads || []);
+  // Refresh the tab bar active state without a full reload. Rebuild INSIDE the
+  // sticky wrapper (replacing the wrapper's outerHTML would strip the pinning).
+  const wrap = document.getElementById('cockpit-tabbar-wrap');
+  if (wrap) wrap.innerHTML = cockpitTabBar(cockpitData.targets || [], cockpitData.leads || []);
   renderCockpitTabBody();
 }
 
@@ -15894,6 +16071,7 @@ let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
+  window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
   _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
@@ -16105,7 +16283,9 @@ function applyLeadGraceLock() {
   // of the promotion criteria. Org Change button is hidden too (applyLeadReadOnly
   // re-showed it, so hide it here so it wins).
   const changeBtn = document.getElementById('lead-target-org-change-btn');
-  if (changeBtn) changeBtn.style.display = editable ? '' : 'none';
+  // The org fill window (lead loaded org-less) keeps Change available past the
+  // grace lock — same waiver as applyLeadTargetOrgLock, or this hide would win.
+  if (changeBtn) changeBtn.style.display = (editable || window._leadOrgFillWindow) ? '' : 'none';
   // The mandatory banner only applies while still New (requirements not yet met): it
   // disappears the moment the lead reaches Working, and returns if an edit during the
   // grace window breaks the requirements and drops it back to New (the status recompute
@@ -17370,6 +17550,12 @@ function applyLeadDescriptionMode() {
 }
 
 function populateLeadForm() {
+  // Org fill window: if the lead LOADED without an organisation, the org controls
+  // stay workable for this whole form-open even past the New/grace freeze — the
+  // organisation is required to reach Review, so an as-loaded gap must be fillable
+  // at any stage, and a mis-pick stays correctable until the form closes. The next
+  // open (org now saved) freezes it as spec b2 intends.
+  window._leadOrgFillWindow = !leadData.target_org_id && !String(leadData.target_org_name || '').trim();
   // Source
   if (leadData.source_id) document.getElementById('lead-source-id').value = leadData.source_id;
   if (leadData.source_person_id) document.getElementById('lead-source-person-id').value = leadData.source_person_id;
@@ -19415,6 +19601,9 @@ function leadLiveSourceComplete() {
 // Once past New the target organisation is frozen (spec b2 — contact can still
 // change). leadReadOnly (Promoted/Dead) already disables everything globally.
 function applyLeadTargetOrgLock(locked) {
+  // The as-loaded org gap keeps the controls live for this form-open (see
+  // populateLeadForm) — a picked-but-unsaved org stays correctable via Change.
+  if (window._leadOrgFillWindow) locked = false;
   const dd        = document.getElementById('lead-target-org-id');
   const picker    = document.getElementById('lead-target-org-picker');
   const chosen    = document.getElementById('lead-target-org-chosen');
@@ -19423,14 +19612,18 @@ function applyLeadTargetOrgLock(locked) {
   const matchEl   = document.getElementById('lead-target-org-matches');
   const hintEl    = document.getElementById('lead-target-org-hint');
   const changeBtn = document.getElementById('lead-target-org-change-btn');
-  if (dd) dd.disabled = locked;
+  const hasExisting = !!leadData.target_org_id;
+  const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
+  // The freeze applies to a CHOSEN organisation (spec b2) — never to the absence
+  // of one. An org-less lead past New used to freeze EMPTY: a disabled dropdown
+  // promising "create a new one below" with the input hidden, and no way left to
+  // ever enter the org Review requires (Kargo Group, Richard 2026-08-28).
+  if (dd) dd.disabled = locked && (hasExisting || hasNew);
   // Mid-type protection: if the user is actively editing a free-text new-org name when
   // a relayout fires (notably the New→Working autosave flip), don't collapse the input
   // into the chosen chip — that reads as the typed name vanishing. It collapses on the
   // next relayout once the field no longer has focus.
-  if (!locked && !leadData.target_org_id && nameField && document.activeElement === nameField) return;
-  const hasExisting = !!leadData.target_org_id;
-  const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
+  if (!leadData.target_org_id && nameField && document.activeElement === nameField) return;
   if (hasExisting || hasNew) {
     // A chosen org stays in the "picked" chip on reopen (existing FK or free-text new
     // org), with a Change button only while editable. Fixes the dropdown reappearing.
@@ -19448,13 +19641,9 @@ function applyLeadTargetOrgLock(locked) {
     if (matchEl)  { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
     if (hintEl)    hintEl.style.display = 'none';
     if (changeBtn) changeBtn.style.display = locked ? 'none' : '';
-  } else if (locked) {
-    if (picker)    picker.style.display = 'flex';
-    if (chosen)    chosen.style.display = 'none';
-    if (nameField) nameField.style.display = 'none';
-    if (hintEl)    hintEl.style.display = 'none';
   } else {
-    // Editable, nothing chosen yet → live picker + free-text via the change handler.
+    // Nothing chosen yet → live picker + free-text via the change handler,
+    // whatever the stage (an empty org is never frozen — see above).
     if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
   }
 }
@@ -22202,7 +22391,7 @@ async function renderAttentionPage() {
   head.innerHTML = '';
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div style="padding:0 0 24px;">
-      <div id="attn-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
+      <div id="attn-controls" class="list-sticky-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;"></div>
       <div id="attn-results"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
     </div></td></tr>`;
   try {
@@ -24408,7 +24597,7 @@ async function renderInternalActivityPage() {
   if (head) head.innerHTML = '';
   if (body) body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div style="padding:0 0 24px;">
-      <div id="ia-controls" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;"></div>
+      <div id="ia-controls" class="list-sticky-bar" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;"></div>
       <div id="ia-kpis"></div>
       <div id="ia-results"><div style="padding:20px;color:var(--text3);">Loading internal activity...</div></div>
     </div></td></tr>`;
