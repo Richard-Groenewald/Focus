@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11403,6 +11403,9 @@ function setLeadBandsAll(open) {
 // Shared client-band header row (leads + opportunities lists). Key is
 // URI-encoded (plus %27 for quotes) so free-text client names survive the
 // inline onclick attribute.
+// v7.8.96: no longer called — replaced by the column-aligned _leadBandRowHtml /
+// dealBandRow. KEPT deliberately so the band redesign can be unbuilt by simply
+// restoring the two group-renderer call sites (memory: client-band-rows-v7896).
 function _clientBandRow(page, key, open, label, word, bits, colspan) {
   const enc = encodeURIComponent(key).replace(/'/g, '%27');
   return `<tr onclick="toggleClientBand('${page}','${enc}')" style="cursor:pointer;">
@@ -11596,31 +11599,48 @@ async function renderOpportunitiesPage() {
       return html;
     };
 
-    // Client roll-up, always on: deals sharing an organisation auto-collapse
-    // under a client band heading, CLOSED by default — click the heading to
-    // open/close. One-deal clients and org-less deals stay plain rows. Bands
-    // form from the filtered+sorted rows in order of first appearance, so the
-    // user's column sort still decides band order; lineage families nest
-    // within their band. Heading label prefers the org's trading name; the
-    // stats carry deal count, distinct sites, and client TCV (from streams).
+    // Client roll-up, always on: deals sharing an organisational FAMILY
+    // (dealBandOf: the deal's org walked to its ultimate parent) auto-collapse
+    // under a client band row, CLOSED by default — click the row to open/close.
+    // One-deal clients and org-less deals stay plain rows. Bands form from the
+    // filtered+sorted rows in order of first appearance, so the user's column
+    // sort still decides band order; lineage families nest within their band.
+    // CLIENT BAND ROW (opps, v7.8.96): column-aligned like the deal rows it
+    // collapses. Deal Name carries the roll-up (count + TCV from streams — the
+    // only source of financials); Order Date is the FIRST-LOADED (earliest-
+    // created) deal's, current value; Stage = the most advanced in the band
+    // (Lost counts only if everything is lost); Probability = the highest.
+    const dealBandRow = (k, open, label, members) => {
+      const first = [...members].sort((x, y) => new Date(x.created_at || 0) - new Date(y.created_at || 0))[0];
+      const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
+      const rank = d => +d.stage_id === 6 ? -1 : (+d.stage_id || 0);
+      const adv = members.reduce((a, d) => rank(d) > rank(a) ? d : a, members[0]);
+      const advStage = stages.find(s => +s.id === +adv.stage_id);
+      const prob = members.reduce((a, d) => Math.max(a, +d.probability || 0), 0);
+      const enc = encodeURIComponent(k).replace(/'/g, '%27');
+      return `<tr onclick="toggleClientBand('opps','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
+        <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span></td>
+        <td>${members.length} deals · ${pbFmtRand(Math.round(tcv))} TCV</td>
+        <td>${first.order_date ? new Date(first.order_date).toLocaleDateString('en-ZA') : '—'}</td>
+        <td>${advStage ? `<span class="badge badge-blue">${advStage.name}</span>` : '—'}</td>
+        <td style="text-align:right;">${prob ? prob + '%' : '—'}</td>
+      </tr>`;
+    };
+
     const groupRenderer = (filtered) => {
-      const byOrg = new Map(); const order = [];
+      const byOrg = new Map(); const order = []; const labels = new Map();
       filtered.forEach(d => {
-        const k = d.org_id != null ? 'o' + (+d.org_id) : 'x' + d.id;   // org-less deals never band
-        if (!byOrg.has(k)) { byOrg.set(k, []); order.push(k); }
+        // Family band key (v7.8.96): the deal's org walked to its ultimate parent.
+        const bk = dealBandOf(d, orgs);
+        const k = bk.key;
+        if (!byOrg.has(k)) { byOrg.set(k, []); order.push(k); labels.set(k, bk.label); }
         byOrg.get(k).push(d);
       });
       return order.map(k => {
         const members = byOrg.get(k);
         if (members.length === 1) return familiesHtml(members, false);
-        const org = orgs.find(o => 'o' + o.id === k);
         const open = _clientOpen.has('opps:' + k);
-        const nSites = new Set(members.filter(d => d.site_id).map(d => +d.site_id)).size;
-        const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
-        const bits = [members.length + ' opportunities'];
-        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
-        bits.push(pbFmtRand(Math.round(tcv)) + ' TCV');
-        return _clientBandRow('opps', k, open, org?.name || '(No organisation)', 'opportunities', bits.join(' · '), 5)
+        return dealBandRow(k, open, labels.get(k) || '(No organisation)', members)
              + (open ? familiesHtml(members, true) : '');
       }).join('');
     };
@@ -13784,6 +13804,53 @@ function leadClientOf(l, orgs, sites) {
 }
 const leadClientLabel = (l, orgs, sites) => leadClientOf(l, orgs, sites).label;
 
+// ── Client band identity (v7.8.96) ────────────────────────────────────────────
+// Register bands group by ORGANISATIONAL FAMILY, not the raw org record:
+//   1. resolve the record's org (leadClientOf rules / deals.org_id, unchanged);
+//   2. a free-text lead name that case-folds equal to an existing organisation's
+//      colloquial name ADOPTS that organisation, so a typed "Kargo Group" lead
+//      bands with the linked Kargo Group leads instead of sitting apart;
+//   3. walk parent_org_id to the ULTIMATE parent (cycle/self-reference guarded —
+//      prod has three self-referencing rows), so the day the family-linking data
+//      pass populates parents, whole families band automatically with no code
+//      change. With no parents linked (today) this is exactly per-org banding.
+// The per-row Client COLUMN stays leadClientOf (the lead's own organisation) —
+// under a family band the column may legitimately differ from the band heading.
+// UNBUILD: memory note client-band-rows-v7896 — revert the v7.8.96 commit, or by
+// hand: group renderers back to leadClientOf / 'o'+org_id keys + _clientBandRow.
+function _ultimateParentOrg(org, orgs) {
+  const seen = new Set();
+  let cur = org;
+  while (cur && cur.parent_org_id && !seen.has(+cur.id)) {
+    seen.add(+cur.id);
+    const p = (orgs || []).find(x => +x.id === +cur.parent_org_id);
+    if (!p || seen.has(+p.id) || +p.id === +cur.id) break;
+    cur = p;
+  }
+  return cur || org;
+}
+function leadBandOf(l, orgs, sites) {
+  const O = orgs || allData['organisations'] || [];
+  const c = leadClientOf(l, O, sites);
+  if (c.key === 'none') return c;   // clientless — and 'none' must not read as an 'n' name key
+  let org = null;
+  if (c.key[0] === 'o') org = O.find(x => 'o' + x.id === c.key) || null;
+  else if (c.key[0] === 'n') {
+    const nm = c.key.slice(1);   // leadClientOf already case-folded the typed name
+    org = O.find(x => (x.name || '').trim().toLowerCase() === nm) || null;
+  }
+  if (!org) return c;
+  const top = _ultimateParentOrg(org, O);
+  return { key: 'o' + top.id, label: top.name || c.label };
+}
+function dealBandOf(d, orgs) {
+  const O = orgs || allData['organisations'] || [];
+  const org = d.org_id != null ? O.find(o => +o.id === +d.org_id) : null;
+  if (!org) return { key: 'x' + d.id, label: '(No organisation)' };
+  const top = _ultimateParentOrg(org, O);
+  return { key: 'o' + top.id, label: top.name || '(No organisation)' };
+}
+
 // Lead display label outside the leads page (engagement modal, dashboard,
 // history, contacts admin) — site-first like the leads list: embedded
 // sites(name) from the fetch, else leadSiteLabel, else the organisation, else
@@ -13966,7 +14033,8 @@ async function renderLeadsPage() {
     const leadsGroupRenderer = (rows) => {
       const bands = new Map(); const order = [];
       rows.forEach(l => {
-        const c = leadClientOf(l, orgs, sites);
+        // Family band key (v7.8.96): parent-aware + free-text-name merge.
+        const c = leadBandOf(l, orgs, sites);
         const key = c.key === 'none' ? 'x' + l.id : c.key;   // clientless leads never band
         let b = bands.get(key);
         if (!b) { b = { key, label: c.label, rows: [] }; bands.set(key, b); order.push(b); }
@@ -13975,12 +14043,7 @@ async function renderLeadsPage() {
       return order.map(b => {
         if (b.rows.length === 1) return renderLeadRow(b.rows[0], sources, regions, people, orgs);
         const open = _leadBandsDefaultOpen !== _clientOpen.has('leads:' + b.key);
-        const nSites = new Set(b.rows
-          .map(l => l.site_id ? 'id' + l.site_id : (leadSiteLabel(l) || '').toLowerCase())
-          .filter(Boolean)).size;
-        const bits = [b.rows.length + ' leads'];
-        if (nSites) bits.push(nSites + ' site' + (nSites !== 1 ? 's' : ''));
-        return _clientBandRow('leads', b.key, open, b.label, 'leads', bits.join(' · '), cols.length)
+        return _leadBandRowHtml(b, open, sources, regions, people, orgs)
              + (open ? b.rows.map(l =>
                  renderLeadRow(l, sources, regions, people, orgs).replace('<tr ', '<tr class="client-band-child" ')
                ).join('') : '');
@@ -14111,6 +14174,78 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
     <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
+    <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
+    <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
+    <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
+    <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
+    <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
+  </tr>`;
+}
+
+// CLIENT BAND ROW (leads, v7.8.96): column-aligned like the child rows it
+// collapses (Richard 2026-08-28), replacing the old full-width text strip.
+// Identity columns — Source, Region, Branch, Owner — come from the band's
+// FIRST-LOADED lead (earliest created_at), showing its CURRENT values (no
+// snapshot). Site shows the one shared site name, else a count. FACT shows the
+// band's best score as that lead's dots. Next Action = the soonest due in the
+// band; Last Touch = the most recent, aging-coloured by that lead's own
+// owner/status thresholds. Click toggles the band, exactly like the old strip.
+function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
+  const rows = b.rows;
+  const first = [...rows].sort((x, y) => new Date(x.created_at || 0) - new Date(y.created_at || 0))[0];
+  const source = sources.find(s => +s.id === +first.source_id);
+  const region = regions.find(r => +r.id === +first.region_id);
+  const branch = (allData['branches'] || []).find(x => +x.id === +first.branch_id);
+  const owner  = people.find(p => +p.id === +first.owner_id);
+  const ownerDisplay = owner
+    ? [owner.first_name, owner.last_name].filter(Boolean).join(' ')
+    : '<span style="color:var(--text3);font-style:italic;">Shared</span>';
+  // Site: the one shared site name, else how many distinct sites the band spans.
+  const siteLabels = [...new Set(rows.map(l => (leadSiteLabel(l) || '').trim()).filter(Boolean))];
+  const siteCell = siteLabels.length === 1 ? cEsc(siteLabels[0])
+                 : siteLabels.length ? siteLabels.length + ' sites'
+                 : '—';
+  // FACT: the band's best score, rendered as that lead's dots (same order/colours
+  // as renderLeadRow: F=fit, A=access, C=capacity, T=trigger).
+  const factOf = l => (+l.fit || 0) + (+l.trigger_score || 0) + (+l.access || 0) + (+l.capacity || 0);
+  const best = rows.reduce((a, l) => factOf(l) > factOf(a) ? l : a, rows[0]);
+  const dotColour = (n) => n === 2 ? '#16a34a' : n === 1 ? '#f59e0b' : '#cbd5e1';
+  const qualDots = ['F','A','C','T'].map((letter, i) => {
+    const val = [best.fit, best.access, best.capacity, best.trigger_score][i];
+    return `<span title="Best in group — ${letter}: ${val===2?'Strong':val===1?'Weak':'Unknown'}" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${dotColour(val)};margin:0 1px;"></span>`;
+  }).join('');
+  // Next action: soonest due (dated ones win), else the first captured text.
+  const dated = rows.filter(l => l.next_action && l.next_action_date)
+                    .sort((x, y) => new Date(x.next_action_date) - new Date(y.next_action_date));
+  const na = dated[0] || rows.find(l => l.next_action) || null;
+  let nextActionCell = '—';
+  if (na) {
+    const isOverdue = na.next_action_date && new Date(na.next_action_date) < new Date(new Date().toDateString());
+    const dateLabel = na.next_action_date ? new Date(na.next_action_date).toLocaleDateString('en-ZA') : '';
+    nextActionCell = `<div style="${isOverdue ? 'color:var(--red);font-weight:600;' : ''}">
+      ${na.next_action}${dateLabel ? `<div style="font-size:11px;opacity:0.7;">${dateLabel}</div>` : ''}
+    </div>`;
+  }
+  // Last touch: the band's most recent, coloured by THAT lead's aging thresholds.
+  const touched = rows.filter(l => l.last_touch_date)
+                      .sort((x, y) => new Date(y.last_touch_date) - new Date(x.last_touch_date));
+  let lastTouchCell = '—';
+  if (touched.length) {
+    const t = touched[0];
+    const days = Math.floor((Date.now() - new Date(t.last_touch_date).getTime()) / 86400000);
+    const kind = t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null;
+    const limit = kind ? agingDaysFor(t.owner_id, kind) : 0;
+    const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
+              : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
+              : '';
+    lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
+  }
+  const enc = encodeURIComponent(b.key).replace(/'/g, '%27');
+  return `<tr onclick="toggleClientBand('leads','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
+    <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(b.label)} <span style="font-weight:500;color:var(--text2);">(${rows.length})</span></td>
+    <td style="padding:10px 12px;font-size:13px;">${siteCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
