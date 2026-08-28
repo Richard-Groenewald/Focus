@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -15936,6 +15936,7 @@ let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
+  window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
   _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
@@ -16147,7 +16148,9 @@ function applyLeadGraceLock() {
   // of the promotion criteria. Org Change button is hidden too (applyLeadReadOnly
   // re-showed it, so hide it here so it wins).
   const changeBtn = document.getElementById('lead-target-org-change-btn');
-  if (changeBtn) changeBtn.style.display = editable ? '' : 'none';
+  // The org fill window (lead loaded org-less) keeps Change available past the
+  // grace lock — same waiver as applyLeadTargetOrgLock, or this hide would win.
+  if (changeBtn) changeBtn.style.display = (editable || window._leadOrgFillWindow) ? '' : 'none';
   // The mandatory banner only applies while still New (requirements not yet met): it
   // disappears the moment the lead reaches Working, and returns if an edit during the
   // grace window breaks the requirements and drops it back to New (the status recompute
@@ -17412,6 +17415,12 @@ function applyLeadDescriptionMode() {
 }
 
 function populateLeadForm() {
+  // Org fill window: if the lead LOADED without an organisation, the org controls
+  // stay workable for this whole form-open even past the New/grace freeze — the
+  // organisation is required to reach Review, so an as-loaded gap must be fillable
+  // at any stage, and a mis-pick stays correctable until the form closes. The next
+  // open (org now saved) freezes it as spec b2 intends.
+  window._leadOrgFillWindow = !leadData.target_org_id && !String(leadData.target_org_name || '').trim();
   // Source
   if (leadData.source_id) document.getElementById('lead-source-id').value = leadData.source_id;
   if (leadData.source_person_id) document.getElementById('lead-source-person-id').value = leadData.source_person_id;
@@ -19457,6 +19466,9 @@ function leadLiveSourceComplete() {
 // Once past New the target organisation is frozen (spec b2 — contact can still
 // change). leadReadOnly (Promoted/Dead) already disables everything globally.
 function applyLeadTargetOrgLock(locked) {
+  // The as-loaded org gap keeps the controls live for this form-open (see
+  // populateLeadForm) — a picked-but-unsaved org stays correctable via Change.
+  if (window._leadOrgFillWindow) locked = false;
   const dd        = document.getElementById('lead-target-org-id');
   const picker    = document.getElementById('lead-target-org-picker');
   const chosen    = document.getElementById('lead-target-org-chosen');
@@ -19465,14 +19477,18 @@ function applyLeadTargetOrgLock(locked) {
   const matchEl   = document.getElementById('lead-target-org-matches');
   const hintEl    = document.getElementById('lead-target-org-hint');
   const changeBtn = document.getElementById('lead-target-org-change-btn');
-  if (dd) dd.disabled = locked;
+  const hasExisting = !!leadData.target_org_id;
+  const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
+  // The freeze applies to a CHOSEN organisation (spec b2) — never to the absence
+  // of one. An org-less lead past New used to freeze EMPTY: a disabled dropdown
+  // promising "create a new one below" with the input hidden, and no way left to
+  // ever enter the org Review requires (Kargo Group, Richard 2026-08-28).
+  if (dd) dd.disabled = locked && (hasExisting || hasNew);
   // Mid-type protection: if the user is actively editing a free-text new-org name when
   // a relayout fires (notably the New→Working autosave flip), don't collapse the input
   // into the chosen chip — that reads as the typed name vanishing. It collapses on the
   // next relayout once the field no longer has focus.
-  if (!locked && !leadData.target_org_id && nameField && document.activeElement === nameField) return;
-  const hasExisting = !!leadData.target_org_id;
-  const hasNew = !leadData.target_org_id && !!String(leadData.target_org_name || '').trim();
+  if (!leadData.target_org_id && nameField && document.activeElement === nameField) return;
   if (hasExisting || hasNew) {
     // A chosen org stays in the "picked" chip on reopen (existing FK or free-text new
     // org), with a Change button only while editable. Fixes the dropdown reappearing.
@@ -19490,13 +19506,9 @@ function applyLeadTargetOrgLock(locked) {
     if (matchEl)  { matchEl.innerHTML = ''; matchEl.style.display = 'none'; }
     if (hintEl)    hintEl.style.display = 'none';
     if (changeBtn) changeBtn.style.display = locked ? 'none' : '';
-  } else if (locked) {
-    if (picker)    picker.style.display = 'flex';
-    if (chosen)    chosen.style.display = 'none';
-    if (nameField) nameField.style.display = 'none';
-    if (hintEl)    hintEl.style.display = 'none';
   } else {
-    // Editable, nothing chosen yet → live picker + free-text via the change handler.
+    // Nothing chosen yet → live picker + free-text via the change handler,
+    // whatever the stage (an empty org is never frozen — see above).
     if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
   }
 }
