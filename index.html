@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8743,36 +8743,22 @@ async function _dealLeadHistoryHtml(dealId) {
 
   const label = leadEngLabel(lead) || ('Lead #' + lead.id);
   const totalMins = engs.reduce((t, e) => t + (+e.duration_minutes || 0), 0);
-  const rows = engs.map(e => {
-    const type = e.engagement_type
-      ? `<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text2);background:var(--card);border:1px solid var(--border);padding:1px 6px;border-radius:4px;">${cEsc(e.engagement_type)}</span>` : '';
-    const mode = e.work_mode === 'internal'
-      ? `<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#FEF3C7;color:#92400E;">OUR WORK</span>` : '';
-    const time = e.duration_minutes
-      ? `<span style="font-size:10px;font-weight:700;color:var(--navy);background:var(--card);border:1px solid var(--border);padding:1px 6px;border-radius:4px;">${fmtMinutes(e.duration_minutes)}</span>` : '';
-    const next = e.next_action
-      ? `<div style="font-size:11px;margin-top:3px;color:var(--text3);">Next: ${cEsc(e.next_action)}${e.next_action_date ? ' &middot; ' + e.next_action_date : ''}${e.next_action_done ? ' &check;' : ''}</div>` : '';
-    const note = e.notes
-      ? `<div style="font-size:12px;color:var(--text2);margin-top:3px;white-space:pre-wrap;">${cEsc(String(e.notes).slice(0, 400))}${String(e.notes).length > 400 ? '…' : ''}</div>` : '';
-    return `
-      <div style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;" onclick="openEngagement(${e.id})">
-        <div style="font-size:13px;"><strong>${e.engagement_date || ''}</strong> &nbsp; ${type} ${mode} ${time}</div>
-        ${note}${next}
-      </div>`;
-  }).join('');
 
+  // Same stream-grouped table as the deal's own list above it (Richard
+  // 2026-08-28: the lead's history must look identical, and closed engagements
+  // are history — VISIBLE by default, not tucked behind a collapsed strip).
   return `
     <div id="deal-lead-history" style="margin-top:18px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
       <div onclick="toggleDealLeadHistory()" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 12px;background:var(--bg);font-weight:700;font-size:13px;">
-        <span><span id="deal-lead-history-caret">&#9656;</span> Before promotion &mdash; ${engs.length} engagement${engs.length === 1 ? '' : 's'} on the lead
+        <span><span id="deal-lead-history-caret">&#9662;</span> Before promotion &mdash; ${engs.length} engagement${engs.length === 1 ? '' : 's'} on the lead
           <span style="font-weight:600;color:var(--text3);">&middot; ${cEsc(label)}</span></span>
         <span style="font-weight:600;color:var(--text3);">${totalMins ? fmtMinutes(totalMins) + ' recorded' : ''}</span>
       </div>
-      <div id="deal-lead-history-body" style="display:none;">
+      <div id="deal-lead-history-body" style="display:block;">
         <div style="padding:8px 12px;background:var(--card);font-size:11px;color:var(--text3);border-bottom:1px solid var(--border);">
           These belong to the lead and are shown here for continuity. Open one to read it; it is edited on the lead, not the deal.
         </div>
-        ${rows}
+        ${_engStreamTableHtml(engs)}
       </div>
     </div>`;
 }
@@ -8786,19 +8772,13 @@ function toggleDealLeadHistory() {
   if (caret) caret.innerHTML = open ? '&#9656;' : '&#9662;';
 }
 
-async function loadEngagements(dealId) {
-  const list = document.getElementById('engagement-list');
-  if (!list) return;
-  if (!dealId) { list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>'; return; }
-
-  try {
-    const engs = await apiGet('engagements', `deal_id=eq.${dealId}&select=*&order=engagement_date.desc,created_at.desc`);
-    const leadHistoryHtml = await _dealLeadHistoryHtml(dealId);
-    if (!engs.length) {
-      list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>' + leadHistoryHtml;
-      return;
-    }
-
+// Shared stream-grouped engagement table — used by the deal's Engagement tab AND
+// the promoted lead's "Before promotion" history beneath it, so the lead's
+// history looks and works EXACTLY like the deal's own list (Richard 2026-08-28;
+// it used to render as a different compact-card widget). Expansion state is
+// shared via window._dealEngOpenStreams; stream ids are engagement ids (globally
+// unique across leads and deals) so the two tables never collide.
+function _engStreamTableHtml(engs) {
     const graceMins = engagementEditMinutes();   // Infinity when set to 'indefinite'
     const now = Date.now();
 
@@ -8896,7 +8876,7 @@ async function loadEngagements(dealId) {
       </tr>` + g.list.map(e => engRowHtml(e, g.rootId, shown)).join('');
     }).join('');
 
-    list.innerHTML = `
+    return `
       <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;">
         <thead><tr style="background:var(--bg);text-align:left;">
           <th style="padding:8px 8px 8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;white-space:nowrap;">Latest</th>
@@ -8906,7 +8886,20 @@ async function loadEngagements(dealId) {
           <th style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;text-align:right;white-space:nowrap;">Completed</th>
         </tr></thead>
         <tbody>${rows}</tbody>
-      </table>${leadHistoryHtml}`;
+      </table>`;
+}
+
+async function loadEngagements(dealId) {
+  const list = document.getElementById('engagement-list');
+  if (!list) return;
+  if (!dealId) { list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>'; return; }
+
+  try {
+    const engs = await apiGet('engagements', `deal_id=eq.${dealId}&select=*&order=engagement_date.desc,created_at.desc`);
+    const leadHistoryHtml = await _dealLeadHistoryHtml(dealId);
+    list.innerHTML = (engs.length
+      ? _engStreamTableHtml(engs)
+      : '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>') + leadHistoryHtml;
     startEditCountdownTicker();   // drive the per-engagement edit-window countdowns
   } catch(err) {
     list.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3);">Error: ${err.message}</div>`;
@@ -14018,7 +14011,11 @@ async function renderLeadsPage() {
       { key: 'qual',   label: 'F A C T',     get: l => (+l.fit||0)+(+l.trigger_score||0)+(+l.access||0)+(+l.capacity||0), align: 'center' },
       { key: 'owner',  label: 'Owner',       get: l => ownerName(l) },
       { key: 'nxt',    label: 'Next Action', get: l => l.next_action || '' },
-      { key: 'touch',  label: 'Last Touch',  get: l => lastTouchDays(l) },
+      // Promoted leads sort/filter this column by days since PROMOTION — the
+      // cell shows "Promoted <date>" there, not the touch clock.
+      { key: 'touch',  label: 'Last Touch',  get: l => (l.status === 'Promoted' && l.promoted_at)
+          ? Math.floor((Date.now() - new Date(l.promoted_at).getTime()) / 86400000)
+          : lastTouchDays(l) },
     ];
 
     // Client roll-up, always on: leads sharing a client band under a client
@@ -14152,7 +14149,11 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   // Was hardcoded 14/30 until v7.8.89. Only Raw and Working age; other stages
   // stay neutral (Nurture/Hold run on their own clocks), as does aging = off.
   let lastTouchCell = '—';
-  if (l.last_touch_date) {
+  if (l.status === 'Promoted' && l.promoted_at) {
+    // Promoted leads are done being touched — the column shows the milestone
+    // instead of a meaningless aging clock (Richard 2026-08-28).
+    lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>`;
+  } else if (l.last_touch_date) {
     const days = Math.floor((Date.now() - new Date(l.last_touch_date).getTime()) / 86400000);
     const kind = l.status === 'New' ? 'new' : l.status === 'Working' ? 'working' : null;
     const limit = kind ? agingDaysFor(l.owner_id, kind) : 0;
@@ -14170,7 +14171,12 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     rowBorder += 'box-shadow:inset 3px 0 0 0 var(--red);';
   }
 
-  return `<tr onclick="openLead(${l.id})" style="cursor:pointer;${rowBorder}">
+  // A promoted lead's row asks instead of opening directly (Richard 2026-08-28):
+  // view the lead read-only, or go straight to the opportunity it became.
+  const rowClick = (l.status === 'Promoted' && l.promoted_deal_id)
+    ? `openPromotedLeadAsk(${l.id}, ${+l.promoted_deal_id})`
+    : `openLead(${l.id})`;
+  return `<tr onclick="${rowClick}" style="cursor:pointer;${rowBorder}">
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
     <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
@@ -14228,10 +14234,17 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     </div>`;
   }
   // Last touch: the band's most recent, coloured by THAT lead's aging thresholds.
+  // On the Promoted tab (every member promoted) the milestone replaces the clock:
+  // show the band's most recent promotion date instead.
   const touched = rows.filter(l => l.last_touch_date)
                       .sort((x, y) => new Date(y.last_touch_date) - new Date(x.last_touch_date));
   let lastTouchCell = '—';
-  if (touched.length) {
+  const promotedAll = rows.every(l => l.status === 'Promoted');
+  if (promotedAll) {
+    const latestPromo = rows.filter(l => l.promoted_at)
+                            .sort((x, y) => new Date(y.promoted_at) - new Date(x.promoted_at))[0];
+    if (latestPromo) lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>`;
+  } else if (touched.length) {
     const t = touched[0];
     const days = Math.floor((Date.now() - new Date(t.last_touch_date).getTime()) / 86400000);
     const kind = t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null;
@@ -14253,6 +14266,28 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
   </tr>`;
+}
+
+// Clicking a Promoted lead in the register: ask before opening (Richard
+// 2026-08-28). The lead is already fully read-only at this stage, so "view the
+// lead" is just the normal open; the second button goes straight to the deal.
+function openPromotedLeadAsk(leadId, dealId) {
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:480px;">
+        <div class="modal-header">
+          <div class="modal-title">Lead promoted</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);line-height:1.5;">This lead has been promoted to an opportunity. Do you want to view the lead in read-only mode or open the opportunity?</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal(); openLead(${+leadId});">View lead (read-only)</button>
+          <button class="btn btn-primary" onclick="closeModal(); openOpportunity(${+dealId});">Open the opportunity →</button>
+        </div>
+      </div>
+    </div>`);
 }
 
 // Open an existing lead for editing.
@@ -19120,6 +19155,9 @@ async function saveExecFlagVerdict(flagId, verdict) {
         dead_reviewed_at: nowIso,
         updated_at: nowIso,
       }, 'id=eq.' + leadData.id);
+      // Open obligations close with the lead — a killed lead must not keep
+      // open actions lingering invisibly in the database.
+      await closeLeadOpenActions(leadData.id, 'Closed with the lead (red flag).');
     }
     closeModal();
     await loadLeadQualificationSelections(leadData.id);
@@ -19501,6 +19539,8 @@ async function saveDeclineStageRequest() {
         dead_notes: (req.request_type === 'hold' ? 'Hold' : LEAD_STAGE_X) + ' request declined: ' + reason,
         updated_at: new Date().toISOString(),
       }, 'id=eq.' + leadData.id);
+      // Open obligations close with the lead (same rule as the Decline path).
+      await closeLeadOpenActions(leadData.id, 'Closed with the lead (request declined → Dead).');
     }
     window._leadStageRequest = null;
     window._leadStageRequestFor = null;
@@ -20604,6 +20644,24 @@ async function openPromoteQ4Screen1() {
   const naOpts = '<option value="">— select —</option>' +
     nextActions.map(n => `<option value="${n.id}" ${+s.q4.nextActionId===+n.id?'selected':''}>${n.name}</option>`).join('');
 
+  // Outstanding actions on the lead (Richard 2026-08-28: the user must be TOLD).
+  // Mirrors the commit's carry-forward filter exactly (next_action_done=false),
+  // so the banner lists precisely what will move to the opportunity.
+  if (!s._openActs) {
+    try {
+      s._openActs = await apiGet('engagements',
+        `lead_id=eq.${leadData.id}&next_action_done=eq.false&select=id,next_action,next_action_date,engagement_type&order=next_action_date.asc,id.asc`);
+    } catch (e) { s._openActs = []; }
+  }
+  const openActsBanner = (s._openActs || []).length ? `
+    <div style="margin:0 0 14px;padding:10px 12px;background:#FEF3C7;border:1px solid #E9C46A;border-radius:var(--radius);color:#7A5B10;">
+      <div style="font-weight:700;font-size:12px;margin-bottom:6px;">⚠ ${s._openActs.length} open action${s._openActs.length === 1 ? '' : 's'} on this lead will carry over</div>
+      ${s._openActs.map(a => `<div style="font-size:12px;padding:1px 0;">• ${cEsc(a.next_action || a.engagement_type || 'Engagement')}${a.next_action_date ? ` <span style="opacity:0.75;">— due ${new Date(a.next_action_date).toLocaleDateString('en-ZA')}</span>` : ''}</div>`).join('')}
+      <div style="font-size:11px;margin-top:6px;opacity:0.85;">${(window._promoteMode === 'request')
+        ? 'They move to the opportunity when the request is accepted; the lead keeps closed copies as history.'
+        : 'They will continue on the new opportunity; the lead keeps closed copies as history.'}</div>
+    </div>` : '';
+
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:640px;max-height:90vh;display:flex;flex-direction:column;">
@@ -20613,6 +20671,7 @@ async function openPromoteQ4Screen1() {
         </div>
         <div class="modal-body" style="overflow-y:auto;">
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Name the new deal and lock in your first commitment.</div>
+          ${openActsBanner}
 
           <div class="form-group">
             <label class="form-label">Deal name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
@@ -21335,6 +21394,23 @@ async function commitPromotion(s) {
 // ── Decline modal ─────────────────────────────────────────
 // Available whenever status is not already Dead/Promoted. Captures dead_reason +
 // dead_notes; the trigger flips status to Dead on save.
+
+// Close every still-open next action when a lead leaves the pipeline as Dead
+// (Richard 2026-08-28). Without this the actions lingered open-but-invisible:
+// the attention/outstanding collectors skip Dead leads, so the obligations
+// vanished from every nag surface while staying open in the database. Called
+// from all three Dead-writing paths (decline, exec red-flag kill, stage-request
+// declined → dead), each stamping its own completion note.
+async function closeLeadOpenActions(leadId, why) {
+  try {
+    await api('engagements', 'PATCH', {
+      next_action_done:            true,
+      next_action_completed_at:    new Date().toISOString(),
+      next_action_completion_note: why,
+    }, `lead_id=eq.${leadId}&next_action_done=eq.false&next_action=not.is.null`);
+  } catch (e) { console.warn('Could not close the lead\'s open actions:', e.message); }
+}
+
 async function openDeclineModal() {
   if (!leadData?.id) return;
   let reasons = allData['decline_reasons'];
@@ -21342,8 +21418,18 @@ async function openDeclineModal() {
     try { reasons = await apiGet('decline_reasons', 'active=eq.true&select=*&order=sort_order,name'); allData['decline_reasons'] = reasons; }
     catch (e) { reasons = []; }
   }
-  const reasonOpts = '<option value="">— select a reason —</option>' +
-    (reasons || []).map(r => `<option value="${r.id}">${(r.name || '').replace(/</g, '&lt;')}</option>`).join('');
+  // Outstanding actions on the lead: the user must be told they close with it.
+  let openActs = [];
+  try {
+    openActs = await apiGet('engagements',
+      `lead_id=eq.${leadData.id}&next_action_done=eq.false&next_action=not.is.null&select=id,next_action,next_action_date&order=next_action_date.asc,id.asc`);
+  } catch (e) { openActs = []; }
+  const openActsBlock = openActs.length ? `
+    <div style="margin-bottom:14px;padding:10px 12px;background:#FEF3C7;border:1px solid #E9C46A;border-radius:var(--radius);color:#7A5B10;">
+      <div style="font-weight:700;font-size:12px;margin-bottom:6px;">⚠ ${openActs.length} open action${openActs.length === 1 ? '' : 's'} on this lead</div>
+      ${openActs.map(a => `<div style="font-size:12px;padding:1px 0;">• ${cEsc(a.next_action)}${a.next_action_date ? ` <span style="opacity:0.75;">— due ${new Date(a.next_action_date).toLocaleDateString('en-ZA')}</span>` : ''}</div>`).join('')}
+      <div style="font-size:11px;margin-top:6px;opacity:0.85;">Declining closes ${openActs.length === 1 ? 'it' : 'them'} with the lead.</div>
+    </div>` : '';
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:560px;">
@@ -21352,6 +21438,7 @@ async function openDeclineModal() {
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
+          ${openActsBlock}
           <div class="form-group" style="margin-bottom:12px;">
             <label class="form-label">Category <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <div style="display:flex;gap:8px;">
@@ -21424,6 +21511,8 @@ async function saveDecline() {
       dead_reviewed_at:  selfOversee ? nowIso : null,
       updated_at:        nowIso,
     }, 'id=eq.' + leadData.id);
+    // Open obligations close with the lead (the decline modal listed them).
+    await closeLeadOpenActions(leadData.id, 'Closed with the lead (declined).');
     // Audit/queue row for the Approvals widget (pre-approved on self-oversight).
     const rLabel = (allData['decline_reasons'] || []).find(x => +x.id === reasonId)?.name || '';
     await api('lead_stage_requests', 'POST', {
