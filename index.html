@@ -638,7 +638,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.92 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -674,7 +674,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.92 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -15935,6 +15935,7 @@ async function openLeadForm(id) {
     // that becomes the thread's "Original". See leadIsAppendMode.
     window._leadDescStartAppend = !!((leadData.description || '').trim());
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
+    _promotedLeadContactsCache = null;   // promoted read-through refetches per open
     resetLeadForm();
     await initLeadForm();
     await loadLeadDescriptionLog(id);
@@ -17044,9 +17045,71 @@ function toggleLeadContact(i) {
   renderLeadContacts();
 }
 
+// Read-through contact list for a PROMOTED lead: contacts move to the opportunity
+// at promotion, so the lead's own list is empty and read as "contacts gone"
+// (Willowton, Richard 2026-08-28). Render the deal's contacts read-only with a
+// pointer to the opportunity; management (add/edit/remove) stays on the deal.
+// Cache is per lead-open (cleared in openLeadForm) — renderLeadContacts fires
+// several times per open and must not refetch each time.
+let _promotedLeadContactsCache = null;   // { dealId, rows }
+async function _renderPromotedLeadContacts(el, dealId) {
+  const wrap  = document.getElementById('lead-contact-add-btn-wrap');
+  const entry = document.getElementById('lead-contact-entry');
+  if (wrap)  wrap.style.display = 'none';
+  if (entry) entry.style.display = 'none';
+  const note = `<div style="font-size:11px;color:var(--text3);margin-bottom:6px;">Contacts are managed on the opportunity since this lead was promoted — <a href="#" onclick="closeLeadPage({force:true}); openOpportunity(${+dealId}); return false;" style="color:var(--red);">open the opportunity</a>.</div>`;
+  const esc = s => String(s == null ? '' : s).replace(/</g, '&lt;');
+  let rows = (_promotedLeadContactsCache && _promotedLeadContactsCache.dealId === +dealId)
+    ? _promotedLeadContactsCache.rows : null;
+  if (!rows) {
+    el.innerHTML = note + '<div style="font-size:12px;color:var(--text3);">Loading contacts…</div>';
+    try {
+      const dcs = await apiGet('deal_contacts', `deal_id=eq.${+dealId}&select=*`);
+      const ids = [...new Set(dcs.map(c => +c.person_id).filter(Boolean))];
+      let people = (allData['people'] || []).filter(p => ids.includes(+p.id));
+      if (ids.length && people.length < ids.length) {
+        try { people = await apiGet('people', `id=in.(${ids.join(',')})&select=*`); } catch (e) {}
+      }
+      // Job titles come from the current affiliation on the lead's organisation.
+      const titleByPid = {};
+      if (leadData && leadData.target_org_id) {
+        try {
+          (await apiGet('person_organisation_roles', `org_id=eq.${+leadData.target_org_id}&end_date=is.null&select=person_id,job_title`))
+            .forEach(r => { if (r.job_title) titleByPid[+r.person_id] = r.job_title; });
+        } catch (e) {}
+      }
+      const byId = {}; people.forEach(p => { byId[+p.id] = p; });
+      rows = dcs.map(c => {
+        const p = byId[+c.person_id] || {};
+        return {
+          name:  [p.first_name, p.last_name].filter(Boolean).join(' ') || ('Person #' + c.person_id),
+          title: titleByPid[+c.person_id] || '',
+          email: p.email || '', phone: p.phone || '', note: c.note || '',
+        };
+      });
+      _promotedLeadContactsCache = { dealId: +dealId, rows };
+    } catch (e) {
+      el.innerHTML = note + `<div style="font-size:12px;color:var(--red);">Could not load the opportunity's contacts: ${esc(e.message)}</div>`;
+      return;
+    }
+  }
+  el.innerHTML = note + (rows.length ? rows.map(r => `
+    <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:6px;background:var(--bg2);padding:8px 10px;">
+      <strong style="font-size:13px;">${esc(r.name)}</strong>
+      <div style="font-size:12px;color:var(--text2);margin-top:2px;">${[r.title, r.email, r.phone].filter(Boolean).map(esc).join(' · ') || '—'}</div>
+      ${r.note ? `<div style="font-size:12px;color:var(--text3);margin-top:2px;">${esc(r.note)}</div>` : ''}
+    </div>`).join('')
+    : '<div style="font-size:12px;color:var(--text3);">The opportunity has no contacts yet.</div>');
+}
+
 function renderLeadContacts() {
   const el = document.getElementById('lead-contacts-list');
   if (!el) return;
+  // Promoted: the lead's own list is empty by design — show the deal's contacts.
+  if (leadData && leadData.id && leadData.status === 'Promoted' && leadData.promoted_deal_id) {
+    _renderPromotedLeadContacts(el, +leadData.promoted_deal_id);
+    return;
+  }
   // Load affiliations so existing/affiliated can be distinguished; re-render when ready.
   if (leadContacts.some(c => c.person_id) && !allData['person_organisation_roles']) {
     _ensurePersonAffiliationsLoaded().then(() => renderLeadContacts());
