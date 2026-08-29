@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -13889,9 +13889,12 @@ async function renderLeadsPage() {
       allData['regions']      || apiGet('regions', 'select=*'),
       allData['service_major']|| apiGet('service_major', 'select=*'),
       allData['people']       || apiGet('people', 'select=*'),
-      allData['organisations']|| apiGet('organisations', 'select=*'),
+      // Orgs + sites always fresh: a session cache that predates rows born since
+      // (capture-born orgs, the 08-25 backfill) fed the register and the lead form
+      // stale lists — populate's restore then no-opped and autosave nulled the FK.
+      apiGet('organisations', 'select=*'),
       allData['research_campaigns'] || apiGet('research_campaigns', 'select=*'),
-      allData['sites']        || apiGet('sites', 'select=*'),
+      apiGet('sites', 'select=*'),
     ]);
     allData['lead_sources']       = sources;
     allData['regions']            = regions;
@@ -16143,6 +16146,17 @@ async function openLeadForm(id) {
         if (srows[0]) (allData['sites'] = allData['sites'] || []).push(srows[0]);
       } catch (e) { /* populate falls back exactly as before */ }
     }
+    // Same rescue for the organisation: the org dropdown renders from the cache,
+    // and a cached list that predates this org's row (capture-born Prospects, the
+    // 08-25 backfill) made populate's restore a silent no-op — the empty select
+    // then round-tripped target_org_id NULL on the next autosave (Lesley-Anne's
+    // serial org wipes, 2026-08-27..29).
+    if (leadData.target_org_id && !(allData['organisations'] || []).some(o => +o.id === +leadData.target_org_id)) {
+      try {
+        const orows = await apiGet('organisations', 'id=eq.' + leadData.target_org_id + '&select=*');
+        if (orows[0]) (allData['organisations'] = allData['organisations'] || []).push(orows[0]);
+      } catch (e) { /* saveLead's selectFkOrKeep guard still preserves the stored value */ }
+    }
     // Description threading is decided ONCE per open: an existing description makes
     // this session append-only (add-a-note); a blank one stays a normal editable box
     // that becomes the thread's "Original". See leadIsAppendMode.
@@ -17043,7 +17057,7 @@ async function initLeadForm() {
     allData['regions']            || apiGet('regions', 'active=eq.true&select=*&order=name.asc'),
     allData['service_major']      || apiGet('service_major', 'active=eq.true&select=*&order=name.asc'),
     allData['people']             || apiGet('people', 'select=*&order=first_name.asc'),
-    allData['organisations']      || apiGet('organisations', 'select=*&order=name.asc'),
+    (allData['organisations'] && allData['organisations'].length) ? allData['organisations'] : apiGet('organisations', 'select=*&order=name.asc'),   // an empty [] (failed init) must refetch, not stand
     allData['research_campaigns'] || apiGet('research_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['sales_campaigns']    || apiGet('sales_campaigns', 'status=eq.Active&select=*&order=name.asc'),
     allData['service_sub_all']    || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc'),
@@ -21418,6 +21432,8 @@ async function openDeclineModal() {
     try { reasons = await apiGet('decline_reasons', 'active=eq.true&select=*&order=sort_order,name'); allData['decline_reasons'] = reasons; }
     catch (e) { reasons = []; }
   }
+  const reasonOpts = '<option value="">— select a reason —</option>' +
+    (reasons || []).map(r => `<option value="${r.id}">${(r.name || '').replace(/</g, '&lt;')}</option>`).join('');
   // Outstanding actions on the lead: the user must be told they close with it.
   let openActs = [];
   try {
@@ -22101,7 +22117,10 @@ async function saveLead(opts) {
   // the pre-v7.8.82 behaviour, self-healing as the user keeps typing. The
   // focus guard stays as the last line of mid-type defence, and on failure the
   // free-text column keeps working exactly as before.
-  let targetOrgId = +document.getElementById('lead-target-org-id').value || null;
+  // selectFkOrKeep, not a raw read: this select was the one FK deliberately left
+  // out of the v7.8.50 sweep, and a stale options list (org row newer than the
+  // session's cache) then read back '' and nulled a perfectly good organisation.
+  let targetOrgId = selectFkOrKeep('lead-target-org-id', leadData && leadData.target_org_id);
   const _tgtOrgNameEl = document.getElementById('lead-target-org-name');
   let typedOrgName = (_tgtOrgNameEl?.value || '').trim();
   const _orgNameCommitted = !(opts && opts.silent)
@@ -22813,8 +22832,8 @@ async function _rptActivity(st) {
   for (let i = 0; i < dealIds.length; i += 150)
     (await apiGet('deals', `id=in.(${dealIds.slice(i, i + 150).join(',')})&select=id,owner_id,region_id,branch_id,name`))
       .forEach(d => { dealById[+d.id] = d; });
-  if (!allData['organisations']) { try { allData['organisations'] = await apiGet('organisations', 'select=id,name,trading_name'); } catch (e) { allData['organisations'] = []; } }
-  if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=id,first_name,last_name'); } catch (e) { allData['people'] = []; } }
+  if (!allData['organisations']) { try { allData['organisations'] = await apiGet('organisations', 'select=*'); } catch (e) { /* leave unset so the next consumer refetches — a cached [] poisoned whole sessions */ } }
+  if (!allData['people']) { try { allData['people'] = await apiGet('people', 'select=id,first_name,last_name'); } catch (e) { /* leave unset */ } }
   const orgById = Object.fromEntries((allData['organisations'] || []).map(o => [+o.id, o]));
   const pName = id => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '(unattributed)'; };
 
@@ -25510,7 +25529,7 @@ async function renderSettingsPage() {
   // Merge Organisations card needs the full org list for its pickers.
   if (!allData['organisations']) {
     try { allData['organisations'] = await apiGet('organisations', 'select=*'); }
-    catch (e) { allData['organisations'] = []; }
+    catch (e) { /* leave unset so the next consumer refetches — a cached [] poisoned whole sessions */ }
   }
 
   const fy = appSettings['fy_start_month'] || 'April';
