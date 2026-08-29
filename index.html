@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17114,10 +17114,15 @@ async function initLeadForm() {
   // Source-person (referrer) is a free-type field with similarity matching —
   // no dropdown to populate. The hidden FK is set only when a match is chosen.
 
-  // Source-org picker: all orgs
+  // Pickers exclude deactivated orgs (soft-merged duplicates) — but always keep
+  // the lead's own current orgs so an existing link never falls out of its select.
+  const pickerOrgs = orgs.filter(o => o.active !== false
+    || +o.id === +(leadData?.target_org_id || 0) || +o.id === +(leadData?.source_org_id || 0));
+
+  // Source-org picker: all active orgs
   const srcOrgSel = document.getElementById('lead-source-org-id');
   srcOrgSel.innerHTML = '<option value="">— select client —</option>' +
-    orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
 
   // Research campaign picker
   const campaignSel = document.getElementById('lead-research-campaign-id');
@@ -17129,10 +17134,10 @@ async function initLeadForm() {
   salesCampaignSel.innerHTML = '<option value="">— select campaign —</option>' +
     salesCampaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
 
-  // Organisation sub-picker (shown only when adding a new site): all orgs
+  // Organisation sub-picker (shown only when adding a new site): all active orgs
   const tgtOrgSel = document.getElementById('lead-target-org-id');
   tgtOrgSel.innerHTML = '<option value="">Pick a known organisation or create a new one below</option>' +
-    orgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
 
   // Primary Site typeahead starts empty (search is live against allData['sites']).
   clearLeadSiteField();
@@ -20232,8 +20237,9 @@ function _orgMatchScore(org, colloquial, legal) {
 }
 
 function _findOrgMatches(colloquial, legal, limit = 5) {
-  // Exclude home organisations from match candidates — they aren't clients.
-  const orgs = (allData['organisations'] || []).filter(o => !o.home_organisation);
+  // Exclude home organisations (not clients) and deactivated orgs (soft-merged
+  // duplicates) from match candidates.
+  const orgs = (allData['organisations'] || []).filter(o => !o.home_organisation && o.active !== false);
   const scored = orgs
     .map(o => ({ org: o, score: _orgMatchScore(o, colloquial, legal) }))
     .filter(x => x.score >= 70)
@@ -20258,7 +20264,7 @@ async function findOrCreateProspectOrg(name) {
   if (!n) return null;
   try {
     if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
-    const hit = (allData['organisations'] || []).find(o => !o.home_organisation
+    const hit = (allData['organisations'] || []).find(o => !o.home_organisation && o.active !== false
       && (norm(o.name) === n || norm(o.trading_name) === n || norm(o.legal_name) === n));
     if (hit) return hit;
     const created = await api('organisations', 'POST', { name: String(name).trim(), client_status: 'Prospect' }, 'select=*');
@@ -21630,6 +21636,11 @@ function setLeadQual(key, level) {
   // Changing a score re-opens qualification: drop any legacy demote hold.
   leadData.qualification_demoted = false;
   renderLeadQualification();
+  // The Hold/Nurture buttons key off these scores but live in the workflow
+  // chrome, which only re-rendered on a STATUS change — so greening Fit/Access
+  // on a Working lead never revealed Nurture until all four flipped it to
+  // Review (Lesley-Anne's "needs all FOUR", bugs #71/#73).
+  refreshLeadWorkflowChrome();
   markLeadDirty();
 }
 
