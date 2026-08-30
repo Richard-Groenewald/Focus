@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.8.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.00 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.8.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.00 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10946,7 +10946,10 @@ function selectFkOrKeep(elId, storedVal) {
   const el  = document.getElementById(elId);
   const cur = +(el && el.value) || null;
   if (cur) return cur;
-  if (storedVal == null || !el || !el.options) return null;   // non-select: nothing to reason about
+  // A MISSING control keeps the stored value — the element's absence is never the
+  // user clearing the field (a section rebuild/removal read back as "wipe the FK").
+  if (!el || !el.options) return (+storedVal || null);
+  if (storedVal == null) return null;
   const offered = Array.from(el.options).some(o => +o.value === +storedVal);
   return offered ? null : (+storedVal || null);
 }
@@ -16109,6 +16112,8 @@ let leadReadOnly = false;
 
 async function openNewLead() {
   leadData = {};
+  window._leadTargetOrgAsLoaded = null;   // keep-guard baseline: a new lead has no org to keep (bug #76)
+  window._leadTargetOrgExplicitClear = false;
   window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
@@ -16161,6 +16166,11 @@ async function openLeadForm(id) {
     // this session append-only (add-a-note); a blank one stays a normal editable box
     // that becomes the thread's "Original". See leadIsAppendMode.
     window._leadDescStartAppend = !!((leadData.description || '').trim());
+    // Keep-guard baseline (bug #76): the organisation as loaded from the DB row
+    // this open. saveLead falls back to this when the select reads back empty
+    // without the user having gone through the Change flow.
+    window._leadTargetOrgAsLoaded = +leadData.target_org_id || null;
+    window._leadTargetOrgExplicitClear = false;
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     _promotedLeadContactsCache = null;   // promoted read-through refetches per open
     resetLeadForm();
@@ -18225,6 +18235,7 @@ function confirmLeadTargetOrgNew() {
 function changeLeadTargetOrg() {
   const dd = document.getElementById('lead-target-org-id');
   if (!dd) return;
+  window._leadTargetOrgExplicitClear = true;   // the ONE door an org may leave through (saveLead keep-guard, bug #76)
   dd.value = '';
   onLeadTargetOrgChange();  // reveals picker + free-text, hides chosen display
   dd.focus();
@@ -20270,7 +20281,10 @@ async function findOrCreateProspectOrg(name) {
     const created = await api('organisations', 'POST', { name: String(name).trim(), client_status: 'Prospect' }, 'select=*');
     const org = created && created[0];
     if (!org) return null;
-    allData['organisations'].push(org);
+    // api() invalidates the organisations lookup cache on its own POST (v7.7.20
+    // _lkInvalidate), so the cache is ALWAYS null right here — a bare .push threw,
+    // the org was born but never linked, and the lead kept free text (bug #76).
+    (allData['organisations'] = allData['organisations'] || []).push(org);
     delete allData['_org_idf'];   // match corpus changed → rebuild on next match
     return org;
   } catch (e) {
@@ -22136,6 +22150,16 @@ async function saveLead(opts) {
   let typedOrgName = (_tgtOrgNameEl?.value || '').trim();
   const _orgNameCommitted = !(opts && opts.silent)
     || window._leadTargetOrgNewConfirmed === typedOrgName.toLowerCase();
+  // Ninth instance of the wipe class (bug #76): the select read back EMPTY on a
+  // lead with a stored organisation even though populate restores it. So stop
+  // inferring deletion from emptiness: an organisation leaves a lead ONLY through
+  // the explicit Change flow (changeLeadTargetOrg sets the flag) or a typed
+  // replacement name. Any other empty read-back keeps the AS-LOADED org — the
+  // baseline is snapshotted straight off the DB row at form open (and refreshed
+  // on each save), so an in-memory null of leadData can't defeat it either.
+  if (!targetOrgId && !typedOrgName && window._leadTargetOrgAsLoaded && !window._leadTargetOrgExplicitClear) {
+    targetOrgId = window._leadTargetOrgAsLoaded;
+  }
   if (!targetOrgId && typedOrgName.length >= 2 && _orgNameCommitted && document.activeElement !== _tgtOrgNameEl) {
     const org = await findOrCreateProspectOrg(typedOrgName);
     if (org) {
@@ -22285,6 +22309,9 @@ async function saveLead(opts) {
       leadData = result[0];
       if (!opts.silent) showStatus('Lead created');
     }
+    // The just-persisted organisation is the keep-guard's new baseline for the
+    // rest of this form-open (bug #76).
+    window._leadTargetOrgAsLoaded = +payload.target_org_id || null;
     // Re-apply edits that arrived mid-flight: anywhere the live object now differs
     // from what was SENT, the user changed it during the request — keep their value.
     let midFlightEdits = false;
