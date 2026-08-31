@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.05 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.06 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.05 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.06 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2503,7 +2503,11 @@ const ORG_DETAIL_FIELDS = [
   { key: 'client_since',  label: 'Client Since', type: 'date' },
   { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
   { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
-  { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
+  // Parent/child (v7.9.06): parent-ness is DECLARED via the tickbox — the picker
+  // below offers ONLY ticked orgs, so the hierarchy stays deliberate (no accidental
+  // chains through ordinary clients). The anchor of a family is whoever gets ticked.
+  { key: 'is_parent',     label: 'Parent organisation (may head a group)', type: 'checkbox' },
+  { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name, lookupFilter: r => r.is_parent === true },
 
   { type: 'section', label: 'Compliance & Finance' },
   { key: 'registration_no',  label: 'Registration No' },
@@ -3789,7 +3793,10 @@ function renderField(f, val, locked) {
   }
 
   if (f.type === 'lookup') {
-    const lookupData = allData[f.lookupTable] || [];
+    // lookupFilter narrows the offered options (e.g. parent picker → ticked
+    // parents only) — but the record's CURRENT value is always kept, so an
+    // existing link never silently falls out of its own select.
+    const lookupData = (allData[f.lookupTable] || []).filter(r => !f.lookupFilter || f.lookupFilter(r) || +r.id === +val);
     const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${f.lookupLabel(r)}</option>`).join('');
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select —</option>${opts}</select></div>`;
   }
@@ -4541,6 +4548,25 @@ async function saveRecord(e) {
     body.is_client = true;
     body.home_organisation = false;
     body.allows_system_users = false;
+  }
+
+  // Parent/group guards (v7.9.06): an organisation can never be its own parent
+  // (the 4001/4084/4138 self-link noise), and a declared parent with children
+  // still pointing at it cannot be unticked — repoint the children first.
+  if (currentPage === 'organisations' || currentPage === 'clients') {
+    if (editingId && body.parent_org_id != null && +body.parent_org_id === +editingId) {
+      showStatus('An organisation cannot be its own parent', 'error');
+      return;
+    }
+    if (editingId && body.is_parent === false) {
+      try {
+        const kids = await apiGet('organisations', 'parent_org_id=eq.' + editingId + '&select=id&limit=1');
+        if (kids.length) {
+          showStatus('Cannot untick Parent — child organisations still point at this one. Re-point them first.', 'error');
+          return;
+        }
+      } catch (err) { /* best-effort guard — never block the save on a failed check */ }
+    }
   }
 
   // Extra validation for system_users
@@ -11811,7 +11837,7 @@ async function renderOpportunitiesPage() {
       const prob = members.reduce((a, d) => Math.max(a, +d.probability || 0), 0);
       const enc = encodeURIComponent(k).replace(/'/g, '%27');
       return `<tr onclick="toggleClientBand('opps','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
-        <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span></td>
+        <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span>${_groupChipHtml(k)}</td>
         <td>${members.length} deals · ${pbFmtRand(Math.round(tcv))} TCV</td>
         <td>${first.order_date ? new Date(first.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td>${advStage ? `<span class="badge badge-blue">${advStage.name}</span>` : '—'}</td>
@@ -14043,6 +14069,147 @@ function dealBandOf(d, orgs) {
   return { key: 'o' + top.id, label: top.name || '(No organisation)' };
 }
 
+// ── Parent / group surfaces (v7.9.06) ─────────────────────────────────────────
+// A group is never a record: it's the computed set of organisations sharing an
+// ultimate parent, and it borrows the parent's identity. The parent is DECLARED
+// (organisations.is_parent tickbox) — these surfaces only ever render for it.
+function _familyOrgIds(parentId) {
+  const O = allData['organisations'] || [];
+  const ids = new Set([+parentId]);
+  O.forEach(o => { if (+_ultimateParentOrg(o, O).id === +parentId) ids.add(+o.id); });
+  return Array.from(ids);
+}
+// GROUP chip on a band heading — only for declared parents, never for a mere
+// multi-record band of one org (band ≠ group). Click = family engagement history.
+function _groupChipHtml(bandKey) {
+  if (!bandKey || bandKey[0] !== 'o') return '';
+  const id = +bandKey.slice(1);
+  const org = (allData['organisations'] || []).find(o => +o.id === id);
+  if (!org || !org.is_parent) return '';
+  const n = _familyOrgIds(id).length;
+  return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Group of ${n} organisation${n===1?'':'s'} — click for the family's engagement history" style="display:inline-block;margin-left:7px;padding:2px 8px;border-radius:9px;background:#F0E9DC;border:1px solid #C3B091;color:#003057;font-size:10px;font-weight:700;letter-spacing:.04em;vertical-align:middle;cursor:pointer;white-space:nowrap;">GROUP · ${n} ORGS</span>`;
+}
+// ↳ hook under a register client cell: names the family the org sits under.
+// Absence of a hook means "standalone" — the default state carries no ink.
+function _childHookHtml(orgId) {
+  const O = allData['organisations'] || [];
+  const org = orgId != null ? O.find(o => +o.id === +orgId) : null;
+  if (!org || !org.parent_org_id) return '';
+  const top = _ultimateParentOrg(org, O);
+  if (+top.id === +org.id) return '';
+  return `<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;">↳ <span style="font-weight:600;color:var(--text2);">${cEsc(top.name || '')}</span></div>`;
+}
+
+// ── Family engagement history (behind the band heading's GROUP chip) ──────────
+// Aggregated view per Richard 2026-08-31: every engagement across the family's
+// leads and deals, each row attributed to its child organisation, rows belonging
+// to the PARENT itself highlighted, sortable + searchable. Engagements stay
+// lead-XOR-deal — this is pure read; org-attachable engagements deliberately
+// deferred (the visual parent tier is already reserved for them).
+let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '';
+async function openParentHistory(parentId) {
+  try {
+    if (!allData['organisations'] || !allData['organisations'].length) allData['organisations'] = await apiGet('organisations', 'select=*');
+    const O = allData['organisations'];
+    const parent = O.find(o => +o.id === +parentId);
+    if (!parent) { showStatus('Organisation not found', 'error'); return; }
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=*');
+    const famIds = _familyOrgIds(+parentId);
+    const idList = famIds.join(',');
+    const sites = await apiGet('sites', 'organisation_id=in.(' + idList + ')&select=id,name,organisation_id');
+    const siteIds = sites.map(s => +s.id);
+    // Family leads: linked by org, or anchored on a family site (site-first capture).
+    const leadFilter = siteIds.length
+      ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
+      : 'target_org_id=in.(' + idList + ')';
+    const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id');
+    const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
+    const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
+    const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
+    const siteOrg = new Map(sites.map(s => [+s.id, +s.organisation_id]));
+    const orgName = id => (O.find(o => +o.id === +id)?.name) || '—';
+    const leadById = new Map(leads.map(l => [+l.id, l]));
+    const dealById = new Map(deals.map(d => [+d.id, d]));
+    const rows = [];
+    engL.concat(engD).forEach(en => {
+      let entityOrg = null, recLabel = '', open = '', kind = '';
+      if (en.lead_id && leadById.has(+en.lead_id)) {
+        const l = leadById.get(+en.lead_id);
+        entityOrg = l.target_org_id ? +l.target_org_id : (l.site_id ? (siteOrg.get(+l.site_id) || null) : null);
+        const siteRow = l.site_id ? sites.find(s => +s.id === +l.site_id) : null;
+        recLabel = siteRow?.name || l.site_name || l.description || ('Lead #' + l.id);
+        open = 'openLead(' + (+l.id) + ')'; kind = 'Lead';
+      } else if (en.deal_id && dealById.has(+en.deal_id)) {
+        const d = dealById.get(+en.deal_id);
+        entityOrg = d.org_id != null ? +d.org_id : null;
+        recLabel = d.name || ('Deal #' + d.id);
+        open = 'openOpportunity(' + (+d.id) + ')'; kind = 'Deal';
+      } else return;
+      const person = (allData['people'] || []).find(p => +p.id === +en.created_by);
+      rows.push({
+        date:  en.engagement_date || '',
+        client: entityOrg != null ? orgName(entityOrg) : '—',
+        isParent: entityOrg != null && +entityOrg === +parentId,
+        rec: recLabel, open, kind,
+        type: en.engagement_type || '',
+        owner: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : '',
+        notes: String(en.notes || '').replace(/\s+/g, ' ').trim(),
+      });
+    });
+    _phData = { rows };
+    _phSort = { key: 'date', dir: -1 }; _phQ = '';
+    showModal(`
+      <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+        <div class="modal" style="width:960px;max-width:96vw;">
+          <div class="modal-header">
+            <div class="modal-title">${cEsc(parent.name || '')} — group engagement history
+              <span style="font-weight:500;color:var(--text3);font-size:12px;margin-left:8px;">${famIds.length} organisation${famIds.length===1?'':'s'} · ${rows.length} engagement${rows.length===1?'':'s'}</span></div>
+            <button class="modal-close" onclick="closeModal()">×</button>
+          </div>
+          <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+            <input type="text" id="ph-search" class="form-control" placeholder="Search type, client, record, notes, owner…" style="margin-bottom:10px;" oninput="_phQ=this.value; _phRenderRows();">
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr>${[['date','Date'],['client','Client'],['rec','Record'],['type','Type'],['owner','By'],['notes','Notes']].map(c => `<th style="cursor:pointer;white-space:nowrap;" onclick="_phSetSort('${c[0]}')">${c[1]}<span id="ph-arr-${c[0]}"></span></th>`).join('')}</tr></thead>
+              <tbody id="ph-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>`);
+    _phRenderRows();
+  } catch (e) { showStatus('Could not load group history: ' + e.message, 'error'); }
+}
+function _phSetSort(k) {
+  if (_phSort.key === k) _phSort.dir = -_phSort.dir;
+  else _phSort = { key: k, dir: k === 'date' ? -1 : 1 };
+  _phRenderRows();
+}
+function _phRenderRows() {
+  const tb = document.getElementById('ph-tbody');
+  if (!tb || !_phData) return;
+  const q = (_phQ || '').trim().toLowerCase();
+  let rows = _phData.rows.filter(r => !q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q));
+  const k = _phSort.key, dir = _phSort.dir;
+  rows = rows.slice().sort((a, b) => {
+    const av = String(a[k] || '').toLowerCase(), bv = String(b[k] || '').toLowerCase();
+    return av < bv ? -dir : av > bv ? dir : 0;
+  });
+  ['date','client','rec','type','owner','notes'].forEach(c => {
+    const el = document.getElementById('ph-arr-' + c);
+    if (el) el.textContent = c === k ? (dir > 0 ? ' ▲' : ' ▼') : '';
+  });
+  tb.innerHTML = rows.length ? rows.map(r => `
+    <tr onclick="closeModal(); ${r.open}" style="cursor:pointer;${r.isParent ? 'background:#F7F2E9;box-shadow:inset 3px 0 0 0 #C3B091;' : ''}">
+      <td style="white-space:nowrap;">${r.date ? new Date(r.date).toLocaleDateString('en-ZA') : '—'}</td>
+      <td style="font-weight:600;color:#003057;white-space:nowrap;">${cEsc(r.client)}${r.isParent ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">PARENT</span>' : ''}</td>
+      <td>${cEsc(r.rec)} <span style="font-size:10px;color:var(--text3);">(${r.kind})</span></td>
+      <td style="white-space:nowrap;">${cEsc(r.type || '—')}</td>
+      <td style="white-space:nowrap;">${cEsc(r.owner || '—')}</td>
+      <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
+    </tr>`).join('')
+  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this family yet'}</td></tr>`;
+}
+
 // Lead display label outside the leads page (engagement modal, dashboard,
 // history, contacts admin) — site-first like the leads list: embedded
 // sites(name) from the fetch, else leadSiteLabel, else the organisation, else
@@ -14383,9 +14550,12 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   const rowClick = (l.status === 'Promoted' && l.promoted_deal_id)
     ? `openPromotedLeadAsk(${l.id}, ${+l.promoted_deal_id})`
     : `openLead(${l.id})`;
+  // ↳ family hook (v7.9.06): a child org's row names the parent it sits under.
+  const hookOrgId = l.target_org_id
+    || ((allData['sites'] || []).find(s => +s.id === +l.site_id)?.organisation_id) || null;
   return `<tr onclick="${rowClick}" style="cursor:pointer;${rowBorder}">
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}${cdChip}</td>
-    <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${cEsc(leadClientLabel(l, orgs)) || '—'}${_childHookHtml(hookOrgId)}</td>
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
@@ -14464,7 +14634,7 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
   const enc = encodeURIComponent(b.key).replace(/'/g, '%27');
   return `<tr onclick="toggleClientBand('leads','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}</td>
-    <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(b.label)} <span style="font-weight:500;color:var(--text2);">(${rows.length})</span></td>
+    <td style="padding:10px 12px;font-size:13px;font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(b.label)} <span style="font-weight:500;color:var(--text2);">(${rows.length})</span>${_groupChipHtml(b.key)}</td>
     <td style="padding:10px 12px;font-size:13px;">${siteCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
