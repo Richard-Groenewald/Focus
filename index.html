@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.02 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.03 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.02 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.03 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -746,8 +746,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     </div>
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;">
+      <span id="opp-save-indicator" style="font-size:12px;font-weight:600;"></span>
       <div id="opp-status-badge" style="font-size:12px;color:var(--text3);"></div>
-      <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeOppPage()">Cancel</button>
+      <button class="btn btn-secondary btn-sm" id="opp-revert-btn" style="display:none;" title="Undo every change made since you opened this deal" onclick="revertOpp()">↺ Revert changes</button>
+      <button class="btn btn-secondary btn-sm" onmousedown="this._md=Date.now()" onclick="if(Date.now()-this._md<300)closeOppPage()">Close</button>
       <button class="btn btn-primary" id="opp-save-btn" onclick="saveOpportunity()">Save</button>
     </div>
   </div>
@@ -5013,6 +5015,8 @@ function getFYLabel(fy) {
 
 async function openNewOpportunity() {
   // Fully reset all state
+  resetOppDirty();
+  _oppAsOpened = null;   // nothing to revert to — a new deal exists only on Save
   oppData = {};
   oppMonths = {};
   oppRevLocked = false;
@@ -5069,10 +5073,14 @@ async function openNewOpportunity() {
 
 async function openOpportunity(id, adminMode = false) {
   try {
+    resetOppDirty();
     dealAdminMode = !!adminMode && can('administer_deals');
     const deals = await apiGet('deals', 'id=eq.' + id + '&select=*');
     oppData = deals[0] || { id };
     oppMonths = {};
+    // Revert baseline: the autosave columns exactly as the database holds them now.
+    _oppAsOpened = {};
+    for (const f of Object.values(OPP_AUTOSAVE_FIELDS)) _oppAsOpened[f.col] = oppData[f.col] ?? null;
 
     // Load revenue stream months
     const streams = await apiGet('revenue_streams', 'deal_id=eq.' + id + '&stream_type=eq.opportunity&select=id,locked');
@@ -5120,8 +5128,189 @@ async function openOpportunity(id, adminMode = false) {
   }
 }
 
-function closeOppPage() {
+// ── Deal form field-level autosave (v7.9.03) ─────────────────────────────────
+// Plain attributes save themselves, like the lead form — but per FIELD, never
+// the full form: only columns the user actually touched are PATCHed, so a
+// populate failure can never null an untouched column (the lesson of the
+// nine-instance lead org-wipe class, applied from birth here).
+// Everything event-ful stays behind the explicit Save button: stage (securing
+// runs the legal-name gate + secured process), client, service, margin (it
+// cascades into stream month margins), owner, revenue months, collaborators,
+// contacts, and the Lost package.
+const OPP_AUTOSAVE_FIELDS = {
+  'opp-name':        { col: 'name',        read: el => el.value.trim() },
+  'opp-probability': { col: 'probability', read: el => el.value !== '' ? +el.value : null },
+  'opp-order-date':  { col: 'order_date',  read: el => el.value || null },
+  'opp-start-date':  { col: 'start_date',  read: el => el.value || null },
+  'opp-notes':       { col: 'notes',       read: el => el.value || null },
+  'opp-ext-notes':   { col: 'ext_notes',   read: el => el.value || null },
+};
+let _oppDirtyFields = new Set();    // autosavable fields edited since last flush
+let _oppEventDirty = false;         // structural edits pending — need explicit Save
+let _oppAutoSaveTimer = null;
+let _oppAutoSavePromise = null;     // in-flight PATCH, awaited by flush/revert
+let _oppAsOpened = null;            // as-opened values of the autosave columns (revert baseline)
+
+function setOppSaveIndicator(state) {
+  const el = document.getElementById('opp-save-indicator');
+  if (!el) return;
+  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'] };
+  const [t, c] = map[state] || ['', ''];
+  el.textContent = t; el.style.color = c;
+}
+
+// Reset dirty tracking and (once) attach input + beforeunload guards.
+function resetOppDirty() {
+  clearTimeout(_oppAutoSaveTimer);
+  _oppDirtyFields.clear();
+  _oppEventDirty = false;
+  setOppSaveIndicator('');
+  if (window._oppGuardsAttached) return;
+  const page = document.getElementById('opp-page');
+  if (!page) return;
+  const h = (e) => _oppMarkDirty(e);
+  page.addEventListener('input', h);
+  page.addEventListener('change', h);
+  window.addEventListener('beforeunload', (e) => {
+    if (page.classList.contains('active') && !oppReadOnly && (_oppDirtyFields.size || _oppEventDirty)) {
+      e.preventDefault(); e.returnValue = '';
+    }
+  });
+  window._oppGuardsAttached = true;
+}
+
+function _oppMarkDirty(e) {
+  const t = e.target;
+  if (oppReadOnly || !t || !t.closest) return;
+  if (t.closest('.modal-overlay')) return;           // shared modals save through their own flows
+  if (t.closest('#opp-tab-engagement')) return;      // engagements save through the li-* modal
+  if (t.closest('#proposal-builder-root')) return;   // the quote tool saves its own quotes
+  if (OPP_AUTOSAVE_FIELDS[t.id] && oppData.id) {
+    _oppDirtyFields.add(t.id);
+    // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
+    // indicator shown is "Saved" after a successful save (lead-form idiom).
+    setOppSaveIndicator('');
+    clearTimeout(_oppAutoSaveTimer);
+    _oppAutoSaveTimer = setTimeout(oppAutoSaveNow, 1500);
+  } else {
+    // Structural field (any deal) or any edit on a not-yet-created deal:
+    // commits only through Save — the close guard offers the choice.
+    _oppEventDirty = true;
+  }
+}
+
+// PATCH only the touched fields whose value actually differs from the loaded row.
+// opts.flush (close/leave path): skip the typing guard and surface failures.
+async function oppAutoSaveNow(opts) {
+  opts = opts || {};
+  clearTimeout(_oppAutoSaveTimer);
+  if (oppReadOnly || !oppData.id) return true;
+  if (_oppAutoSavePromise) {
+    // A save is already on the wire: don't drop this tick — edits made during the
+    // in-flight save must persist. Flush waits for it; ticks retry shortly.
+    if (!opts.flush) { _oppAutoSaveTimer = setTimeout(oppAutoSaveNow, 800); return true; }
+    await _oppAutoSavePromise;
+  }
+  if (!_oppDirtyFields.size) return true;
+  // NEVER save out from under active typing (Richard 2026-08-27, lead form):
+  // a mid-keystroke PATCH commits half-typed values. Wait for focus to leave the
+  // field; the close/leave flush passes {flush:true} so nothing is lost on exit.
+  if (!opts.flush) {
+    const _ae = document.activeElement;
+    if (_ae && _ae.closest && _ae.closest('#opp-page') && (_ae.tagName === 'TEXTAREA'
+        || (_ae.tagName === 'INPUT' && !['checkbox','radio','button','submit','hidden','range'].includes(_ae.type)))) {
+      _oppAutoSaveTimer = setTimeout(oppAutoSaveNow, 1000);
+      return true;
+    }
+  }
+  const payload = {}, sent = {};
+  for (const id of Array.from(_oppDirtyFields)) {
+    const f = OPP_AUTOSAVE_FIELDS[id], el = document.getElementById(id);
+    if (!f || !el) { _oppDirtyFields.delete(id); continue; }
+    const v = f.read(el);
+    if (id === 'opp-name' && !v) continue;   // name is required: a blank never autosaves (Save validates)
+    if (String(v ?? '') === String(oppData[f.col] ?? '')) { _oppDirtyFields.delete(id); continue; }
+    payload[f.col] = v; sent[id] = v;
+  }
+  if (!Object.keys(payload).length) return true;
+  const doSave = (async () => {
+    const rows = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
+    if (rows && rows[0]) Object.assign(oppData, rows[0]);
+    else Object.keys(payload).forEach(c => { oppData[c] = payload[c]; });
+  })();
+  _oppAutoSavePromise = doSave.catch(() => {});
+  let ok = true;
+  try { await doSave; } catch (e) { ok = false; if (opts.flush) showStatus('Autosave failed: ' + e.message, 'error'); }
+  _oppAutoSavePromise = null;
+  if (ok) {
+    for (const [id, v] of Object.entries(sent)) {
+      const f = OPP_AUTOSAVE_FIELDS[id], el = document.getElementById(id);
+      // Clear only if the user hasn't typed further while the PATCH was on the wire.
+      if (el && f && String(f.read(el) ?? '') === String(v ?? '')) _oppDirtyFields.delete(id);
+    }
+    setOppSaveIndicator('saved');
+    if (_oppDirtyFields.size) _oppAutoSaveTimer = setTimeout(oppAutoSaveNow, 800);
+  } else {
+    setOppSaveIndicator('');
+    // Edits stay dirty; retry quietly, and the close flush is the backstop.
+    if (!opts.flush) _oppAutoSaveTimer = setTimeout(oppAutoSaveNow, 5000);
+  }
+  return ok;
+}
+
+// Undo every change made since the deal was opened: PATCH the autosaved columns
+// back to their as-opened values, then reload the form clean (which also throws
+// away any unsaved structural edits). Mirror of the lead form's Revert.
+async function revertOpp() {
+  if (oppReadOnly || !oppData.id) return;
+  const confirmed = await confirmDialog({
+    title: 'Revert changes',
+    message: 'Revert every change made since you opened this deal? Autosaved edits go back to their opening values, and unsaved stage/structural edits are discarded.',
+    confirmLabel: 'Revert', danger: true });
+  if (!confirmed) return;
+  clearTimeout(_oppAutoSaveTimer);
+  if (_oppAutoSavePromise) await _oppAutoSavePromise;   // let an in-flight PATCH land first
+  _oppDirtyFields.clear(); _oppEventDirty = false;
+  startBusy('Reverting…');
+  try {
+    const payload = {};
+    if (_oppAsOpened) {
+      for (const f of Object.values(OPP_AUTOSAVE_FIELDS)) {
+        if (String(_oppAsOpened[f.col] ?? '') !== String(oppData[f.col] ?? '')) payload[f.col] = _oppAsOpened[f.col];
+      }
+    }
+    if (Object.keys(payload).length) await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id);
+    const id = oppData.id, admin = dealAdminMode;
+    await openOpportunity(id, admin);
+    showStatus('Reverted to opening state');
+  } catch (e) { showStatus('Revert failed: ' + e.message, 'error'); }
+  finally { stopBusy(); }
+}
+
+// Close the deal page. Pending autosaves flush first (never lose a plain edit);
+// pending STRUCTURAL edits ask — an explicit red click is the only way to
+// discard them, and every dismissive gesture (Esc, ×, overlay) stays on the page.
+// Returns true when the page actually closed, false when the user stayed.
+async function closeOppPage(opts) {
+  opts = opts || {};
+  clearTimeout(_oppAutoSaveTimer);
+  if (!opts.force && !oppReadOnly) {
+    if (_oppDirtyFields.size && oppData.id) {
+      const ok = await oppAutoSaveNow({ flush: true });
+      if (!ok) return false;   // save failed: stay, the error toast is showing
+    }
+    if (_oppEventDirty) {
+      const discard = await confirmDialog({
+        title: 'Unsaved changes',
+        message: 'Some of your changes (stage, client, service, margin, revenue months, collaborators or contacts) only commit when you Save. Discard them?',
+        confirmLabel: 'Discard & close', cancelLabel: 'Keep editing', danger: true });
+      if (!discard) return false;
+    }
+  }
+  _oppDirtyFields.clear(); _oppEventDirty = false;
+  setOppSaveIndicator('');
   document.getElementById('opp-page').classList.remove('active');
+  return true;
 }
 
 // Read-only state for the open deal. true when the current user cannot edit core fields.
@@ -5149,6 +5338,10 @@ function applyOppReadOnly(level) {
   // Core Save is only available with full edit rights.
   const saveBtn = document.getElementById('opp-save-btn');
   if (saveBtn) saveBtn.style.display = (level === 'full') ? '' : 'none';
+
+  // Revert follows Save, and only exists once there is a saved state to go back to.
+  const revertBtn = document.getElementById('opp-revert-btn');
+  if (revertBtn) revertBtn.style.display = (level === 'full' && oppData.id) ? '' : 'none';
 
   // Log Engagement: available to full + engagement, hidden for pure viewers.
   const logBtn = document.getElementById('opp-log-engagement-btn');
@@ -9083,7 +9276,7 @@ async function saveOpportunity() {
     await maybeOfferExtensionProspect(deal, prevStageId);
 
     const fromAdmin = dealAdminMode;
-    closeOppPage();
+    await closeOppPage({ force: true });   // everything just committed — nothing to flush or ask
     if (fromAdmin) await renderDealAdminPage();
     else await renderOpportunitiesPage();
   } catch(e) {
@@ -14316,7 +14509,10 @@ let _leadOpenedFromDealId = null;
 // gets relabeled so the round-trip is obvious.
 async function openLeadFromDeal(leadId, dealId) {
   _leadOpenedFromDealId = dealId;
-  closeOppPage();
+  // Leaving the deal counts as leaving: flush autosaves, and if structural edits
+  // are pending the user chooses — "Keep editing" aborts the navigation.
+  const closed = await closeOppPage();
+  if (!closed) { _leadOpenedFromDealId = null; return; }
   await openLeadForm(leadId);
   _updateLeadBackButtonForDealContext();
 }
