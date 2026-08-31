@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.00 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.01 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -691,7 +691,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.00 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.01 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -16201,6 +16201,11 @@ async function openLeadForm(id) {
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
     renderLeadInteractions();
+    // Final authority on the org display (bug #77): whatever twitched earlier in
+    // the open, the lead's stored organisation is what the form shows. The t500
+    // pass catches late async touchers; both warn with a tag when they fix anything.
+    reconcileLeadOrgDisplay('open');
+    setTimeout(() => reconcileLeadOrgDisplay('t500'), 500);
     resetLeadDirty();
     // Reflect current deal-context state on the back button label every time
     // (defensive — covers the case where state was changed between opens).
@@ -17693,7 +17698,7 @@ function populateLeadForm() {
     }
   } finally { window._leadPopulating = false; }
   // Contacts: load the one unified list and render it (with existing/affiliated/new badges).
-  loadLeadContacts(leadData.id).then(() => renderLeadContacts());
+  loadLeadContacts(leadData.id).then(() => { renderLeadContacts(); reconcileLeadOrgDisplay('contacts-tail'); });
   hideLeadContactEntry();
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
@@ -19716,6 +19721,57 @@ function applyLeadTargetOrgLock(locked) {
     // whatever the stage (an empty org is never frozen — see above).
     if (typeof onLeadTargetOrgChange === 'function') onLeadTargetOrgChange();
   }
+}
+
+// ── Org display reconciler (bug #77) ──────────────────────────────────────────
+// v7.9.00's keep-guard stopped the ninth wipe instance at the DATA layer, but the
+// form could still OPEN with the org area blank on free-text-site + linked-org
+// leads (Scaw Metals: DB kept org 4249, the form showed the empty picker and
+// invited a manual re-pick — the exact gesture behind the 8th instance's
+// alphabetical-neighbour mis-links). The DOM twitch that empties it has resisted
+// static diagnosis, so the open sequence now ENDS with this authoritative pass:
+// if the lead HAS an organisation but the UI disagrees, put the UI right — and
+// console.warn what was found, so the next bug report's attached console log
+// names the actual pre-fix state (tag says which pass caught it).
+function reconcileLeadOrgDisplay(tag) {
+  try {
+    if (!leadData || !leadData.target_org_id) return;   // org-less lead: nothing to enforce
+    if (leadData.site_id) {
+      const st = (allData['sites'] || []).find(s => +s.id === +leadData.site_id);
+      if (st && st.organisation_id) return;   // org derives from the site; the sub-picker is legitimately hidden
+    }
+    const dd     = document.getElementById('lead-target-org-id');
+    const chosen = document.getElementById('lead-target-org-chosen');
+    const group  = document.getElementById('lead-target-org-group');
+    if (!dd || !chosen || !group) return;
+    const ddEmpty     = !+(dd.value);
+    const chipHidden  = chosen.style.display !== 'flex';
+    const groupHidden = group.style.display === 'none';
+    if (!ddEmpty && !chipHidden && !groupHidden) return;   // healthy — the usual case, zero cost
+    const org = (allData['organisations'] || []).find(o => +o.id === +leadData.target_org_id);
+    console.warn('lead org display reconciled (' + (tag || '?') + '): dd=' + (ddEmpty ? 'EMPTY' : dd.value)
+      + ' chip=' + (chipHidden ? 'HIDDEN' : 'shown') + ' group=' + (groupHidden ? 'HIDDEN' : 'shown')
+      + ' -> restoring org ' + leadData.target_org_id + (org ? ' (' + org.name + ')' : ' (not in cache)'));
+    if (!Array.from(dd.options).some(o => +o.value === +leadData.target_org_id)) {
+      const opt = document.createElement('option');
+      opt.value = String(leadData.target_org_id);
+      opt.textContent = org?.name || ('Organisation #' + leadData.target_org_id);
+      dd.appendChild(opt);
+    }
+    window._leadPopulating = true;   // display repair, never a user edit: no dirty, no live-sync
+    try {
+      group.style.display = '';
+      dd.value = String(leadData.target_org_id);
+      onLeadTargetOrgChange();
+      const locked = !!(leadData.id) && (leadData.status || 'New') !== 'New'
+        && typeof leadInEditGrace === 'function' && !leadInEditGrace(leadData);
+      applyLeadTargetOrgLock(locked);
+    } finally { window._leadPopulating = false; }
+    if (leadReadOnly) {
+      const b = document.getElementById('lead-target-org-change-btn');
+      if (b) b.style.display = 'none';   // view-only forms keep the edit affordance hidden
+    }
+  } catch (e) { /* display reconciliation must never break the open */ }
 }
 
 // Once a lead is past New the Source is frozen and shown compactly (spec b1).
