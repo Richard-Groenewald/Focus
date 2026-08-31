@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.03 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.04 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.03 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.04 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17232,9 +17232,16 @@ function resetLeadForm() {
   if (srcName) srcName.style.display = '';
   const srcHint = document.getElementById('lead-source-person-hint');
   if (srcHint) srcHint.style.display = '';
-  onLeadTargetOrgChange();
-  // Clear the primary Site typeahead (also hides the org sub-picker).
-  clearLeadSiteField();
+  // Resetting IS populating: both calls below re-enter onLeadTargetOrgChange with
+  // the dropdown deliberately blank, and its live-sync must not read that blank
+  // into leadData (wipe path #1 of bug #77, caught live 2026-08-31 on lead 4188).
+  const _wasPopulating = window._leadPopulating;
+  window._leadPopulating = true;
+  try {
+    onLeadTargetOrgChange();
+    // Clear the primary Site typeahead (also hides the org sub-picker).
+    clearLeadSiteField();
+  } finally { window._leadPopulating = _wasPopulating; }
   // Status badge resets to New
   renderLeadStatusBadge('New');
   // Hide conditional sections
@@ -17354,7 +17361,13 @@ async function initLeadForm() {
     pickerOrgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
 
   // Primary Site typeahead starts empty (search is live against allData['sites']).
-  clearLeadSiteField();
+  // Under the populating flag: this re-enters onLeadTargetOrgChange with a blank
+  // dropdown, and the live-sync must not wipe leadData's org (wipe path #2 of
+  // bug #77 — the one that survived guarding resetLeadForm alone; both stacks
+  // captured live on lead 4188 Premier Foods, 2026-08-31).
+  const _wasPopulatingInit = window._leadPopulating;
+  window._leadPopulating = true;
+  try { clearLeadSiteField(); } finally { window._leadPopulating = _wasPopulatingInit; }
 
   // Contacts are rendered from the unified list (renderLeadContacts) on populate.
 }
@@ -18029,7 +18042,21 @@ function onLeadTargetOrgChange() {
   // leadData.target_org_id before populate's own restore branches could read it —
   // the lead's organisation vanished from the form while the register still showed
   // it (the PAR leads, Richard 2026-08-28).
-  if (leadData && !window._leadPopulating) { leadData.target_org_id = +orgId || null; updateLeadReadiness(); }
+  // v7.9.03, the bug #77 mechanism FOUND (caught live on lead 4188 Premier Foods):
+  // openLeadForm's PRE-populate resets also land here with the dropdown blank —
+  // resetLeadForm() directly, and initLeadForm() via clearLeadSiteField() — while
+  // _leadPopulating is still false, so the sync below wiped the in-memory org
+  // before populate could restore it. Those call sites now raise the flag, and
+  // this sync only CLEARS an org through the explicit Change door (memory twin
+  // of the v7.9.00 save keep-guard): a picked org always syncs; emptiness syncs
+  // only when the user explicitly cleared, or there was nothing to lose.
+  if (leadData && !window._leadPopulating) {
+    const v = +orgId || null;
+    if (v || window._leadTargetOrgExplicitClear || !leadData.target_org_id) {
+      leadData.target_org_id = v;
+    }
+    updateLeadReadiness();
+  }
 }
 
 // ── Site typeahead ────────────────────────────────────────────────────────────
@@ -19934,7 +19961,18 @@ function applyLeadTargetOrgLock(locked) {
 // names the actual pre-fix state (tag says which pass caught it).
 function reconcileLeadOrgDisplay(tag) {
   try {
-    if (!leadData || !leadData.target_org_id) return;   // org-less lead: nothing to enforce
+    if (!leadData) return;
+    // v7.9.03: don't trust a wiped memory. The bug #77 mechanism nulled
+    // leadData.target_org_id in-flight (pre-populate live-sync reading a blank
+    // dropdown), so the old org-less guard stood down exactly when it was
+    // needed. The as-loaded DB snapshot (v7.9.00 keep-guard) is the fallback
+    // truth — honoured unless the user explicitly cleared via the Change door.
+    if (!leadData.target_org_id && window._leadTargetOrgAsLoaded
+        && !window._leadTargetOrgExplicitClear) {
+      console.warn('lead org display reconciled (' + (tag || '?') + '): leadData org was NULL in memory — healed from as-loaded ' + window._leadTargetOrgAsLoaded);
+      leadData.target_org_id = +window._leadTargetOrgAsLoaded;
+    }
+    if (!leadData.target_org_id) return;   // genuinely org-less lead: nothing to enforce
     if (leadData.site_id) {
       const st = (allData['sites'] || []).find(s => +s.id === +leadData.site_id);
       if (st && st.organisation_id) return;   // org derives from the site; the sub-picker is legitimately hidden
