@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.06 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.06 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2503,11 +2503,11 @@ const ORG_DETAIL_FIELDS = [
   { key: 'client_since',  label: 'Client Since', type: 'date' },
   { key: 'sector_id',     label: 'Industry Sector', type: 'lookup', lookupTable: 'industry_sectors', lookupLabel: r => r.name },
   { key: 'region_id',     label: 'Region', type: 'lookup', lookupTable: 'regions', lookupLabel: r => r.name },
-  // Parent/child (v7.9.06): parent-ness is DECLARED via the tickbox — the picker
-  // below offers ONLY ticked orgs, so the hierarchy stays deliberate (no accidental
-  // chains through ordinary clients). The anchor of a family is whoever gets ticked.
-  { key: 'is_parent',     label: 'Parent organisation (may head a group)', type: 'checkbox' },
-  { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name, lookupFilter: r => r.is_parent === true },
+  // Parent/child (v7.9.07): every organisation is a functional collective from
+  // the start — no declaration tickbox (organisations.is_parent stays in the DB,
+  // dormant). Multi-entity families link here; the self-parent guard in
+  // saveRecord keeps the chain sane.
+  { key: 'parent_org_id', label: 'Parent / Group', type: 'lookup', lookupTable: 'organisations', lookupLabel: r => r.name },
 
   { type: 'section', label: 'Compliance & Finance' },
   { key: 'registration_no',  label: 'Registration No' },
@@ -2713,6 +2713,9 @@ const PAGES = {
       { key: 'website',             label: 'Website' },
       { key: 'home_organisation',   label: 'Home Org', render: v => v ? '<span class="badge badge-blue">Home</span>' : '' },
       { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
+      // The collective's PERMANENT doorway (v7.9.08): band badges vanish when a
+      // tab holds no leads for the org — this one can't. Same view, same log button.
+      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
     ],
     // Same tabbed form as Clients, plus an Admin tab for the home/system flags.
     fields: [
@@ -2771,6 +2774,8 @@ const PAGES = {
           const cls = v === 'Active' ? 'badge-green' : v === 'Standing' ? 'badge-blue' : 'badge-gray';
           return v ? `<span class="badge ${cls}">${v}</span>` : '<span style="color:var(--text3);">—</span>';
         } },
+      // The collective's permanent doorway (v7.9.08) — see organisations config.
+      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
     ],
     // Tabbed client form (see renderTabbedForm). is_client / home_organisation /
     // allows_system_users are forced on save (clients can't be home/system orgs).
@@ -4550,23 +4555,12 @@ async function saveRecord(e) {
     body.allows_system_users = false;
   }
 
-  // Parent/group guards (v7.9.06): an organisation can never be its own parent
-  // (the 4001/4084/4138 self-link noise), and a declared parent with children
-  // still pointing at it cannot be unticked — repoint the children first.
-  if (currentPage === 'organisations' || currentPage === 'clients') {
-    if (editingId && body.parent_org_id != null && +body.parent_org_id === +editingId) {
-      showStatus('An organisation cannot be its own parent', 'error');
-      return;
-    }
-    if (editingId && body.is_parent === false) {
-      try {
-        const kids = await apiGet('organisations', 'parent_org_id=eq.' + editingId + '&select=id&limit=1');
-        if (kids.length) {
-          showStatus('Cannot untick Parent — child organisations still point at this one. Re-point them first.', 'error');
-          return;
-        }
-      } catch (err) { /* best-effort guard — never block the save on a failed check */ }
-    }
+  // Parent/group guard (v7.9.06): an organisation can never be its own parent —
+  // the 4001/4084/4138 self-link noise, now impossible to recreate.
+  if ((currentPage === 'organisations' || currentPage === 'clients')
+      && editingId && body.parent_org_id != null && +body.parent_org_id === +editingId) {
+    showStatus('An organisation cannot be its own parent', 'error');
+    return;
   }
 
   // Extra validation for system_users
@@ -9283,6 +9277,7 @@ async function saveOpportunity() {
       const result = await api('deals', 'POST', payload, 'select=*');
       deal = result[0];
       showStatus('Opportunity created');
+      if (deal.org_id) maybeBirthCollective(+deal.org_id);   // second pursuit births the group (v7.9.09)
     }
     oppData.id = deal.id;
 
@@ -12050,9 +12045,18 @@ function agingDaysFor(personId, kind) {
 // first; each surface applies its own scope rule.
 async function _attentionLeadItems() {
   const leads = await apiGet('leads',
-    'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,description,site_id,site_name,next_action_date,sites(name)');
+    'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,target_org_id,description,site_id,site_name,next_action_date,sites(name)');
   await sweepHoldWake(leads);   // wake due leads now, so their reminders show immediately
   const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
+  // Soothing (v7.9.07): a group touch quiets the aging nags too. Orgs may not be
+  // cached on the dashboard — use a SLIM local list, never written to allData
+  // (slim caches poisoned option lists before; see lead-org-name-autosave-wipe).
+  await _loadOrgTouches();
+  let _orgsForAging = allData['organisations'];
+  if (!_orgsForAging || !_orgsForAging.length) {
+    try { _orgsForAging = await apiGet('organisations', 'select=id,parent_org_id,group_touch_soothes'); }
+    catch (e) { _orgsForAging = []; }
+  }
   const items = [];
   for (const l of leads) {
     if (l.status === 'Dead' || l.status === 'Promoted') continue;
@@ -12064,7 +12068,7 @@ async function _attentionLeadItems() {
     }
     if (l.status === 'New') {
       const x = agingDaysFor(l.owner_id, 'new');
-      const days = daysSince(l.last_touch_date || l.created_at);
+      const days = daysSince(leadEffectiveTouch(l, _orgsForAging).date || l.created_at);
       if (x > 0 && days != null && days >= x) items.push({ lead: l, id: l.id, label, kind: 'new', days, limit: x,
         msg: 'Raw lead untouched for ' + days + ' days (limit ' + x + ')', order: 1 });
     } else if (l.status === 'Working') {
@@ -12073,7 +12077,7 @@ async function _attentionLeadItems() {
       // then reports the overdue action, and this escalation resumes).
       const planned = l.next_action_date && String(l.next_action_date).slice(0, 10) >= new Date().toISOString().slice(0, 10);
       const y = agingDaysFor(l.owner_id, 'working');
-      const days = daysSince(l.last_touch_date || l.created_at);
+      const days = daysSince(leadEffectiveTouch(l, _orgsForAging).date || l.created_at);
       if (!planned && y > 0 && days != null && days >= y) items.push({ lead: l, id: l.id, label, kind: 'working', days, limit: y,
         msg: 'Working lead with no touch for ' + days + ' days (limit ' + y + ')', order: 1 });
     }
@@ -14079,15 +14083,21 @@ function _familyOrgIds(parentId) {
   O.forEach(o => { if (+_ultimateParentOrg(o, O).id === +parentId) ids.add(+o.id); });
   return Array.from(ids);
 }
-// GROUP chip on a band heading — only for declared parents, never for a mere
-// multi-record band of one org (band ≠ group). Click = family engagement history.
+// Doorway chip on a band heading (v7.9.09): groups are BORN, not universal.
+// A multi-organisation family is a group by linkage (khaki GROUP badge); a
+// single org wears the muted HISTORY badge only once collective_since is
+// stamped — its second pursuit arrived, ratchet holds forever. One-pursuit
+// organisations stay inkless: the lead IS the story until there are two.
 function _groupChipHtml(bandKey) {
   if (!bandKey || bandKey[0] !== 'o') return '';
   const id = +bandKey.slice(1);
   const org = (allData['organisations'] || []).find(o => +o.id === id);
-  if (!org || !org.is_parent) return '';
+  if (!org) return '';
   const n = _familyOrgIds(id).length;
-  return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Group of ${n} organisation${n===1?'':'s'} — click for the family's engagement history" style="display:inline-block;margin-left:7px;padding:2px 8px;border-radius:9px;background:#F0E9DC;border:1px solid #C3B091;color:#003057;font-size:10px;font-weight:700;letter-spacing:.04em;vertical-align:middle;cursor:pointer;white-space:nowrap;">GROUP · ${n} ORGS</span>`;
+  const base = 'display:inline-block;margin-left:7px;padding:2px 8px;border-radius:9px;font-size:10px;font-weight:700;letter-spacing:.04em;vertical-align:middle;cursor:pointer;white-space:nowrap;';
+  if (n > 1) return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Group of ${n} organisations — engagement history across the family" style="${base}background:#F0E9DC;border:1px solid #C3B091;color:#003057;">GROUP · ${n} ORGS</span>`;
+  if (!org.collective_since) return '';
+  return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Collective engagement history for ${String(org.name || '').replace(/"/g, '&quot;')} — all its leads and deals, plus group-level engagements" style="${base}background:transparent;border:1px solid #D8CCB4;color:#8A6D3B;">HISTORY</span>`;
 }
 // ↳ hook under a register client cell: names the family the org sits under.
 // Absence of a hook means "standalone" — the default state carries no ink.
@@ -14098,6 +14108,171 @@ function _childHookHtml(orgId) {
   const top = _ultimateParentOrg(org, O);
   if (+top.id === +org.id) return '';
   return `<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;">↳ <span style="font-weight:600;color:var(--text2);">${cEsc(top.name || '')}</span></div>`;
+}
+
+// ── Group touches & aging (v7.9.07) ───────────────────────────────────────────
+// A collective engagement soothes every member lead's aging clock by default
+// (Richard 2026-08-31); a collective can opt out via organisations.
+// group_touch_soothes (the toggle lives inside the group view — zero form ink).
+// Internal-mode work never counts as a touch, mirroring the lead rule.
+async function _loadOrgTouches(force) {
+  if (allData['_org_touches'] && !force) return allData['_org_touches'];
+  const map = {};
+  try {
+    const rows = await apiGet('engagements', 'org_id=not.is.null&select=org_id,engagement_date,work_mode');
+    rows.forEach(r => {
+      if (r.work_mode === 'internal' || !r.engagement_date) return;
+      const k = 'o' + r.org_id;
+      if (!map[k] || r.engagement_date > map[k]) map[k] = r.engagement_date;
+    });
+  } catch (e) { /* soothing degrades to own-touch aging */ }
+  allData['_org_touches'] = map;
+  return map;
+}
+// Latest soothing group touch for an org, walking its ancestor chain — each
+// node contributes only while its own group_touch_soothes isn't false.
+function _groupTouchFor(orgId, orgsArr) {
+  const map = allData['_org_touches'];
+  if (!map || orgId == null) return null;
+  const O = orgsArr || allData['organisations'] || [];
+  let cur = O.find(o => +o.id === +orgId), best = null;
+  const seen = new Set();
+  while (cur && !seen.has(+cur.id)) {
+    seen.add(+cur.id);
+    if (cur.group_touch_soothes !== false) {
+      const d = map['o' + cur.id];
+      if (d && (!best || d > best)) best = d;
+    }
+    cur = cur.parent_org_id ? O.find(x => +x.id === +cur.parent_org_id) : null;
+  }
+  return best;
+}
+// A lead's EFFECTIVE last touch: its own, or the family's group touch if newer.
+function leadEffectiveTouch(l, orgsArr) {
+  const own = l.last_touch_date || null;
+  const orgId = l.target_org_id
+    || ((allData['sites'] || []).find(s => +s.id === +l.site_id)?.organisation_id) || null;
+  const grp = _groupTouchFor(orgId, orgsArr);
+  return (grp && (!own || grp > own)) ? { date: grp, group: true } : { date: own, group: false };
+}
+
+// ── Group birth (v7.9.09) ─────────────────────────────────────────────────────
+// A group is BORN when an organisation gains its second concurrent pursuit
+// (lead or deal). Birth is a RATCHET — collective_since never unsets, so a born
+// group keeps its doorway forever (the delete-last-lead lesson). At birth the
+// group adopts the FIRST pursuit's description as its own (seeded copy,
+// editable at group level thereafter). Fire-and-forget from every pursuit-
+// creating path; the migration backfill catches anything missed.
+async function maybeBirthCollective(orgId) {
+  try {
+    if (!orgId) return;
+    const cached = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (cached && cached.collective_since) return;   // already born — the common case, one array scan
+    // Extension/variation deals do NOT count as distinct pursuits — they are the
+    // same relationship continuing (Richard 2026-09-01; revisit note in memory:
+    // counting them may become right once leads+opps run smoothly).
+    const [ls, ds] = await Promise.all([
+      apiGet('leads', 'target_org_id=eq.' + (+orgId) + '&select=id,description,created_at'),
+      apiGet('deals', 'org_id=eq.' + (+orgId) + '&or=(opportunity_type.is.null,opportunity_type.eq.new_business)&select=id,notes,created_at'),
+    ]);
+    if (ls.length + ds.length < 2) return;
+    const fresh = await apiGet('organisations', 'id=eq.' + (+orgId) + '&select=id,collective_since,group_description');
+    if (!fresh[0] || fresh[0].collective_since) return;
+    const first = ls.map(l => ({ t: l.created_at, text: l.description }))
+      .concat(ds.map(d => ({ t: d.created_at, text: d.notes })))
+      .sort((a, b) => new Date(a.t || 0) - new Date(b.t || 0))
+      .find(p => (p.text || '').trim());
+    const patch = { collective_since: new Date().toISOString() };
+    if (!fresh[0].group_description && first) patch.group_description = first.text;
+    await api('organisations', 'PATCH', patch, 'id=eq.' + (+orgId));
+    if (cached) {
+      cached.collective_since = patch.collective_since;
+      if (patch.group_description) cached.group_description = patch.group_description;
+    }
+  } catch (e) { /* birth is best-effort — the next pursuit or the migration backfill catches it */ }
+}
+
+// ── Group stage cohesion (v7.9.11) ────────────────────────────────────────────
+// Richard's special rules (2026-09-01): the collective moves as one through the
+// early stages. One member entering Working or Nurture pulls the whole group UP
+// the ladder Raw < Working < Nurture (never down; Hold/Review/Promoted/Dead
+// members untouched; a site is the only ticket a pulled sibling needs). A
+// newborn on an advanced group joins at the group's reached stage. Waking is
+// NOT cohesive — one wakes alone. All of it rides the group's one switch
+// (group_touch_soothes): off = the group neither breathes nor moves together.
+const _stageRank = s => s === 'New' ? 0 : s === 'Working' ? 1 : s === LEAD_STAGE_X ? 2 : -1;
+function _cohesionRootFor(lead) {
+  const O = allData['organisations'] || [];
+  const orgId = lead.target_org_id
+    || ((allData['sites'] || []).find(s => +s.id === +lead.site_id)?.organisation_id) || null;
+  if (!orgId) return null;
+  const org = O.find(o => +o.id === +orgId);
+  if (!org) return null;
+  const top = _ultimateParentOrg(org, O);
+  const isGroup = !!top.collective_since || !!org.collective_since || _familyOrgIds(+top.id).length > 1;
+  if (!isGroup) return null;
+  if (top.group_touch_soothes === false) return null;   // the one switch
+  return top;
+}
+async function _groupMemberLeads(top) {
+  const famIds = _familyOrgIds(+top.id);
+  const idList = famIds.join(',');
+  let siteIds = [];
+  try { siteIds = (await apiGet('sites', 'organisation_id=in.(' + idList + ')&select=id')).map(s => +s.id); } catch (e) {}
+  const filter = siteIds.length
+    ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
+    : 'target_org_id=in.(' + idList + ')';
+  return apiGet('leads', filter + '&select=id,status,site_id,site_name,working_at,nurture_cadence_days');
+}
+async function applyGroupStageCohesion(sourceLead, targetStage, opts) {
+  try {
+    const rank = _stageRank(targetStage);
+    if (rank < 1 || !sourceLead) return;
+    const top = _cohesionRootFor(sourceLead);
+    if (!top) return;
+    const members = await _groupMemberLeads(top);
+    const now = new Date().toISOString();
+    const pulled = members.filter(m => +m.id !== +sourceLead.id
+      && _stageRank(m.status) >= 0 && _stageRank(m.status) < rank
+      && (m.site_id || (m.site_name || '').trim()));   // "site is enough" (Richard)
+    if (!pulled.length) return;
+    const cadence = (opts && opts.cadence) || sourceLead.nurture_cadence_days || 30;
+    for (const m of pulled) {
+      const patch = { status: targetStage, updated_at: now };
+      if (!m.working_at) patch.working_at = now;
+      if (targetStage === LEAD_STAGE_X) patch.nurture_cadence_days = m.nurture_cadence_days || cadence;
+      await api('leads', 'PATCH', patch, 'id=eq.' + (+m.id));
+    }
+    showStatus('Group cohesion: ' + pulled.length + ' related lead' + (pulled.length === 1 ? '' : 's') + ' moved to ' + leadStageLabel(targetStage) + ' with this one');
+  } catch (e) { console.warn('group cohesion skipped:', e.message); }
+}
+// A newborn on a born group joins the group's reached stage (never stays Raw
+// below its family). Requires a site, like every pulled sibling.
+async function applyGroupJoinStage(newLead) {
+  try {
+    if (!newLead || newLead.status !== 'New') return;
+    if (!(newLead.site_id || (newLead.site_name || '').trim())) return;
+    const top = _cohesionRootFor(newLead);
+    if (!top) return;
+    const members = await _groupMemberLeads(top);
+    let maxRank = 0, cadence = 30;
+    members.forEach(m => {
+      if (+m.id === +newLead.id) return;
+      const r = _stageRank(m.status);
+      if (r > maxRank) { maxRank = r; if (m.nurture_cadence_days) cadence = m.nurture_cadence_days; }
+    });
+    if (maxRank < 1) return;
+    const target = maxRank === 1 ? 'Working' : LEAD_STAGE_X;
+    const patch = { status: target, working_at: newLead.working_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (target === LEAD_STAGE_X) patch.nurture_cadence_days = cadence;
+    await api('leads', 'PATCH', patch, 'id=eq.' + (+newLead.id));
+    newLead.status = target; newLead.working_at = patch.working_at;
+    if (typeof leadData === 'object' && leadData && +leadData.id === +newLead.id) {
+      leadData.status = target; leadData.working_at = patch.working_at;
+      if (typeof renderLeadStatusBadge === 'function') renderLeadStatusBadge(target);
+    }
+    showStatus('Joined its group at ' + leadStageLabel(target));
+  } catch (e) { /* best-effort — the group's next move will pull it anyway */ }
 }
 
 // ── Family engagement history (behind the band heading's GROUP chip) ──────────
@@ -14122,19 +14297,29 @@ async function openParentHistory(parentId) {
     const leadFilter = siteIds.length
       ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
       : 'target_org_id=in.(' + idList + ')';
-    const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status');
-    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id');
+    const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status,created_at,source_id');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,created_at');
     const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
     const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
     const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
+    // Collective engagements logged against the family's organisations (v7.9.07).
+    const engO = await apiGet('engagements', 'org_id=in.(' + idList + ')&select=*');
+    // Lookups for the log-group-engagement form.
+    if (!allData['activity_types']) { try { allData['activity_types'] = await apiGet('activity_types', 'select=*&order=name.asc'); } catch (e) { allData['activity_types'] = []; } }
+    if (!allData['next_actions'])   { try { allData['next_actions']   = await apiGet('next_actions', 'select=*&order=sort_order.asc'); } catch (e) { allData['next_actions'] = []; } }
     const siteOrg = new Map(sites.map(s => [+s.id, +s.organisation_id]));
     const orgName = id => (O.find(o => +o.id === +id)?.name) || '—';
     const leadById = new Map(leads.map(l => [+l.id, l]));
     const dealById = new Map(deals.map(d => [+d.id, d]));
     const rows = [];
-    engL.concat(engD).forEach(en => {
+    engL.concat(engD, engO).forEach(en => {
       let entityOrg = null, recLabel = '', open = '', kind = '';
-      if (en.lead_id && leadById.has(+en.lead_id)) {
+      if (en.org_id) {
+        // Collective row — logged against the organisation itself (the hold-all).
+        entityOrg = +en.org_id;
+        recLabel = '(collective)';
+        open = ''; kind = 'Group';
+      } else if (en.lead_id && leadById.has(+en.lead_id)) {
         const l = leadById.get(+en.lead_id);
         entityOrg = l.target_org_id ? +l.target_org_id : (l.site_id ? (siteOrg.get(+l.site_id) || null) : null);
         const siteRow = l.site_id ? sites.find(s => +s.id === +l.site_id) : null;
@@ -14150,15 +14335,33 @@ async function openParentHistory(parentId) {
       rows.push({
         date:  en.engagement_date || '',
         client: entityOrg != null ? orgName(entityOrg) : '—',
-        isParent: entityOrg != null && +entityOrg === +parentId,
+        isGroup: kind === 'Group',
         rec: recLabel, open, kind,
         type: en.engagement_type || '',
         owner: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : '',
         notes: String(en.notes || '').replace(/\s+/g, ' ').trim(),
       });
     });
-    _phData = { rows };
+    _phData = { rows, parentId: +parentId, parentName: parent.name || '' };
     _phSort = { key: 'date', dir: -1 }; _phQ = '';
+    // Origin: the group's how-it-started = the EARLIEST pursuit's source (v7.9.09).
+    if (!allData['lead_sources']) { try { allData['lead_sources'] = await apiGet('lead_sources', 'select=*'); } catch (e) { allData['lead_sources'] = []; } }
+    const _pursuits = leads.map(l => ({ t: l.created_at, kind: 'lead', src: l.source_id }))
+      .concat(deals.map(d => ({ t: d.created_at, kind: 'deal' })))
+      .sort((a, b) => new Date(a.t || 0) - new Date(b.t || 0));
+    let originLabel = '—';
+    if (_pursuits.length) {
+      const f = _pursuits[0];
+      const when = f.t ? new Date(f.t).toLocaleDateString('en-ZA') : '';
+      originLabel = (f.kind === 'lead'
+        ? (((allData['lead_sources'] || []).find(s => +s.id === +f.src)?.name) || 'Lead')
+        : 'Direct opportunity') + (when ? ' · ' + when : '');
+    }
+    const _todayStr = new Date().toISOString().slice(0, 10);
+    const _typeOpts = (allData['activity_types'] || []).filter(t => t.active !== false)
+      .map(t => `<option value="${t.id}">${cEsc(t.name || '')}</option>`).join('');
+    const _naOpts = (allData['next_actions'] || []).filter(n => n.active !== false)
+      .map(n => `<option value="${n.id}">${cEsc(n.name || '')}</option>`).join('');
     showModal(`
       <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
         <div class="modal" style="width:960px;max-width:96vw;">
@@ -14168,6 +14371,37 @@ async function openParentHistory(parentId) {
             <button class="modal-close" onclick="closeModal()">×</button>
           </div>
           <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
+            <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
+              <button class="btn btn-primary btn-sm" onclick="_phShowLogForm()">+ Log group engagement</button>
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;" title="On: a group engagement resets every member's aging clock, and one member entering Working or ${LEAD_STAGE_X} pulls the whole group with it. Off: members age and move individually; group rows stay visible as context.">
+                <input type="checkbox" ${parent.group_touch_soothes !== false ? 'checked' : ''} onchange="_phToggleSoothe(${+parentId}, this.checked)">
+                Group acts as one — aging & stage moves
+              </label>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Group description <span style="font-weight:500;text-transform:none;letter-spacing:0;">· Origin: ${cEsc(originLabel)}</span></div>
+                <button class="btn btn-secondary btn-sm" id="ph-desc-edit-btn" onclick="_phEditDesc()">Edit</button>
+              </div>
+              <div id="ph-desc-view" style="font-size:13px;color:var(--text);margin-top:6px;white-space:pre-wrap;">${(parent.group_description || '').trim() ? cEsc(parent.group_description) : '<span style="color:var(--text3);">No group description yet — seeded from the first pursuit at birth, editable here.</span>'}</div>
+              <div id="ph-desc-editwrap" style="display:none;margin-top:6px;">
+                <textarea id="ph-desc-input" class="form-control" rows="3">${cEsc(parent.group_description || '')}</textarea>
+                <div style="text-align:right;margin-top:6px;"><button class="btn btn-primary btn-sm" onclick="_phSaveDesc()">Save description</button></div>
+              </div>
+            </div>
+            <div id="ph-log-form" style="display:none;background:#F7F2E9;border:1px solid #C3B091;border-radius:8px;padding:12px;margin-bottom:10px;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <input type="date" id="ph-eng-date" class="form-control" style="width:150px;" value="${_todayStr}">
+                <select id="ph-eng-type" class="form-control" style="width:190px;"><option value="">— type —</option>${_typeOpts}</select>
+                <input type="text" id="ph-eng-notes" class="form-control" style="flex:1;min-width:220px;" placeholder="Notes — what happened with the group?">
+              </div>
+              <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;">
+                <select id="ph-eng-na" class="form-control" style="width:200px;"><option value="">— next action —</option>${_naOpts}</select>
+                <input type="date" id="ph-eng-na-date" class="form-control" style="width:150px;">
+                <span style="font-size:11px;color:var(--text3);">Next action + due date required — "No Further Action" closes it immediately</span>
+                <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="_phSaveGroupEngagement()">Save</button>
+              </div>
+            </div>
             <input type="text" id="ph-search" class="form-control" placeholder="Search type, client, record, notes, owner…" style="margin-bottom:10px;" oninput="_phQ=this.value; _phRenderRows();">
             <table style="width:100%;border-collapse:collapse;">
               <thead><tr>${[['date','Date'],['client','Client'],['rec','Record'],['type','Type'],['owner','By'],['notes','Notes']].map(c => `<th style="cursor:pointer;white-space:nowrap;" onclick="_phSetSort('${c[0]}')">${c[1]}<span id="ph-arr-${c[0]}"></span></th>`).join('')}</tr></thead>
@@ -14199,15 +14433,88 @@ function _phRenderRows() {
     if (el) el.textContent = c === k ? (dir > 0 ? ' ▲' : ' ▼') : '';
   });
   tb.innerHTML = rows.length ? rows.map(r => `
-    <tr onclick="closeModal(); ${r.open}" style="cursor:pointer;${r.isParent ? 'background:#F7F2E9;box-shadow:inset 3px 0 0 0 #C3B091;' : ''}">
+    <tr ${r.open ? `onclick="closeModal(); ${r.open}"` : ''} style="${r.open ? 'cursor:pointer;' : ''}${r.isGroup ? 'background:#F7F2E9;box-shadow:inset 3px 0 0 0 #C3B091;' : ''}">
       <td style="white-space:nowrap;">${r.date ? new Date(r.date).toLocaleDateString('en-ZA') : '—'}</td>
-      <td style="font-weight:600;color:#003057;white-space:nowrap;">${cEsc(r.client)}${r.isParent ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">PARENT</span>' : ''}</td>
+      <td style="font-weight:600;color:#003057;white-space:nowrap;">${cEsc(r.client)}${r.isGroup ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">GROUP</span>' : ''}</td>
       <td>${cEsc(r.rec)} <span style="font-size:10px;color:var(--text3);">(${r.kind})</span></td>
       <td style="white-space:nowrap;">${cEsc(r.type || '—')}</td>
       <td style="white-space:nowrap;">${cEsc(r.owner || '—')}</td>
       <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
     </tr>`).join('')
-  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this family yet'}</td></tr>`;
+  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this collective yet'}</td></tr>`;
+}
+
+// Group description: seeded from the first pursuit at birth, editable HERE at
+// group level — the collective's story is free to outgrow lead #1's text.
+function _phEditDesc() {
+  const v = document.getElementById('ph-desc-view'), w = document.getElementById('ph-desc-editwrap');
+  if (v) v.style.display = 'none';
+  if (w) { w.style.display = ''; document.getElementById('ph-desc-input')?.focus(); }
+}
+async function _phSaveDesc() {
+  if (!_phData || !_phData.parentId) return;
+  const text = (document.getElementById('ph-desc-input')?.value || '').trim() || null;
+  try {
+    await api('organisations', 'PATCH', { group_description: text }, 'id=eq.' + _phData.parentId);
+    const cached = (allData['organisations'] || []).find(o => +o.id === +_phData.parentId);
+    if (cached) cached.group_description = text;
+    const v = document.getElementById('ph-desc-view'), w = document.getElementById('ph-desc-editwrap');
+    if (v) { v.innerHTML = text ? cEsc(text) : '<span style="color:var(--text3);">No group description yet.</span>'; v.style.display = ''; }
+    if (w) w.style.display = 'none';
+    showStatus('Group description saved');
+  } catch (e) { showStatus('Could not save description: ' + e.message, 'error'); }
+}
+
+// Show the inline log form inside the group view.
+function _phShowLogForm() {
+  const f = document.getElementById('ph-log-form');
+  if (f) { f.style.display = ''; document.getElementById('ph-eng-type')?.focus(); }
+}
+// Per-collective aging override (default: soothing). Lives HERE, not on the org
+// form — only people actually working a collective ever meet it.
+async function _phToggleSoothe(orgId, on) {
+  try {
+    await api('organisations', 'PATCH', { group_touch_soothes: !!on }, 'id=eq.' + (+orgId));
+    showStatus(on ? 'Group touches now count for members’ aging' : 'Members now age on their own touches only');
+  } catch (e) { showStatus('Could not save the aging setting: ' + e.message, 'error'); }
+}
+// Save a COLLECTIVE engagement — org_id is its home; leads and deals untouched.
+// House rule holds (v7.7.98): a next action + due date is required, with
+// "No Further Action" saving as already complete.
+async function _phSaveGroupEngagement() {
+  if (!_phData || !_phData.parentId) return;
+  const date  = document.getElementById('ph-eng-date')?.value || '';
+  const typeId = +(document.getElementById('ph-eng-type')?.value || 0) || null;
+  const notes = (document.getElementById('ph-eng-notes')?.value || '').trim();
+  const naId  = +(document.getElementById('ph-eng-na')?.value || 0) || null;
+  let naDate  = document.getElementById('ph-eng-na-date')?.value || '';
+  if (!date)   { showStatus('Engagement date is required', 'error'); return; }
+  if (!typeId) { showStatus('Pick an engagement type', 'error'); return; }
+  if (!naId)   { showStatus('A next action is required — pick "No Further Action" if nothing is owed', 'error'); return; }
+  const na = (allData['next_actions'] || []).find(n => +n.id === naId);
+  const isNfa = na && String(na.name || '').toLowerCase() === 'no further action';
+  if (isNfa) naDate = new Date().toISOString().slice(0, 10);
+  if (!naDate) { showStatus('A due date for the next action is required', 'error'); return; }
+  const type = (allData['activity_types'] || []).find(t => +t.id === typeId);
+  try {
+    await api('engagements', 'POST', {
+      org_id:           +_phData.parentId,
+      engagement_date:  date,
+      engagement_type:  type ? type.name : null,
+      activity_type_id: typeId,
+      notes:            notes || null,
+      next_action:      na ? na.name : null,
+      next_action_id:   naId,
+      next_action_date: naDate,
+      next_action_done: !!isNfa,
+      created_by:       currentUser?.personId || null,
+    }, 'select=*');
+    delete allData['_org_touches'];   // group touch changed — soothing recomputes
+    showStatus('Group engagement logged');
+    const pid = _phData.parentId;
+    closeModal();
+    openParentHistory(pid);   // reopen fresh so the new row shows immediately
+  } catch (e) { showStatus('Could not log the group engagement: ' + e.message, 'error'); }
 }
 
 // Lead display label outside the leads page (engagement modal, dashboard,
@@ -14269,6 +14576,7 @@ async function renderLeadsPage() {
     allData['organisations']      = orgs;
     allData['research_campaigns'] = campaigns;
     allData['sites']              = sites;
+    await _loadOrgTouches(true);   // group touches for the soothing aging rule (v7.9.07)
 
     // App-layer sweeps: flip eligible New leads to Working, and wake held leads
     // whose wake date has arrived (replaces the retired DB status triggers).
@@ -14527,14 +14835,19 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     // Promoted leads are done being touched — the column shows the milestone
     // instead of a meaningless aging clock (Richard 2026-08-28).
     lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>`;
-  } else if (l.last_touch_date) {
-    const days = Math.floor((Date.now() - new Date(l.last_touch_date).getTime()) / 86400000);
-    const kind = l.status === 'New' ? 'new' : l.status === 'Working' ? 'working' : null;
-    const limit = kind ? agingDaysFor(l.owner_id, kind) : 0;
-    const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
-              : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
-              : '';
-    lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
+  } else {
+    // Effective touch (v7.9.07): the family's group engagement soothes the clock
+    // when newer than the lead's own touch — marked "· grp" so the source shows.
+    const eff = leadEffectiveTouch(l);
+    if (eff.date) {
+      const days = Math.floor((Date.now() - new Date(eff.date).getTime()) / 86400000);
+      const kind = l.status === 'New' ? 'new' : l.status === 'Working' ? 'working' : null;
+      const limit = kind ? agingDaysFor(l.owner_id, kind) : 0;
+      const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
+                : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
+                : '';
+      lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}${eff.group ? ' <span style="font-size:10px;color:#8A6D3B;font-weight:700;" title="Most recent touch is a group engagement">· grp</span>' : ''}</span>`;
+    }
   }
 
   // Edit-grace countdown: Working leads still in their editable window show the
@@ -14621,15 +14934,23 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     const latestPromo = rows.filter(l => l.promoted_at)
                             .sort((x, y) => new Date(y.promoted_at) - new Date(x.promoted_at))[0];
     if (latestPromo) lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>`;
-  } else if (touched.length) {
-    const t = touched[0];
-    const days = Math.floor((Date.now() - new Date(t.last_touch_date).getTime()) / 86400000);
-    const kind = t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null;
-    const limit = kind ? agingDaysFor(t.owner_id, kind) : 0;
-    const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
-              : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
-              : '';
-    lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}</span>`;
+  } else {
+    // Band's most recent touch: the members' own touches vs the collective's
+    // group touch (v7.9.07) — whichever is newer wears the cell, "· grp" marked.
+    const t = touched[0] || null;
+    const grp = b.key && b.key[0] === 'o' ? _groupTouchFor(+b.key.slice(1)) : null;
+    const ownDate = t ? t.last_touch_date : null;
+    const useGrp = !!(grp && (!ownDate || grp > ownDate));
+    const effDate = useGrp ? grp : ownDate;
+    if (effDate) {
+      const days = Math.floor((Date.now() - new Date(effDate).getTime()) / 86400000);
+      const kind = t ? (t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null) : null;
+      const limit = (kind && t) ? agingDaysFor(t.owner_id, kind) : 0;
+      const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
+                : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
+                : '';
+      lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}${useGrp ? ' <span style="font-size:10px;color:#8A6D3B;font-weight:700;" title="Most recent touch is a group engagement">· grp</span>' : ''}</span>`;
+    }
   }
   const enc = encodeURIComponent(b.key).replace(/'/g, '%27');
   return `<tr onclick="toggleClientBand('leads','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
@@ -15596,6 +15917,8 @@ async function promoteTargetToLead(id) {
   try {
     const made = await api('leads', 'POST', leadPayload, 'select=*');
     const lead = made[0];
+    if (lead.target_org_id) maybeBirthCollective(+lead.target_org_id);   // v7.9.09 group birth
+    applyGroupJoinStage(lead);   // v7.9.11: newborn joins its group's reached stage
     await api('campaign_targets', 'PATCH',
       { status: 'Promoted', promoted_lead_id: lead.id, promoted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
       'id=eq.' + id);
@@ -16488,6 +16811,7 @@ async function openNewLead() {
   leadData = {};
   window._leadTargetOrgAsLoaded = null;   // keep-guard baseline: a new lead has no org to keep (bug #76)
   window._leadTargetOrgExplicitClear = false;
+  window._leadStatusAtOpen = 'New';
   window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
@@ -16545,6 +16869,7 @@ async function openLeadForm(id) {
     // without the user having gone through the Change flow.
     window._leadTargetOrgAsLoaded = +leadData.target_org_id || null;
     window._leadTargetOrgExplicitClear = false;
+    window._leadStatusAtOpen = leadData.status || 'New';   // cohesion fires on transitions, once (v7.9.11)
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     _promotedLeadContactsCache = null;   // promoted read-through refetches per open
     resetLeadForm();
@@ -19801,6 +20126,9 @@ async function submitStageRequest(type) {
     const made = await api('lead_stage_requests', 'POST', row, 'select=*');
     closeModal();
     await applyStageRequest(made && made[0] ? made[0] : row);
+    // Working → Nurture is a cohesive move (v7.9.11): the whole group follows,
+    // pulled siblings inheriting this cadence. Hold is individual — not cohesive.
+    if (!isHold) applyGroupStageCohesion(leadData, LEAD_STAGE_X, { cadence: cad });
     showStatus(isHold ? 'Lead placed on Hold' : 'Lead moved to ' + LEAD_STAGE_X);
   } catch (e) { showStatus('Could not apply: ' + e.message, 'error'); }
   finally { stopBusy(); }
@@ -21636,6 +21964,7 @@ async function commitPromotion(s) {
       created_by:       currentUser?.personId || null,
     };
     const createdDeal = await api('deals', 'POST', dealPayload, 'select=*');
+    if (dealPayload.org_id) maybeBirthCollective(+dealPayload.org_id);   // promote adds a pursuit — group may be born (v7.9.09)
     const dealId = createdDeal[0].id;
 
     // === 5. Deal collaborators: owner ========================
@@ -22411,6 +22740,7 @@ async function sweepNewToWorking(leads) {
       const patch = { status: 'Working', working_at: l.working_at || now.toISOString(), updated_at: now.toISOString() };
       await api('leads', 'PATCH', patch, 'id=eq.' + l.id);
       l.status = 'Working'; l.working_at = patch.working_at;
+      applyGroupStageCohesion(l, 'Working');   // one member up = the group up (v7.9.11, best-effort)
     } catch (e) { /* non-fatal — leave New, retry on next load */ }
   }
   return leads;
@@ -22775,11 +23105,22 @@ async function saveLead(opts) {
       payload.created_by = currentUser?.personId || null;
       const result = await api('leads', 'POST', payload, 'select=*');
       leadData = result[0];
+      window._leadJustCreated = true;   // rule 2 (v7.9.11): a newborn may join its group's stage
       if (!opts.silent) showStatus('Lead created');
     }
     // The just-persisted organisation is the keep-guard's new baseline for the
     // rest of this form-open (bug #76).
     window._leadTargetOrgAsLoaded = +payload.target_org_id || null;
+    // Second pursuit on this organisation? The group is born (v7.9.09, ratchet).
+    if (payload.target_org_id) maybeBirthCollective(+payload.target_org_id);
+    // Group stage rules (v7.9.11): a newborn joins its group's reached stage;
+    // a lead ENTERING Working pulls the whole group up. Nurture entry hooks in
+    // submitStageRequest (its own path). Both best-effort, never block the save.
+    if (window._leadJustCreated) { window._leadJustCreated = false; applyGroupJoinStage(leadData); }
+    if (leadData.status === 'Working' && window._leadStatusAtOpen !== 'Working') {
+      window._leadStatusAtOpen = 'Working';   // once per form-open
+      applyGroupStageCohesion(leadData, 'Working');
+    }
     // Re-apply edits that arrived mid-flight: anywhere the live object now differs
     // from what was SENT, the user changed it during the request — keep their value.
     let midFlightEdits = false;
@@ -23985,6 +24326,25 @@ async function loadLeadInteractions(leadId) {
     leadInteractions = [];
     console.warn('Could not load lead interactions:', e.message);
   }
+  // Group context (v7.9.07): collective engagements on the lead's organisation
+  // and its ancestors — interleaved read-only by renderLeadInteractions.
+  // leadInteractions itself stays PURE: cadence step counts and edit paths rely on it.
+  window._leadGroupEngs = [];
+  try {
+    const orgId = leadData?.target_org_id
+      || ((allData['sites'] || []).find(s => +s.id === +leadData?.site_id)?.organisation_id) || null;
+    if (orgId) {
+      const O = allData['organisations'] || [];
+      const chain = []; const seen = new Set();
+      let cur = O.find(o => +o.id === +orgId);
+      if (!cur) chain.push(+orgId);   // org row not cached: still fetch its own collective rows
+      while (cur && !seen.has(+cur.id)) {
+        seen.add(+cur.id); chain.push(+cur.id);
+        cur = cur.parent_org_id ? O.find(x => +x.id === +cur.parent_org_id) : null;
+      }
+      if (chain.length) window._leadGroupEngs = await apiGet('engagements', 'org_id=in.(' + chain.join(',') + ')&select=*&order=engagement_date.desc');
+    }
+  } catch (e) { window._leadGroupEngs = []; }
   // Milestone badges for the list (fail-silent pre-migration).
   await _milLookups();
   window._leadMilMap = await _milForEngagements(leadInteractions.map(i => +i.id));
@@ -23993,7 +24353,8 @@ async function loadLeadInteractions(leadId) {
 function renderLeadInteractions() {
   const list = document.getElementById('lead-interactions-list');
   if (!list) return;
-  if (!leadInteractions.length) {
+  const groupEngs = window._leadGroupEngs || [];
+  if (!leadInteractions.length && !groupEngs.length) {
     list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>';
     return;
   }
@@ -24001,7 +24362,7 @@ function renderLeadInteractions() {
   const now = Date.now();
   const gracePeriodMs = graceMins * 60 * 1000;
 
-  const rows = leadInteractions.map(i => {
+  const ownEntries = leadInteractions.map(i => {
     const isEditable = (now - new Date(i.created_at).getTime()) < gracePeriodMs;
 
     const hasNext = !!i.next_action;
@@ -24041,14 +24402,35 @@ function renderLeadInteractions() {
 
     const borderLeft = isEditable ? '3px solid var(--red)' : '3px solid var(--border)';
 
-    return `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openLeadInteractionRow(${i.id})">
+    return { date: i.engagement_date || '', html: `<tr style="border-top:1px solid var(--border);cursor:pointer;" onclick="openLeadInteractionRow(${i.id})">
       <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:${borderLeft};vertical-align:middle;white-space:nowrap;width:1%;">${i.engagement_date}</td>
       <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;">${typeCell}</td>
       <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextActionCell}</td>
       <td style="padding:10px 12px;color:var(--text2);vertical-align:middle;text-align:right;white-space:nowrap;width:1%;">${nextDateCell}</td>
       <td style="padding:10px 12px;text-align:right;vertical-align:middle;white-space:nowrap;width:1%;">${completedCell}</td>
-    </tr>`;
-  }).join('');
+    </tr>` };
+  });
+
+  // Group context rows (v7.9.07): the collective's engagements, khaki-tinted and
+  // read-only — the group's story shown inside the member's, never editable here
+  // and never counted as the lead's own activity. Interleaved chronologically.
+  const orgsForNames = allData['organisations'] || [];
+  const gName = id => (orgsForNames.find(o => +o.id === +id)?.name) || 'Group';
+  const groupEntries = groupEngs.map(e => ({
+    date: e.engagement_date || '',
+    html: `<tr style="border-top:1px solid var(--border);background:#F7F2E9;" title="Group engagement — logged at the organisation; read-only here">
+      <td style="padding:10px 8px 10px 12px;font-weight:600;border-left:3px solid #C3B091;vertical-align:middle;white-space:nowrap;width:1%;">${e.engagement_date || ''}</td>
+      <td style="padding:10px 12px 10px 4px;vertical-align:middle;width:100%;"><div style="display:flex;align-items:center;gap:10px;min-width:0;">
+        <span style="flex-shrink:0;font-size:9px;font-weight:800;color:#8A6D3B;border:1px solid #D8CCB4;border-radius:8px;padding:1px 6px;white-space:nowrap;">GROUP — ${cEsc(gName(e.org_id))}</span>
+        <span class="eng-badge" style="flex-shrink:0;">${e.engagement_type || ''}</span>
+        ${e.notes ? `<span style="font-size:12px;color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;">${cEsc(String(e.notes).slice(0, 100))}</span>` : ''}
+      </div></td>
+      <td colspan="3" style="padding:10px 12px;color:var(--text3);vertical-align:middle;text-align:right;font-size:11px;white-space:nowrap;">group context</td>
+    </tr>` }));
+
+  const rows = ownEntries.concat(groupEntries)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .map(x => x.html).join('');
 
   list.innerHTML = `
     <table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:auto;">
