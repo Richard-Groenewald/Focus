@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.10 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.10 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -14192,6 +14192,89 @@ async function maybeBirthCollective(orgId) {
   } catch (e) { /* birth is best-effort — the next pursuit or the migration backfill catches it */ }
 }
 
+// ── Group stage cohesion (v7.9.11) ────────────────────────────────────────────
+// Richard's special rules (2026-09-01): the collective moves as one through the
+// early stages. One member entering Working or Nurture pulls the whole group UP
+// the ladder Raw < Working < Nurture (never down; Hold/Review/Promoted/Dead
+// members untouched; a site is the only ticket a pulled sibling needs). A
+// newborn on an advanced group joins at the group's reached stage. Waking is
+// NOT cohesive — one wakes alone. All of it rides the group's one switch
+// (group_touch_soothes): off = the group neither breathes nor moves together.
+const _stageRank = s => s === 'New' ? 0 : s === 'Working' ? 1 : s === LEAD_STAGE_X ? 2 : -1;
+function _cohesionRootFor(lead) {
+  const O = allData['organisations'] || [];
+  const orgId = lead.target_org_id
+    || ((allData['sites'] || []).find(s => +s.id === +lead.site_id)?.organisation_id) || null;
+  if (!orgId) return null;
+  const org = O.find(o => +o.id === +orgId);
+  if (!org) return null;
+  const top = _ultimateParentOrg(org, O);
+  const isGroup = !!top.collective_since || !!org.collective_since || _familyOrgIds(+top.id).length > 1;
+  if (!isGroup) return null;
+  if (top.group_touch_soothes === false) return null;   // the one switch
+  return top;
+}
+async function _groupMemberLeads(top) {
+  const famIds = _familyOrgIds(+top.id);
+  const idList = famIds.join(',');
+  let siteIds = [];
+  try { siteIds = (await apiGet('sites', 'organisation_id=in.(' + idList + ')&select=id')).map(s => +s.id); } catch (e) {}
+  const filter = siteIds.length
+    ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
+    : 'target_org_id=in.(' + idList + ')';
+  return apiGet('leads', filter + '&select=id,status,site_id,site_name,working_at,nurture_cadence_days');
+}
+async function applyGroupStageCohesion(sourceLead, targetStage, opts) {
+  try {
+    const rank = _stageRank(targetStage);
+    if (rank < 1 || !sourceLead) return;
+    const top = _cohesionRootFor(sourceLead);
+    if (!top) return;
+    const members = await _groupMemberLeads(top);
+    const now = new Date().toISOString();
+    const pulled = members.filter(m => +m.id !== +sourceLead.id
+      && _stageRank(m.status) >= 0 && _stageRank(m.status) < rank
+      && (m.site_id || (m.site_name || '').trim()));   // "site is enough" (Richard)
+    if (!pulled.length) return;
+    const cadence = (opts && opts.cadence) || sourceLead.nurture_cadence_days || 30;
+    for (const m of pulled) {
+      const patch = { status: targetStage, updated_at: now };
+      if (!m.working_at) patch.working_at = now;
+      if (targetStage === LEAD_STAGE_X) patch.nurture_cadence_days = m.nurture_cadence_days || cadence;
+      await api('leads', 'PATCH', patch, 'id=eq.' + (+m.id));
+    }
+    showStatus('Group cohesion: ' + pulled.length + ' related lead' + (pulled.length === 1 ? '' : 's') + ' moved to ' + leadStageLabel(targetStage) + ' with this one');
+  } catch (e) { console.warn('group cohesion skipped:', e.message); }
+}
+// A newborn on a born group joins the group's reached stage (never stays Raw
+// below its family). Requires a site, like every pulled sibling.
+async function applyGroupJoinStage(newLead) {
+  try {
+    if (!newLead || newLead.status !== 'New') return;
+    if (!(newLead.site_id || (newLead.site_name || '').trim())) return;
+    const top = _cohesionRootFor(newLead);
+    if (!top) return;
+    const members = await _groupMemberLeads(top);
+    let maxRank = 0, cadence = 30;
+    members.forEach(m => {
+      if (+m.id === +newLead.id) return;
+      const r = _stageRank(m.status);
+      if (r > maxRank) { maxRank = r; if (m.nurture_cadence_days) cadence = m.nurture_cadence_days; }
+    });
+    if (maxRank < 1) return;
+    const target = maxRank === 1 ? 'Working' : LEAD_STAGE_X;
+    const patch = { status: target, working_at: newLead.working_at || new Date().toISOString(), updated_at: new Date().toISOString() };
+    if (target === LEAD_STAGE_X) patch.nurture_cadence_days = cadence;
+    await api('leads', 'PATCH', patch, 'id=eq.' + (+newLead.id));
+    newLead.status = target; newLead.working_at = patch.working_at;
+    if (typeof leadData === 'object' && leadData && +leadData.id === +newLead.id) {
+      leadData.status = target; leadData.working_at = patch.working_at;
+      if (typeof renderLeadStatusBadge === 'function') renderLeadStatusBadge(target);
+    }
+    showStatus('Joined its group at ' + leadStageLabel(target));
+  } catch (e) { /* best-effort — the group's next move will pull it anyway */ }
+}
+
 // ── Family engagement history (behind the band heading's GROUP chip) ──────────
 // Aggregated view per Richard 2026-08-31: every engagement across the family's
 // leads and deals, each row attributed to its child organisation, rows belonging
@@ -14290,9 +14373,9 @@ async function openParentHistory(parentId) {
           <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
               <button class="btn btn-primary btn-sm" onclick="_phShowLogForm()">+ Log group engagement</button>
-              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;" title="On: a group engagement resets every member lead's aging clock. Off: members age on their own touches; group rows stay visible as context.">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;" title="On: a group engagement resets every member's aging clock, and one member entering Working or ${LEAD_STAGE_X} pulls the whole group with it. Off: members age and move individually; group rows stay visible as context.">
                 <input type="checkbox" ${parent.group_touch_soothes !== false ? 'checked' : ''} onchange="_phToggleSoothe(${+parentId}, this.checked)">
-                Group touches count for members' aging
+                Group acts as one — aging & stage moves
               </label>
             </div>
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
@@ -15835,6 +15918,7 @@ async function promoteTargetToLead(id) {
     const made = await api('leads', 'POST', leadPayload, 'select=*');
     const lead = made[0];
     if (lead.target_org_id) maybeBirthCollective(+lead.target_org_id);   // v7.9.09 group birth
+    applyGroupJoinStage(lead);   // v7.9.11: newborn joins its group's reached stage
     await api('campaign_targets', 'PATCH',
       { status: 'Promoted', promoted_lead_id: lead.id, promoted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
       'id=eq.' + id);
@@ -16727,6 +16811,7 @@ async function openNewLead() {
   leadData = {};
   window._leadTargetOrgAsLoaded = null;   // keep-guard baseline: a new lead has no org to keep (bug #76)
   window._leadTargetOrgExplicitClear = false;
+  window._leadStatusAtOpen = 'New';
   window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
   leadInteractions = [];
@@ -16784,6 +16869,7 @@ async function openLeadForm(id) {
     // without the user having gone through the Change flow.
     window._leadTargetOrgAsLoaded = +leadData.target_org_id || null;
     window._leadTargetOrgExplicitClear = false;
+    window._leadStatusAtOpen = leadData.status || 'New';   // cohesion fires on transitions, once (v7.9.11)
     _leadCadence = null;   // cleared until loadLeadCadence() repopulates for this lead's campaign
     _promotedLeadContactsCache = null;   // promoted read-through refetches per open
     resetLeadForm();
@@ -20040,6 +20126,9 @@ async function submitStageRequest(type) {
     const made = await api('lead_stage_requests', 'POST', row, 'select=*');
     closeModal();
     await applyStageRequest(made && made[0] ? made[0] : row);
+    // Working → Nurture is a cohesive move (v7.9.11): the whole group follows,
+    // pulled siblings inheriting this cadence. Hold is individual — not cohesive.
+    if (!isHold) applyGroupStageCohesion(leadData, LEAD_STAGE_X, { cadence: cad });
     showStatus(isHold ? 'Lead placed on Hold' : 'Lead moved to ' + LEAD_STAGE_X);
   } catch (e) { showStatus('Could not apply: ' + e.message, 'error'); }
   finally { stopBusy(); }
@@ -22651,6 +22740,7 @@ async function sweepNewToWorking(leads) {
       const patch = { status: 'Working', working_at: l.working_at || now.toISOString(), updated_at: now.toISOString() };
       await api('leads', 'PATCH', patch, 'id=eq.' + l.id);
       l.status = 'Working'; l.working_at = patch.working_at;
+      applyGroupStageCohesion(l, 'Working');   // one member up = the group up (v7.9.11, best-effort)
     } catch (e) { /* non-fatal — leave New, retry on next load */ }
   }
   return leads;
@@ -23015,6 +23105,7 @@ async function saveLead(opts) {
       payload.created_by = currentUser?.personId || null;
       const result = await api('leads', 'POST', payload, 'select=*');
       leadData = result[0];
+      window._leadJustCreated = true;   // rule 2 (v7.9.11): a newborn may join its group's stage
       if (!opts.silent) showStatus('Lead created');
     }
     // The just-persisted organisation is the keep-guard's new baseline for the
@@ -23022,6 +23113,14 @@ async function saveLead(opts) {
     window._leadTargetOrgAsLoaded = +payload.target_org_id || null;
     // Second pursuit on this organisation? The group is born (v7.9.09, ratchet).
     if (payload.target_org_id) maybeBirthCollective(+payload.target_org_id);
+    // Group stage rules (v7.9.11): a newborn joins its group's reached stage;
+    // a lead ENTERING Working pulls the whole group up. Nurture entry hooks in
+    // submitStageRequest (its own path). Both best-effort, never block the save.
+    if (window._leadJustCreated) { window._leadJustCreated = false; applyGroupJoinStage(leadData); }
+    if (leadData.status === 'Working' && window._leadStatusAtOpen !== 'Working') {
+      window._leadStatusAtOpen = 'Working';   // once per form-open
+      applyGroupStageCohesion(leadData, 'Working');
+    }
     // Re-apply edits that arrived mid-flight: anywhere the live object now differs
     // from what was SENT, the user changed it during the request — keep their value.
     let midFlightEdits = false;
