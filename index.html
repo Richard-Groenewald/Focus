@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.08 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.09 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.08 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.09 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2715,7 +2715,7 @@ const PAGES = {
       { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
       // The collective's PERMANENT doorway (v7.9.08): band badges vanish when a
       // tab holds no leads for the org — this one can't. Same view, same log button.
-      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) || `<span onclick="event.stopPropagation(); openParentHistory(${+v})" title="Collective engagement history" style="display:inline-block;padding:2px 8px;border-radius:9px;background:transparent;border:1px solid #D8CCB4;color:#8A6D3B;font-size:10px;font-weight:700;letter-spacing:.04em;cursor:pointer;white-space:nowrap;">HISTORY</span>` },
+      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
     ],
     // Same tabbed form as Clients, plus an Admin tab for the home/system flags.
     fields: [
@@ -2775,7 +2775,7 @@ const PAGES = {
           return v ? `<span class="badge ${cls}">${v}</span>` : '<span style="color:var(--text3);">—</span>';
         } },
       // The collective's permanent doorway (v7.9.08) — see organisations config.
-      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) || `<span onclick="event.stopPropagation(); openParentHistory(${+v})" title="Collective engagement history" style="display:inline-block;padding:2px 8px;border-radius:9px;background:transparent;border:1px solid #D8CCB4;color:#8A6D3B;font-size:10px;font-weight:700;letter-spacing:.04em;cursor:pointer;white-space:nowrap;">HISTORY</span>` },
+      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
     ],
     // Tabbed client form (see renderTabbedForm). is_client / home_organisation /
     // allows_system_users are forced on save (clients can't be home/system orgs).
@@ -9277,6 +9277,7 @@ async function saveOpportunity() {
       const result = await api('deals', 'POST', payload, 'select=*');
       deal = result[0];
       showStatus('Opportunity created');
+      if (deal.org_id) maybeBirthCollective(+deal.org_id);   // second pursuit births the group (v7.9.09)
     }
     oppData.id = deal.id;
 
@@ -14082,10 +14083,11 @@ function _familyOrgIds(parentId) {
   O.forEach(o => { if (+_ultimateParentOrg(o, O).id === +parentId) ids.add(+o.id); });
   return Array.from(ids);
 }
-// Doorway chip on a band heading (v7.9.07): EVERY organisation band is a
-// functional collective — no declaration needed. True multi-organisation
-// families wear the khaki GROUP badge (derived from actual links); single-org
-// bands get a muted HISTORY badge. Both open the collective's engagement view.
+// Doorway chip on a band heading (v7.9.09): groups are BORN, not universal.
+// A multi-organisation family is a group by linkage (khaki GROUP badge); a
+// single org wears the muted HISTORY badge only once collective_since is
+// stamped — its second pursuit arrived, ratchet holds forever. One-pursuit
+// organisations stay inkless: the lead IS the story until there are two.
 function _groupChipHtml(bandKey) {
   if (!bandKey || bandKey[0] !== 'o') return '';
   const id = +bandKey.slice(1);
@@ -14094,6 +14096,7 @@ function _groupChipHtml(bandKey) {
   const n = _familyOrgIds(id).length;
   const base = 'display:inline-block;margin-left:7px;padding:2px 8px;border-radius:9px;font-size:10px;font-weight:700;letter-spacing:.04em;vertical-align:middle;cursor:pointer;white-space:nowrap;';
   if (n > 1) return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Group of ${n} organisations — engagement history across the family" style="${base}background:#F0E9DC;border:1px solid #C3B091;color:#003057;">GROUP · ${n} ORGS</span>`;
+  if (!org.collective_since) return '';
   return `<span onclick="event.stopPropagation(); openParentHistory(${id})" title="Collective engagement history for ${String(org.name || '').replace(/"/g, '&quot;')} — all its leads and deals, plus group-level engagements" style="${base}background:transparent;border:1px solid #D8CCB4;color:#8A6D3B;">HISTORY</span>`;
 }
 // ↳ hook under a register client cell: names the family the org sits under.
@@ -14153,6 +14156,39 @@ function leadEffectiveTouch(l, orgsArr) {
   return (grp && (!own || grp > own)) ? { date: grp, group: true } : { date: own, group: false };
 }
 
+// ── Group birth (v7.9.09) ─────────────────────────────────────────────────────
+// A group is BORN when an organisation gains its second concurrent pursuit
+// (lead or deal). Birth is a RATCHET — collective_since never unsets, so a born
+// group keeps its doorway forever (the delete-last-lead lesson). At birth the
+// group adopts the FIRST pursuit's description as its own (seeded copy,
+// editable at group level thereafter). Fire-and-forget from every pursuit-
+// creating path; the migration backfill catches anything missed.
+async function maybeBirthCollective(orgId) {
+  try {
+    if (!orgId) return;
+    const cached = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (cached && cached.collective_since) return;   // already born — the common case, one array scan
+    const [ls, ds] = await Promise.all([
+      apiGet('leads', 'target_org_id=eq.' + (+orgId) + '&select=id,description,created_at'),
+      apiGet('deals', 'org_id=eq.' + (+orgId) + '&select=id,notes,created_at'),
+    ]);
+    if (ls.length + ds.length < 2) return;
+    const fresh = await apiGet('organisations', 'id=eq.' + (+orgId) + '&select=id,collective_since,group_description');
+    if (!fresh[0] || fresh[0].collective_since) return;
+    const first = ls.map(l => ({ t: l.created_at, text: l.description }))
+      .concat(ds.map(d => ({ t: d.created_at, text: d.notes })))
+      .sort((a, b) => new Date(a.t || 0) - new Date(b.t || 0))
+      .find(p => (p.text || '').trim());
+    const patch = { collective_since: new Date().toISOString() };
+    if (!fresh[0].group_description && first) patch.group_description = first.text;
+    await api('organisations', 'PATCH', patch, 'id=eq.' + (+orgId));
+    if (cached) {
+      cached.collective_since = patch.collective_since;
+      if (patch.group_description) cached.group_description = patch.group_description;
+    }
+  } catch (e) { /* birth is best-effort — the next pursuit or the migration backfill catches it */ }
+}
+
 // ── Family engagement history (behind the band heading's GROUP chip) ──────────
 // Aggregated view per Richard 2026-08-31: every engagement across the family's
 // leads and deals, each row attributed to its child organisation, rows belonging
@@ -14175,8 +14211,8 @@ async function openParentHistory(parentId) {
     const leadFilter = siteIds.length
       ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
       : 'target_org_id=in.(' + idList + ')';
-    const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status');
-    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id');
+    const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status,created_at,source_id');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,created_at');
     const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
     const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
     const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
@@ -14222,6 +14258,19 @@ async function openParentHistory(parentId) {
     });
     _phData = { rows, parentId: +parentId, parentName: parent.name || '' };
     _phSort = { key: 'date', dir: -1 }; _phQ = '';
+    // Origin: the group's how-it-started = the EARLIEST pursuit's source (v7.9.09).
+    if (!allData['lead_sources']) { try { allData['lead_sources'] = await apiGet('lead_sources', 'select=*'); } catch (e) { allData['lead_sources'] = []; } }
+    const _pursuits = leads.map(l => ({ t: l.created_at, kind: 'lead', src: l.source_id }))
+      .concat(deals.map(d => ({ t: d.created_at, kind: 'deal' })))
+      .sort((a, b) => new Date(a.t || 0) - new Date(b.t || 0));
+    let originLabel = '—';
+    if (_pursuits.length) {
+      const f = _pursuits[0];
+      const when = f.t ? new Date(f.t).toLocaleDateString('en-ZA') : '';
+      originLabel = (f.kind === 'lead'
+        ? (((allData['lead_sources'] || []).find(s => +s.id === +f.src)?.name) || 'Lead')
+        : 'Direct opportunity') + (when ? ' · ' + when : '');
+    }
     const _todayStr = new Date().toISOString().slice(0, 10);
     const _typeOpts = (allData['activity_types'] || []).filter(t => t.active !== false)
       .map(t => `<option value="${t.id}">${cEsc(t.name || '')}</option>`).join('');
@@ -14242,6 +14291,17 @@ async function openParentHistory(parentId) {
                 <input type="checkbox" ${parent.group_touch_soothes !== false ? 'checked' : ''} onchange="_phToggleSoothe(${+parentId}, this.checked)">
                 Group touches count for members' aging
               </label>
+            </div>
+            <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+                <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Group description <span style="font-weight:500;text-transform:none;letter-spacing:0;">· Origin: ${cEsc(originLabel)}</span></div>
+                <button class="btn btn-secondary btn-sm" id="ph-desc-edit-btn" onclick="_phEditDesc()">Edit</button>
+              </div>
+              <div id="ph-desc-view" style="font-size:13px;color:var(--text);margin-top:6px;white-space:pre-wrap;">${(parent.group_description || '').trim() ? cEsc(parent.group_description) : '<span style="color:var(--text3);">No group description yet — seeded from the first pursuit at birth, editable here.</span>'}</div>
+              <div id="ph-desc-editwrap" style="display:none;margin-top:6px;">
+                <textarea id="ph-desc-input" class="form-control" rows="3">${cEsc(parent.group_description || '')}</textarea>
+                <div style="text-align:right;margin-top:6px;"><button class="btn btn-primary btn-sm" onclick="_phSaveDesc()">Save description</button></div>
+              </div>
             </div>
             <div id="ph-log-form" style="display:none;background:#F7F2E9;border:1px solid #C3B091;border-radius:8px;padding:12px;margin-bottom:10px;">
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
@@ -14296,6 +14356,27 @@ function _phRenderRows() {
       <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
     </tr>`).join('')
   : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this collective yet'}</td></tr>`;
+}
+
+// Group description: seeded from the first pursuit at birth, editable HERE at
+// group level — the collective's story is free to outgrow lead #1's text.
+function _phEditDesc() {
+  const v = document.getElementById('ph-desc-view'), w = document.getElementById('ph-desc-editwrap');
+  if (v) v.style.display = 'none';
+  if (w) { w.style.display = ''; document.getElementById('ph-desc-input')?.focus(); }
+}
+async function _phSaveDesc() {
+  if (!_phData || !_phData.parentId) return;
+  const text = (document.getElementById('ph-desc-input')?.value || '').trim() || null;
+  try {
+    await api('organisations', 'PATCH', { group_description: text }, 'id=eq.' + _phData.parentId);
+    const cached = (allData['organisations'] || []).find(o => +o.id === +_phData.parentId);
+    if (cached) cached.group_description = text;
+    const v = document.getElementById('ph-desc-view'), w = document.getElementById('ph-desc-editwrap');
+    if (v) { v.innerHTML = text ? cEsc(text) : '<span style="color:var(--text3);">No group description yet.</span>'; v.style.display = ''; }
+    if (w) w.style.display = 'none';
+    showStatus('Group description saved');
+  } catch (e) { showStatus('Could not save description: ' + e.message, 'error'); }
 }
 
 // Show the inline log form inside the group view.
@@ -15750,6 +15831,7 @@ async function promoteTargetToLead(id) {
   try {
     const made = await api('leads', 'POST', leadPayload, 'select=*');
     const lead = made[0];
+    if (lead.target_org_id) maybeBirthCollective(+lead.target_org_id);   // v7.9.09 group birth
     await api('campaign_targets', 'PATCH',
       { status: 'Promoted', promoted_lead_id: lead.id, promoted_at: new Date().toISOString(), updated_at: new Date().toISOString() },
       'id=eq.' + id);
@@ -21790,6 +21872,7 @@ async function commitPromotion(s) {
       created_by:       currentUser?.personId || null,
     };
     const createdDeal = await api('deals', 'POST', dealPayload, 'select=*');
+    if (dealPayload.org_id) maybeBirthCollective(+dealPayload.org_id);   // promote adds a pursuit — group may be born (v7.9.09)
     const dealId = createdDeal[0].id;
 
     // === 5. Deal collaborators: owner ========================
@@ -22934,6 +23017,8 @@ async function saveLead(opts) {
     // The just-persisted organisation is the keep-guard's new baseline for the
     // rest of this form-open (bug #76).
     window._leadTargetOrgAsLoaded = +payload.target_org_id || null;
+    // Second pursuit on this organisation? The group is born (v7.9.09, ratchet).
+    if (payload.target_org_id) maybeBirthCollective(+payload.target_org_id);
     // Re-apply edits that arrived mid-flight: anywhere the live object now differs
     // from what was SENT, the user changed it during the request — keep their value.
     let midFlightEdits = false;
