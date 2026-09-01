@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.12 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.11 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.12 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19460,11 +19460,15 @@ function refreshLeadWorkflowChrome() {
     window._leadStageRequest = null;   // drop any stale row from a previously open lead
     loadLeadStageRequest(leadData.id).then(() => refreshLeadWorkflowChrome());
   }
-  const stageEligible = (status === 'Working' || status === 'Qualified')
-    && canRequestStageChange(leadData) && !window._leadStageRequest;
+  const stageChangeOk = canRequestStageChange(leadData) && !window._leadStageRequest;
+  const stageEligible = (status === 'Working' || status === 'Qualified') && stageChangeOk;
+  // Raw→Nurture direct entry (Richard 2026-09-02, bugs #71/#73): F+A Strong is
+  // enough — the security sales cycle runs 9 months, so Trigger is never there
+  // at the start. Hold keeps its Working/Review gate.
+  const nurtureStageOk = stageEligible || (status === 'New' && stageChangeOk);
   const stageXBtn = document.getElementById('lead-stagex-btn');
   if (stageXBtn) {
-    stageXBtn.style.display = (stageEligible && leadNurtureEligible(leadData)) ? '' : 'none';
+    stageXBtn.style.display = (nurtureStageOk && leadNurtureEligible(leadData)) ? '' : 'none';
     stageXBtn.textContent = LEAD_STAGE_X + ' →';
     stageXBtn.onclick = () => openStageRequestModal('nurture');
   }
@@ -20054,7 +20058,11 @@ async function saveReopenLead() {
 // Direct action (2026-08-12) — no approval step; the row is written pre-approved.
 function openStageRequestModal(type) {
   if (!canRequestStageChange(leadData)) { showStatus('Only the lead owner or a manager can do this', 'error'); return; }
-  if (leadData.status !== 'Working' && leadData.status !== 'Qualified') { showStatus('Hold and ' + LEAD_STAGE_X + ' are available for Working or ' + LEAD_STAGE_READY + ' leads', 'error'); return; }
+  // Nurture may be entered straight from Raw (Richard 2026-09-02); Hold may not.
+  const _stageOkFor = type === 'nurture'
+    ? ['New', 'Working', 'Qualified'].includes(leadData.status)
+    : (leadData.status === 'Working' || leadData.status === 'Qualified');
+  if (!_stageOkFor) { showStatus(type === 'nurture' ? (LEAD_STAGE_X + ' is available for ' + LEAD_STAGE_RAW + ', Working or ' + LEAD_STAGE_READY + ' leads') : ('Hold is available for Working or ' + LEAD_STAGE_READY + ' leads'), 'error'); return; }
   if (window._leadStageRequest) { showStatus('A legacy stage request is still awaiting approval', 'error'); return; }
   if (type === 'hold' && !leadHoldEligible(leadData)) { showStatus('Hold needs Fit, Access and Capacity all Strong', 'error'); return; }
   if (type === 'nurture' && !leadNurtureEligible(leadData)) { showStatus(LEAD_STAGE_X + ' needs Fit and Access Strong', 'error'); return; }
