@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.13 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.13 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1294,6 +1294,17 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <!-- Qualification Tab -->
     <div class="opp-tab-content" id="lead-tab-qualification">
       <div style="max-width:720px;">
+        <!-- Industry Sector (v7.9.14): Fit is judged on "sector, size, footprint",
+             so the sector is captured where that judgement happens. The value
+             lives on the ORGANISATION (organisations.sector_id) — this control
+             PATCHes the org row directly and never rides the lead autosave. -->
+        <div class="opp-section" id="lead-qual-sector-wrap">
+          <div class="opp-section-title">Industry Sector</div>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+            <select id="lead-qual-sector" class="form-control" style="max-width:340px;" onchange="onLeadQualSectorChange(this)"></select>
+            <span id="lead-qual-sector-note" style="font-size:12px;color:var(--text3);"></span>
+          </div>
+        </div>
         <div class="opp-section">
           <div class="opp-section-title">Qualification Dimensions</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:20px;">
@@ -11682,28 +11693,46 @@ function toggleLineage(masterId) {
   _renderTable('opportunities');
 }
 
+// Sector lens (v7.9.14): an organisation's industry sector, resolved from the
+// session caches. Leads and deals INHERIT their client org's sector — a lead
+// falls back to its site's organisation, a deal uses org_id — so the Sector
+// columns on both registers read one source of truth: organisations.sector_id.
+function _orgSectorName(orgId) {
+  if (!orgId) return '';
+  const o = (allData['organisations'] || []).find(x => +x.id === +orgId);
+  if (!o || !o.sector_id) return '';
+  return ((allData['industry_sectors'] || []).find(s => +s.id === +o.sector_id)?.name) || '';
+}
+function _leadSectorName(l) {
+  const orgId = l.target_org_id
+    || ((allData['sites'] || []).find(s => +s.id === +l.site_id)?.organisation_id) || null;
+  return _orgSectorName(orgId);
+}
+
 async function renderOpportunitiesPage() {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
 
   head.innerHTML = '';
-  body.innerHTML = '<tr class="empty-row"><td colspan="5">Loading...</td></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
   renderViewFilterBar('opps');
 
   try {
-    let [deals, orgs, stages, people, stageCats, sites] = await Promise.all([
+    let [deals, orgs, stages, people, stageCats, sites, sectors] = await Promise.all([
       apiGetAll('deals', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['organisations'] || apiGet('organisations', 'select=*'),
       allData['stages'] || apiGet('stages', 'select=*'),
       allData['people'] || apiGet('people', 'select=*'),
       allData['stage_categories'] || apiGet('stage_categories', 'select=*'),
       allData['sites'] || apiGet('sites', 'select=*'),
+      allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
     ]);
     allData['organisations'] = orgs;
     allData['stages'] = stages;
     allData['people'] = people;
     allData['stage_categories'] = stageCats;
     allData['sites'] = sites;
+    allData['industry_sectors'] = sectors;
 
     // Apply the ownership view (own / all / collab / team) before rendering.
     deals = await filterDealsByView(deals, oppsOwnerView);
@@ -11738,11 +11767,11 @@ async function renderOpportunitiesPage() {
     document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
 
     if (!deals.length) {
-      head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th></tr>';
+      head.innerHTML = '<tr><th>Organisation</th><th>Sector</th><th>Deal Name</th><th>Order Date</th><th>Stage</th><th style="text-align:right">Probability</th></tr>';
       const emptyMsg = oppsStatusFilter === 'open'
         ? 'No open opportunities — switch to "All statuses" to see secured and closed deals'
         : 'No opportunities yet — click "+ New Opportunity" to create one';
-      body.innerHTML = `<tr class="empty-row"><td colspan="5">${emptyMsg}</td></tr>`;
+      body.innerHTML = `<tr class="empty-row"><td colspan="6">${emptyMsg}</td></tr>`;
       return;
     }
 
@@ -11754,6 +11783,7 @@ async function renderOpportunitiesPage() {
     // the band heading — but sort/filter always work on the organisation).
     const columns = [
       { key: 'org',        label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
+      { key: 'sector',     label: 'Sector',       get: d => _orgSectorName(d.org_id) },
       { key: 'name',       label: 'Deal Name',    get: d => d.name || '' },
       { key: 'order_date', label: 'Order Date',   get: d => d.order_date || '' },
       { key: 'stage',      label: 'Stage',        get: d => (stages.find(s => +s.id === +d.stage_id)?.name) || '' },
@@ -11776,6 +11806,7 @@ async function renderOpportunitiesPage() {
       const nameCls = opts.child ? ' class="lin-name"' : '';
       return `<tr class="${opts.child ? 'lineage-child' : ''}${opts.grouped ? ' client-band-child' : ''}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
         <td style="font-weight:600;">${opts.child ? '' : col1Of(d, opts.grouped)}</td>
+        <td>${opts.child ? '' : (_orgSectorName(d.org_id) || '—')}</td>
         <td${nameCls}>${d.name}${(opts.child || opts.tag) ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
@@ -11790,6 +11821,7 @@ async function renderOpportunitiesPage() {
       const n = members.length;
       return `<tr class="lineage-master${grouped ? ' client-band-child' : ''}" onclick="toggleLineage(${mid})" style="cursor:pointer;">
         <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${col1Of(d, grouped)}</td>
+        <td>${_orgSectorName(d.org_id) || '—'}</td>
         <td style="color:#003057;font-weight:700;">${d.name}</td>
         <td style="color:var(--text3);">${n} linked deals</td>
         <td>—</td>
@@ -11846,6 +11878,7 @@ async function renderOpportunitiesPage() {
       const enc = encodeURIComponent(k).replace(/'/g, '%27');
       return `<tr onclick="toggleClientBand('opps','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
         <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span>${_groupChipHtml(k)}</td>
+        <td>${_orgSectorName(first.org_id) || '—'}</td>
         <td>${members.length} deals · ${pbFmtRand(Math.round(tcv))} TCV</td>
         <td>${first.order_date ? new Date(first.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td>${advStage ? `<span class="badge badge-blue">${advStage.name}</span>` : '—'}</td>
@@ -14569,7 +14602,7 @@ async function renderLeadsPage() {
 
   try {
     // Load lookups + leads in parallel
-    let [leads, sources, regions, services, people, orgs, campaigns, sites] = await Promise.all([
+    let [leads, sources, regions, services, people, orgs, campaigns, sites, sectors] = await Promise.all([
       apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['lead_sources'] || apiGet('lead_sources', 'select=*'),
       allData['regions']      || apiGet('regions', 'select=*'),
@@ -14581,6 +14614,7 @@ async function renderLeadsPage() {
       apiGet('organisations', 'select=*'),
       allData['research_campaigns'] || apiGet('research_campaigns', 'select=*'),
       apiGet('sites', 'select=*'),
+      allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
     ]);
     allData['lead_sources']       = sources;
     allData['regions']            = regions;
@@ -14589,6 +14623,7 @@ async function renderLeadsPage() {
     allData['organisations']      = orgs;
     allData['research_campaigns'] = campaigns;
     allData['sites']              = sites;
+    allData['industry_sectors']   = sectors;
     await _loadOrgTouches(true);   // group touches for the soothing aging rule (v7.9.07)
 
     // App-layer sweeps: flip eligible New leads to Working, and wake held leads
@@ -14698,6 +14733,7 @@ async function renderLeadsPage() {
       { key: 'target', label: 'Site',        get: l => targetName(l) },
       { key: 'region', label: 'Region',      get: l => (regions.find(r => +r.id === +l.region_id)?.name) || '' },
       { key: 'branch', label: 'Branch',      get: l => ((allData['branches']||[]).find(b => +b.id === +l.branch_id)?.name) || '' },
+      { key: 'sector', label: 'Sector',      get: l => _leadSectorName(l) },
       { key: 'qual',   label: 'F A C T',     get: l => (+l.fit||0)+(+l.trigger_score||0)+(+l.access||0)+(+l.capacity||0), align: 'center' },
       { key: 'owner',  label: 'Owner',       get: l => ownerName(l) },
       { key: 'nxt',    label: 'Next Action', get: l => l.next_action || '' },
@@ -14885,6 +14921,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;font-weight:600;">${targetDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${_leadSectorName(l) || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
@@ -14972,6 +15009,7 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     <td style="padding:10px 12px;font-size:13px;">${siteCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${region?.name || '—'}</td>
     <td style="padding:10px 12px;font-size:13px;">${branch?.name || '—'}</td>
+    <td style="padding:10px 12px;font-size:13px;">${_leadSectorName(first) || '—'}</td>
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
@@ -17453,7 +17491,9 @@ function resetLeadDirty() {
   if (window._leadGuardsAttached) return;
   const page = document.getElementById('lead-page');
   if (!page) return;
-  const h = (e) => { if (e.target.closest && e.target.closest('.modal-overlay')) return; markLeadDirty(e); };
+  // Sector select excluded: it edits the ORGANISATION row (its own PATCH), so it
+  // must never mark the lead dirty or trigger a full lead autosave.
+  const h = (e) => { if (e.target.closest && (e.target.closest('.modal-overlay') || e.target.closest('#lead-qual-sector-wrap'))) return; markLeadDirty(e); };
   page.addEventListener('input', h);
   page.addEventListener('change', h);
   window.addEventListener('beforeunload', (e) => {
@@ -21086,7 +21126,7 @@ function _findOrgMatches(colloquial, legal, limit = 5) {
 // retyping a known name links instead of duplicating. Returns the organisations
 // row, or null on any failure — the caller then falls back to the legacy
 // free-text column; capture must never block on this.
-async function findOrCreateProspectOrg(name) {
+async function findOrCreateProspectOrg(name, sectorId) {
   const norm = s => String(s || '').trim().toLowerCase();
   const n = norm(name);
   if (!n) return null;
@@ -21094,8 +21134,17 @@ async function findOrCreateProspectOrg(name) {
     if (!allData['organisations']) allData['organisations'] = await apiGet('organisations', 'select=*');
     const hit = (allData['organisations'] || []).find(o => !o.home_organisation && o.active !== false
       && (norm(o.name) === n || norm(o.trading_name) === n || norm(o.legal_name) === n));
-    if (hit) return hit;
-    const created = await api('organisations', 'POST', { name: String(name).trim(), client_status: 'Prospect' }, 'select=*');
+    if (hit) {
+      // Campaign stamp (v7.9.14): a sectorless MATCH gets the campaign's sector
+      // filled in — never overwrites a sector someone already set. Best-effort.
+      if (sectorId && !hit.sector_id) {
+        try { await api('organisations', 'PATCH', { sector_id: +sectorId }, 'id=eq.' + (+hit.id)); hit.sector_id = +sectorId; }
+        catch (e) { console.warn('sector stamp on existing org failed:', e.message); }
+      }
+      return hit;
+    }
+    const created = await api('organisations', 'POST',
+      { name: String(name).trim(), client_status: 'Prospect', ...(sectorId ? { sector_id: +sectorId } : {}) }, 'select=*');
     const org = created && created[0];
     if (!org) return null;
     // api() invalidates the organisations lookup cache on its own POST (v7.7.20
@@ -22415,7 +22464,67 @@ function qualDimMeta(key) {
   };
 }
 
+// ── Industry Sector on the Qualification tab (v7.9.14) ──────────────────────
+// The sector belongs to the ORGANISATION; this control reads/writes
+// organisations.sector_id directly (single-column PATCH on change, immediate).
+// It deliberately does NOT touch leadData or the lead autosave: the dirty
+// delegation excludes #lead-qual-sector-wrap, so changing sector can never
+// drag a full lead PATCH behind it (the wipe-class lesson).
+function _leadCurrentOrgId() {
+  return (leadData && +leadData.target_org_id)
+    || ((allData['sites'] || []).find(s => +s.id === +(leadData && leadData.site_id))?.organisation_id)
+    || null;
+}
+async function refreshLeadQualSector() {
+  const dd = document.getElementById('lead-qual-sector');
+  const note = document.getElementById('lead-qual-sector-note');
+  if (!dd || !note) return;
+  if (!allData['industry_sectors']) {
+    try { allData['industry_sectors'] = await apiGet('industry_sectors', 'select=*&order=name.asc'); }
+    catch (e) { return; }
+  }
+  const orgId = _leadCurrentOrgId();
+  // The org row may be missing from a nulled/stale cache (api() invalidates the
+  // organisations lookup on every write) — fetch the single row rather than
+  // concluding "no organisation". Null-safe push: the bug-76 lesson.
+  let org = orgId ? ((allData['organisations'] || []).find(o => +o.id === +orgId) || null) : null;
+  if (orgId && !org) {
+    try { org = (await apiGet('organisations', 'id=eq.' + (+orgId) + '&select=*'))[0] || null; } catch (e) {}
+    if (org && !(allData['organisations'] || []).some(o => +o.id === +org.id)) {
+      (allData['organisations'] = allData['organisations'] || []).push(org);
+    }
+  }
+  if (!org) {
+    dd.style.display = 'none'; dd.innerHTML = '';
+    note.textContent = 'Link an organisation first — the sector is recorded on the organisation itself.';
+    return;
+  }
+  const sectors = (allData['industry_sectors'] || [])
+    .filter(s => s.active !== false || +s.id === +org.sector_id);
+  dd.style.display = '';
+  dd.disabled = !!leadReadOnly;
+  dd.innerHTML = '<option value="">— no sector —</option>' + sectors
+    .map(s => `<option value="${s.id}" ${+org.sector_id === +s.id ? 'selected' : ''}>${String(s.name).replace(/</g, '&lt;')}</option>`)
+    .join('');
+  note.textContent = 'Sector of ' + (org.trading_name || org.name) + ' — saves to the organisation immediately.';
+}
+async function onLeadQualSectorChange(dd) {
+  const orgId = _leadCurrentOrgId();
+  if (!orgId) return;
+  const val = +dd.value || null;
+  const note = document.getElementById('lead-qual-sector-note');
+  try {
+    await api('organisations', 'PATCH', { sector_id: val }, 'id=eq.' + (+orgId));
+    const o = (allData['organisations'] || []).find(x => +x.id === +orgId);
+    if (o) o.sector_id = val;
+    if (note) { note.textContent = 'Saved ✓'; setTimeout(refreshLeadQualSector, 1500); }
+  } catch (e) {
+    if (note) note.textContent = 'Could not save: ' + e.message;
+  }
+}
+
 function renderLeadQualification() {
+  refreshLeadQualSector();   // async, self-contained — repaints the sector block
   const wrap = document.getElementById('lead-qual-rows');
   if (!wrap) return;
   // Lazy-load the admin-editable descriptions once, then re-render.
@@ -22980,7 +23089,14 @@ async function saveLead(opts) {
     targetOrgId = window._leadTargetOrgAsLoaded;
   }
   if (!targetOrgId && typedOrgName.length >= 2 && _orgNameCommitted && document.activeElement !== _tgtOrgNameEl) {
-    const org = await findOrCreateProspectOrg(typedOrgName);
+    // Campaign lens (v7.9.14, Richard's door #2): a research-campaign lead knows
+    // its market — the campaign's sector rides along to the org being born (or
+    // fills a sectorless match). Best-effort: no campaign / no sector = no stamp.
+    const _rcIdForSector = selectFkOrKeep('lead-research-campaign-id', leadData && leadData.research_campaign_id);
+    const _rcSector = _rcIdForSector
+      ? ((allData['research_campaigns'] || []).find(c => +c.id === +_rcIdForSector)?.industry_sector_id || null)
+      : null;
+    const org = await findOrCreateProspectOrg(typedOrgName, _rcSector);
     if (org) {
       targetOrgId = +org.id;
       typedOrgName = '';
