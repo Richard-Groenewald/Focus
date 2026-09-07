@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.15 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.15 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3355,11 +3355,11 @@ function showPage(page) {
   document.getElementById('page-sub').textContent = '';
 
   // Hide the sidebar on the wide pages (Revenue Pipeline matrix, Opportunities
-  // lineage table) so they fit without horizontal scrolling; expose a toggle
-  // to bring it back.
+  // lineage table, Leads register — v7.9.15, Richard: "as with opportunities")
+  // so they fit without horizontal scrolling; expose a toggle to bring it back.
   const sidebar = document.getElementById('app-sidebar');
   const sidebarToggle = document.getElementById('sidebar-toggle');
-  if (page === 'revenue_pipeline' || page === 'opportunities') {
+  if (page === 'revenue_pipeline' || page === 'opportunities' || page === 'leads') {
     if (sidebar) sidebar.style.display = 'none';
     if (sidebarToggle) sidebarToggle.style.display = '';
   } else {
@@ -11934,7 +11934,7 @@ const DASH_ROLE_WIDGETS = {
   'Sales User':    ['actions', 'leads', 'opportunities', 'pipeline', 'campaigns', 'interactions', 'milestones', 'milestone_pulse'],
   'Sales Manager': ['approvals', 'actions', 'campaigns', 'leads', 'opportunities', 'pipeline', 'interactions', 'milestones', 'milestone_pulse'],
   'Operations':    ['contracts'],
-  'Executive':     ['approvals', 'company', 'leads'],   // was 'EXCO' — no such role exists; the live role name is Executive
+  'Executive':     ['approvals', 'company', 'leads', 'sector_value'],   // was 'EXCO' — no such role exists; the live role name is Executive
   'Admin':         ['approvals', 'bugs'],
   'Read Only':     [],
 };
@@ -11948,6 +11948,7 @@ const DASH_WIDGET_CATALOG = {
   leads:         'Leads',
   opportunities: 'Opportunities',
   pipeline:      'Pipeline',
+  sector_value:  'Value by Sector',
   campaigns:     'Campaigns',
   contracts:     'Active Contracts',
   company:       'Company Overview',
@@ -12212,7 +12213,8 @@ async function renderDashboard() {
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
   const loaders = { approvals: _dashApprovals, actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps,
-                    pipeline: _dashPipeline, campaigns: _dashCampaigns, contracts: _dashContracts, company: _dashCompany,
+                    pipeline: _dashPipeline, sector_value: _dashSectorValue, campaigns: _dashCampaigns,
+                    contracts: _dashContracts, company: _dashCompany,
                     bugs: _dashBugs, interactions: _dashInteractions, milestones: _dashMilestones,
                     milestone_pulse: _dashMilestonePulse };
   await Promise.all(widgets.map(async w => {
@@ -12622,6 +12624,80 @@ async function _dashPipeline() {
     ['Weighted', pbFmtRand(Math.round(weighted))],
     ['Total', pbFmtRand(Math.round(total))],
   ], `${deals.length} open · weighted = value × probability`, 'revenue_pipeline', 'Full pipeline');
+}
+
+// Value by Sector (v7.9.15, Richard 2026-09-07): the exco cut — Rand value per
+// industry sector, open pipeline beside the secured book. Figures come from
+// REVENUE STREAMS only (TCV = stream months summed; never Base Amount / Num
+// Months): an open deal sums its opportunity streams' opportunity_revenue, a
+// secured deal its FULFILMENT streams' secured_revenue (the contract-phase
+// stream_type value is 'fulfilment' — verified on prod). A deal wears its
+// ORGANISATION's sector — organisations.sector_id, the same resolution as the
+// register Sector columns.
+async function _dashSectorValue() {
+  const scope = _dashScope();
+  if (!allData['industry_sectors']) {
+    try { allData['industry_sectors'] = await apiGet('industry_sectors', 'select=*'); }
+    catch (e) { allData['industry_sectors'] = []; }
+  }
+  const secName = Object.fromEntries((allData['industry_sectors'] || []).map(s => [+s.id, s.name]));
+  const orgs = await apiGet('organisations', 'select=id,sector_id');
+  const orgSector = Object.fromEntries(orgs.map(o => [+o.id, o.sector_id ? (secName[+o.sector_id] || '(no sector)') : '(no sector)']));
+  const openIds = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
+  const securedIds = _dashStageIds(['Secured']);
+  const deals = (await apiGet('deals', 'select=id,stage_id,org_id,owner_id,branch_id,region_id'))
+    .filter(d => _dashInScope(d, scope) && (openIds.has(+d.stage_id) || securedIds.has(+d.stage_id)));
+  const chipText = scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine';
+  const shell = inner => `<div class="card" style="padding:0;height:100%;">
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
+      <div style="font-weight:700;color:var(--navy);font-size:14px;">Value by Sector<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipText}</span></div>
+      <button class="btn btn-ghost btn-sm" onclick="showPage('opportunities')">Register →</button>
+    </div><div style="padding:12px 16px 14px;">${inner}</div></div>`;
+  if (!deals.length) return shell('<div style="padding:10px 0;color:var(--text3);font-size:12px;">No open or secured deals in this scope.</div>');
+  const ids = deals.map(d => d.id);
+  // One embedded call, both stream types: months nested under their stream
+  // escape the 1000-row cap (same pattern the Pipeline card uses).
+  const streams = await apiGet('revenue_streams',
+    `deal_id=in.(${ids.join(',')})&select=deal_id,stream_type,revenue_stream_months(opportunity_revenue,secured_revenue)`);
+  const oppTot = {}, conTot = {};
+  for (const s of streams) {
+    const did = +s.deal_id;
+    for (const m of (s.revenue_stream_months || [])) {
+      if (s.stream_type === 'opportunity') oppTot[did] = (oppTot[did] || 0) + (+m.opportunity_revenue || 0);
+      else if (s.stream_type === 'fulfilment') conTot[did] = (conTot[did] || 0) + (+m.secured_revenue || 0);
+    }
+  }
+  const agg = new Map();   // sector name -> { pipe, secv, nOpen, nSec }
+  for (const d of deals) {
+    const sec = orgSector[+d.org_id] || '(no sector)';
+    const a = agg.get(sec) || { pipe: 0, secv: 0, nOpen: 0, nSec: 0 };
+    if (openIds.has(+d.stage_id)) { a.pipe += oppTot[d.id] || 0; a.nOpen++; }
+    else { a.secv += conTot[d.id] || 0; a.nSec++; }
+    agg.set(sec, a);
+  }
+  const rows = [...agg.entries()].filter(([, a]) => a.pipe > 0 || a.secv > 0)
+    .sort((x, y) => (y[1].pipe + y[1].secv) - (x[1].pipe + x[1].secv));
+  const totPipe = rows.reduce((t, [, a]) => t + a.pipe, 0);
+  const totSec = rows.reduce((t, [, a]) => t + a.secv, 0);
+  const maxVal = Math.max(...rows.map(([, a]) => a.pipe + a.secv), 1);
+  const esc = s => String(s).replace(/</g, '&lt;');
+  const rowHtml = rows.map(([sec, a]) => {
+    const w = Math.max(2, Math.round(((a.pipe + a.secv) / maxVal) * 100));
+    return `<div style="margin-bottom:7px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;">
+        <span style="font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${esc(sec)} — ${a.nOpen} open, ${a.nSec} secured">${esc(sec)}</span>
+        <span style="white-space:nowrap;color:var(--text2);">${a.pipe ? pbFmtRand(Math.round(a.pipe)) : '—'} <span style="color:var(--text3);">·</span> <span style="color:#155e75;font-weight:600;">${a.secv ? pbFmtRand(Math.round(a.secv)) : '—'}</span></span>
+      </div>
+      <div style="height:4px;border-radius:2px;background:var(--bg);margin-top:3px;overflow:hidden;"><div style="height:100%;width:${w}%;background:var(--navy);opacity:.75;"></div></div>
+    </div>`;
+  }).join('');
+  return shell(`
+    <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:12px;">
+      <div><div style="font-size:22px;font-weight:800;color:var(--navy);line-height:1.1;">${pbFmtRand(Math.round(totPipe))}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">Open pipeline</div></div>
+      <div><div style="font-size:22px;font-weight:800;color:#155e75;line-height:1.1;">${pbFmtRand(Math.round(totSec))}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">Secured book</div></div>
+    </div>
+    ${rowHtml || '<div style="color:var(--text3);font-size:12px;">No stream values yet.</div>'}
+    <div style="margin-top:10px;color:var(--text3);font-size:11px;">Pipeline · <span style="color:#155e75;font-weight:600;">Secured</span> — TCV from revenue streams; sector = the deal's organisation.</div>`);
 }
 
 async function _dashCampaigns() {
