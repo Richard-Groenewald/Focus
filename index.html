@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19046,10 +19046,18 @@ function renderLeadServiceEstimates() {
     const rec = _leadSvcEstRecurring(m.name);
     const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:120px;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
     const num = (fid, ph, title) => `<input type="number" min="1" step="1" id="${fid}" class="form-control" style="width:78px;" placeholder="${ph}" title="${title}" oninput="leadSvcEstRecalc()">`;
-    const date = fid => `<input type="date" id="${fid}" class="form-control" style="width:142px;" title="Expected start date" onchange="leadSvcEstRecalc()">`;
+    // Duration (v7.9.21, Richard): the standard terms as a dropdown, "Other…"
+    // reveals a free months input for anything different.
+    const monthsSel = `<select id="lse-months-sel-${m.id}" class="form-control" style="width:98px;" title="Duration in months" onchange="_svcEstMonthsSel(${m.id})">
+        <option value="">months</option>
+        ${[12, 24, 36, 48, 60].map(n => `<option value="${n}">${n} mo</option>`).join('')}
+        <option value="other">Other…</option>
+      </select><input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="width:70px;display:none;" placeholder="months" title="Custom duration in months" oninput="leadSvcEstRecalc()">`;
+    // Start (v7.9.21): always the 1st of a month — capture month + year only.
+    const month = fid => `<input type="month" id="${fid}" class="form-control" style="width:150px;" title="Expected start — always the 1st of the month" onchange="leadSvcEstRecalc()">`;
     const fields = rec
-      ? money('lse-monthly-' + m.id, 'R / month', 'Monthly revenue') + num('lse-months-' + m.id, 'months', 'Duration in months') + date('lse-start-' + m.id)
-      : money('lse-amount-' + m.id, 'R value', 'Total value') + num('lse-months-' + m.id, 'over (1)', 'Spread over months — blank = 1 month') + date('lse-start-' + m.id);
+      ? money('lse-monthly-' + m.id, 'R / month', 'Monthly revenue') + monthsSel + month('lse-start-' + m.id)
+      : money('lse-amount-' + m.id, 'R value', 'Total value') + num('lse-months-' + m.id, 'over (1)', 'Spread over months — blank = 1 month') + month('lse-start-' + m.id);
     return `<div id="lse-row-${m.id}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
       <div style="flex:0 0 150px;font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
         <div style="font-size:10px;font-weight:400;color:var(--text3);">${rec ? 'Monthly · Duration · Start' : 'Value · Over period · Start'}</div>
@@ -19059,13 +19067,33 @@ function renderLeadServiceEstimates() {
     </div>`;
   }).join('');
 }
+function _svcEstMonthsSel(majorId) {
+  const sel = document.getElementById('lse-months-sel-' + majorId);
+  const custom = document.getElementById('lse-months-custom-' + majorId);
+  if (!sel || !custom) return;
+  const other = sel.value === 'other';
+  custom.style.display = other ? '' : 'none';
+  if (other) custom.focus();
+  leadSvcEstRecalc();
+}
+function _svcEstMonths(majorId, rec) {
+  if (rec) {
+    const sel = document.getElementById('lse-months-sel-' + majorId);
+    if (!sel) return null;
+    if (sel.value === 'other') return +(document.getElementById('lse-months-custom-' + majorId)?.value || 0) || null;
+    return +sel.value || null;
+  }
+  return +(document.getElementById('lse-months-' + majorId)?.value || 0) || null;
+}
 function _leadSvcEstRowValues() {
   return _leadSvcEstMajors().map(m => {
     const rec = _leadSvcEstRecurring(m.name);
     const monthly = rec ? _svcEstNum('lse-monthly-' + m.id) : null;
     const amount = rec ? null : _svcEstNum('lse-amount-' + m.id);
-    const months = +(document.getElementById('lse-months-' + m.id)?.value || 0) || null;
-    const start = (document.getElementById('lse-start-' + m.id)?.value || '') || null;
+    const months = _svcEstMonths(m.id, rec);
+    // Start is a month picker — the stored date is always the 1st (Richard).
+    const mv = (document.getElementById('lse-start-' + m.id)?.value || '');
+    const start = mv ? (mv.length === 7 ? mv + '-01' : mv) : null;
     const total = rec ? ((monthly && months) ? monthly * months : 0) : (amount || 0);
     return { majorId: +m.id, monthly, amount, months, start, total,
              empty: monthly == null && amount == null && months == null && !start };
@@ -19140,12 +19168,19 @@ function populateLeadServiceEstimates(rows) {
     const mid = +r.service_major_id;
     const mEl = document.getElementById('lse-monthly-' + mid);
     const aEl = document.getElementById('lse-amount-' + mid);
-    const nEl = document.getElementById('lse-months-' + mid);
+    const nEl = document.getElementById('lse-months-' + mid);          // project rows: plain input
+    const sEl = document.getElementById('lse-months-sel-' + mid);      // recurring rows: dropdown (+ custom)
+    const cEl = document.getElementById('lse-months-custom-' + mid);
     const dEl = document.getElementById('lse-start-' + mid);
     if (mEl && r.monthly_amount != null) { mEl.value = String(Math.round(+r.monthly_amount)); formatLeadEstValue(mEl); }
     if (aEl && r.amount != null) { aEl.value = String(Math.round(+r.amount)); formatLeadEstValue(aEl); }
-    if (nEl && r.months != null) nEl.value = r.months;
-    if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 10);
+    if (r.months != null) {
+      if (sEl) {
+        if ([12, 24, 36, 48, 60].includes(+r.months)) { sEl.value = String(+r.months); }
+        else { sEl.value = 'other'; if (cEl) { cEl.style.display = ''; cEl.value = r.months; } }
+      } else if (nEl) nEl.value = r.months;
+    }
+    if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 7);   // month picker: YYYY-MM
   }
   leadSvcEstRecalc();
 }
