@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19033,7 +19033,22 @@ function _leadSvcEstMajors() {
   return (allData['service_major'] || []).filter(m => m.active !== false)
     .sort((a, b) => (rec(b) - rec(a)) || (rec(a) ? (+a.id - +b.id) : String(a.name).localeCompare(String(b.name))));
 }
-function _svcEstMoney(el) { formatLeadEstValue(el); leadSvcEstRecalc(); }
+function _svcEstMoney(el) {
+  formatLeadEstValue(el);
+  // Project rows: a value defaults Over period to 1 the moment it lands
+  // (v7.9.23); clearing the value takes the auto-1 back with it.
+  if (el.id && el.id.startsWith('lse-amount-')) {
+    const majorId = el.id.slice('lse-amount-'.length);
+    const sel = document.getElementById('lse-months-sel-' + majorId);
+    const wrapEl = document.getElementById('lse-months-customwrap-' + majorId);
+    const hasVal = /\d/.test(el.value || '');
+    if (sel && wrapEl && wrapEl.style.display === 'none') {
+      if (hasVal && !sel.value) sel.value = '1';
+      else if (!hasVal && sel.value === '1') sel.value = '';
+    }
+  }
+  leadSvcEstRecalc();
+}
 function _svcEstNum(id) {
   const digits = (document.getElementById(id)?.value || '').replace(/[^\d]/g, '');
   return digits ? +digits : null;
@@ -19042,30 +19057,104 @@ function renderLeadServiceEstimates() {
   const wrap = document.getElementById('lead-svc-est-rows');
   if (!wrap) return;
   const majors = _leadSvcEstMajors();
+  // Strict column grid (v7.9.22, Richard: "make all columns line up vertically"):
+  // name | amount | months | start | total — identical template on every row.
+  const GRID = 'display:grid;grid-template-columns:150px 120px 112px 150px 1fr;gap:8px;align-items:center;';
   wrap.innerHTML = majors.map(m => {
     const rec = _leadSvcEstRecurring(m.name);
-    const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:120px;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
-    const num = (fid, ph, title) => `<input type="number" min="1" step="1" id="${fid}" class="form-control" style="width:78px;" placeholder="${ph}" title="${title}" oninput="leadSvcEstRecalc()">`;
-    const date = fid => `<input type="date" id="${fid}" class="form-control" style="width:142px;" title="Expected start date" onchange="leadSvcEstRecalc()">`;
-    const fields = rec
-      ? money('lse-monthly-' + m.id, 'R / month', 'Monthly revenue') + num('lse-months-' + m.id, 'months', 'Duration in months') + date('lse-start-' + m.id)
-      : money('lse-amount-' + m.id, 'R value', 'Total value') + num('lse-months-' + m.id, 'over (1)', 'Spread over months — blank = 1 month') + date('lse-start-' + m.id);
-    return `<div id="lse-row-${m.id}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
-      <div style="flex:0 0 150px;font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
+    const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:100%;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
+    // Months (v7.9.21/22/23): a dropdown of the standard terms — Duration
+    // 12/24/36/48/60 on recurring rows, Over period 1–12 on project rows (auto-
+    // defaults to 1 when a value lands) — with "Other…" REPLACING the dropdown
+    // in the same cell (blur it empty to get the dropdown back).
+    const monthsOpts = rec ? [12, 24, 36, 48, 60] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    const monthsCell = `<div><select id="lse-months-sel-${m.id}" class="form-control" style="width:100%;" title="${rec ? 'Duration in months' : 'Spread over months'}" onchange="_svcEstMonthsSel(${m.id})">
+        <option value="">${rec ? 'months' : 'over…'}</option>
+        ${monthsOpts.map(n => `<option value="${n}">${n} ${n === 1 ? 'month' : 'months'}</option>`).join('')}
+        <option value="other">Other…</option>
+      </select><div id="lse-months-customwrap-${m.id}" style="display:none;align-items:center;gap:4px;">
+        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;" placeholder="…" title="Custom months — Enter or click away to set" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})" onkeydown="if(event.key==='Enter')this.blur()">
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap;">months</span>
+      </div></div>`;
+    // Start (v7.9.21): always the 1st of a month — capture month + year only.
+    const month = fid => `<input type="month" id="${fid}" class="form-control" style="width:100%;" title="Expected start — always the 1st of the month" onchange="leadSvcEstRecalc()">`;
+    return `<div id="lse-row-${m.id}" style="${GRID}padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
+      <div style="font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
         <div style="font-size:10px;font-weight:400;color:var(--text3);">${rec ? 'Monthly · Duration · Start' : 'Value · Over period · Start'}</div>
       </div>
-      ${fields}
-      <div id="lse-total-${m.id}" style="margin-left:auto;font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap;">—</div>
+      ${money(rec ? 'lse-monthly-' + m.id : 'lse-amount-' + m.id, rec ? 'R / month' : 'R value', rec ? 'Monthly revenue' : 'Total value')}
+      ${monthsCell}
+      ${month('lse-start-' + m.id)}
+      <div id="lse-total-${m.id}" style="text-align:right;font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap;">—</div>
     </div>`;
   }).join('');
+}
+function _svcEstMonthsSel(majorId) {
+  const sel = document.getElementById('lse-months-sel-' + majorId);
+  const custom = document.getElementById('lse-months-custom-' + majorId);
+  if (!sel || !custom) return;
+  // "Other…" swaps in a months input; committing it INJECTS the number as a
+  // real option (v7.9.25) — so "18 months" wears the same dress and arrow as
+  // "36 months", and the list keeps offering the standard terms + Other….
+  const wrap = document.getElementById('lse-months-customwrap-' + majorId);
+  if (sel.value === 'other') {
+    sel.style.display = 'none';
+    if (wrap) wrap.style.display = 'flex';
+    custom.value = '';
+    custom.focus();
+  } else {
+    // Standard pick: retire any previously injected custom option.
+    Array.from(sel.options).forEach(o => { if (o.dataset.custom && o.value !== sel.value) o.remove(); });
+    if (wrap) wrap.style.display = 'none';
+    sel.style.display = '';
+  }
+  leadSvcEstRecalc();
+}
+function _svcEstMonthsLabel(n) { return n === 1 ? '1 month' : n + ' months'; }
+// Put a number into the select as a (tagged) option and select it — the custom
+// value then renders exactly like a listed term.
+function _svcEstInjectMonths(sel, n) {
+  let opt = Array.from(sel.options).find(o => o.value !== '' && o.value !== 'other' && +o.value === +n);
+  if (!opt) {
+    opt = document.createElement('option');
+    opt.value = String(+n);
+    opt.dataset.custom = '1';
+    opt.textContent = _svcEstMonthsLabel(+n);
+    const otherOpt = Array.from(sel.options).find(o => o.value === 'other');
+    sel.insertBefore(opt, otherOpt || null);
+  }
+  Array.from(sel.options).forEach(o => { if (o.dataset.custom && +o.value !== +n) o.remove(); });
+  sel.value = String(+n);
+}
+// Leaving the custom input commits it: a number becomes a selected option
+// (dressed like every listed term); empty returns the plain dropdown.
+function _svcEstMonthsBlur(majorId) {
+  const sel = document.getElementById('lse-months-sel-' + majorId);
+  const custom = document.getElementById('lse-months-custom-' + majorId);
+  if (!sel || !custom) return;
+  const wrap = document.getElementById('lse-months-customwrap-' + majorId);
+  const n = +custom.value || 0;
+  if (n > 0) _svcEstInjectMonths(sel, n);
+  else sel.value = '';
+  if (wrap) wrap.style.display = 'none';
+  sel.style.display = '';
+  leadSvcEstRecalc();
+}
+function _svcEstMonths(majorId) {
+  const sel = document.getElementById('lse-months-sel-' + majorId);
+  if (!sel) return null;
+  if (sel.value === 'other') return +(document.getElementById('lse-months-custom-' + majorId)?.value || 0) || null;
+  return +sel.value || null;
 }
 function _leadSvcEstRowValues() {
   return _leadSvcEstMajors().map(m => {
     const rec = _leadSvcEstRecurring(m.name);
     const monthly = rec ? _svcEstNum('lse-monthly-' + m.id) : null;
     const amount = rec ? null : _svcEstNum('lse-amount-' + m.id);
-    const months = +(document.getElementById('lse-months-' + m.id)?.value || 0) || null;
-    const start = (document.getElementById('lse-start-' + m.id)?.value || '') || null;
+    const months = _svcEstMonths(m.id);
+    // Start is a month picker — the stored date is always the 1st (Richard).
+    const mv = (document.getElementById('lse-start-' + m.id)?.value || '');
+    const start = mv ? (mv.length === 7 ? mv + '-01' : mv) : null;
     const total = rec ? ((monthly && months) ? monthly * months : 0) : (amount || 0);
     return { majorId: +m.id, monthly, amount, months, start, total,
              empty: monthly == null && amount == null && months == null && !start };
@@ -19140,12 +19229,17 @@ function populateLeadServiceEstimates(rows) {
     const mid = +r.service_major_id;
     const mEl = document.getElementById('lse-monthly-' + mid);
     const aEl = document.getElementById('lse-amount-' + mid);
-    const nEl = document.getElementById('lse-months-' + mid);
+    const sEl = document.getElementById('lse-months-sel-' + mid);      // months dropdown (+ in-place custom)
+    const cEl = document.getElementById('lse-months-custom-' + mid);
     const dEl = document.getElementById('lse-start-' + mid);
     if (mEl && r.monthly_amount != null) { mEl.value = String(Math.round(+r.monthly_amount)); formatLeadEstValue(mEl); }
     if (aEl && r.amount != null) { aEl.value = String(Math.round(+r.amount)); formatLeadEstValue(aEl); }
-    if (nEl && r.months != null) nEl.value = r.months;
-    if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 10);
+    if (r.months != null && sEl) {
+      // Listed term selects itself; a non-standard stored term is injected as a
+      // real option (v7.9.25) so it renders exactly like the listed ones.
+      _svcEstInjectMonths(sEl, +r.months);
+    }
+    if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 7);   // month picker: YYYY-MM
   }
   leadSvcEstRecalc();
 }
