@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.15 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.15 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1131,10 +1131,17 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
           </div>
         </div>
 
-        <!-- Product/Service Opportunity (own card; applyLeadFormLayout places it above Details) -->
+        <!-- Estimated Revenue (own card; applyLeadFormLayout places it above Details).
+             v7.9.17 (Richard): renamed from "Primary Service Interest"; the blended-
+             category TICKS are invisible now — a value in a service's estimate row
+             ticks its category in the background (the hidden boxes below stay as the
+             as-loaded state carrier so legacy blends survive grid-less saves); the
+             total estimated value is CALCULATED, never typed (hidden input keeps
+             carrying est_value for populate/save so nothing downstream changes). -->
         <div class="opp-section" id="lead-service-section">
-          <div class="opp-section-title">Primary Service Interest</div>
+          <div class="opp-section-title">Estimated Revenue</div>
           <div class="form-group" style="margin-bottom:0;">
+            <label class="form-label" style="font-size:12px;">Primary service interest</label>
             <!-- Single dropdown: an optgroup per major, with the major itself selectable
                  as "(general)" plus each of its subs. The hidden inputs keep the major/sub
                  split so save + promote are unchanged. -->
@@ -1144,15 +1151,25 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
             <input type="hidden" id="lead-service-major-id">
             <input type="hidden" id="lead-service-sub-id">
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">Carries across to the opportunity on promote.</div>
-            <div id="lead-blend-wrap" style="margin-top:10px;">
-              <label class="form-label" style="font-size:12px;">Blended categories <span style="font-weight:400;color:var(--text3);font-size:11px;">— tick every offering this turn-key spans (the primary above is included automatically)</span></label>
-              <div id="lead-blend-boxes" style="display:flex;flex-wrap:wrap;padding-top:4px;"></div>
+            <div id="lead-blend-wrap" style="display:none;">
+              <div id="lead-blend-boxes"></div>
             </div>
           </div>
-          <!-- Estimated deal value (merged into this card to save vertical space) -->
-          <div class="form-group" style="margin:10px 0 0;">
+          <!-- Per-service estimates: one line per service type — Manpower / Control
+               Room capture Monthly x Duration + Start; Advisory / Technology capture
+               Value over a period (default 1 month) + Start. Each line totals itself;
+               a valued line auto-ticks its category into the blend. -->
+          <div class="form-group" style="margin:14px 0 0;">
+            <label class="form-label" style="font-size:12px;">Per service type <span style="font-weight:400;color:var(--text3);font-size:11px;">— a value here also marks that service as part of this lead</span></label>
+            <div id="lead-svc-est-rows"></div>
+            <div id="lead-svc-est-total" style="text-align:right;padding:8px 0 0;font-size:13px;font-weight:700;color:var(--navy);"></div>
+          </div>
+          <!-- est_value carrier: hidden — the value is CALCULATED from the grid
+               (or carried forward for grid-less legacy leads). populate + save
+               still read/write this input, so every downstream reader is unchanged. -->
+          <div class="form-group" style="display:none;margin:10px 0 0;">
             <label class="form-label">Estimated deal value</label>
-            <input type="text" inputmode="numeric" id="lead-est-value" class="form-control" placeholder="R …  (back-of-envelope estimate, optional)" oninput="formatLeadEstValue(this)">
+            <input type="text" inputmode="numeric" id="lead-est-value" class="form-control" placeholder="R …" oninput="formatLeadEstValue(this)">
           </div>
         </div>
 
@@ -16954,6 +16971,7 @@ async function openNewLead() {
   window._leadRevert = { lead: {}, contacts: [], interactions: [], descLog: [] };  // revert = discard the new lead
   // Only managers/admin may assign an owner other than themselves.
   if (ownerSel && !canAssignOwner(leadData)) ownerSel.disabled = true;
+  await loadLeadServiceEstimates(null);   // blank grid, sync armed (v7.9.16)
   document.getElementById('lead-page').classList.add('active');
   switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
   renderLeadStatusBadge('New');
@@ -17005,6 +17023,7 @@ async function openLeadForm(id) {
     await loadLeadContacts(id);
     // Populate fields from leadData
     populateLeadForm();
+    await loadLeadServiceEstimates(id);   // per-service estimate grid (v7.9.16)
     await loadLeadInteractions(id);
     await loadLeadCadence();         // campaign cadence for the ribbon (needs interactions for the step count)
     renderLeadCadenceRibbon();
@@ -17027,6 +17046,7 @@ async function openLeadForm(id) {
     switchLeadTab('overview', document.querySelector('#lead-page .opp-tab'));
     renderLeadQualification();
     renderLeadInteractions();
+    leadSvcEstRecalc();   // re-apply the derived est-value lock after applyLeadReadOnly re-enabled inputs
     // Final authority on the org display (bug #77): whatever twitched earlier in
     // the open, the lead's stored organisation is what the form shows. The t500
     // pass catches late async touchers; both warn with a tag when they fix anything.
@@ -18926,6 +18946,9 @@ function onLeadServiceComboChange() {
   if (primary) document.querySelectorAll('.lead-svc-major').forEach(el => { if (+el.value === primary) el.checked = true; });
   // Live-sync so the all-green readiness highlight reacts without waiting for save.
   if (leadData) { leadData.service_major_id = +maj.value || null; updateLeadReadiness(); }
+  // The primary's own estimate line must carry revenue (v7.9.19) — re-evaluate
+  // the row cue the moment the primary changes.
+  if (typeof leadSvcEstRecalc === 'function') leadSvcEstRecalc();
 }
 
 // Set the combined dropdown from the hidden major/sub values (sub wins if present).
@@ -18988,6 +19011,186 @@ function formatLeadEstValue(el) {
 function leadEstValueNumber() {
   const digits = (document.getElementById('lead-est-value')?.value || '').replace(/[^\d]/g, '');
   return digits ? +digits : null;
+}
+
+// ── Per-service estimates (v7.9.16, Richard 2026-09-08) ─────────────────────
+// One estimate line per ACTIVE service major on the Primary Service Interest
+// card. Recurring services (Manpower, Control Room) capture Monthly × Duration
+// + Start date; project services (Advisory & Design, Technology Works) capture
+// Value spread Over a period (blank = 1 month) + Start date. Each line shows
+// its own total (recurring = monthly × months, project = value); the grand
+// total BECOMES the lead's Estimated deal value (field locks while the grid
+// carries values; grid-less leads keep the free-text estimate). Rows live in
+// lead_service_estimates (lead 1:N major, UNIQUE pair), synced by saveLead
+// AFTER the lead row lands — and ONLY when this open both rendered and loaded
+// the grid, so a failed populate can never read an empty grid as "the user
+// cleared everything" (the wipe-class lesson).
+let _leadSvcEstLoaded = false;          // rows fetched (or new-lead blank) — sync may run
+window._leadSvcEstAsLoaded = [];        // DB rows as loaded this open (diff + delete baseline)
+const _leadSvcEstRecurring = name => /manpower|control room/i.test(String(name || ''));
+function _leadSvcEstMajors() {
+  const rec = m => _leadSvcEstRecurring(m.name) ? 1 : 0;
+  return (allData['service_major'] || []).filter(m => m.active !== false)
+    .sort((a, b) => (rec(b) - rec(a)) || (rec(a) ? (+a.id - +b.id) : String(a.name).localeCompare(String(b.name))));
+}
+function _svcEstMoney(el) { formatLeadEstValue(el); leadSvcEstRecalc(); }
+function _svcEstNum(id) {
+  const digits = (document.getElementById(id)?.value || '').replace(/[^\d]/g, '');
+  return digits ? +digits : null;
+}
+function renderLeadServiceEstimates() {
+  const wrap = document.getElementById('lead-svc-est-rows');
+  if (!wrap) return;
+  const majors = _leadSvcEstMajors();
+  wrap.innerHTML = majors.map(m => {
+    const rec = _leadSvcEstRecurring(m.name);
+    const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:120px;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
+    const num = (fid, ph, title) => `<input type="number" min="1" step="1" id="${fid}" class="form-control" style="width:78px;" placeholder="${ph}" title="${title}" oninput="leadSvcEstRecalc()">`;
+    const date = fid => `<input type="date" id="${fid}" class="form-control" style="width:142px;" title="Expected start date" onchange="leadSvcEstRecalc()">`;
+    const fields = rec
+      ? money('lse-monthly-' + m.id, 'R / month', 'Monthly revenue') + num('lse-months-' + m.id, 'months', 'Duration in months') + date('lse-start-' + m.id)
+      : money('lse-amount-' + m.id, 'R value', 'Total value') + num('lse-months-' + m.id, 'over (1)', 'Spread over months — blank = 1 month') + date('lse-start-' + m.id);
+    return `<div id="lse-row-${m.id}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
+      <div style="flex:0 0 150px;font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
+        <div style="font-size:10px;font-weight:400;color:var(--text3);">${rec ? 'Monthly · Duration · Start' : 'Value · Over period · Start'}</div>
+      </div>
+      ${fields}
+      <div id="lse-total-${m.id}" style="margin-left:auto;font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap;">—</div>
+    </div>`;
+  }).join('');
+}
+function _leadSvcEstRowValues() {
+  return _leadSvcEstMajors().map(m => {
+    const rec = _leadSvcEstRecurring(m.name);
+    const monthly = rec ? _svcEstNum('lse-monthly-' + m.id) : null;
+    const amount = rec ? null : _svcEstNum('lse-amount-' + m.id);
+    const months = +(document.getElementById('lse-months-' + m.id)?.value || 0) || null;
+    const start = (document.getElementById('lse-start-' + m.id)?.value || '') || null;
+    const total = rec ? ((monthly && months) ? monthly * months : 0) : (amount || 0);
+    return { majorId: +m.id, monthly, amount, months, start, total,
+             empty: monthly == null && amount == null && months == null && !start };
+  });
+}
+function leadSvcEstRecalc() {
+  const rows = _leadSvcEstRowValues();
+  let grand = 0;
+  for (const r of rows) {
+    grand += r.total;
+    const cell = document.getElementById('lse-total-' + r.majorId);
+    if (cell) cell.textContent = r.total ? 'R ' + Math.round(r.total).toLocaleString('en-US') : '—';
+  }
+  // The total is CALCULATED (v7.9.17) — never typed. Grid-less legacy leads
+  // show their carried-forward est_value until per-service estimates exist.
+  const legacy = grand ? null : leadEstValueNumber();
+  const totEl = document.getElementById('lead-svc-est-total');
+  if (totEl) {
+    if (grand) {
+      totEl.innerHTML = `Total estimated value: <span style="font-size:15px;">R ${Math.round(grand).toLocaleString('en-US')}</span>`;
+    } else {
+      totEl.innerHTML = legacy
+        ? `Total estimated value: <span style="font-size:15px;">R ${Number(legacy).toLocaleString('en-US')}</span> <span style="font-weight:400;color:var(--text3);font-size:11px;">— carried forward; add per-service lines above to recalculate</span>`
+        : `<span style="font-weight:400;color:var(--text3);font-size:12px;">Total estimated value: —</span>`;
+    }
+  }
+  // Attention cues (Richard's two rules, 2026-09-08):
+  // 1 (v7.9.18): the whole Estimated Revenue card wears a red edge + faint tint
+  //   while it holds no value at all — no estimate line and no carried-forward
+  //   est_value. Legacy-valued leads don't glow (they have an estimate, just
+  //   unstructured); read-only leads never glow.
+  // 2 (v7.9.19): the PRIMARY service's own line must carry revenue — when a
+  //   primary is selected and its line totals zero, THAT ROW glows so the user
+  //   sees exactly what's required. Independent of rule 1 (fires even when
+  //   other lines or a legacy figure satisfy the card).
+  const ro = (typeof leadReadOnly !== 'undefined' && leadReadOnly);
+  const card = document.getElementById('lead-service-section');
+  if (card) {
+    const needsValues = !grand && !legacy && !ro;
+    card.style.boxShadow = needsValues ? 'inset 3px 0 0 0 var(--red)' : '';
+    card.style.background = needsValues ? '#FA0A1108' : '';
+  }
+  const primaryMajor = +(document.getElementById('lead-service-major-id')?.value || 0);
+  for (const r of rows) {
+    const rowEl = document.getElementById('lse-row-' + r.majorId);
+    if (!rowEl) continue;
+    const glow = !ro && primaryMajor === r.majorId && !r.total;
+    // Row glow deliberately BRIGHTER than the card cue (Richard 2026-09-08) —
+    // it names the exact line that's required.
+    rowEl.style.boxShadow = glow ? 'inset 4px 0 0 0 var(--red)' : '';
+    rowEl.style.background = glow ? '#FA0A1120' : '';
+  }
+  // The grand total IS the estimated deal value while the grid carries values;
+  // the free-text field keeps serving grid-less (legacy) estimates. The lock is
+  // tagged so read-only mode is never accidentally undone when the grid empties.
+  const ev = document.getElementById('lead-est-value');
+  if (ev) {
+    if (grand > 0) {
+      ev.value = 'R ' + Math.round(grand).toLocaleString('en-US');
+      ev.disabled = true; ev.dataset.derived = '1';
+      ev.title = 'Derived from the service estimates above';
+    } else if (ev.dataset.derived === '1') {
+      delete ev.dataset.derived; ev.title = '';
+      if (typeof leadReadOnly === 'undefined' || !leadReadOnly) ev.disabled = false;
+    }
+  }
+  return grand;
+}
+function populateLeadServiceEstimates(rows) {
+  renderLeadServiceEstimates();
+  for (const r of (rows || [])) {
+    const mid = +r.service_major_id;
+    const mEl = document.getElementById('lse-monthly-' + mid);
+    const aEl = document.getElementById('lse-amount-' + mid);
+    const nEl = document.getElementById('lse-months-' + mid);
+    const dEl = document.getElementById('lse-start-' + mid);
+    if (mEl && r.monthly_amount != null) { mEl.value = String(Math.round(+r.monthly_amount)); formatLeadEstValue(mEl); }
+    if (aEl && r.amount != null) { aEl.value = String(Math.round(+r.amount)); formatLeadEstValue(aEl); }
+    if (nEl && r.months != null) nEl.value = r.months;
+    if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 10);
+  }
+  leadSvcEstRecalc();
+}
+async function loadLeadServiceEstimates(leadId) {
+  _leadSvcEstLoaded = false;
+  window._leadSvcEstAsLoaded = [];
+  if (leadId) {
+    try {
+      window._leadSvcEstAsLoaded = await apiGet('lead_service_estimates', 'lead_id=eq.' + (+leadId) + '&select=*');
+      _leadSvcEstLoaded = true;
+    } catch (e) { console.warn('service estimates load failed — grid stays read-only-ish (no sync this open):', e.message); }
+  } else {
+    _leadSvcEstLoaded = true;   // new lead: nothing to load, sync may run
+  }
+  populateLeadServiceEstimates(window._leadSvcEstAsLoaded);
+}
+async function syncLeadServiceEstimates(leadId) {
+  if (!_leadSvcEstLoaded || !leadId) return;
+  if (!document.getElementById('lead-svc-est-rows')?.childElementCount) return;
+  const byMajor = Object.fromEntries((window._leadSvcEstAsLoaded || []).map(r => [+r.service_major_id, r]));
+  const norm = d => d ? String(d).slice(0, 10) : null;
+  let changed = false;
+  for (const r of _leadSvcEstRowValues()) {
+    const cur = byMajor[r.majorId];
+    try {
+      if (r.empty) {
+        if (cur) { await api('lead_service_estimates', 'DELETE', null, 'id=eq.' + cur.id); changed = true; }
+        continue;
+      }
+      // Diff before writing — autosave calls this on every tick.
+      const nz = v => v == null ? null : +v;
+      if (cur && nz(cur.monthly_amount) === nz(r.monthly) && nz(cur.amount) === nz(r.amount)
+          && nz(cur.months) === nz(r.months) && norm(cur.start_date) === (r.start ?? null)) continue;
+      const body = { lead_id: +leadId, service_major_id: r.majorId,
+                     monthly_amount: r.monthly, months: r.months, amount: r.amount,
+                     start_date: r.start, updated_at: new Date().toISOString() };
+      if (cur) await api('lead_service_estimates', 'PATCH', body, 'id=eq.' + cur.id);
+      else await api('lead_service_estimates', 'POST', body);
+      changed = true;
+    } catch (e) { console.warn('service estimate sync failed for major ' + r.majorId + ':', e.message); }
+  }
+  if (changed) {
+    try { window._leadSvcEstAsLoaded = await apiGet('lead_service_estimates', 'lead_id=eq.' + (+leadId) + '&select=*'); }
+    catch (e) { /* baseline refresh is best-effort — next open reloads it */ }
+  }
 }
 
 function refreshLeadServiceSubDropdown() {
@@ -23230,8 +23433,16 @@ async function saveLead(opts) {
     region_id:        selectFkOrKeep('lead-region-id', leadData.region_id),
     branch_id:        selectFkOrKeep('lead-branch-id', leadData.branch_id),
     service_major_ids: (function () {
-      const set = new Set(readServiceFocusBoxes('lead-svc-major'));
+      // v7.9.17: the blend ticks are invisible — a VALUE in a service's estimate
+      // row ticks its category in the background. Grid carries values → blend =
+      // primary + valued services (stale manual ticks retire with the next save);
+      // grid empty → the as-loaded blend (hidden pre-ticked boxes) survives
+      // untouched, so legacy leads lose nothing.
       const primary = +document.getElementById('lead-service-major-id').value || 0;
+      const gridReady = (typeof _leadSvcEstRowValues === 'function')
+        && !!document.getElementById('lead-svc-est-rows')?.childElementCount;
+      const valued = gridReady ? _leadSvcEstRowValues().filter(r => !r.empty).map(r => r.majorId) : [];
+      const set = new Set(valued.length ? valued : readServiceFocusBoxes('lead-svc-major'));
       if (primary) set.add(primary);                 // primary line's category is always part of the blend
       const arr = Array.from(set);
       return arr.length ? arr : null;
@@ -23351,6 +23562,9 @@ async function saveLead(opts) {
     if (!opts.silent) setLeadSaveIndicator('saved');   // explicit saves confirm with "Saved"
     // Sync junction tables for the qualification multi-selects
     await saveLeadQualificationSelections(leadData.id);
+    // Per-service estimate rows (v7.9.16): diffed upserts, guarded by the
+    // loaded/rendered flags inside — a failed populate can never delete rows.
+    await syncLeadServiceEstimates(leadData.id);
     // Description thread: in append-mode an explicit save commits the add-box as a
     // new log entry. NEVER on a silent autosave — that would create duplicate notes.
     if (appendMode && descInput && !opts.silent) {
