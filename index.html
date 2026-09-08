@@ -424,7 +424,11 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .rev-fy-tab.active { background:var(--navy); color:#fff; border-color:var(--navy); z-index:1; }
 .rev-fy-content { display:none; padding:8px 16px; overflow-x:auto; }
 .rev-fy-content.active { display:block; }
-.rev-table { width:100%; border-collapse:collapse; font-size:12px; min-width:700px; }
+/* table-layout:fixed (v7.9.31): without it each month's <input> demands its
+   ~173px browser-default width, forcing the table to ~2300px and off the
+   screen. Fixed layout shares the width equally so 12 months FIT the viewport;
+   min-width + the wrapper's overflow-x stay as the narrow-window fallback. */
+.rev-table { width:100%; border-collapse:collapse; font-size:12px; min-width:700px; table-layout:fixed; }
 .rev-table th { background:var(--bg); padding:7px 10px; text-align:center; font-size:11px; font-weight:700; color:var(--text3); border:1px solid var(--border); white-space:nowrap; }
 .rev-table th.row-label { text-align:left; width:80px; }
 .rev-table td { padding:4px 6px; border:1px solid var(--border); text-align:right; }
@@ -655,7 +659,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.30 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.32 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +698,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.30 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.32 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19059,33 +19063,35 @@ function renderLeadServiceEstimates() {
   const majors = _leadSvcEstMajors();
   // Strict column grid (v7.9.22, Richard: "make all columns line up vertically"):
   // name | amount | months | start | total — identical template on every row.
-  const GRID = 'display:grid;grid-template-columns:150px 120px 112px 150px 1fr;gap:8px;align-items:center;';
+  // v7.9.31: columns SHRINKABLE (minmax) + min-width:0 on every cell so the
+  // grid compresses into its card instead of overflowing the right edge.
+  const GRID = 'display:grid;grid-template-columns:minmax(96px,150px) minmax(84px,120px) minmax(80px,112px) minmax(110px,150px) minmax(56px,auto);gap:8px;align-items:center;';
   wrap.innerHTML = majors.map(m => {
     const rec = _leadSvcEstRecurring(m.name);
-    const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:100%;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
+    const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:100%;min-width:0;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
     // Months (v7.9.21/22/23): a dropdown of the standard terms — Duration
     // 12/24/36/48/60 on recurring rows, Over period 1–12 on project rows (auto-
     // defaults to 1 when a value lands) — with "Other…" REPLACING the dropdown
     // in the same cell (blur it empty to get the dropdown back).
     const monthsOpts = rec ? [12, 24, 36, 48, 60] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    const monthsCell = `<div><select id="lse-months-sel-${m.id}" class="form-control" style="width:100%;" title="${rec ? 'Duration in months' : 'Spread over months'}" onchange="_svcEstMonthsSel(${m.id})">
+    const monthsCell = `<div style="min-width:0;"><select id="lse-months-sel-${m.id}" class="form-control" style="width:100%;min-width:0;" title="${rec ? 'Duration in months' : 'Spread over months'}" onchange="_svcEstMonthsSel(${m.id})">
         <option value="">${rec ? 'months' : 'over…'}</option>
         ${monthsOpts.map(n => `<option value="${n}">${n} ${n === 1 ? 'month' : 'months'}</option>`).join('')}
         <option value="other">Other…</option>
       </select><div id="lse-months-customwrap-${m.id}" style="display:none;align-items:center;gap:4px;">
-        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;" placeholder="…" title="Custom months — Enter or click away to set" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})" onkeydown="if(event.key==='Enter')this.blur()">
+        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;width:100%;" placeholder="…" title="Custom months — Enter or click away to set" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})" onkeydown="if(event.key==='Enter')this.blur()">
         <span style="font-size:11px;color:var(--text3);white-space:nowrap;">months</span>
       </div></div>`;
     // Start (v7.9.21): always the 1st of a month — capture month + year only.
-    const month = fid => `<input type="month" id="${fid}" class="form-control" style="width:100%;" title="Expected start — always the 1st of the month" onchange="leadSvcEstRecalc()">`;
+    const month = fid => `<input type="month" id="${fid}" class="form-control" style="width:100%;min-width:0;" title="Expected start — always the 1st of the month" onchange="leadSvcEstRecalc()">`;
     return `<div id="lse-row-${m.id}" style="${GRID}padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
-      <div style="font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
+      <div style="min-width:0;font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
         <div style="font-size:10px;font-weight:400;color:var(--text3);">${rec ? 'Monthly · Duration · Start' : 'Value · Over period · Start'}</div>
       </div>
       ${money(rec ? 'lse-monthly-' + m.id : 'lse-amount-' + m.id, rec ? 'R / month' : 'R value', rec ? 'Monthly revenue' : 'Total value')}
       ${monthsCell}
       ${month('lse-start-' + m.id)}
-      <div id="lse-total-${m.id}" style="text-align:right;font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap;">—</div>
+      <div id="lse-total-${m.id}" style="min-width:0;text-align:right;font-size:12px;font-weight:700;color:var(--navy);white-space:nowrap;">—</div>
     </div>`;
   }).join('');
 }
@@ -22728,15 +22734,20 @@ async function commitPromotion(s) {
       deal_id: dealId, stream_type: 'opportunity', locked: false,
     }, 'select=*');
     const streamId = stream[0].id;
-    const startDate = new Date(startDt);
+    // Month keys built in LOCAL time (v7.9.32, Richard's Welgevonden repro):
+    // toISOString() converts local midnight back to UTC — two hours EARLIER in
+    // SAST — so every key landed on the PREVIOUS month's last day and the whole
+    // schedule shifted one month early (Nov-start showed from Oct). Parse the
+    // start by parts and format by parts; no UTC round-trip anywhere.
+    const [_sy, _sm] = String(startDt).split('-').map(Number);
     // Bulk insert: PostgREST accepts an array body, so all months go in ONE
     // round-trip (each proxied call costs ~1.4s — a 36-month deal was 36 calls).
     const monthRows = monthValues.map((v, i) => {
-      const m = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
+      const m = new Date(_sy, (_sm - 1) + i, 1);
       // Month key matches the existing opportunity form's format: YYYY-MM with
       // no day. The grid lookup uses this same shape — sending YYYY-MM-01 would
       // store under a different key and the grid would show blank.
-      const monthStr = m.toISOString().slice(0,7);
+      const monthStr = m.getFullYear() + '-' + String(m.getMonth() + 1).padStart(2, '0');
       const revenue  = +v;
       const marginR  = Math.round((revenue * margin / 100) * 100) / 100;
       return { stream_id: streamId, month: monthStr,
