@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.24 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.24 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19073,7 +19073,7 @@ function renderLeadServiceEstimates() {
         ${monthsOpts.map(n => `<option value="${n}">${n} ${n === 1 ? 'month' : 'months'}</option>`).join('')}
         <option value="other">Other…</option>
       </select><div id="lse-months-customwrap-${m.id}" style="display:none;align-items:center;gap:4px;">
-        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;" placeholder="…" title="Custom months — leave empty to return to the list" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})">
+        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;" placeholder="…" title="Custom months — Enter or click away to set" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})" onkeydown="if(event.key==='Enter')this.blur()">
         <span style="font-size:11px;color:var(--text3);white-space:nowrap;">months</span>
       </div></div>`;
     // Start (v7.9.21): always the 1st of a month — capture month + year only.
@@ -19093,30 +19093,52 @@ function _svcEstMonthsSel(majorId) {
   const sel = document.getElementById('lse-months-sel-' + majorId);
   const custom = document.getElementById('lse-months-custom-' + majorId);
   if (!sel || !custom) return;
-  // "Other…" REPLACES the dropdown in the same cell (v7.9.22) — no extra column.
+  // "Other…" swaps in a months input; committing it INJECTS the number as a
+  // real option (v7.9.25) — so "18 months" wears the same dress and arrow as
+  // "36 months", and the list keeps offering the standard terms + Other….
   const wrap = document.getElementById('lse-months-customwrap-' + majorId);
   if (sel.value === 'other') {
     sel.style.display = 'none';
     if (wrap) wrap.style.display = 'flex';
+    custom.value = '';
     custom.focus();
   } else {
+    // Standard pick: retire any previously injected custom option.
+    Array.from(sel.options).forEach(o => { if (o.dataset.custom && o.value !== sel.value) o.remove(); });
     if (wrap) wrap.style.display = 'none';
     sel.style.display = '';
   }
   leadSvcEstRecalc();
 }
-// Emptying the custom months and leaving it brings the dropdown back.
+function _svcEstMonthsLabel(n) { return n === 1 ? '1 month' : n + ' months'; }
+// Put a number into the select as a (tagged) option and select it — the custom
+// value then renders exactly like a listed term.
+function _svcEstInjectMonths(sel, n) {
+  let opt = Array.from(sel.options).find(o => o.value !== '' && o.value !== 'other' && +o.value === +n);
+  if (!opt) {
+    opt = document.createElement('option');
+    opt.value = String(+n);
+    opt.dataset.custom = '1';
+    opt.textContent = _svcEstMonthsLabel(+n);
+    const otherOpt = Array.from(sel.options).find(o => o.value === 'other');
+    sel.insertBefore(opt, otherOpt || null);
+  }
+  Array.from(sel.options).forEach(o => { if (o.dataset.custom && +o.value !== +n) o.remove(); });
+  sel.value = String(+n);
+}
+// Leaving the custom input commits it: a number becomes a selected option
+// (dressed like every listed term); empty returns the plain dropdown.
 function _svcEstMonthsBlur(majorId) {
   const sel = document.getElementById('lse-months-sel-' + majorId);
   const custom = document.getElementById('lse-months-custom-' + majorId);
   if (!sel || !custom) return;
-  if (!custom.value) {
-    const wrap = document.getElementById('lse-months-customwrap-' + majorId);
-    if (wrap) wrap.style.display = 'none';
-    sel.style.display = '';
-    sel.value = '';
-    leadSvcEstRecalc();
-  }
+  const wrap = document.getElementById('lse-months-customwrap-' + majorId);
+  const n = +custom.value || 0;
+  if (n > 0) _svcEstInjectMonths(sel, n);
+  else sel.value = '';
+  if (wrap) wrap.style.display = 'none';
+  sel.style.display = '';
+  leadSvcEstRecalc();
 }
 function _svcEstMonths(majorId) {
   const sel = document.getElementById('lse-months-sel-' + majorId);
@@ -19213,16 +19235,9 @@ function populateLeadServiceEstimates(rows) {
     if (mEl && r.monthly_amount != null) { mEl.value = String(Math.round(+r.monthly_amount)); formatLeadEstValue(mEl); }
     if (aEl && r.amount != null) { aEl.value = String(Math.round(+r.amount)); formatLeadEstValue(aEl); }
     if (r.months != null && sEl) {
-      // Listed term selects itself; anything else = the custom input REPLACES
-      // the dropdown in place (each row type carries its own option list).
-      const listed = Array.from(sEl.options).some(o => o.value === String(+r.months));
-      if (listed) { sEl.value = String(+r.months); }
-      else {
-        sEl.value = 'other'; sEl.style.display = 'none';
-        const wEl = document.getElementById('lse-months-customwrap-' + mid);
-        if (wEl) wEl.style.display = 'flex';
-        if (cEl) cEl.value = r.months;
-      }
+      // Listed term selects itself; a non-standard stored term is injected as a
+      // real option (v7.9.25) so it renders exactly like the listed ones.
+      _svcEstInjectMonths(sEl, +r.months);
     }
     if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 7);   // month picker: YYYY-MM
   }
