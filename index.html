@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.30 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.30 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -22177,11 +22177,26 @@ async function openPromoteQ4Screen2() {
   // Pre-fill the wizard's service sub from the lead, if set. The user can
   // still change it in this screen — Q4 wins. This keeps both lead form and
   // wizard consistent: change freely up until commit.
+  let _subDeduced = null;   // why the sub was auto-resolved (shown under the field)
   if (!s.q4.serviceSubId && leadData.service_sub_id) {
     s.q4.serviceSubId = +leadData.service_sub_id;
   }
+  if (s.q4.serviceSubId && +s.q4.serviceSubId === +leadData.service_sub_id) {
+    _subDeduced = 'lead';
+  }
   const _focusMajorIds = focusMajorIds(leadData);
   const subs = (allData['service_sub_all'] || []).filter(s2 => _focusMajorIds.includes(+s2.major_id));
+  // Deduce when knowable (v7.9.28, Richard: "does it not have enough info?"):
+  // the estimates name the service FAMILY, but margin lives on the SUB — so a
+  // real ambiguity must still ask. When the primary major has exactly ONE
+  // active sub, though, there is nothing to ask: pre-pick it.
+  if (!s.q4.serviceSubId) {
+    const primarySubs = subs.filter(x => +x.major_id === +(leadData.service_major_id || 0));
+    if (primarySubs.length === 1) {
+      s.q4.serviceSubId = +primarySubs[0].id;
+      _subDeduced = 'only';
+    }
+  }
   const subOpts = '<option value="">— select —</option>' +
     subs.map(s2 => `<option value="${s2.id}" data-recurring="${s2.is_recurring?1:0}" data-margin="${s2.default_margin||25}" data-duration="${s2.default_duration||0}" ${+s.q4.serviceSubId===+s2.id?'selected':''}>${s2.name}${s2.is_recurring?' (recurring)':' (project)'}</option>`).join('');
   // An empty list is a configuration gap, not a user mistake — name it, and say
@@ -22242,7 +22257,10 @@ async function openPromoteQ4Screen2() {
           <div class="form-group">
             <label class="form-label">Service type <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="promote-q4-service-sub" class="form-control" onchange="_onPromoteQ4ServiceSubChange()" ${subs.length ? '' : 'disabled'}>${subOpts}</select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Drives recurring vs project, default margin${seeding ? '' : ', and default duration'}.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">${
+              _subDeduced === 'lead' ? 'Pre-filled from the lead’s Primary Service Interest — <strong>please confirm</strong>, or change if the deal differs. Sets the deal’s default margin (adjustable on the deal afterwards).'
+              : _subDeduced === 'only' ? 'Pre-filled — the only service type under this focus. <strong>Please confirm.</strong> Sets the deal’s default margin (adjustable on the deal afterwards).'
+              : 'Drives recurring vs project, default margin, and default duration.'}</div>
             ${noSubsNote}
           </div>
 
