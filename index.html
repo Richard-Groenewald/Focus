@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.18 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.19 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.18 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.19 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -18946,6 +18946,9 @@ function onLeadServiceComboChange() {
   if (primary) document.querySelectorAll('.lead-svc-major').forEach(el => { if (+el.value === primary) el.checked = true; });
   // Live-sync so the all-green readiness highlight reacts without waiting for save.
   if (leadData) { leadData.service_major_id = +maj.value || null; updateLeadReadiness(); }
+  // The primary's own estimate line must carry revenue (v7.9.19) — re-evaluate
+  // the row cue the moment the primary changes.
+  if (typeof leadSvcEstRecalc === 'function') leadSvcEstRecalc();
 }
 
 // Set the combined dropdown from the hidden major/sub values (sub wins if present).
@@ -19047,7 +19050,7 @@ function renderLeadServiceEstimates() {
     const fields = rec
       ? money('lse-monthly-' + m.id, 'R / month', 'Monthly revenue') + num('lse-months-' + m.id, 'months', 'Duration in months') + date('lse-start-' + m.id)
       : money('lse-amount-' + m.id, 'R value', 'Total value') + num('lse-months-' + m.id, 'over (1)', 'Spread over months — blank = 1 month') + date('lse-start-' + m.id);
-    return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--border);">
+    return `<div id="lse-row-${m.id}" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
       <div style="flex:0 0 150px;font-size:12px;font-weight:600;color:var(--text);">${String(m.name).replace(/</g, '&lt;')}
         <div style="font-size:10px;font-weight:400;color:var(--text3);">${rec ? 'Monthly · Duration · Start' : 'Value · Over period · Start'}</div>
       </div>
@@ -19089,16 +19092,29 @@ function leadSvcEstRecalc() {
         : `<span style="font-weight:400;color:var(--text3);font-size:12px;">Total estimated value: —</span>`;
     }
   }
-  // Attention cue (v7.9.18, Richard: "highlight until it contains values"): the
-  // Estimated Revenue card wears a red edge + faint tint while it holds no value
-  // at all — no estimate line and no carried-forward est_value. Legacy-valued
-  // leads don't glow (they have an estimate, just unstructured); read-only
-  // leads don't glow (nothing the viewer can do about it).
+  // Attention cues (Richard's two rules, 2026-09-08):
+  // 1 (v7.9.18): the whole Estimated Revenue card wears a red edge + faint tint
+  //   while it holds no value at all — no estimate line and no carried-forward
+  //   est_value. Legacy-valued leads don't glow (they have an estimate, just
+  //   unstructured); read-only leads never glow.
+  // 2 (v7.9.19): the PRIMARY service's own line must carry revenue — when a
+  //   primary is selected and its line totals zero, THAT ROW glows so the user
+  //   sees exactly what's required. Independent of rule 1 (fires even when
+  //   other lines or a legacy figure satisfy the card).
+  const ro = (typeof leadReadOnly !== 'undefined' && leadReadOnly);
   const card = document.getElementById('lead-service-section');
   if (card) {
-    const needsValues = !grand && !legacy && !(typeof leadReadOnly !== 'undefined' && leadReadOnly);
+    const needsValues = !grand && !legacy && !ro;
     card.style.boxShadow = needsValues ? 'inset 3px 0 0 0 var(--red)' : '';
     card.style.background = needsValues ? '#FA0A1108' : '';
+  }
+  const primaryMajor = +(document.getElementById('lead-service-major-id')?.value || 0);
+  for (const r of rows) {
+    const rowEl = document.getElementById('lse-row-' + r.majorId);
+    if (!rowEl) continue;
+    const glow = !ro && primaryMajor === r.majorId && !r.total;
+    rowEl.style.boxShadow = glow ? 'inset 3px 0 0 0 var(--red)' : '';
+    rowEl.style.background = glow ? '#FA0A1108' : '';
   }
   // The grand total IS the estimated deal value while the grid carries values;
   // the free-text field keeps serving grid-less (legacy) estimates. The lock is
