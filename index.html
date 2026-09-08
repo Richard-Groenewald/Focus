@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.27 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.25 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.27 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -21064,7 +21064,9 @@ function renderPromotionRequestSummary(req) {
     ['Service',      svc],
     ['Value (TCV)',  value],
     ['Dates',        (q4.orderDate || '—') + ' order · ' + (q4.startDate || '—') + ' start'],
-    ['First action', (q4.nextActionText || '—') + (q4.nextActionDate ? ' by ' + q4.nextActionDate : '')],
+    ['First action', q4.useExistingAction
+      ? 'Continues from the lead: ' + (q4.existingActionLabel || 'open action') + (q4.existingActionDate ? ' by ' + q4.existingActionDate : '')
+      : (q4.nextActionText || '—') + (q4.nextActionDate ? ' by ' + q4.nextActionDate : '')],
   ];
   if (req.request_type === 'special' && req.justification) rows.push(['Justification', req.justification]);
   return `<div style="border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">` +
@@ -21773,14 +21775,15 @@ async function _openPromoteOrgScreen2() {
         </div>
         <div class="form-group">
           <label class="form-label">Email</label>
-          <input type="email" id="promote-person-email" class="form-control" value="${(np.email||'').replace(/"/g,'&quot;')}">
+          <input type="email" id="promote-person-email" class="form-control" value="${(np.email||'').replace(/"/g,'&quot;')}" oninput="_promoteContactNudge()">
         </div>
       </div>
       <div class="form-group">
         <label class="form-label">Phone</label>
-        <input type="text" id="promote-person-phone" class="form-control" value="${(np.phone||'').replace(/"/g,'&quot;')}">
+        <input type="text" id="promote-person-phone" class="form-control" value="${(np.phone||'').replace(/"/g,'&quot;')}" oninput="_promoteContactNudge()">
       </div>
       <div style="font-size:11px;color:var(--text3);margin-top:-6px;">Email <strong>or</strong> phone is required.</div>
+      <div id="promote-contact-nudge" style="font-size:11px;margin-top:4px;"></div>
     </div>`;
 
   showModal(`
@@ -21796,13 +21799,14 @@ async function _openPromoteOrgScreen2() {
           <div class="opp-section-title" style="font-size:11px;margin-bottom:8px;">Organisation contact details</div>
           <div class="form-group">
             <label class="form-label">Website</label>
-            <input type="url" id="promote-org-website" class="form-control" placeholder="https://…" value="${(s.website||'').replace(/"/g,'&quot;')}">
+            <input type="url" id="promote-org-website" class="form-control" placeholder="https://…" value="${(s.website||'').replace(/"/g,'&quot;')}" oninput="_promoteOrgDetailNudge()">
           </div>
           <div class="form-group">
             <label class="form-label">Address</label>
-            <textarea id="promote-org-address" class="form-control" rows="2" placeholder="Street, suburb, city">${(s.address||'').replace(/</g,'&lt;')}</textarea>
+            <textarea id="promote-org-address" class="form-control" rows="2" placeholder="Street, suburb, city" oninput="_promoteOrgDetailNudge()">${(s.address||'').replace(/</g,'&lt;')}</textarea>
           </div>
-          <div style="font-size:11px;color:var(--text3);margin-top:-6px;margin-bottom:18px;">Website <strong>or</strong> address is required. Both is best.</div>
+          <div style="font-size:11px;color:var(--text3);margin-top:-6px;">Website <strong>or</strong> address is required.</div>
+          <div id="promote-org-detail-nudge" style="font-size:11px;margin:4px 0 18px;"></div>
 
           <div class="opp-section-title" style="font-size:11px;margin-bottom:8px;">Primary contact</div>
           ${contactToggleHtml}
@@ -21816,6 +21820,32 @@ async function _openPromoteOrgScreen2() {
       </div>
     </div>
   `);
+  _promoteOrgDetailNudge();
+  _promoteContactNudge();
+}
+
+// Completeness nudges (v7.9.27, Richard: "persuade the user to add all
+// available information, not only the minimum"). The MINIMUM rules are
+// untouched — these lines only encourage filling the other half of each pair.
+function _promoteOrgDetailNudge() {
+  const el = document.getElementById('promote-org-detail-nudge');
+  if (!el) return;
+  const web = (document.getElementById('promote-org-website')?.value || '').trim();
+  const adr = (document.getElementById('promote-org-address')?.value || '').trim();
+  if (web && adr) el.innerHTML = '<span style="color:#166534;font-weight:600;">✓ Both captured — the record is whole.</span>';
+  else if (web) el.innerHTML = '<span style="color:#92400E;">Nearly there — you have the website; <strong>add the address too</strong>. A minute now saves the next person a hunt.</span>';
+  else if (adr) el.innerHTML = '<span style="color:#92400E;">Nearly there — you have the address; <strong>add the website too</strong>. A minute now saves the next person a hunt.</span>';
+  else el.innerHTML = '<span style="color:var(--text3);">Best practice: capture <strong>both</strong>, not just one.</span>';
+}
+function _promoteContactNudge() {
+  const el = document.getElementById('promote-contact-nudge');
+  if (!el) return;
+  const em = (document.getElementById('promote-person-email')?.value || '').trim();
+  const ph = (document.getElementById('promote-person-phone')?.value || '').trim();
+  if (em && ph) el.innerHTML = '<span style="color:#166534;font-weight:600;">✓ Both captured — the contact is reachable either way.</span>';
+  else if (em) el.innerHTML = '<span style="color:#92400E;">You have the email — <strong>add the phone too</strong> if you have it; deals move on calls.</span>';
+  else if (ph) el.innerHTML = '<span style="color:#92400E;">You have the phone — <strong>add the email too</strong> if you have it; proposals travel by mail.</span>';
+  else el.innerHTML = '<span style="color:var(--text3);">Best practice: capture <strong>both</strong>, not just one.</span>';
 }
 
 // Captures the screen-2 inputs into _promoteOrgState, then opens Q4.
@@ -21926,13 +21956,36 @@ async function openPromoteQ4Screen1() {
         `lead_id=eq.${leadData.id}&next_action_done=eq.false&select=id,next_action,next_action_date,engagement_type&order=next_action_date.asc,id.asc`);
     } catch (e) { s._openActs = []; }
   }
-  const openActsBanner = (s._openActs || []).length ? `
+  // Existing open actions (v7.9.27, Richard): don't force ANOTHER next action
+  // when a live one already fits. Default = continue with the soonest-due open
+  // action; "set a new one" reveals today's capture fields.
+  const openActs = s._openActs || [];
+  if (s.q4.actionMode === undefined) {
+    s.q4.actionMode = openActs.length ? 'existing' : 'new';
+    if (openActs.length) s.q4.existingActionId = +openActs[0].id;
+  }
+  if (!openActs.length) s.q4.actionMode = 'new';
+  const useExisting = s.q4.actionMode === 'existing';
+  const actLabel = a => (a.next_action || a.engagement_type || 'Engagement')
+    + (a.next_action_date ? ' — due ' + new Date(a.next_action_date).toLocaleDateString('en-ZA') : '');
+  const openActsBanner = openActs.length ? `
     <div style="margin:0 0 14px;padding:10px 12px;background:#FEF3C7;border:1px solid #E9C46A;border-radius:var(--radius);color:#7A5B10;">
-      <div style="font-weight:700;font-size:12px;margin-bottom:6px;">⚠ ${s._openActs.length} open action${s._openActs.length === 1 ? '' : 's'} on this lead will carry over</div>
-      ${s._openActs.map(a => `<div style="font-size:12px;padding:1px 0;">• ${cEsc(a.next_action || a.engagement_type || 'Engagement')}${a.next_action_date ? ` <span style="opacity:0.75;">— due ${new Date(a.next_action_date).toLocaleDateString('en-ZA')}</span>` : ''}</div>`).join('')}
+      <div style="font-weight:700;font-size:12px;margin-bottom:6px;">${openActs.length} open action${openActs.length === 1 ? '' : 's'} on this lead ${openActs.length === 1 ? 'carries' : 'carry'} over — is one of them already the right next step?</div>
+      <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin:4px 0;">
+        <input type="radio" name="promote-action-mode" ${useExisting ? 'checked' : ''} onchange="_setPromoteActionMode('existing')" style="margin-top:2px;">
+        <span style="flex:1;">Yes — continue with this one as the first commitment:
+          <select id="promote-q4-existing-action" class="form-control" style="margin-top:5px;" onchange="window._promoteOrgState.q4.existingActionId=+this.value" ${useExisting ? '' : 'disabled'}>
+            ${openActs.map(a => `<option value="${a.id}" ${+s.q4.existingActionId === +a.id ? 'selected' : ''}>${cEsc(actLabel(a))}</option>`).join('')}
+          </select>
+        </span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;cursor:pointer;margin:4px 0;">
+        <input type="radio" name="promote-action-mode" ${useExisting ? '' : 'checked'} onchange="_setPromoteActionMode('new')">
+        No — set a new first action below
+      </label>
       <div style="font-size:11px;margin-top:6px;opacity:0.85;">${(window._promoteMode === 'request')
-        ? 'They move to the opportunity when the request is accepted; the lead keeps closed copies as history.'
-        : 'They will continue on the new opportunity; the lead keeps closed copies as history.'}</div>
+        ? 'Every open action moves to the opportunity when the request is accepted; the lead keeps closed copies as history.'
+        : 'Every open action continues on the new opportunity; the lead keeps closed copies as history.'}</div>
     </div>` : '';
 
   showModal(`
@@ -21951,20 +22004,22 @@ async function openPromoteQ4Screen1() {
             <input type="text" id="promote-deal-name" class="form-control" value="${(s.q4.dealName||'').replace(/"/g,'&quot;')}">
           </div>
 
-          <div class="opp-section-title" style="font-size:11px;margin:14px 0 8px;">First action obligation</div>
-          <div class="form-row">
-            <div class="form-group">
-              <label class="form-label">Next action <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-              <select id="promote-q4-next-action-id" class="form-control" onchange="_onPromoteQ4NextActionChange()">${naOpts}</select>
+          <div id="promote-q4-new-action-wrap" style="display:${useExisting ? 'none' : 'block'};">
+            <div class="opp-section-title" style="font-size:11px;margin:14px 0 8px;">First action obligation</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Next action <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+                <select id="promote-q4-next-action-id" class="form-control" onchange="_onPromoteQ4NextActionChange()">${naOpts}</select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Due date <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
+                <input type="date" id="promote-q4-next-date" class="form-control" value="${s.q4.nextActionDate || ''}" min="${new Date().toISOString().slice(0,10)}">
+              </div>
             </div>
             <div class="form-group">
-              <label class="form-label">Due date <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-              <input type="date" id="promote-q4-next-date" class="form-control" value="${s.q4.nextActionDate || ''}" min="${new Date().toISOString().slice(0,10)}">
+              <label class="form-label">Action details</label>
+              <textarea id="promote-q4-action-details" class="form-control" rows="2" placeholder="Anything that clarifies what 'next' means…">${(s.q4.actionDetails||'').replace(/</g,'&lt;')}</textarea>
             </div>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Action details</label>
-            <textarea id="promote-q4-action-details" class="form-control" rows="2" placeholder="Anything that clarifies what 'next' means…">${(s.q4.actionDetails||'').replace(/</g,'&lt;')}</textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -21985,26 +22040,126 @@ function _onPromoteQ4NextActionChange() {
   window._promoteOrgState.q4.nextActionText = row ? row.name : '';
 }
 
+// Continue-with-existing vs set-new first action (v7.9.27).
+function _setPromoteActionMode(mode) {
+  const s = window._promoteOrgState;
+  if (!s?.q4) return;
+  s.q4.actionMode = mode;
+  const wrap = document.getElementById('promote-q4-new-action-wrap');
+  if (wrap) wrap.style.display = (mode === 'existing') ? 'none' : 'block';
+  const sel = document.getElementById('promote-q4-existing-action');
+  if (sel) {
+    sel.disabled = mode !== 'existing';
+    if (mode === 'existing') s.q4.existingActionId = +sel.value || s.q4.existingActionId;
+  }
+}
+
 function _promoteCaptureQ4Screen1AndContinue() {
   const s = window._promoteOrgState;
-  const dealName       = (document.getElementById('promote-deal-name')?.value         || '').trim();
+  const dealName = (document.getElementById('promote-deal-name')?.value || '').trim();
+  if (!dealName) { showStatus('Deal name is required', 'error'); return; }
+  s.q4.dealName = dealName;
+
+  if (s.q4.actionMode === 'existing') {
+    // The chosen open action IS the first commitment — it carries over to the
+    // opportunity anyway, so no new obligation is forced (Richard 2026-09-08).
+    const sel = document.getElementById('promote-q4-existing-action');
+    const chosenId = +(sel?.value || s.q4.existingActionId || 0);
+    const chosen = (s._openActs || []).find(a => +a.id === chosenId) || (s._openActs || [])[0];
+    if (!chosen) { showStatus('Pick which open action continues, or set a new one', 'error'); return; }
+    s.q4.useExistingAction   = true;
+    s.q4.existingActionId    = +chosen.id;
+    s.q4.existingActionLabel = chosen.next_action || chosen.engagement_type || 'Open action';
+    s.q4.existingActionDate  = chosen.next_action_date || null;
+    openPromoteQ4Screen2();
+    return;
+  }
+
+  s.q4.useExistingAction = false;
   const nextActionId   = +(document.getElementById('promote-q4-next-action-id')?.value || 0);
   const nextActionDate = (document.getElementById('promote-q4-next-date')?.value       || '').trim();
   const actionDetails  = (document.getElementById('promote-q4-action-details')?.value  || '').trim();
 
-  if (!dealName)       { showStatus('Deal name is required', 'error'); return; }
   if (!nextActionId)   { showStatus('Pick a next action', 'error'); return; }
   if (!nextActionDate) { showStatus('Due date is required', 'error'); return; }
 
   const list = allData['_next_actions_opps'] || [];
   const row = list.find(n => +n.id === nextActionId);
-  s.q4.dealName       = dealName;
   s.q4.nextActionId   = nextActionId;
   s.q4.nextActionText = row ? row.name : '';
   s.q4.nextActionDate = nextActionDate;
   s.q4.actionDetails  = actionDetails;
 
   openPromoteQ4Screen2();
+}
+
+// ── Promote seeding from the Estimated Revenue grid (v7.9.26) ───────────────
+// The lead's per-service estimate lines are stream-shaped by design: each
+// valued line becomes a monthly schedule (recurring = monthly × duration from
+// its start month; project = value spread over its period), and the schedules
+// SUM into one combined month series from the earliest start — exactly the
+// shape the opportunity stream wants. Reads the LIVE grid (unsaved edits
+// included); the request path persists monthValues, so Accept needs no grid.
+function _promoteEstSeed(fallbackStartYM) {
+  if (typeof _leadSvcEstRowValues !== 'function'
+      || !document.getElementById('lead-svc-est-rows')?.childElementCount) return null;
+  const majors = allData['service_major'] || [];
+  const parts = [];
+  const byMonth = new Map();   // 'YYYY-MM' -> summed revenue
+  for (const r of _leadSvcEstRowValues()) {
+    if (!r.total) continue;
+    const major = majors.find(m => +m.id === +r.majorId);
+    const rec = _leadSvcEstRecurring(major?.name);
+    const startYM = (r.start || '').slice(0, 7) || fallbackStartYM;
+    const n = rec ? r.months : (r.months || 1);
+    if (!startYM || !n) continue;
+    const [y0, m0] = startYM.split('-').map(Number);
+    let vals;
+    if (rec) {
+      vals = Array(n).fill(+r.monthly);
+    } else {
+      // Split evenly, remainder onto the last month so the sum matches exactly
+      // (same arithmetic as the manual project path).
+      const base = Math.floor((+r.amount / n) * 100) / 100;
+      vals = Array(n).fill(base);
+      const rem = Math.round((+r.amount - base * n) * 100) / 100;
+      if (rem) vals[n - 1] = Math.round((vals[n - 1] + rem) * 100) / 100;
+    }
+    for (let i = 0; i < n; i++) {
+      const d = new Date(y0, (m0 - 1) + i, 1);
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      byMonth.set(key, Math.round(((byMonth.get(key) || 0) + vals[i]) * 100) / 100);
+    }
+    parts.push({
+      name: major?.name || ('Service ' + r.majorId),
+      label: rec
+        ? `R ${Math.round(+r.monthly).toLocaleString('en-US')} × ${n} months from ${startYM}`
+        : `R ${Math.round(+r.amount).toLocaleString('en-US')} over ${n} month${n === 1 ? '' : 's'} from ${startYM}`,
+      total: r.total,
+    });
+  }
+  if (!parts.length) return null;
+  const keys = Array.from(byMonth.keys()).sort();
+  const [ys, ms] = keys[0].split('-').map(Number);
+  const [ye, me] = keys[keys.length - 1].split('-').map(Number);
+  const span = (ye - ys) * 12 + (me - ms) + 1;
+  const monthValues = [];
+  for (let i = 0; i < span; i++) {
+    const d = new Date(ys, (ms - 1) + i, 1);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    monthValues.push(byMonth.get(key) || 0);   // disjoint schedules keep honest zero months
+  }
+  const tcv = monthValues.reduce((a, b) => a + b, 0);
+  return { startDate: keys[0] + '-01', monthValues, span, tcv, parts };
+}
+// The PRIMARY service's own estimate line, for prefilling the manual fields
+// when seeding is off (better than the old est_value ÷ 12 guess).
+function _promotePrimaryEstRow() {
+  if (typeof _leadSvcEstRowValues !== 'function'
+      || !document.getElementById('lead-svc-est-rows')?.childElementCount) return null;
+  const primary = +(leadData?.service_major_id || 0);
+  if (!primary) return null;
+  return _leadSvcEstRowValues().find(r => +r.majorId === primary && r.total) || null;
 }
 
 async function openPromoteQ4Screen2() {
@@ -22047,6 +22202,26 @@ async function openPromoteQ4Screen2() {
     s.q4.startDate = d.toISOString().slice(0,10);
   }
 
+  // Estimated Revenue seed (v7.9.26): the lead's valued estimate lines combine
+  // into one month schedule; seeding is ON by default whenever lines exist.
+  const seed = _promoteEstSeed(s.q4.startDate.slice(0, 7));
+  if (s.q4.useEstimates === undefined) s.q4.useEstimates = !!seed;
+  if (!seed) s.q4.useEstimates = false;
+  const seeding = !!(seed && s.q4.useEstimates);
+  if (seeding) s.q4.startDate = seed.startDate;
+  const seedPanel = seed ? `
+          <div style="margin:0 0 14px;padding:12px 14px;background:#F0F7F4;border:1px solid #BBD9C9;border-radius:var(--radius);">
+            <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--navy);cursor:pointer;margin:0;">
+              <input type="checkbox" id="promote-q4-use-est" ${seeding ? 'checked' : ''} onchange="_onPromoteQ4SeedToggle(this.checked)">
+              Seed the revenue grid from the lead's service estimates
+            </label>
+            <div style="margin-top:8px;">
+              ${seed.parts.map(p => `<div style="font-size:12px;padding:1px 0;color:var(--text2);"><strong>${cEsc(p.name)}</strong> — ${cEsc(p.label)} <span style="color:var(--text3);">= R ${Math.round(p.total).toLocaleString('en-US')}</span></div>`).join('')}
+              <div style="font-size:12px;margin-top:6px;font-weight:700;color:var(--navy);">Combined: R ${Math.round(seed.tcv).toLocaleString('en-US')} across ${seed.span} month${seed.span === 1 ? '' : 's'} from ${seed.startDate.slice(0, 7)}</div>
+              <div style="font-size:11px;color:var(--text3);margin-top:4px;">${seeding ? 'The month rows below are built from these lines; untick to capture the numbers manually.' : 'Ticked off — the manual fields below apply.'}</div>
+            </div>
+          </div>` : '';
+
   // Recurring vs non-recurring panels — visibility driven by selected sub
   const sub = subs.find(s2 => +s2.id === +s.q4.serviceSubId);
   const isRec = sub ? !!sub.is_recurring : null;
@@ -22062,11 +22237,12 @@ async function openPromoteQ4Screen2() {
         </div>
         <div class="modal-body" style="overflow-y:auto;">
           <div style="font-size:13px;color:var(--text2);margin-bottom:14px;">Capture the financial picture so this deal has real numbers from day one.</div>
+          ${seedPanel}
 
           <div class="form-group">
             <label class="form-label">Service type <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="promote-q4-service-sub" class="form-control" onchange="_onPromoteQ4ServiceSubChange()" ${subs.length ? '' : 'disabled'}>${subOpts}</select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Drives recurring vs project, default margin, and default duration.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Drives recurring vs project, default margin${seeding ? '' : ', and default duration'}.</div>
             ${noSubsNote}
           </div>
 
@@ -22077,11 +22253,11 @@ async function openPromoteQ4Screen2() {
             </div>
             <div class="form-group">
               <label class="form-label">Service start date <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-              <input type="date" id="promote-q4-start-date" class="form-control" value="${s.q4.startDate || ''}">
+              <input type="date" id="promote-q4-start-date" class="form-control" value="${s.q4.startDate || ''}" ${seeding ? 'disabled title="Comes from the earliest estimate line — untick the seed to set manually"' : ''}>
             </div>
           </div>
 
-          <div id="promote-q4-recurring" style="display:${s.q4.isRecurring===true?'block':'none'};">
+          <div id="promote-q4-recurring" style="display:${(!seeding && s.q4.isRecurring===true)?'block':'none'};">
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Monthly value (ZAR) <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
@@ -22095,7 +22271,7 @@ async function openPromoteQ4Screen2() {
             <div style="font-size:11px;color:var(--text3);margin-top:-6px;">Generates N month rows at the monthly value, starting from the service start date.</div>
           </div>
 
-          <div id="promote-q4-nonrecurring" style="display:${s.q4.isRecurring===false?'block':'none'};">
+          <div id="promote-q4-nonrecurring" style="display:${(!seeding && s.q4.isRecurring===false)?'block':'none'};">
             <div class="form-row">
               <div class="form-group">
                 <label class="form-label">Total project value (ZAR) <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
@@ -22109,7 +22285,7 @@ async function openPromoteQ4Screen2() {
             <div style="font-size:11px;color:var(--text3);margin-top:-6px;">Total splits evenly across the delivery window starting at service start date.</div>
           </div>
 
-          <div id="promote-q4-pick-sub-hint" style="display:${sub?'none':'block'};font-size:12px;color:var(--text3);padding:14px 0;">Pick a service type to see value &amp; duration fields.</div>
+          <div id="promote-q4-pick-sub-hint" style="display:${(sub || seeding)?'none':'block'};font-size:12px;color:var(--text3);padding:14px 0;">Pick a service type to see value &amp; duration fields.</div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="openPromoteQ4Screen1()">← Back</button>
@@ -22120,16 +22296,37 @@ async function openPromoteQ4Screen2() {
   `);
 }
 
+// Seed toggle (v7.9.26): capture the manual fields into state, then re-render
+// the screen — the template is state-driven, so panels/dates follow the flag.
+function _onPromoteQ4SeedToggle(on) {
+  const s = window._promoteOrgState;
+  if (!s?.q4) return;
+  s.q4.useEstimates = !!on;
+  s.q4.orderDate      = (document.getElementById('promote-q4-order-date')?.value || s.q4.orderDate || '');
+  if (!on) {
+    // Returning to manual: keep whatever was typed; start date becomes editable
+    // again at its current value.
+    s.q4.startDate    = (document.getElementById('promote-q4-start-date')?.value || s.q4.startDate || '');
+  }
+  s.q4.monthlyValue   = (document.getElementById('promote-q4-monthly')?.value || s.q4.monthlyValue || '');
+  s.q4.totalValue     = (document.getElementById('promote-q4-total')?.value || s.q4.totalValue || '');
+  const dRec  = document.getElementById('promote-q4-duration-rec')?.value;
+  const dProj = document.getElementById('promote-q4-duration-proj')?.value;
+  if (dRec || dProj) s.q4.durationMonths = +(dRec || dProj) || s.q4.durationMonths;
+  openPromoteQ4Screen2();
+}
+
 function _onPromoteQ4ServiceSubChange() {
   const sel = document.getElementById('promote-q4-service-sub');
   const opt = sel?.selectedOptions[0];
   const s = window._promoteOrgState;
+  const seeding = !!s.q4.useEstimates;
   if (!opt || !opt.value) {
     s.q4.serviceSubId = null;
     s.q4.isRecurring = null;
     document.getElementById('promote-q4-recurring').style.display = 'none';
     document.getElementById('promote-q4-nonrecurring').style.display = 'none';
-    document.getElementById('promote-q4-pick-sub-hint').style.display = 'block';
+    document.getElementById('promote-q4-pick-sub-hint').style.display = seeding ? 'none' : 'block';
     return;
   }
   s.q4.serviceSubId = +opt.value;
@@ -22138,27 +22335,38 @@ function _onPromoteQ4ServiceSubChange() {
   if (!s.q4.durationMonths) s.q4.durationMonths = +opt.dataset.duration || (s.q4.isRecurring ? 12 : 3);
 
   document.getElementById('promote-q4-pick-sub-hint').style.display = 'none';
-  document.getElementById('promote-q4-recurring').style.display    = s.q4.isRecurring ? 'block' : 'none';
-  document.getElementById('promote-q4-nonrecurring').style.display = s.q4.isRecurring ? 'none' : 'block';
+  // While seeding from the estimates, the manual value panels stay hidden — the
+  // month rows come from the seed, not these fields.
+  document.getElementById('promote-q4-recurring').style.display    = (!seeding && s.q4.isRecurring) ? 'block' : 'none';
+  document.getElementById('promote-q4-nonrecurring').style.display = (!seeding && !s.q4.isRecurring) ? 'block' : 'none';
+  if (seeding) return;
 
-  // Auto-populate the value and duration fields from the lead's est_value
-  // (treated as the annual value). Only fills empty fields — never overwrites
-  // user input. User can still freely change any of these before Promote lands.
+  // Auto-populate the value and duration fields — the PRIMARY service's own
+  // estimate line first (v7.9.26: real monthly/value + term + start), falling
+  // back to the old est_value-as-annual guess. Only fills empty fields — never
+  // overwrites user input; everything stays editable until commit.
+  const est = _promotePrimaryEstRow();
   const annual = +leadData.est_value || 0;
+  if (est && est.start) {
+    const startF = document.getElementById('promote-q4-start-date');
+    if (startF && startF.value === s.q4.startDate && !startF.disabled) { startF.value = est.start; s.q4.startDate = est.start; }
+  }
   if (s.q4.isRecurring) {
     const monthlyF  = document.getElementById('promote-q4-monthly');
     const durationF = document.getElementById('promote-q4-duration-rec');
-    if (monthlyF && !monthlyF.value && annual) {
-      monthlyF.value = Math.round(annual / 12);
+    if (monthlyF && !monthlyF.value) {
+      if (est && est.monthly) monthlyF.value = Math.round(+est.monthly);
+      else if (annual) monthlyF.value = Math.round(annual / 12);
     }
-    if (durationF && !durationF.value) durationF.value = s.q4.durationMonths;
+    if (durationF && !durationF.value) durationF.value = (est && est.months) || s.q4.durationMonths;
   } else {
     const totalF    = document.getElementById('promote-q4-total');
     const durationF = document.getElementById('promote-q4-duration-proj');
-    if (totalF && !totalF.value && annual) {
-      totalF.value = annual;
+    if (totalF && !totalF.value) {
+      if (est && est.amount) totalF.value = Math.round(+est.amount);
+      else if (annual) totalF.value = annual;
     }
-    if (durationF && !durationF.value) durationF.value = s.q4.durationMonths;
+    if (durationF && !durationF.value) durationF.value = (est && est.months) || s.q4.durationMonths;
   }
 }
 // Validate + capture Q4 screen-2 (revenue stream) into the package `s`. Pure DOM
@@ -22183,6 +22391,21 @@ function buildAndValidateQ4Screen2(s) {
   const isRec  = !!subRow.is_recurring;
   const margin = +subRow.default_margin || 25;
   let durationMonths, monthValues; // monthValues = array of revenue values per month
+  // Seeded path (v7.9.26): the month series comes from the lead's combined
+  // service-estimate schedule — the manual value fields are hidden and skipped.
+  if (s.q4.useEstimates) {
+    const seed = _promoteEstSeed(startDt.slice(0, 7));
+    if (!seed) { showStatus('The service estimates are empty — untick the seed and capture the numbers manually', 'error'); return false; }
+    s.q4.serviceSubId   = subId;
+    s.q4.isRecurring    = isRec;
+    s.q4.marginPct      = margin;
+    s.q4.orderDate      = orderDt;
+    s.q4.startDate      = seed.startDate;   // the field is disabled while seeding — the seed is the truth
+    s.q4.durationMonths = seed.span;
+    s.q4.monthValues    = seed.monthValues; // persisted so Accept can commit without the DOM
+    s.q4.seededFromEstimates = true;
+    return true;
+  }
   if (isRec) {
     const monthly  = +(document.getElementById('promote-q4-monthly')?.value || 0);
     const duration = +(document.getElementById('promote-q4-duration-rec')?.value || 0);
@@ -22574,17 +22797,23 @@ async function commitPromotion(s) {
       } catch { allData['_activity_types_opps'] = []; }
     }
     const promotionType = (allData['_activity_types_opps'] || []).find(t => t.name === 'Promotion');
+    // Continue-with-existing (v7.9.27): the chosen open action carries over in
+    // §7.5 and IS the first commitment — the promotion row stays as history
+    // (closed, no obligation) instead of forcing a second next action.
+    const useExisting = !!s.q4.useExistingAction;
+    const promoNotes = `Promoted from lead #${leadData.id}: ${leadData.description || ''}`.trim()
+      + (useExisting ? `\nFirst action continues from the lead: ${s.q4.existingActionLabel || 'open action'}${s.q4.existingActionDate ? ' — due ' + s.q4.existingActionDate : ''}` : '');
     const promoEng = await api('engagements', 'POST', {
       deal_id:          dealId,
       engagement_date:  new Date().toISOString().slice(0,10),
       engagement_type:  promotionType ? promotionType.name : 'Promotion',
       activity_type_id: promotionType ? +promotionType.id : null,
-      notes:            `Promoted from lead #${leadData.id}: ${leadData.description || ''}`.trim(),
-      next_action:      s.q4.nextActionText || null,
-      next_action_id:   s.q4.nextActionId || null,
-      action_details:   s.q4.actionDetails || null,
-      next_action_date: s.q4.nextActionDate || null,
-      next_action_done: false,
+      notes:            promoNotes,
+      next_action:      useExisting ? null : (s.q4.nextActionText || null),
+      next_action_id:   useExisting ? null : (s.q4.nextActionId || null),
+      action_details:   useExisting ? null : (s.q4.actionDetails || null),
+      next_action_date: useExisting ? null : (s.q4.nextActionDate || null),
+      next_action_done: useExisting ? true : false,
       created_by:       currentUser?.personId || null,
     }, 'select=*');
     // The promotion obligation opens the deal's primary 'Sales' stream.
