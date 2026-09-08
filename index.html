@@ -655,7 +655,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.23 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.24 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.23 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.24 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19040,9 +19040,9 @@ function _svcEstMoney(el) {
   if (el.id && el.id.startsWith('lse-amount-')) {
     const majorId = el.id.slice('lse-amount-'.length);
     const sel = document.getElementById('lse-months-sel-' + majorId);
-    const custom = document.getElementById('lse-months-custom-' + majorId);
+    const wrapEl = document.getElementById('lse-months-customwrap-' + majorId);
     const hasVal = /\d/.test(el.value || '');
-    if (sel && custom && custom.style.display === 'none') {
+    if (sel && wrapEl && wrapEl.style.display === 'none') {
       if (hasVal && !sel.value) sel.value = '1';
       else if (!hasVal && sel.value === '1') sel.value = '';
     }
@@ -19059,7 +19059,7 @@ function renderLeadServiceEstimates() {
   const majors = _leadSvcEstMajors();
   // Strict column grid (v7.9.22, Richard: "make all columns line up vertically"):
   // name | amount | months | start | total — identical template on every row.
-  const GRID = 'display:grid;grid-template-columns:150px 120px 98px 150px 1fr;gap:8px;align-items:center;';
+  const GRID = 'display:grid;grid-template-columns:150px 120px 112px 150px 1fr;gap:8px;align-items:center;';
   wrap.innerHTML = majors.map(m => {
     const rec = _leadSvcEstRecurring(m.name);
     const money = (fid, ph, title) => `<input type="text" inputmode="numeric" id="${fid}" class="form-control" style="width:100%;" placeholder="${ph}" title="${title}" oninput="_svcEstMoney(this)">`;
@@ -19070,9 +19070,12 @@ function renderLeadServiceEstimates() {
     const monthsOpts = rec ? [12, 24, 36, 48, 60] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     const monthsCell = `<div><select id="lse-months-sel-${m.id}" class="form-control" style="width:100%;" title="${rec ? 'Duration in months' : 'Spread over months'}" onchange="_svcEstMonthsSel(${m.id})">
         <option value="">${rec ? 'months' : 'over…'}</option>
-        ${monthsOpts.map(n => `<option value="${n}">${n} mo</option>`).join('')}
+        ${monthsOpts.map(n => `<option value="${n}">${n} ${n === 1 ? 'month' : 'months'}</option>`).join('')}
         <option value="other">Other…</option>
-      </select><input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="width:100%;display:none;" placeholder="months" title="Custom months — leave empty to return to the list" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})"></div>`;
+      </select><div id="lse-months-customwrap-${m.id}" style="display:none;align-items:center;gap:4px;">
+        <input type="number" min="1" step="1" id="lse-months-custom-${m.id}" class="form-control" style="flex:1;min-width:0;" placeholder="…" title="Custom months — leave empty to return to the list" oninput="leadSvcEstRecalc()" onblur="_svcEstMonthsBlur(${m.id})">
+        <span style="font-size:11px;color:var(--text3);white-space:nowrap;">months</span>
+      </div></div>`;
     // Start (v7.9.21): always the 1st of a month — capture month + year only.
     const month = fid => `<input type="month" id="${fid}" class="form-control" style="width:100%;" title="Expected start — always the 1st of the month" onchange="leadSvcEstRecalc()">`;
     return `<div id="lse-row-${m.id}" style="${GRID}padding:7px 6px 7px 8px;border-bottom:1px solid var(--border);">
@@ -19091,12 +19094,13 @@ function _svcEstMonthsSel(majorId) {
   const custom = document.getElementById('lse-months-custom-' + majorId);
   if (!sel || !custom) return;
   // "Other…" REPLACES the dropdown in the same cell (v7.9.22) — no extra column.
+  const wrap = document.getElementById('lse-months-customwrap-' + majorId);
   if (sel.value === 'other') {
     sel.style.display = 'none';
-    custom.style.display = '';
+    if (wrap) wrap.style.display = 'flex';
     custom.focus();
   } else {
-    custom.style.display = 'none';
+    if (wrap) wrap.style.display = 'none';
     sel.style.display = '';
   }
   leadSvcEstRecalc();
@@ -19107,7 +19111,8 @@ function _svcEstMonthsBlur(majorId) {
   const custom = document.getElementById('lse-months-custom-' + majorId);
   if (!sel || !custom) return;
   if (!custom.value) {
-    custom.style.display = 'none';
+    const wrap = document.getElementById('lse-months-customwrap-' + majorId);
+    if (wrap) wrap.style.display = 'none';
     sel.style.display = '';
     sel.value = '';
     leadSvcEstRecalc();
@@ -19214,7 +19219,9 @@ function populateLeadServiceEstimates(rows) {
       if (listed) { sEl.value = String(+r.months); }
       else {
         sEl.value = 'other'; sEl.style.display = 'none';
-        if (cEl) { cEl.style.display = ''; cEl.value = r.months; }
+        const wEl = document.getElementById('lse-months-customwrap-' + mid);
+        if (wEl) wEl.style.display = 'flex';
+        if (cEl) cEl.value = r.months;
       }
     }
     if (dEl && r.start_date) dEl.value = String(r.start_date).slice(0, 7);   // month picker: YYYY-MM
