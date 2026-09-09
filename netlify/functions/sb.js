@@ -12,8 +12,11 @@ const sbAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSoc
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,Prefer,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token',
+  'Access-Control-Allow-Headers': 'Content-Type,Prefer,Range,Range-Unit,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
+  // PostgREST's Content-Range carries the total row count (Prefer: count=…);
+  // the app's apiGetAll/apiCount read it to page in parallel / count server-side.
+  'Access-Control-Expose-Headers': 'Content-Range',
 };
 
 // ── Password hashing ─────────────────────────────────────────────────────────
@@ -293,12 +296,19 @@ exports.handler = async (event) => {
           'Prefer': event.headers['prefer'] || '',
           'X-Actor-Id': claimedActor || tokenPerson,
           'X-Real-Actor-Id': realActor,
+          // Range paging (v7.9.36): forwarded so apiCount() can ask for a 1-row
+          // window and still receive the total.
+          ...(event.headers['range'] ? { 'Range': event.headers['range'] } : {}),
+          ...(event.headers['range-unit'] ? { 'Range-Unit': event.headers['range-unit'] } : {}),
         }
       }, res => {
         let d = ''; res.on('data', c => d += c);
         res.on('end', () => resolve({
           statusCode: res.statusCode,
-          headers: { 'Content-Type': 'application/json', ...CORS },
+          headers: {
+            'Content-Type': 'application/json', ...CORS,
+            ...(res.headers['content-range'] ? { 'Content-Range': res.headers['content-range'] } : {}),
+          },
           body: isSystemUsers ? scrubCredentials(d) : d
         }));
       });
