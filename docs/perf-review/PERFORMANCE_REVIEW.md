@@ -2,6 +2,8 @@
 
 *September 2026. Reviewed: `index.html` (v7.9.35, 28,147 lines), `netlify/functions/sb.js`, and every file in `sql/`. No live database access; row counts are stated as assumptions where they matter.*
 
+> **Status (v7.9.36, 9 September 2026):** Tier 0 is implemented on branch `claude/focus-performance-optimization-3tpv6y`. Items 0.1–0.9, 0.11–0.16 are done as described; 0.10 covers the client-contacts embed, the eligible-people embed and the Engagement History chunk loops (the engagement-modal opener was left as is). Every database-facing change carries a fallback to the previous code path, so a database without a relationship or constraint degrades to the old behaviour instead of failing. Tiers 1–4 remain proposals.
+
 **Constraint honoured throughout:** nothing below relies on local caching or local storage (no localStorage, sessionStorage, IndexedDB, Cache API or service-worker data caching, and no extension of the existing lookup cache). Every gain comes from fewer or parallel round trips, narrower queries, server-side joins and aggregation, database indexes and triggers, smaller payloads, proxy and topology changes, and cheaper rendering.
 
 ---

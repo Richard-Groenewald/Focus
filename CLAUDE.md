@@ -6,7 +6,16 @@ This file is read by Claude Code at the start of every session. It is the source
 
 Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (Pty) Ltd**, a South African integrated security solutions company. Used by sales and management to track opportunities, contracts, leads, and engagements across mining, hospitality, residential estates, and FMCG sectors.
 
-- **Current version:** v7.7.35 (Engagement History controls reworked: defaults to My engagements + Group-by-Client; top row Scope/Group/Category/Date/Outstanding/Next-action-only; second row Filter-by Client/Deal/Person; Dev only; as of 28 June 2026)
+- **Current version:** v7.9.36 (performance Tier 0: single dashboard render at login, embedded user-context read, parallel loaders for deal/lead/quote, one-call revenue-month upsert, client-only tab clicks, logos moved out of the HTML, minified deploy via `build.js`; see `docs/perf-review/`; as of 9 September 2026)
+
+## Performance conventions (v7.9.36)
+
+- **Sequential round trips are the cost that users feel** (~1.4 s per proxied call). Never chain `await api(...)` calls that only depend on an id you already have: put them in one `Promise.all`.
+- `api(table, method, body, params, opts)` accepts `opts.prefer` (e.g. `'resolution=merge-duplicates,return=minimal'` for an upsert), `opts.silent` (background traffic, no busy bar) and `opts.headers` (returns `{ rows, headers }`). `apiGetAll` pages in parallel using `Content-Range`; `apiCount` counts server-side.
+- A write already returns the row (`Prefer: return=representation`): splice it into memory and re-render, do not re-download the table. `reloadLeadAfterServerChange(row)` takes the PATCHed row.
+- Tab, scope and layout clicks must be client-only (`renderLeadsPage({ reuse: true })`, `_dashApplyOrderToDom`).
+- Netlify publishes `dist/` built by `node build.js` (esbuild-minified inline script). `index.html` remains the only source file; do not edit `dist/`.
+- The ranked proposals for the remaining tiers (indexes, triggers, views/RPCs, topology, rendering) are in `docs/perf-review/PERFORMANCE_REVIEW.md`.
 - **Tagline:** Lead by Example
 - **Font:** Arial
 - **Brand colours:**
