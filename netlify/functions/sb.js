@@ -1,5 +1,6 @@
 const https = require('https');
 const crypto = require('crypto');
+const zlib = require('zlib');
 // Host is env-driven so production vs test databases can be selected per Netlify
 // deploy context. Falls back to the production project if SUPABASE_HOST is unset.
 const SB = process.env.SUPABASE_HOST || 'kevrfdjqyuhmgziqxuvs.supabase.co';
@@ -282,6 +283,14 @@ exports.handler = async (event) => {
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
+  // Compression (v7.9.38, Tier 3.2): until now every body travelled as raw JSON
+  // on BOTH legs — PostgREST → this function → browser — so a 500 KB list page
+  // crossed two continents uncompressed. Ask the gateway for gzip and hand the
+  // compressed bytes straight to the browser. system_users stays plain because
+  // scrubCredentials rewrites its body. SB_GZIP=0 in the Netlify environment
+  // switches the whole thing off without a deploy.
+  const wantGzip = process.env.SB_GZIP !== '0' && !isSystemUsers;
+  const clientTakesGzip = event.headers['accept-encoding'] == null || /\bgzip\b/i.test(event.headers['accept-encoding']);
   return new Promise(resolve => {
     const doReq = (attempt) => {
       const req = https.request({
@@ -300,17 +309,33 @@ exports.handler = async (event) => {
           // window and still receive the total.
           ...(event.headers['range'] ? { 'Range': event.headers['range'] } : {}),
           ...(event.headers['range-unit'] ? { 'Range-Unit': event.headers['range-unit'] } : {}),
+          ...(wantGzip ? { 'Accept-Encoding': 'gzip' } : {}),
         }
       }, res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => resolve({
-          statusCode: res.statusCode,
-          headers: {
+        const chunks = []; res.on('data', c => chunks.push(c));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          const gz = raw.length > 0 && /\bgzip\b/i.test(res.headers['content-encoding'] || '');
+          const headers = {
             'Content-Type': 'application/json', ...CORS,
             ...(res.headers['content-range'] ? { 'Content-Range': res.headers['content-range'] } : {}),
-          },
-          body: isSystemUsers ? scrubCredentials(d) : d
-        }));
+          };
+          // Compressed bytes go through untouched (base64 is how a Lambda-style
+          // function returns binary; fetch() in the browser inflates them). Only
+          // inflate here when the body must be rewritten or the client cannot
+          // take gzip.
+          if (gz && wantGzip && clientTakesGzip) {
+            return resolve({
+              statusCode: res.statusCode,
+              headers: { ...headers, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' },
+              body: raw.toString('base64'), isBase64Encoded: true,
+            });
+          }
+          let text;
+          try { text = gz ? zlib.gunzipSync(raw).toString('utf8') : raw.toString('utf8'); }
+          catch (e) { return resolve({ statusCode: 502, headers, body: JSON.stringify({ error: 'Bad upstream encoding' }) }); }
+          resolve({ statusCode: res.statusCode, headers, body: isSystemUsers ? scrubCredentials(text) : text });
+        });
       });
       req.on('error', e => {
         // Stale keep-alive socket: Supabase's LB closes idle connections, and a

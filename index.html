@@ -665,7 +665,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -704,7 +704,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1807,6 +1807,7 @@ function _mockMatch(row, filters) {
       case 'gt':  return cell != null && cell >  _mockCoerce(f.val);
       case 'lt':  return cell != null && cell <  _mockCoerce(f.val);
       case 'is':  return f.val === 'null' ? cell == null : cell != null;
+      case 'not': return f.val === 'is.null' ? cell != null : f.val === 'is.true' ? cell !== true : f.val === 'is.false' ? cell !== false : true;
       default:    return true;
     }
   });
@@ -12307,7 +12308,7 @@ function _dashScope() {
 function dashSetScope(s) {
   if (!_dashScopeOptions().includes(s)) return;
   try { localStorage.setItem(_dashScopeKey(), s); } catch (e) {}
-  renderDashboard();
+  renderDashboard({ reuse: true });   // v7.9.38: re-render from the bundle in hand — no traffic
 }
 function _dashInScope(rec, scope) {
   if (!rec) return false;
@@ -12400,24 +12401,64 @@ function agingDaysFor(personId, kind) {
   return g > 0 ? g : 0;
 }
 
+// ── Dashboard bundle (v7.9.38) ───────────────────────────────────────────────
+// dashboard_summary() (sql/perf_tier2_dashboard_summary.sql) returns every
+// dataset the widgets read in ONE call — a render used to be ~30 requests
+// (leads whole-table four times, deals five times, serial 150-id chunk loops).
+// Widgets read window._dashBundle when it is set and keep their per-widget
+// reads otherwise, so the function can be installed before or after this build.
+let _dashRpcMissing = false;   // set when rpc/dashboard_summary answers 404 (function not installed)
+async function _dashFetchBundle() {
+  if (MOCK || _dashRpcMissing) return null;
+  // 12 monthly buckets is the widest window the Interactions card needs.
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth() - 11, 1).toISOString().slice(0, 10);
+  try {
+    const b = await api('rpc/dashboard_summary', 'POST', { p_from: from }, '', { prefer: '' });
+    if (!(b && typeof b === 'object' && !Array.isArray(b) && Array.isArray(b.leads))) return null;
+    _dashSeedLookups(b);
+    return b;
+  } catch (e) {
+    if (/^404\b|PGRST202/.test((e && e.message) || '')) _dashRpcMissing = true;
+    else console.warn('dashboard_summary failed — using the per-widget reads:', e && e.message);
+    return null;
+  }
+}
+// Lookups the bundle carries: freshen the shared caches so the widgets' helpers
+// (_milLookups, _milTypeName, red flags, sectors, stages, group touches) need
+// no round trip of their own.
+function _dashSeedLookups(B) {
+  if (!allData['stages'] || !allData['stages'].length) allData['stages'] = B.stages || [];
+  if (Array.isArray(B.milestone_groups)) allData['milestone_groups'] = B.milestone_groups;
+  if (Array.isArray(B.milestone_types))  allData['milestone_types']  = B.milestone_types;
+  if (Array.isArray(B.red_flags)) allData['red_flags'] = B.red_flags;
+  if (!allData['industry_sectors'] && Array.isArray(B.industry_sectors)) allData['industry_sectors'] = B.industry_sectors;
+  allData['_org_touches'] = (B.org_touches && typeof B.org_touches === 'object') ? B.org_touches : {};
+}
+
 // Shared collector for the dashboard banner and the Attention Workbench page:
 // every lead currently flagged — back from Hold (woke_at set), or aging
 // New/Working past its owner's threshold. Returns items UNSCOPED, worst
-// first; each surface applies its own scope rule.
-async function _attentionLeadItems() {
-  const sweepP = startLeadSweep({ wakeOnly: true });   // overlaps the read (v7.9.37)
-  const leads = await apiGet('leads',
+// first; each surface applies its own scope rule. B = the dashboard bundle
+// (v7.9.38) or null; sweepP = an already-started wake sweep, if the caller
+// overlapped one with the bundle fetch.
+async function _attentionLeadItems(B, sweepP) {
+  if (sweepP === undefined) sweepP = startLeadSweep({ wakeOnly: true });   // overlaps the read (v7.9.37)
+  const leads = B ? B.leads : await apiGet('leads',
     'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,target_org_id,description,site_id,site_name,next_action_date,sites(name)');
   await applyLeadSweeps(leads, sweepP, { wakeOnly: true });   // wake due leads now, so their reminders show immediately
   const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
   // Soothing (v7.9.07): a group touch quiets the aging nags too. Orgs may not be
   // cached on the dashboard — use a SLIM local list, never written to allData
   // (slim caches poisoned option lists before; see lead-org-name-autosave-wipe).
-  await _loadOrgTouches();
+  if (!B) await _loadOrgTouches();   // the bundle seeds allData['_org_touches'] itself
   let _orgsForAging = allData['organisations'];
   if (!_orgsForAging || !_orgsForAging.length) {
-    try { _orgsForAging = await apiGet('organisations', 'select=id,parent_org_id,group_touch_soothes'); }
-    catch (e) { _orgsForAging = []; }
+    if (B) _orgsForAging = B.orgs || [];
+    else {
+      try { _orgsForAging = await apiGet('organisations', 'select=id,parent_org_id,group_touch_soothes'); }
+      catch (e) { _orgsForAging = []; }
+    }
   }
   const items = [];
   for (const l of leads) {
@@ -12451,13 +12492,13 @@ async function _attentionLeadItems() {
 // Top-of-dashboard reminder banner: leads back from Hold (woke_at set) + aging
 // New/Working escalations. Owner sees their own; sales management sees all.
 // The full workable list lives on the Attention Workbench page (Sales Management).
-async function _dashRemindersHtml() {
+async function _dashRemindersHtml(B, sweepP) {
   try {
     const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     const isSM = !!(currentUser && (currentUser.isAdmin
       || currentUser.permissions.includes('all') || currentUser.permissions.includes('promote_lead')));
     const inScope = l => isSM || +l.owner_id === +(currentUser?.personId || 0);
-    const items = (await _attentionLeadItems()).filter(r => inScope(r.lead));
+    const items = (await _attentionLeadItems(B, sweepP)).filter(r => inScope(r.lead));
     if (!items.length) return '';
     const rows = items.slice(0, 6).map(r => `
       <div id="woke-rem-${r.id}" style="display:flex;align-items:center;gap:10px;padding:5px 0;font-size:12px;">
@@ -12494,7 +12535,7 @@ async function dismissWokeReminder(leadId) {
   } catch (e) { showStatus('Could not dismiss: ' + e.message, 'error'); }
 }
 
-async function renderDashboard() {
+async function renderDashboard(opts) {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
   head.innerHTML = '';
@@ -12506,10 +12547,17 @@ async function renderDashboard() {
       <div>No dashboard is configured for your role yet.</div></div></td></tr>`;
     return;
   }
+  // v7.9.38: the wake sweep and the one-call bundle overlap; every widget below
+  // reads window._dashBundle (null = the per-widget reads). A scope switch
+  // re-renders from the bundle it already has ({ reuse: true }) — no traffic.
+  const reuse = !!(opts && opts.reuse && window._dashBundle);
+  const sweepP = reuse ? Promise.resolve({ woke: [], working: [] }) : startLeadSweep({ wakeOnly: true });
+  const B = reuse ? window._dashBundle : await _dashFetchBundle();
+  window._dashBundle = B;
   // Make sure shared lookups the widgets read are present.
   if (!allData['stages']) { try { allData['stages'] = await apiGet('stages', 'select=id,name'); } catch(e) { allData['stages'] = []; } }
   // Lifecycle reminders (woke-from-Hold + aging escalations) — top of dashboard.
-  const remindersHtml = await _dashRemindersHtml();
+  const remindersHtml = await _dashRemindersHtml(B, sweepP);
   const customised = !!localStorage.getItem(_dashOrderKey());
   // Global scope switch (Mine / Team / All) — shown only when rights offer a
   // choice; the pick is remembered per person and drives every scoped card.
@@ -12566,7 +12614,8 @@ async function _dashApprovals() {
   if (!isSM && !exec) return shell('<div style="padding:14px 0;color:var(--text3);font-size:12px;">Your role has no approval duties.</div>');
 
   const rows = [];
-  const leads = await apiGet('leads', 'select=id,owner_id,target_org_name,description,status,site_id,site_name,sites(name)');
+  const B = window._dashBundle;
+  const leads = B ? B.leads : await apiGet('leads', 'select=id,owner_id,target_org_name,description,status,site_id,site_name,sites(name)');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const people = allData['people'] || [];
   const personName = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '—'; };
@@ -12575,7 +12624,7 @@ async function _dashApprovals() {
   if (isSM) {
     // Hold/Nurture entry is a direct action since the 2026-08-12 bands revision —
     // the only lead_stage_requests still awaiting a decision here are dead reviews.
-    const [promos, stageReqs] = await Promise.all([
+    const [promos, stageReqs] = B ? [B.promotion_requests || [], B.stage_requests || []] : await Promise.all([
       apiGet('promotion_requests', 'status=eq.pending&select=lead_id,request_type,requested_by,requested_at'),
       apiGet('lead_stage_requests', 'status=eq.pending&request_type=eq.dead&select=lead_id,request_type,requested_by,requested_at'),
     ]);
@@ -12591,17 +12640,24 @@ async function _dashApprovals() {
     }
     // Pending milestone designations (sales-management review; click → review modal).
     try {
-      const pend = await apiGet('engagement_milestones', 'status=eq.pending&select=*&order=proposed_at.asc&limit=100');
+      const pend = B ? (B.pending_milestones || []) : await apiGet('engagement_milestones', 'status=eq.pending&select=*&order=proposed_at.asc&limit=100');
       if (pend.length) {
         await _milLookups();
-        const engIds = [...new Set(pend.map(p => +p.engagement_id))];
-        const engById = {};
-        for (let i = 0; i < engIds.length; i += 150)
-          (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id`)).forEach(e => { engById[+e.id] = e; });
-        const dIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
-        const dealById = {};
-        for (let i = 0; i < dIds.length; i += 150)
-          (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&select=id,name`)).forEach(d => { dealById[+d.id] = d; });
+        const engById = {}, dealById = {};
+        if (B) {
+          // the bundle joins the parent ids and the deal name onto each row
+          pend.forEach(p => {
+            engById[+p.engagement_id] = { id: +p.engagement_id, lead_id: p._lead_id, deal_id: p._deal_id };
+            if (p._deal_id != null) dealById[+p._deal_id] = { id: +p._deal_id, name: p._deal_name };
+          });
+        } else {
+          const engIds = [...new Set(pend.map(p => +p.engagement_id))];
+          for (let i = 0; i < engIds.length; i += 150)
+            (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id`)).forEach(e => { engById[+e.id] = e; });
+          const dIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+          for (let i = 0; i < dIds.length; i += 150)
+            (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&select=id,name`)).forEach(d => { dealById[+d.id] = d; });
+        }
         for (const p of pend) {
           const e = engById[+p.engagement_id]; if (!e) continue;
           const label = e.lead_id != null ? leadLabel(leadById[+e.lead_id])
@@ -12617,7 +12673,7 @@ async function _dashApprovals() {
       let rfLookup = allData['red_flags'];
       if (!rfLookup) { rfLookup = await apiGet('red_flags', 'select=id,name'); allData['red_flags'] = rfLookup; }
       const flagNames = Object.fromEntries((rfLookup || []).map(f => [+f.id, f.name]));
-      const flags = await apiGet('lead_red_flags', 'review_status=eq.pending&cleared=eq.false&select=lead_id,red_flag_id');
+      const flags = B ? (B.pending_red_flags || []) : await apiGet('lead_red_flags', 'review_status=eq.pending&cleared=eq.false&select=lead_id,red_flag_id');
       for (const f of flags) {
         const l = leadById[+f.lead_id]; if (!l) continue;
         if (l.status === 'Dead' || l.status === 'Promoted') continue;   // nothing left to verdict
@@ -12648,10 +12704,10 @@ async function _dashApprovals() {
 // Open next actions (one per stream — the newest is the real obligation),
 // joined to their lead/deal parent. Returns rows UNSCOPED in due-date order;
 // each caller (Outstanding Actions card, Attention Workbench page) applies scope.
-async function _attentionActionRows() {
+async function _attentionActionRows(B) {
   let acts;
   try {
-    acts = await apiGet('engagements',
+    acts = B ? (B.open_actions || []) : await apiGet('engagements',
       'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type,stream_id,engagement_date');
     // One row per open STREAM: within a stream only the newest open action is
     // the real obligation (older ones are legacy pile-up awaiting supersede).
@@ -12668,8 +12724,8 @@ async function _attentionActionRows() {
     acts = await apiGet('engagements',
       'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
   }
-  const leads = await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description,site_id,site_name,sites(name)');
-  const deals = await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
+  const leads = B ? B.leads : await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description,site_id,site_name,sites(name)');
+  const deals = B ? B.deals : await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
   const rows = [];
@@ -12688,7 +12744,7 @@ async function _attentionActionRows() {
 async function _dashActions() {
   const scope = _dashScope();
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const rows = (await _attentionActionRows()).filter(r => _dashInScope(r.parent, scope));
+  const rows = (await _attentionActionRows(window._dashBundle)).filter(r => _dashInScope(r.parent, scope));
   const today = new Date().toISOString().slice(0, 10);
   const soon = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
   const overdue = rows.filter(r => r.due < today).length;
@@ -12775,36 +12831,48 @@ async function _dashInteractions() {
   const iso = d => d.toISOString().slice(0, 10);
   const fromIso = iso(periods[0].s);
 
-  let engs = await apiGetAll('engagements',
+  // v7.9.38: the bundle carries 12 months of engagements with the parent's
+  // owner (_owner_id) and the category (_cat) already joined, so the Wk/Mo and
+  // Mine/Team toggles re-render without a round trip.
+  const B = window._dashBundle;
+  let engs = B ? (B.interactions || []).filter(e => (e.engagement_date || '') >= fromIso) : await apiGetAll('engagements',
     'engagement_date=gte.' + fromIso + '&select=id,lead_id,deal_id,engagement_date,engagement_type,created_by');
   if (!countPromo) engs = engs.filter(e => e.engagement_type !== 'Promotion');
   if (scope === 'own') {
     // Mine = engagements I logged OR on records I own — same rule as the
     // Engagement History page (created-by alone hid owned records' activity).
     const me = +currentUser.personId;
-    const ownLeadIds = new Set(), ownDealIds = new Set();
-    const lIds = [...new Set(engs.filter(e => e.lead_id != null).map(e => +e.lead_id))];
-    const dIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
-    for (let i = 0; i < lIds.length; i += 150)
-      (await apiGet('leads', `id=in.(${lIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(l => ownLeadIds.add(+l.id));
-    for (let i = 0; i < dIds.length; i += 150)
-      (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(d => ownDealIds.add(+d.id));
-    engs = engs.filter(e => +e.created_by === me
-      || (e.lead_id != null && ownLeadIds.has(+e.lead_id))
-      || (e.deal_id != null && ownDealIds.has(+e.deal_id)));
+    if (B) {
+      engs = engs.filter(e => +e.created_by === me || (e._owner_id != null && +e._owner_id === me));
+    } else {
+      const ownLeadIds = new Set(), ownDealIds = new Set();
+      const lIds = [...new Set(engs.filter(e => e.lead_id != null).map(e => +e.lead_id))];
+      const dIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
+      for (let i = 0; i < lIds.length; i += 150)
+        (await apiGet('leads', `id=in.(${lIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(l => ownLeadIds.add(+l.id));
+      for (let i = 0; i < dIds.length; i += 150)
+        (await apiGet('deals', `id=in.(${dIds.slice(i, i + 150).join(',')})&owner_id=eq.${me}&select=id`)).forEach(d => ownDealIds.add(+d.id));
+      engs = engs.filter(e => +e.created_by === me
+        || (e.lead_id != null && ownLeadIds.has(+e.lead_id))
+        || (e.deal_id != null && ownDealIds.has(+e.deal_id)));
+    }
   }
 
-  // Category derivation needs stage + recurring flag for deal-side engagements.
-  const dealIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
+  // Category derivation needs stage + recurring flag for deal-side engagements
+  // (already on each bundle row as _cat).
   const dealById = {};
-  for (let i = 0; i < dealIds.length; i += 150) {
-    const chunk = dealIds.slice(i, i + 150);
-    (await apiGet('deals', `id=in.(${chunk.join(',')})&select=id,stage_id,service_sub_id`))
-      .forEach(d => { dealById[+d.id] = d; });
+  if (!B) {
+    const dealIds = [...new Set(engs.filter(e => e.deal_id != null).map(e => +e.deal_id))];
+    for (let i = 0; i < dealIds.length; i += 150) {
+      const chunk = dealIds.slice(i, i + 150);
+      (await apiGet('deals', `id=in.(${chunk.join(',')})&select=id,stage_id,service_sub_id`))
+        .forEach(d => { dealById[+d.id] = d; });
+    }
+    if (!allData['service_sub']) { try { allData['service_sub'] = await apiGet('service_sub', 'select=id,is_recurring'); } catch (e) { allData['service_sub'] = []; } }
   }
-  if (!allData['service_sub']) { try { allData['service_sub'] = await apiGet('service_sub', 'select=id,is_recurring'); } catch (e) { allData['service_sub'] = []; } }
   const subById = Object.fromEntries((allData['service_sub'] || []).map(s => [+s.id, s]));
   const catOf = e => {
+    if (e._cat) return e._cat;
     if (e.lead_id != null) return 'Outreach';
     const d = dealById[+e.deal_id];
     if (d && [5, 7, 8].includes(+d.stage_id)) {
@@ -12896,7 +12964,8 @@ async function _dashInteractions() {
 // spelled out below so neither band number can hide thin leads.
 async function _dashLeads() {
   const scope = _dashScope();
-  const rows = (await apiGet('leads', 'select=id,status,owner_id,branch_id,region_id,next_action_date'))
+  const B = window._dashBundle;
+  const rows = (B ? B.leads : await apiGet('leads', 'select=id,status,owner_id,branch_id,region_id,next_action_date'))
     .filter(r => _dashInScope(r, scope));
   const today = new Date().toISOString().slice(0, 10);
   const open = rows.filter(r => ['New', 'Working', LEAD_STAGE_X, 'Qualified'].includes(r.status));
@@ -12920,7 +12989,8 @@ async function _dashLeads() {
 async function _dashOpps() {
   const scope = _dashScope();
   const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
-  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+  const B = window._dashBundle;
+  const deals = (B ? B.deals : await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
     .filter(d => _dashInScope(d, scope));
   const openDeals = deals.filter(d => open.has(+d.stage_id));
   const nameById = Object.fromEntries((allData['stages'] || []).map(s => [+s.id, s.name]));
@@ -12933,15 +13003,21 @@ async function _dashOpps() {
 async function _dashPipeline() {
   const scope = _dashScope();
   const open = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
-  const deals = (await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
+  const B = window._dashBundle;
+  const deals = (B ? B.deals : await apiGet('deals', 'select=id,stage_id,probability,owner_id,branch_id,region_id'))
     .filter(d => _dashInScope(d, scope) && open.has(+d.stage_id));
   if (!deals.length) return _dashCard('Pipeline', scope, [['Weighted', 'R 0'], ['Total', 'R 0']], 'No open opportunities', 'revenue_pipeline', 'Full pipeline');
   const ids = deals.map(d => d.id);
-  // One embedded call: opportunity streams with their months nested (FK-backed;
-  // nested rows aren't subject to the 1000-row cap — verified against the DB).
-  const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=deal_id,revenue_stream_months(opportunity_revenue)`);
   const dealTotal = {};
-  for (const s of streams) { const did = +s.deal_id; for (const m of (s.revenue_stream_months || [])) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  if (B) {
+    // Per-deal sums from the bundle — revenue streams only, summed in SQL.
+    (B.stream_values || []).forEach(v => { dealTotal[+v.deal_id] = +v.opp_total || 0; });
+  } else {
+    // One embedded call: opportunity streams with their months nested (FK-backed;
+    // nested rows aren't subject to the 1000-row cap — verified against the DB).
+    const streams = await apiGet('revenue_streams', `deal_id=in.(${ids.join(',')})&stream_type=eq.opportunity&select=deal_id,revenue_stream_months(opportunity_revenue)`);
+    for (const s of streams) { const did = +s.deal_id; for (const m of (s.revenue_stream_months || [])) dealTotal[did] = (dealTotal[did] || 0) + (+m.opportunity_revenue || 0); }
+  }
   let total = 0, weighted = 0;
   for (const d of deals) { const t = dealTotal[d.id] || 0; total += t; weighted += t * ((+d.probability || 0) / 100); }
   return _dashCard('Pipeline', scope, [
@@ -12965,11 +13041,12 @@ async function _dashSectorValue() {
     catch (e) { allData['industry_sectors'] = []; }
   }
   const secName = Object.fromEntries((allData['industry_sectors'] || []).map(s => [+s.id, s.name]));
-  const orgs = await apiGet('organisations', 'select=id,sector_id');
+  const B = window._dashBundle;
+  const orgs = B ? (B.orgs || []) : await apiGet('organisations', 'select=id,sector_id');
   const orgSector = Object.fromEntries(orgs.map(o => [+o.id, o.sector_id ? (secName[+o.sector_id] || '(no sector)') : '(no sector)']));
   const openIds = _dashStageIds(['Prospect', 'Proposal', 'Negotiation']);
   const securedIds = _dashStageIds(['Secured']);
-  const deals = (await apiGet('deals', 'select=id,stage_id,org_id,owner_id,branch_id,region_id'))
+  const deals = (B ? B.deals : await apiGet('deals', 'select=id,stage_id,org_id,owner_id,branch_id,region_id'))
     .filter(d => _dashInScope(d, scope) && (openIds.has(+d.stage_id) || securedIds.has(+d.stage_id)));
   const chipText = scope === 'team' ? 'Team' : scope === 'all' ? 'All' : 'Mine';
   const shell = inner => `<div class="card" style="padding:0;height:100%;">
@@ -12979,16 +13056,21 @@ async function _dashSectorValue() {
     </div><div style="padding:12px 16px 14px;">${inner}</div></div>`;
   if (!deals.length) return shell('<div style="padding:10px 0;color:var(--text3);font-size:12px;">No open or secured deals in this scope.</div>');
   const ids = deals.map(d => d.id);
-  // One embedded call, both stream types: months nested under their stream
-  // escape the 1000-row cap (same pattern the Pipeline card uses).
-  const streams = await apiGet('revenue_streams',
-    `deal_id=in.(${ids.join(',')})&select=deal_id,stream_type,revenue_stream_months(opportunity_revenue,secured_revenue)`);
   const oppTot = {}, conTot = {};
-  for (const s of streams) {
-    const did = +s.deal_id;
-    for (const m of (s.revenue_stream_months || [])) {
-      if (s.stream_type === 'opportunity') oppTot[did] = (oppTot[did] || 0) + (+m.opportunity_revenue || 0);
-      else if (s.stream_type === 'fulfilment') conTot[did] = (conTot[did] || 0) + (+m.secured_revenue || 0);
+  if (B) {
+    // Per-deal sums from the bundle — revenue streams only, summed in SQL.
+    (B.stream_values || []).forEach(v => { oppTot[+v.deal_id] = +v.opp_total || 0; conTot[+v.deal_id] = +v.sec_total || 0; });
+  } else {
+    // One embedded call, both stream types: months nested under their stream
+    // escape the 1000-row cap (same pattern the Pipeline card uses).
+    const streams = await apiGet('revenue_streams',
+      `deal_id=in.(${ids.join(',')})&select=deal_id,stream_type,revenue_stream_months(opportunity_revenue,secured_revenue)`);
+    for (const s of streams) {
+      const did = +s.deal_id;
+      for (const m of (s.revenue_stream_months || [])) {
+        if (s.stream_type === 'opportunity') oppTot[did] = (oppTot[did] || 0) + (+m.opportunity_revenue || 0);
+        else if (s.stream_type === 'fulfilment') conTot[did] = (conTot[did] || 0) + (+m.secured_revenue || 0);
+      }
     }
   }
   const agg = new Map();   // sector name -> { pipe, secv, nOpen, nSec }
@@ -13030,7 +13112,8 @@ async function _dashCampaigns() {
   // scoping, so Team collapses to All here).
   const seeAllAllowed = currentUser?.isAdmin || (currentUser?.roles || []).some(r => r.name === 'Sales Manager');
   const seeAll = seeAllAllowed && _dashScope() !== 'own';
-  const camps = await apiGet('research_campaigns', 'select=id,name,status,owner_id,created_by');
+  const B = window._dashBundle;
+  const camps = B ? (B.campaigns || []) : await apiGet('research_campaigns', 'select=id,name,status,owner_id,created_by');
   const mine = seeAll ? camps : camps.filter(c =>
     (c.owner_id != null && +c.owner_id === +currentUser.personId) ||
     (c.created_by != null && +c.created_by === +currentUser.personId));
@@ -13044,7 +13127,8 @@ async function _dashCampaigns() {
 // Inc 1b widgets — placeholders until built out.
 async function _dashContracts() {
   const secured = _dashStageIds(['Secured']);
-  const deals = (await apiGet('deals', 'select=id,stage_id')).filter(d => secured.has(+d.stage_id));
+  const B = window._dashBundle;
+  const deals = (B ? B.deals : await apiGet('deals', 'select=id,stage_id')).filter(d => secured.has(+d.stage_id));
   return _dashCard('Active Contracts', null, [['Secured contracts', deals.length]], 'Full contracts view coming soon', 'opportunities', 'Open');
 }
 async function _dashCompany() {
@@ -13056,7 +13140,8 @@ async function _dashCompany() {
 // actually open Admin → Settings → Bug Reports.
 async function _dashBugs() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-  const reports = await apiGet('bug_reports', 'select=id,severity,status,description,page,created_at&order=created_at.desc&limit=500');
+  const B = window._dashBundle;
+  const reports = B ? (B.bugs || []) : await apiGet('bug_reports', 'select=id,severity,status,description,page,created_at&order=created_at.desc&limit=500');
   const isOpen = r => r.status === 'New' || r.status === 'Acknowledged';
   const open = reports.filter(isOpen);
   const blocking = open.filter(r => r.severity === 'Blocking').length;
@@ -13088,22 +13173,30 @@ async function _dashMilestones() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const scope = _dashScope();
   await _milLookups();
+  const B = window._dashBundle;
   let rows = [];
   try {
-    rows = await apiGet('engagement_milestones', 'status=eq.approved&select=*&order=decided_at.desc.nullslast&limit=80');
+    rows = B ? (B.approved_milestones || []) : await apiGet('engagement_milestones', 'status=eq.approved&select=*&order=decided_at.desc.nullslast&limit=80');
   } catch (e) {
     return _dashCard('Recent Milestones', null, [['Milestones', '—']], 'Needs the milestones migration (sql/add_engagement_milestones.sql)', null);
   }
-  const engIds = [...new Set(rows.map(r => +r.engagement_id))];
   const engById = {};
-  for (let i = 0; i < engIds.length; i += 150)
-    (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
-  const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
-  const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
-  const [leads, deals] = await Promise.all([
-    leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id,target_org_name,description`) : [],
-    dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id,name`) : [],
-  ]);
+  let leads, deals;
+  if (B) {
+    // the bundle joins the parent ids and engagement date onto each row
+    rows.forEach(m => { engById[+m.engagement_id] = { id: +m.engagement_id, lead_id: m._lead_id, deal_id: m._deal_id, engagement_date: m._engagement_date }; });
+    leads = B.leads; deals = B.deals;
+  } else {
+    const engIds = [...new Set(rows.map(r => +r.engagement_id))];
+    for (let i = 0; i < engIds.length; i += 150)
+      (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
+    const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
+    const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+    [leads, deals] = await Promise.all([
+      leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id,target_org_name,description`) : [],
+      dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id,name`) : [],
+    ]);
+  }
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
   const items = [];
@@ -16747,6 +16840,23 @@ const ENG_CAT_STYLE = {
   Project:  'background:#EDE9FE;color:#5B21B6;',
 };
 
+// v7.9.38: the engagements_labelled view (sql/perf_tier2_engagements_labelled.sql)
+// carries every label _engHistLoad used to resolve in three dependent rounds.
+// Absent view (404 / PGRST205) → the old reads; in mock mode the view is served
+// only when the in-memory store has an engagements_labelled table.
+let _engLabelledMissing = false;
+function _engHistViewAvailable() {
+  if (MOCK) { try { return Array.isArray(_mockStore()['engagements_labelled']); } catch (e) { return false; } }
+  return !_engLabelledMissing;
+}
+// Distinct values for the "filter by" dropdowns, from the rows in hand.
+function _engHistDistincts(st) {
+  st.clients = [...new Set(st.rows.map(r => r.clientName).filter(n => n && n !== '—'))].sort();
+  st.deals = [...new Map(st.rows.map(r => [r.parentKind + ':' + r.parentId, r.parentLabel])).entries()]
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+  st.persons = [...new Set(st.rows.flatMap(r => r.persons))].filter(Boolean).sort();
+}
+
 function _engHistCat(stageId, sub) {
   const s = +stageId;
   if (s === 6) return { cat: 'Sales', lost: true };
@@ -16827,7 +16937,45 @@ async function _engHistLoad() {
   const base = cat === 'Outreach' ? 'lead_id=not.is.null'
              : (cat === 'Sales' || cat === 'Contract' || cat === 'Project') ? 'deal_id=not.is.null'
              : 'id=gt.0';   // All
-  const engs = await apiGet('engagements', `${base}${fromQ}${toQ}&select=*&order=engagement_date.desc,id.desc&limit=1000`);
+  const q = `${base}${fromQ}${toQ}&select=*&order=engagement_date.desc,id.desc&limit=1000`;
+
+  // One call on the labelled view (v7.9.38): category, stream label, client,
+  // parent, owner, people and milestone badges arrive on the row.
+  if (_engHistViewAvailable()) {
+    let labelled = null;
+    try { labelled = await apiGet('engagements_labelled', q); }
+    catch (e) {
+      if (/^404\b|PGRST205/.test((e && e.message) || '')) _engLabelledMissing = true;
+      else throw e;
+    }
+    if (labelled) {
+      st.capHit = labelled.length >= 1000;
+      await _milLookups();   // milestone type names for the badges (cached after the first load)
+      const EXTRA = ['parent_kind', 'parent_id', 'cat', 'lost', 'stream_root', 'stream_label_resolved',
+                     'client_name', 'parent_label', 'owner_id', 'owner_name', 'persons', 'milestones'];
+      st.milestones = {};
+      st.rows = labelled.map(v => {
+        const e = { ...v }; EXTRA.forEach(k => delete e[k]);   // e = the plain engagements row, as before
+        if (Array.isArray(v.milestones) && v.milestones.length) st.milestones[+v.id] = v.milestones;
+        const streamRoot = +(v.stream_root || v.stream_id || v.id);
+        return {
+          e, cat: v.cat, lost: !!v.lost, isLead: v.lead_id != null,
+          streamRoot,
+          streamLabel: v.stream_label_resolved || ('Stream #' + streamRoot),
+          persons: Array.isArray(v.persons) ? v.persons : [],
+          clientName: v.client_name || '—',
+          parentLabel: v.parent_label || (v.lead_id != null ? 'Lead #' + v.lead_id : 'Deal #' + v.deal_id),
+          parentKind: v.parent_kind || (v.lead_id != null ? 'lead' : 'deal'),
+          parentId: v.parent_id != null ? +v.parent_id : (v.lead_id != null ? +v.lead_id : +v.deal_id),
+          ownerId: v.owner_id, ownerName: v.owner_name || '—',
+        };
+      }).filter(r => r.cat);
+      _engHistDistincts(st);
+      return;
+    }
+  }
+
+  const engs = await apiGet('engagements', q);
   st.capHit = engs.length >= 1000;
 
   const dealIds = [...new Set(engs.map(e => e.deal_id).filter(Boolean))];
@@ -16899,11 +17047,7 @@ async function _engHistLoad() {
       ownerId, ownerName: ownerId ? pName(ownerId) : '—',
     };
   }).filter(r => r.cat);
-  // Distinct values for the "filter by" dropdowns.
-  st.clients = [...new Set(st.rows.map(r => r.clientName).filter(n => n && n !== '—'))].sort();
-  st.deals = [...new Map(st.rows.map(r => [r.parentKind + ':' + r.parentId, r.parentLabel])).entries()]
-    .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
-  st.persons = [...new Set(st.rows.flatMap(r => r.persons))].filter(Boolean).sort();
+  _engHistDistincts(st);
 }
 
 // Build the page shell ONCE: the persistent filter bar + an #eh-results container.
@@ -24483,7 +24627,9 @@ async function renderAttentionPage() {
       <div id="attn-results"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
     </div></td></tr>`;
   try {
-    const [leadItems, actionRows] = await Promise.all([_attentionLeadItems(), _attentionActionRows()]);
+    // v7.9.38: one bundle call feeds both collectors (null → their own reads).
+    const B = await _dashFetchBundle();
+    const [leadItems, actionRows] = await Promise.all([_attentionLeadItems(B), _attentionActionRows(B)]);
     // Owner names for just the people on the lists — a whole-table people
     // fetch would risk the PostgREST 1000-row cap.
     const pids = [...new Set([...leadItems.map(i => +i.lead.owner_id || 0), ...actionRows.map(r => +(r.parent.owner_id || 0))].filter(Boolean))];
@@ -25298,22 +25444,31 @@ async function _dashMilestonePulse() {
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const scope = _dashScope();
   await _milLookups();
+  const B = window._dashBundle;
   let rows = [];
   try {
-    rows = await apiGetAll('engagement_milestones', 'select=*');
+    // The bundle carries every pending row plus the approved rows dated this
+    // month or last — exactly the rows the counts below can use.
+    rows = B ? (B.pulse_milestones || []) : await apiGetAll('engagement_milestones', 'select=*');
   } catch (e) {
     return _dashCard('Milestone Pulse', null, [['Milestones', '—']], 'Needs the milestones migration (sql/add_engagement_milestones.sql)', null);
   }
-  const engIds = [...new Set(rows.map(r => +r.engagement_id))];
   const engById = {};
-  for (let i = 0; i < engIds.length; i += 150)
-    (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
-  const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
-  const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
-  const [leads, deals] = await Promise.all([
-    leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
-    dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
-  ]);
+  let leads, deals;
+  if (B) {
+    rows.forEach(m => { engById[+m.engagement_id] = { id: +m.engagement_id, lead_id: m._lead_id, deal_id: m._deal_id, engagement_date: m._engagement_date }; });
+    leads = B.leads; deals = B.deals;
+  } else {
+    const engIds = [...new Set(rows.map(r => +r.engagement_id))];
+    for (let i = 0; i < engIds.length; i += 150)
+      (await apiGet('engagements', `id=in.(${engIds.slice(i, i + 150).join(',')})&select=id,lead_id,deal_id,engagement_date`)).forEach(e => { engById[+e.id] = e; });
+    const leadIds = [...new Set(Object.values(engById).map(e => e.lead_id).filter(Boolean))];
+    const dealIds = [...new Set(Object.values(engById).map(e => e.deal_id).filter(Boolean))];
+    [leads, deals] = await Promise.all([
+      leadIds.length ? apiGet('leads', `id=in.(${leadIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
+      dealIds.length ? apiGet('deals', `id=in.(${dealIds.join(',')})&select=id,owner_id,branch_id,region_id`) : [],
+    ]);
+  }
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
   const dealById = Object.fromEntries(deals.map(d => [+d.id, d]));
   const gById = Object.fromEntries((allData['milestone_groups'] || []).map(g => [+g.id, g]));
