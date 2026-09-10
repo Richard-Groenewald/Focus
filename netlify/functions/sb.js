@@ -1,5 +1,6 @@
 const https = require('https');
 const crypto = require('crypto');
+const zlib = require('zlib');
 // Host is env-driven so production vs test databases can be selected per Netlify
 // deploy context. Falls back to the production project if SUPABASE_HOST is unset.
 const SB = process.env.SUPABASE_HOST || 'kevrfdjqyuhmgziqxuvs.supabase.co';
@@ -12,11 +13,12 @@ const sbAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSoc
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,Prefer,Range,Range-Unit,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token',
+  'Access-Control-Allow-Headers': 'Content-Type,Prefer,Range,Range-Unit,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token,X-Focus-Gzip',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   // PostgREST's Content-Range carries the total row count (Prefer: count=…);
   // the app's apiGetAll/apiCount read it to page in parallel / count server-side.
-  'Access-Control-Expose-Headers': 'Content-Range',
+  // X-Focus-Encoding marks a body the browser has to inflate itself (v7.9.40).
+  'Access-Control-Expose-Headers': 'Content-Range,X-Focus-Encoding',
 };
 
 // ── Password hashing ─────────────────────────────────────────────────────────
@@ -282,6 +284,21 @@ exports.handler = async (event) => {
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
+  // Compression (Tier 3.2, v7.9.40). Every body used to travel as raw JSON on
+  // BOTH legs — PostgREST → this function → browser — and Netlify does not
+  // compress function responses (devtools on Dev, 2026-09-10: no content-encoding
+  // on any /sb/ reply). So the gateway is asked for gzip, and:
+  //   • a browser that said it can inflate (X-Focus-Gzip: 1 — sent by v7.9.40+
+  //     when DecompressionStream exists) gets the compressed bytes untouched,
+  //     flagged with X-Focus-Encoding: gzip. A private header, so nothing between
+  //     here and the browser re-encodes or strips it the way Content-Encoding
+  //     might (the v7.9.38 attempt could not be verified and was pulled);
+  //   • any other client, and every non-2xx reply, gets the body inflated here
+  //     and answered as plain JSON exactly as before.
+  // system_users always stays plain (scrubCredentials rewrites it). SB_GZIP=0 in
+  // the Netlify environment switches all of it off without a deploy.
+  const wantGzip = String(process.env.SB_GZIP || '') !== '0' && !isSystemUsers;
+  const clientInflates = wantGzip && String(event.headers['x-focus-gzip'] || '') === '1';
   return new Promise(resolve => {
     const doReq = (attempt) => {
       const req = https.request({
@@ -300,17 +317,32 @@ exports.handler = async (event) => {
           // window and still receive the total.
           ...(event.headers['range'] ? { 'Range': event.headers['range'] } : {}),
           ...(event.headers['range-unit'] ? { 'Range-Unit': event.headers['range-unit'] } : {}),
+          ...(wantGzip ? { 'Accept-Encoding': 'gzip' } : {}),
         }
       }, res => {
-        let d = ''; res.on('data', c => d += c);
-        res.on('end', () => resolve({
-          statusCode: res.statusCode,
-          headers: {
+        const chunks = []; res.on('data', c => chunks.push(c));
+        res.on('end', () => {
+          const raw = Buffer.concat(chunks);
+          const gz = raw.length > 0 && /\bgzip\b/i.test(res.headers['content-encoding'] || '');
+          const headers = {
             'Content-Type': 'application/json', ...CORS,
             ...(res.headers['content-range'] ? { 'Content-Range': res.headers['content-range'] } : {}),
-          },
-          body: isSystemUsers ? scrubCredentials(d) : d
-        }));
+          };
+          // Compressed bytes go through untouched when the browser can inflate them
+          // (base64 is how a Lambda-style function returns binary). Otherwise the
+          // body is inflated here and answered as plain JSON.
+          if (gz && clientInflates && res.statusCode >= 200 && res.statusCode < 300) {
+            return resolve({
+              statusCode: res.statusCode,
+              headers: { ...headers, 'Content-Type': 'application/octet-stream', 'X-Focus-Encoding': 'gzip' },
+              body: raw.toString('base64'), isBase64Encoded: true,
+            });
+          }
+          let text;
+          try { text = gz ? zlib.gunzipSync(raw).toString('utf8') : raw.toString('utf8'); }
+          catch (e) { return resolve({ statusCode: 502, headers, body: JSON.stringify({ error: 'Bad upstream encoding' }) }); }
+          resolve({ statusCode: res.statusCode, headers, body: isSystemUsers ? scrubCredentials(text) : text });
+        });
       });
       req.on('error', e => {
         // Stale keep-alive socket: Supabase's LB closes idle connections, and a

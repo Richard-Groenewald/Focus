@@ -1,4 +1,7 @@
 -- Focus CRM performance review, September 2026 — proposals 2.1, 2.2, 2.6, 2.8, 2.10
+-- NOTE (v7.9.38): 2.6 shipped as sql/perf_tier2_engagements_labelled.sql and 2.3 as
+-- sql/perf_tier2_dashboard_summary.sql, written against the live schema; the drafts
+-- below for those two are superseded. 2.1, 2.2, 2.8 and 2.10 remain drafts.
 -- (findings SRV-1, SRV-2, SRV-6, SRV-7, SRV-8 in findings-catalogue.md)
 --
 -- Views and functions the pages read in ONE call instead of downloading tables and
