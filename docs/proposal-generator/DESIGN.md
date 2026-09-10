@@ -1,6 +1,6 @@
 # Focus CRM — Proposal Generator — Design Brief
 
-Status: **design proposal, not yet built.** Written 2026-09-10 against Focus v7.9.40. This brief is meant to be handed to a Claude Code session (or read by Richard) and implemented against the real schema. Column names quoted here were verified in `sql/quote_tool_phase_b.sql`, `sql/quote_tool_phase_b3.sql` and `sql/add_sandbox_quotes.sql`; anything marked *assumed* must be checked on Dev first.
+Status: **Increment 1 built in v7.9.41** (2026-09-10): Accessories / Training admin pages and per-post checklists, proposal tables and default template (`sql/proposal_generator_inc1.sql`), the Proposal tab with section list, live A4 preview, per-proposal section edits on a draft row, and Print / Save PDF. Increments 2 and 3 remain design only. Written 2026-09-10 against Focus v7.9.40. This brief is meant to be handed to a Claude Code session (or read by Richard) and implemented against the real schema. Column names quoted here were verified in `sql/quote_tool_phase_b.sql`, `sql/quote_tool_phase_b3.sql` and `sql/add_sandbox_quotes.sql`; anything marked *assumed* must be checked on Dev first.
 
 ---
 
