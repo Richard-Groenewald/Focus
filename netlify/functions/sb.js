@@ -13,11 +13,12 @@ const sbAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30000, maxSoc
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,Prefer,Range,Range-Unit,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token',
+  'Access-Control-Allow-Headers': 'Content-Type,Prefer,Range,Range-Unit,X-Actor-Id,X-Real-Actor-Id,X-Focus-Token,X-Focus-Gzip',
   'Access-Control-Allow-Methods': 'GET,POST,PATCH,DELETE,OPTIONS',
   // PostgREST's Content-Range carries the total row count (Prefer: count=…);
   // the app's apiGetAll/apiCount read it to page in parallel / count server-side.
-  'Access-Control-Expose-Headers': 'Content-Range',
+  // X-Focus-Encoding marks a body the browser has to inflate itself (v7.9.40).
+  'Access-Control-Expose-Headers': 'Content-Range,X-Focus-Encoding',
 };
 
 // ── Password hashing ─────────────────────────────────────────────────────────
@@ -283,21 +284,21 @@ exports.handler = async (event) => {
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
-  // Compression (Tier 3.2). Every body used to travel as raw JSON on BOTH legs —
-  // PostgREST → this function → browser. SB_GZIP in the Netlify environment:
-  //   unset / '0'    off: plain JSON on both legs (the v7.9.37 behaviour). DEFAULT.
-  //   '1'            ask the gateway for gzip and inflate HERE: the cross-Atlantic
-  //                  leg shrinks 5–10×; the browser still gets plain JSON.
-  //   'passthrough'  also hand the compressed bytes to the browser untouched
-  //                  (isBase64Encoded + Content-Encoding). v7.9.38 shipped this as
-  //                  the default and the Dev site crawled (2026-09-10): reads
-  //                  failed in the browser and the client retried each one, so it
-  //                  stays opt-in until proven in devtools on Dev.
-  // system_users always stays plain because scrubCredentials rewrites its body.
-  const gzMode = String(process.env.SB_GZIP || '0').toLowerCase();
-  const wantGzip = (gzMode === '1' || gzMode === 'passthrough') && !isSystemUsers;
-  const passThrough = gzMode === 'passthrough'
-    && (event.headers['accept-encoding'] == null || /\bgzip\b/i.test(event.headers['accept-encoding']));
+  // Compression (Tier 3.2, v7.9.40). Every body used to travel as raw JSON on
+  // BOTH legs — PostgREST → this function → browser — and Netlify does not
+  // compress function responses (devtools on Dev, 2026-09-10: no content-encoding
+  // on any /sb/ reply). So the gateway is asked for gzip, and:
+  //   • a browser that said it can inflate (X-Focus-Gzip: 1 — sent by v7.9.40+
+  //     when DecompressionStream exists) gets the compressed bytes untouched,
+  //     flagged with X-Focus-Encoding: gzip. A private header, so nothing between
+  //     here and the browser re-encodes or strips it the way Content-Encoding
+  //     might (the v7.9.38 attempt could not be verified and was pulled);
+  //   • any other client, and every non-2xx reply, gets the body inflated here
+  //     and answered as plain JSON exactly as before.
+  // system_users always stays plain (scrubCredentials rewrites it). SB_GZIP=0 in
+  // the Netlify environment switches all of it off without a deploy.
+  const wantGzip = String(process.env.SB_GZIP || '') !== '0' && !isSystemUsers;
+  const clientInflates = wantGzip && String(event.headers['x-focus-gzip'] || '') === '1';
   return new Promise(resolve => {
     const doReq = (attempt) => {
       const req = https.request({
@@ -327,13 +328,13 @@ exports.handler = async (event) => {
             'Content-Type': 'application/json', ...CORS,
             ...(res.headers['content-range'] ? { 'Content-Range': res.headers['content-range'] } : {}),
           };
-          // passthrough mode only: compressed bytes go through untouched (base64
-          // is how a Lambda-style function returns binary). Otherwise inflate here
-          // and answer with plain JSON exactly as before.
-          if (gz && wantGzip && passThrough) {
+          // Compressed bytes go through untouched when the browser can inflate them
+          // (base64 is how a Lambda-style function returns binary). Otherwise the
+          // body is inflated here and answered as plain JSON.
+          if (gz && clientInflates && res.statusCode >= 200 && res.statusCode < 300) {
             return resolve({
               statusCode: res.statusCode,
-              headers: { ...headers, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' },
+              headers: { ...headers, 'Content-Type': 'application/octet-stream', 'X-Focus-Encoding': 'gzip' },
               body: raw.toString('base64'), isBase64Encoded: true,
             });
           }

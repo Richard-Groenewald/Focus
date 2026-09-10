@@ -665,7 +665,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.39 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.40 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -704,7 +704,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.39 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.40 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2093,6 +2093,22 @@ document.addEventListener('mousedown', (e) => {
 //             skip the echoed row). Default: return=representation on POST/PATCH.
 //   silent  — background call: don't drive the busy bar / progress cursor.
 //   headers — resolve to { rows, headers } instead of the rows alone.
+// ── Response compression (v7.9.40, Tier 3.2) ────────────────────────────────
+// Netlify does not compress function responses, so every list page and the
+// dashboard bundle used to cross the Atlantic as raw JSON. The proxy now sends
+// the gateway's gzip bytes untouched to a browser that advertises X-Focus-Gzip: 1
+// and flags them with X-Focus-Encoding: gzip (a private header — nothing on the
+// way re-encodes or strips it); the browser inflates with DecompressionStream.
+// Older browsers, and every error reply, still get plain JSON from the proxy.
+const _apiCanInflate = typeof DecompressionStream === 'function';
+async function _apiBodyText(res) {
+  if (_apiCanInflate && res.body && (res.headers.get('x-focus-encoding') || '').toLowerCase() === 'gzip') {
+    try { return await new Response(res.body.pipeThrough(new DecompressionStream('gzip'))).text(); }
+    catch (e) { throw new Error('Could not inflate the response: ' + (e && e.message)); }
+  }
+  return res.text();
+}
+
 async function api(table, method='GET', body=null, params='', opts=null) {
   const o = opts || {};
   if (MOCK) {
@@ -2114,6 +2130,9 @@ async function api(table, method='GET', body=null, params='', opts=null) {
     method,
     headers: { 'Content-Type': 'application/json', 'Prefer': prefer }
   };
+  // v7.9.40: tell the proxy this browser can inflate gzip itself — it then
+  // hands the gateway's compressed bytes straight through (see _apiBodyText).
+  if (_apiCanInflate) opts.headers['X-Focus-Gzip'] = '1';
   // Audit attribution: who is acting. Forwarded by the sb proxy to PostgREST,
   // where the audit_row_change trigger reads it (request.headers GUC).
   if (typeof currentUser !== 'undefined' && currentUser?.personId) opts.headers['X-Actor-Id'] = String(currentUser.personId);
@@ -2138,7 +2157,7 @@ async function api(table, method='GET', body=null, params='', opts=null) {
       catch (fe) { _release(); throw fe; }
       clearTimeout(timer);
       if (!res.ok) {
-        const err = await res.text();
+        const err = await _apiBodyText(res);
         _release();
         // The session gate: a signed-out or expired token gets a uniform 401 from the
         // function. Drop straight back to the sign-in screen rather than retrying.
@@ -2157,7 +2176,7 @@ async function api(table, method='GET', body=null, params='', opts=null) {
         httpErr._bugLogged = true;   // trail entry already pushed above — don't double-log in catch
         throw httpErr;
       }
-      const text = await res.text();
+      const text = await _apiBodyText(res);
       _release();
       _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
       // A successful write to a cached lookup busts it so the next read refetches.
