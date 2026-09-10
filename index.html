@@ -498,6 +498,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pg-tpl.active { border-color:var(--navy); background:#EEF2F6; }
 .pg-tpl .pg-muted, .pg-admin .pg-muted { color:var(--text3); font-size:11px; }
 .pg-clip { font-size:11px; color:var(--text2); white-space:pre-wrap; }
+.pg-history { margin-top:14px; border-top:2px solid var(--navy); padding-top:8px; }
+.pg-history-h { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--navy); margin-bottom:6px; }
+.pg-hist-row { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:5px 0; border-bottom:1px solid var(--border); font-size:12px; }
+.pg-hist-actions { display:flex; gap:4px; flex-shrink:0; }
 .pb-heading-group { margin-bottom:12px; }
 .pb-heading-bar { display:flex; align-items:center; justify-content:space-between; background:var(--navy); color:#fff; padding:5px 10px; border-radius:3px 3px 0 0; user-select:none; }
 .pb-heading-bar.ungrouped { background:#C3B091; color:#000; }
@@ -690,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -729,7 +733,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1909,6 +1913,7 @@ function _mockSeed() {
       { id: 3, name: 'view_all_opportunities' },
       { id: 4, name: 'edit_all_records' },
       { id: 5, name: 'manage_users' },
+      { id: 6, name: 'issue_proposal' },
     ],
     role_permissions: [
       // Sales: create + see all leads (own opportunities only)
@@ -1919,6 +1924,7 @@ function _mockSeed() {
       { role_id: 3, permission_id: 2 },
       { role_id: 3, permission_id: 3 },
       { role_id: 3, permission_id: 4 },
+      { role_id: 3, permission_id: 6 },
     ],
     user_roles: [
       { user_id: 1, role_id: 1 },
@@ -6173,6 +6179,11 @@ async function loadProposalBuilder() {
   root.innerHTML = '<p style="color:var(--text3);">Loading proposals…</p>';
   try {
     const quotes = await apiGet('quote_quotes', 'deal_id=eq.' + oppData.id + '&select=*&order=created_at.desc');
+    // v7.9.42: one extra read for the Proposal column, only when there are quotes; absent tables → blank column.
+    const docs = quotes.length && !_pgMissing
+      ? await apiGet('proposal_documents', 'quote_id=in.(' + quotes.map(q => q.id).join(',') + ')&status=in.(draft,issued)&select=quote_id,status,version,proposal_ref,issued_at').catch(() => [])
+      : [];
+    quotes.forEach(q => { q._pg = docs.filter(d => +d.quote_id === +q.id); });
     root.innerHTML = renderProposalBuilderList(quotes);
   } catch (e) { root.innerHTML = '<p style="color:var(--red);">Error loading proposals: ' + e.message + '</p>'; }
 }
@@ -6185,8 +6196,8 @@ function renderProposalBuilderList(quotes) {
     const [bg, fg] = (c[s] || '#F3F4F6/#374151').split('/');
     return '<span class="badge" style="background:' + bg + ';color:' + fg + ';">' + pbEsc(s) + '</span>';
   };
-  const rows = quotes.map(q => '<tr onclick="openQuote(' + q.id + ')" style="cursor:pointer;"><td style="font-weight:600;">' + pbEsc(q.contract_name) + '</td><td>' + pbEsc(q.quote_date) + '</td><td>' + pbEsc(q.contract_start_date) + '</td><td>' + pbEsc(q.contract_duration_months) + ' mo</td><td>' + pbEsc(q.margin_pct) + '%</td><td>' + sb(q.status) + '</td><td>v' + pbEsc(q.version) + '</td></tr>').join('');
-  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Contract Name</th><th>Quote Date</th><th>Start</th><th>Duration</th><th>Margin</th><th>Status</th><th>Ver</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  const rows = quotes.map(q => '<tr onclick="openQuote(' + q.id + ')" style="cursor:pointer;"><td style="font-weight:600;">' + pbEsc(q.contract_name) + '</td><td>' + pbEsc(q.quote_date) + '</td><td>' + pbEsc(q.contract_start_date) + '</td><td>' + pbEsc(q.contract_duration_months) + ' mo</td><td>' + pbEsc(q.margin_pct) + '%</td><td>' + sb(q.status) + '</td><td>v' + pbEsc(q.version) + '</td><td>' + pgListCell(q._pg || []) + '</td></tr>').join('');
+  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Contract Name</th><th>Quote Date</th><th>Start</th><th>Duration</th><th>Margin</th><th>Status</th><th>Ver</th><th>Proposal</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 async function createNewQuote() {
@@ -6213,7 +6224,7 @@ async function openQuote(id) {
     const pgP = _pgMissing ? Promise.resolve([[], [], [], []]) : Promise.all([
       apiGet('proposal_templates', 'active=eq.true&select=*&order=is_default.desc,name'),
       apiGet('proposal_template_sections', 'select=*&order=template_id,display_order,id'),
-      apiGet('proposal_documents', 'quote_id=eq.' + id + '&status=eq.draft&select=*'),
+      apiGet('proposal_documents', 'quote_id=eq.' + id + '&select=id,quote_id,template_id,snapshot_id,version,status,proposal_ref,issued_at,issued_by,valid_until,content_json,owner_id,created_at,updated_at&order=version.desc'),
       apiGet('quote_snapshots', 'quote_id=eq.' + id + '&select=id,snapshot_at,as_of_date,rate_data&order=snapshot_at.desc&limit=1'),
     ]).catch(e => { if (/^404\b|PGRST205/.test((e && e.message) || '')) _pgMissing = true; return [[], [], [], []]; });
     const catP = Promise.all([
@@ -6241,7 +6252,7 @@ async function openQuote(id) {
     if (!pbQ) return;
     allData['quote_accessories'] = cats[0];
     allData['quote_training_courses'] = cats[1];
-    pgReset({ templates: pg[0], sections: pg[1], draft: pg[2][0] || null, snapshot: pg[3][0] || null });
+    pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
     allData['quote_statutory_allowances'] = statAllow;
@@ -6381,13 +6392,19 @@ async function pbToggleChecklist(postId, kind, itemId, cb) {
 // section switched off, a paragraph rewritten) live on a single draft
 // proposal_documents row per quote, created lazily on the first edit.
 let _pgMissing = false;           // proposal_templates absent (404 / PGRST205) → tab hidden
-let pgState = { templates: [], sections: [], draft: null, snapshot: null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
+let _pgRpcMissing = false;        // rpc/issue_proposal absent (404 / PGRST202) → Issue stays disabled
+let pgState = { templates: [], sections: [], docs: [], draft: null, snapshot: null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
 function pgReset(o) {
-  pgState = { templates: o.templates || [], sections: o.sections || [], draft: o.draft || null, snapshot: o.snapshot || null,
-    templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
+  const docs = (o.docs || []).slice().sort((a, b) => b.version - a.version);
+  pgState = { templates: o.templates || [], sections: o.sections || [], docs, draft: docs.find(d => d.status === 'draft') || null,
+    snapshot: o.snapshot || null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
   const def = pgState.templates.find(t => t.is_default) || pgState.templates[0];
-  pgState.templateId = pgState.draft ? +pgState.draft.template_id : (def ? +def.id : null);
+  // A new draft after an issue starts from the issued version's template.
+  const seed = pgState.draft || pgState.docs.find(d => d.status === 'issued');
+  pgState.templateId = seed ? +seed.template_id : (def ? +def.id : null);
 }
+function pgCurrentIssued() { return pgState.docs.find(d => d.status === 'issued') || null; }
+function pgNextVersion() { return pgState.docs.reduce((m, d) => Math.max(m, +d.version || 0), 0) + 1; }
 function pgApplyDraftSections(rows) {
   pgState.overrides = {};
   (rows || []).forEach(r => { pgState.overrides[r.section_key] = { included: r.included !== false, body: r.body_override }; });
@@ -6447,8 +6464,8 @@ function pgFields(ctx, pricing) {
     'quote.start_date': pgFmtDate(q.contract_start_date),
     'quote.duration_months': String(q.contract_duration_months || ''),
     'quote.valid_until': pgFmtDate(pgValidUntil()),
-    'proposal.ref': (pgState.draft && pgState.draft.proposal_ref) || 'DRAFT',
-    'proposal.version': String((pgState.draft && pgState.draft.version) || 1),
+    'proposal.ref': pgState.issuingRef || 'DRAFT',
+    'proposal.version': String((pgState.draft && pgState.draft.version) || pgNextVersion()),
     'proposal.date': pgFmtDate(q.quote_date || new Date().toISOString().slice(0, 10)),
     'proposal.valid_until': pgFmtDate(pgValidUntil()),
     'pricing.monthly_total': pgMoney(pricing.monthly),
@@ -6633,13 +6650,15 @@ function renderProposalTab() {
   return '<style>' + PG_DOC_CSS + '</style><div class="pg-wrap">' +
     '<div class="pg-side">' +
       '<div class="pg-side-head"><label class="form-label">Template</label><select class="form-control" onchange="pgSetTemplate(+this.value)">' + tplOpts + '</select>' +
-        '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft yet — edits create one') + '</div></div>' +
+        '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft — edits create v' + pgNextVersion()) +
+          (pgCurrentIssued() ? ' · <strong>' + pbEsc(pgCurrentIssued().proposal_ref) + ' v' + pbEsc(pgCurrentIssued().version) + '</strong> issued ' + pbEsc(String(pgCurrentIssued().issued_at || '').slice(0, 10)) : '') + '</div></div>' +
       '<div class="pg-sec-list">' + list + '</div>' +
       '<div class="pg-actions">' +
         '<button class="btn btn-primary" onclick="pgPrint()">Print / Save PDF</button>' +
-        '<button class="btn btn-secondary" title="Numbering and issuing arrive with Increment 2" disabled>Issue</button>' +
+        pgIssueButton() +
         (pgState.draft ? '<button class="btn btn-ghost btn-sm" onclick="pgDiscardDraft()">Discard draft</button>' : '') +
       '</div>' +
+      pgHistoryPanel() +
     '</div>' +
     '<div class="pg-preview" id="pg-preview"><p style="color:var(--text3);padding:30px;">Rendering…</p></div>' +
   '</div>';
@@ -6650,7 +6669,9 @@ async function pgFillPreview() {
   try {
     const ctx = await pgLoadContext();
     const r = pgRenderDocument(ctx);
+    pgState.lastUnknown = r.unknown;
     el.innerHTML = (r.unknown.length ? '<div class="pg-warn">Unknown merge fields: ' + r.unknown.map(pbEsc).join(', ') + ' — fix the template text before issuing.</div>' : '') + r.html;
+    const btn = document.getElementById('pg-issue-btn'); if (btn && r.unknown.length) { btn.disabled = true; btn.title = 'Fix the unknown merge fields first'; }
   } catch (e) { el.innerHTML = '<p style="color:var(--red);padding:30px;">Could not render: ' + pbEsc(e.message) + '</p>'; }
 }
 function pgScrollTo(key) { const s = document.querySelector('#pg-preview .pg-section[data-key="' + key + '"]'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -6670,9 +6691,18 @@ async function pgSetTemplate(id) {
 // One draft row per quote, made the first time anything is customised.
 async function pgEnsureDraft() {
   if (pgState.draft) return pgState.draft;
-  const r = await apiPost('proposal_documents', { quote_id: pbQ.id, template_id: pgState.templateId, status: 'draft', version: 1,
+  const r = await apiPost('proposal_documents', { quote_id: pbQ.id, template_id: pgState.templateId, status: 'draft', version: pgNextVersion(),
     owner_id: currentUser.personId, created_by: currentUser.personId });
   pgState.draft = r[0];
+  pgState.docs.unshift(pgState.draft);
+  // v2+ starts from the wording that went out last time, not from the bare template.
+  const prev = pgCurrentIssued() || pgState.docs.find(d => d.status === 'superseded' || d.status === 'withdrawn');
+  const seedOv = prev && +prev.template_id === +pgState.templateId && prev.content_json && prev.content_json.overrides;
+  if (seedOv && Object.keys(seedOv).length && !Object.keys(pgState.overrides).length) {
+    const rows = Object.entries(seedOv).map(([k, o]) => ({ document_id: pgState.draft.id, section_key: k, included: o.included !== false, body_override: o.body == null ? null : o.body }));
+    try { await api('proposal_document_sections', 'POST', rows, '', { prefer: 'return=minimal' }); pgApplyDraftSections(rows.map(r => ({ section_key: r.section_key, included: r.included, body_override: r.body_override }))); }
+    catch (e) { /* the draft still works from the template */ }
+  }
   return pgState.draft;
 }
 async function pgUpsertSection(key, patch) {
@@ -6706,7 +6736,7 @@ async function pgRevert(key) {
 async function pgDiscardDraft() {
   if (!pgState.draft) return;
   if (!await confirmDialog({ title: 'Discard draft', message: 'Drop every customisation on this proposal and go back to the plain template?', confirmLabel: 'Discard', danger: true })) return;
-  try { await apiDelete('proposal_documents', pgState.draft.id); pgState.draft = null; pgState.overrides = {}; pgState.editing = null; }
+  try { await apiDelete('proposal_documents', pgState.draft.id); pgState.docs = pgState.docs.filter(d => d.id !== pgState.draft.id); pgState.draft = null; pgState.overrides = {}; pgState.editing = null; }
   catch (e) { showStatus('Could not discard: ' + e.message, 'error'); }
   renderQuoteEditor();
 }
@@ -6744,6 +6774,201 @@ async function pgPrint() {
     w.document.close(); w.focus();
     setTimeout(() => { try { w.print(); } catch (e) {} }, 300);
   } catch (e) { showStatus('Could not print: ' + e.message, 'error'); }
+}
+
+// ── Increment 2 (v7.9.42): issue, number, version, ledger ───────────────
+// Issuing is one database transaction (rpc/issue_proposal, sql/proposal_
+// generator_inc2.sql): the draft gets its number and frozen content, earlier
+// issued versions become superseded, the quote flips to 'sent'. The client
+// then writes the ledger the rest of Focus reads: a client-facing engagement
+// on the deal and, with the user's say-so, the move to the Proposal stage.
+function pgIssueBlockers() {
+  const why = [];
+  if (pbQ.is_sandbox) why.push('sandbox quotes cannot be issued');
+  if (!can('issue_proposal')) why.push('you do not have the issue_proposal permission');
+  if (_pgRpcMissing) why.push('sql/proposal_generator_inc2.sql is not installed on this database');
+  if (!pgState.snapshot) why.push('the quote has no calculation snapshot yet');
+  if ((pgState.lastUnknown || []).length) why.push('the text still has unknown merge fields');
+  const secs = pgSections();
+  secs.filter(s => s.mandatory && s.kind !== 'generated' && !(s.body_effective || '').trim()).forEach(s => why.push('"' + s.title + '" is empty'));
+  if (secs.some(s => s.kind === 'prompt' && s.included && !s.customised)) why.push('rewrite the "write" sections — they still show the template prompt');
+  return why;
+}
+function pgIssueButton() {
+  const why = pgIssueBlockers();
+  const v = pgState.draft ? pgState.draft.version : pgNextVersion();
+  return '<button class="btn btn-secondary" id="pg-issue-btn" ' + (why.length ? 'disabled title="Cannot issue: ' + pbEsc(why.join('; ')) + '"' : 'title="Number this proposal and freeze it"') +
+    ' onclick="pgIssue()">Issue v' + v + '</button>';
+}
+// What an issued version keeps: the resolved merge values, every section as
+// it printed (title, text, included), the overrides to seed the next draft,
+// and the pricing rows — enough to re-read it without templates or rates.
+function pgBuildContent(ctx, rendered) {
+  const f = pgFields(ctx, rendered.pricing);
+  return {
+    fields: f,
+    template_id: pgState.templateId,
+    sections: pgSections().map(s => ({ key: s.section_key, title: s.title, kind: s.kind, included: s.included, body: s.kind === 'generated' ? null : s.body_effective })),
+    overrides: pgState.overrides,
+    pricing: rendered.pricing,
+    snapshot_id: pgState.snapshot ? pgState.snapshot.id : null,
+    contact_person_id: ctx.contact ? ctx.contact.personId : null,
+    issued_from_version: pgState.draft ? pgState.draft.version : pgNextVersion(),
+  };
+}
+async function pgIssue() {
+  const why = pgIssueBlockers();
+  if (why.length) { showStatus('Cannot issue: ' + why[0], 'error'); return; }
+  const v = pgState.draft ? pgState.draft.version : pgNextVersion();
+  const prev = pgCurrentIssued();
+  const ok = await confirmDialog({ title: 'Issue proposal v' + v,
+    message: 'This numbers the proposal, freezes its text and figures, and marks the quote as sent.' +
+      (prev ? ' The current issued version ' + pbEsc(prev.proposal_ref) + ' v' + prev.version + ' becomes superseded.' : '') +
+      ' A Proposal engagement is logged on the deal.', confirmLabel: 'Issue' });
+  if (!ok) return;
+  try {
+    const d = await pgEnsureDraft();
+    const ctx = await pgLoadContext();
+    // Render once with the number placeholder, once more after the number is known: the
+    // frozen HTML must carry the real reference, which only the transaction can assign.
+    const first = pgRenderDocument(ctx);
+    const content = pgBuildContent(ctx, first);
+    let row;
+    if (MOCK) row = pgMockIssue(d.id, content, first.html);
+    else {
+      const r = await api('rpc/issue_proposal', 'POST', { p_document_id: d.id, p_actor_id: currentUser.personId, p_content: content, p_html: first.html }, '', { prefer: '' })
+        .catch(e => { if (/^404\b|PGRST202/.test((e && e.message) || '')) { _pgRpcMissing = true; throw new Error('sql/proposal_generator_inc2.sql is not installed on this database'); } throw e; });
+      row = Array.isArray(r) ? r[0] : r;
+    }
+    if (!row) throw new Error('No row returned');
+    // Re-render with the assigned number and store the final HTML on the row (one PATCH).
+    pgState.issuingRef = row.proposal_ref;
+    const final = pgRenderDocument(ctx);
+    pgState.issuingRef = null;
+    content.fields = pgFields(ctx, final.pricing);
+    try { await api('proposal_documents', 'PATCH', { rendered_html: final.html.replace('data-watermark="DRAFT"', 'data-watermark=""'), content_json: content }, 'id=eq.' + row.id, { prefer: 'return=minimal' }); } catch (e) {}
+    // Splice into memory: the issued row, the superseded one, the quote.
+    pgState.docs = pgState.docs.map(x => x.id === row.id ? Object.assign({}, x, row, { content_json: content }) : (x.status === 'issued' ? Object.assign({}, x, { status: 'superseded' }) : x));
+    pgState.draft = null; pgState.overrides = {}; pgState.editing = null;
+    pbQ.status = 'sent'; pbQ.valid_until = row.valid_until;
+    showStatus('Issued ' + row.proposal_ref + ' v' + row.version, 'success');
+    renderQuoteEditor();
+    await pgLedgerAfterIssue(row, ctx);
+  } catch (e) { showStatus('Could not issue: ' + e.message, 'error'); renderQuoteEditor(); }
+}
+// The ledger: an engagement on the deal (client-facing — a proposal IS contact,
+// so Last Touch moves) and the offer to advance to the Proposal stage.
+async function pgLedgerAfterIssue(row, ctx) {
+  if (!pbQ.deal_id) return;
+  try {
+    if (!allData['_activity_types_opps']) allData['_activity_types_opps'] = await apiGet('activity_types', 'applies_to_opportunities=eq.true&select=*');
+    const types = allData['_activity_types_opps'] || [];
+    const type = types.find(t => /proposal/i.test(t.name || '')) || null;
+    const notes = 'Proposal ' + row.proposal_ref + ' v' + row.version + ' issued — ' + (pbQ.contract_name || '') +
+      (row.valid_until ? '; valid until ' + row.valid_until : '') + '. Monthly ' + pgMoney((row.content_json || {}).pricing ? row.content_json.pricing.monthly : 0) + ' excl. VAT.';
+    const eng = await api('engagements', 'POST', {
+      deal_id: pbQ.deal_id, engagement_date: new Date().toISOString().slice(0, 10),
+      engagement_type: type ? type.name : 'Proposal Submitted', activity_type_id: type ? +type.id : null,
+      notes, next_action: null, next_action_done: true, created_by: currentUser.personId,
+    }, 'select=id');
+    const engId = eng && eng[0] ? eng[0].id : null;
+    if (engId) {
+      try { await api('engagements', 'PATCH', { stream_label: 'Sales' }, 'id=eq.' + engId, { prefer: 'return=minimal' }); } catch (e) {}
+      if (ctx.contact && ctx.contact.personId) { try { await api('engagement_people', 'POST', { engagement_id: engId, person_id: ctx.contact.personId }, '', { prefer: 'return=minimal' }); } catch (e) {} }
+    }
+    if (oppData && +oppData.id === +pbQ.deal_id) { try { await loadEngagements(pbQ.deal_id); } catch (e) {} }
+  } catch (e) { showStatus('Issued, but the engagement could not be logged: ' + e.message, 'error'); }
+  await pgOfferStageMove();
+}
+async function pgOfferStageMove() {
+  try {
+    const stages = allData['stages'] || await apiGet('stages', 'active=eq.true&select=*&order=sort_order.asc');
+    allData['stages'] = stages;
+    const proposal = stages.find(s => /^proposal$/i.test(s.name || ''));
+    if (!proposal) return;
+    const dealRows = (oppData && +oppData.id === +pbQ.deal_id) ? [oppData] : await apiGet('deals', 'id=eq.' + pbQ.deal_id + '&select=id,stage_id');
+    const deal = dealRows[0]; if (!deal) return;
+    const cur = stages.find(s => +s.id === +deal.stage_id);
+    if (!cur || +cur.sort_order >= +proposal.sort_order) return;   // never backwards, never a no-op
+    const ok = await confirmDialog({ title: 'Move to Proposal stage?', message: 'The deal is at ' + pbEsc(cur.name) + '. Move it to Proposal now that ' + 'a proposal is out?', confirmLabel: 'Move to Proposal' });
+    if (!ok) return;
+    await api('deals', 'PATCH', { stage_id: proposal.id }, 'id=eq.' + pbQ.deal_id, { prefer: 'return=minimal' });
+    if (oppData && +oppData.id === +pbQ.deal_id) {
+      oppData.stage_id = proposal.id;
+      if (typeof _oppAsOpened === 'object' && _oppAsOpened) _oppAsOpened.stage_id = proposal.id;
+      const sel = document.getElementById('opp-stage-id'); if (sel) { sel.value = proposal.id; try { onOppStageChange(false); } catch (e) {} }
+    }
+    showStatus('Deal moved to Proposal', 'success');
+  } catch (e) { showStatus('Stage not changed: ' + e.message, 'error'); }
+}
+async function pgWithdraw(id) {
+  const d = pgState.docs.find(x => x.id === id); if (!d) return;
+  if (!await confirmDialog({ title: 'Withdraw ' + d.proposal_ref, message: 'Withdraw this issued proposal? It keeps its number and stays readable; the quote returns to draft.', confirmLabel: 'Withdraw', danger: true })) return;
+  try {
+    let row;
+    if (MOCK) row = pgMockWithdraw(id);
+    else { const r = await api('rpc/withdraw_proposal', 'POST', { p_document_id: id, p_actor_id: currentUser.personId }, '', { prefer: '' }); row = Array.isArray(r) ? r[0] : r; }
+    pgState.docs = pgState.docs.map(x => x.id === id ? Object.assign({}, x, row) : x);
+    if (pbQ.status === 'sent') pbQ.status = 'draft';
+    try {
+      await api('engagements', 'POST', { deal_id: pbQ.deal_id, engagement_date: new Date().toISOString().slice(0, 10), engagement_type: 'Proposal withdrawn', notes: 'Proposal ' + d.proposal_ref + ' v' + d.version + ' withdrawn — ' + (pbQ.contract_name || ''), next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
+    } catch (e) {}
+    showStatus('Withdrawn ' + d.proposal_ref, 'success');
+  } catch (e) { showStatus('Could not withdraw: ' + e.message, 'error'); }
+  renderQuoteEditor();
+}
+// Issued versions: read the frozen HTML (fetched on demand — the list load leaves it out).
+async function pgOpenIssued(id, print) {
+  try {
+    const rows = await apiGet('proposal_documents', 'id=eq.' + id + '&select=rendered_html,proposal_ref,version');
+    const d = rows[0]; if (!d || !d.rendered_html) { showStatus('No frozen document on this version', 'error'); return; }
+    const w = window.open('', '_blank');
+    if (!w) { showStatus('Pop-up blocked — allow pop-ups for Focus', 'error'); return; }
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + pbEsc(d.proposal_ref) + ' v' + pbEsc(d.version) + '</title><style>body{margin:0;background:#fff;}' + PG_DOC_CSS + '</style></head><body>' + d.rendered_html + '</body></html>');
+    w.document.close(); w.focus();
+    if (print) setTimeout(() => { try { w.print(); } catch (e) {} }, 300);
+  } catch (e) { showStatus('Could not open: ' + e.message, 'error'); }
+}
+function pgHistoryPanel() {
+  const hist = pgState.docs.filter(d => d.status !== 'draft');
+  if (!hist.length) return '';
+  const badge = st => ({ issued: '#DCFCE7/#166534', superseded: '#F3F4F6/#6B7280', withdrawn: '#FEE2E2/#7F1D1D' }[st] || '#F3F4F6/#374151').split('/');
+  return '<div class="pg-history"><div class="pg-history-h">Issued versions</div>' + hist.map(d => {
+    const [bg, fg] = badge(d.status);
+    return '<div class="pg-hist-row"><div><strong>' + pbEsc(d.proposal_ref || '') + '</strong> v' + pbEsc(d.version) +
+      ' <span class="badge" style="background:' + bg + ';color:' + fg + ';">' + pbEsc(d.status) + '</span>' +
+      '<div class="pg-muted">' + pbEsc(String(d.issued_at || '').slice(0, 10)) + (d.valid_until ? ' · valid to ' + pbEsc(d.valid_until) : '') + '</div></div>' +
+      '<div class="pg-hist-actions"><button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', false)">View</button><button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', true)">Print</button>' +
+      (d.status === 'issued' && can('issue_proposal') ? '<button class="pb-btn xs danger" onclick="pgWithdraw(' + d.id + ')">Withdraw</button>' : '') + '</div></div>';
+  }).join('') + '</div>';
+}
+function pgListCell(docs) {
+  const issued = docs.find(d => d.status === 'issued'), draft = docs.find(d => d.status === 'draft');
+  if (!issued && !draft) return '<span style="color:var(--text3);">—</span>';
+  return (issued ? '<strong>' + pbEsc(issued.proposal_ref) + '</strong> v' + pbEsc(issued.version) + ' · issued ' + pbEsc(String(issued.issued_at || '').slice(0, 10)) : '') +
+    (draft ? (issued ? '<br>' : '') + '<span style="color:var(--text3);">draft v' + pbEsc(draft.version) + '</span>' : '');
+}
+// Mock mode: the same state changes the SQL transaction makes, in the local store.
+function pgMockIssue(docId, content, html) {
+  const db = _mockStore();
+  const docs = db.proposal_documents || (db.proposal_documents = []);
+  const d = docs.find(x => +x.id === +docId); if (!d) throw new Error('draft not found');
+  if (!can('issue_proposal')) throw new Error('You do not have permission to issue proposals');
+  db._proposal_ref_seq = (db._proposal_ref_seq || 0) + 1;
+  docs.forEach(x => { if (+x.quote_id === +d.quote_id && x.status === 'issued') x.status = 'superseded'; });
+  Object.assign(d, { status: 'issued', proposal_ref: 'P-' + new Date().getFullYear() + '-' + String(db._proposal_ref_seq).padStart(4, '0'),
+    issued_at: new Date().toISOString(), issued_by: currentUser.personId, valid_until: pgValidUntil(), content_json: content, rendered_html: html, updated_at: new Date().toISOString() });
+  const q = (db.quote_quotes || []).find(x => +x.id === +d.quote_id); if (q) { q.status = 'sent'; q.valid_until = d.valid_until; }
+  _mockPersist();
+  return JSON.parse(JSON.stringify(d));
+}
+function pgMockWithdraw(docId) {
+  const db = _mockStore();
+  const d = (db.proposal_documents || []).find(x => +x.id === +docId); if (!d) throw new Error('not found');
+  d.status = 'withdrawn'; d.updated_at = new Date().toISOString();
+  const q = (db.quote_quotes || []).find(x => +x.id === +d.quote_id); if (q && q.status === 'sent') q.status = 'draft';
+  _mockPersist();
+  return JSON.parse(JSON.stringify(d));
 }
 
 // ── Admin → Proposal Builder → Proposal Templates ───────────────────────
