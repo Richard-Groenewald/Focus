@@ -6,7 +6,7 @@ This file is read by Claude Code at the start of every session. It is the source
 
 Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (Pty) Ltd**, a South African integrated security solutions company. Used by sales and management to track opportunities, contracts, leads, and engagements across mining, hospitality, residential estates, and FMCG sectors.
 
-- **Current version:** v7.9.36 (performance Tier 0: single dashboard render at login, embedded user-context read, parallel loaders for deal/lead/quote, one-call revenue-month upsert, client-only tab clicks, logos moved out of the HTML, minified deploy via `build.js`; see `docs/perf-review/`; as of 9 September 2026)
+- **Current version:** v7.9.37 (performance Tier 1 client wiring: `sweep_leads()` / `heartbeat()` RPCs with fallbacks, stream label in the engagement insert; SQL in `sql/perf_tier1_*.sql`. v7.9.36 was Tier 0: single dashboard render at login, embedded user-context read, parallel loaders for deal/lead/quote, one-call revenue-month upsert, client-only tab clicks, logos moved out of the HTML, minified deploy via `build.js`; see `docs/perf-review/`; as of 9 September 2026)
 
 ## Performance conventions (v7.9.36)
 
@@ -15,7 +15,8 @@ Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (
 - A write already returns the row (`Prefer: return=representation`): splice it into memory and re-render, do not re-download the table. `reloadLeadAfterServerChange(row)` takes the PATCHed row.
 - Tab, scope and layout clicks must be client-only (`renderLeadsPage({ reuse: true })`, `_dashApplyOrderToDom`).
 - Netlify publishes `dist/` built by `node build.js` (esbuild-minified inline script). `index.html` remains the only source file; do not edit `dist/`.
-- The ranked proposals for the remaining tiers (indexes, triggers, views/RPCs, topology, rendering) are in `docs/perf-review/PERFORMANCE_REVIEW.md`.
+- Tier 1 SQL lives in `sql/perf_tier1_indexes.sql`, `perf_tier1_triggers.sql`, `perf_tier1_audit_statement_level.sql`, `perf_tier1_sweeps_heartbeat.sql` (run in that order, Dev first). The client detects a missing `rpc/sweep_leads` / `rpc/heartbeat` (404) and falls back to the old per-row path, so code and SQL can ship independently.
+- The ranked proposals for the remaining tiers (views/RPCs, topology, rendering) are in `docs/perf-review/PERFORMANCE_REVIEW.md`.
 - **Tagline:** Lead by Example
 - **Font:** Arial
 - **Brand colours:**

@@ -665,7 +665,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -704,7 +704,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1595,6 +1595,7 @@ const BCAST_POLL_MS = 5 * 60 * 1000;
 const BCAST_ACTIVE_MIN = 12;  // "active" = heartbeat within the last N minutes (> two polls)
 const BCAST_MIN_GAP_MS = 60 * 1000;   // refocus bursts never beat more often than this
 let _bcastLastTick = 0;
+let _heartbeatRpcMissing = false;   // set when rpc/heartbeat answers 404 (function not installed)
 function _bcastDismissedKey() { return 'focus_bcast_dismissed_' + (currentUser?.personId || 'anon'); }
 function _bcastDismissed() {
   try { const a = JSON.parse(localStorage.getItem(_bcastDismissedKey()) || '[]'); return Array.isArray(a) ? a : []; }
@@ -1615,20 +1616,35 @@ async function broadcastTick(force) {
   if (!force && Date.now() - _bcastLastTick < BCAST_MIN_GAP_MS) return;
   _bcastLastTick = Date.now();
   const quiet = { silent: true };   // background traffic never drives the busy bar
-  // Presence heartbeat — upsert: PATCH the person's row, POST when it's new.
-  const beatP = (async () => {
+  // v7.9.37: heartbeat() (sql/perf_tier1_sweeps_heartbeat.sql) upserts presence
+  // and returns the live broadcasts in ONE call. Where the function is absent
+  // (404 / PGRST202) the previous PATCH (+POST) + GET path runs instead.
+  let live = null;
+  if (!MOCK && !_heartbeatRpcMissing) {
     try {
-      const beat = { last_seen_at: new Date().toISOString(), app_version: _bcastAppVersion() };
-      const r = await api('user_presence', 'PATCH', beat, 'person_id=eq.' + currentUser.personId + '&select=person_id', quiet);
-      if (!r || !r.length) await api('user_presence', 'POST', Object.assign({ person_id: currentUser.personId }, beat), '', quiet);
-    } catch (e) { /* pre-migration DB or offline — stay quiet */ }
-  })();
+      live = await api('rpc/heartbeat', 'POST', { p_person_id: currentUser.personId, p_version: _bcastAppVersion() }, '', { silent: true, prefer: '' });
+      if (!Array.isArray(live)) live = null;
+    } catch (e) {
+      if (/^404\b|PGRST202/.test((e && e.message) || '')) _heartbeatRpcMissing = true;
+      live = null;
+    }
+  }
   // Live broadcasts → stacked banners (dismissed ids remembered per browser).
   try {
-    const liveP = api('broadcasts', 'GET', null,
-      'ended_at=is.null&expires_at=gt.' + encodeURIComponent(new Date().toISOString()) + '&select=*&order=created_at.desc', quiet);
-    await beatP;
-    const live = await liveP;
+    if (live == null) {
+      // Presence heartbeat — upsert: PATCH the person's row, POST when it's new.
+      const beatP = (async () => {
+        try {
+          const beat = { last_seen_at: new Date().toISOString(), app_version: _bcastAppVersion() };
+          const r = await api('user_presence', 'PATCH', beat, 'person_id=eq.' + currentUser.personId + '&select=person_id', quiet);
+          if (!r || !r.length) await api('user_presence', 'POST', Object.assign({ person_id: currentUser.personId }, beat), '', quiet);
+        } catch (e) { /* pre-migration DB or offline — stay quiet */ }
+      })();
+      const liveP = api('broadcasts', 'GET', null,
+        'ended_at=is.null&expires_at=gt.' + encodeURIComponent(new Date().toISOString()) + '&select=*&order=created_at.desc', quiet);
+      await beatP;
+      live = await liveP;
+    }
     const seen = _bcastDismissed();
     const wanted = (live || []).filter(b => !seen.includes(+b.id));
     let wrap = document.getElementById('bcast-wrap');
@@ -11413,7 +11429,7 @@ async function doLogin() {
 // Two tables stay writable: the presence heartbeat (or they would look offline
 // to everyone else) and bug reports (a viewer who spots a problem should still
 // be able to say so).
-const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports'];
+const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat'];   // rpc: system jobs, not user data entry
 
 function isReadOnlyUser() {
   if (typeof currentUser === 'undefined' || !currentUser) return false;
@@ -12389,9 +12405,10 @@ function agingDaysFor(personId, kind) {
 // New/Working past its owner's threshold. Returns items UNSCOPED, worst
 // first; each surface applies its own scope rule.
 async function _attentionLeadItems() {
+  const sweepP = startLeadSweep({ wakeOnly: true });   // overlaps the read (v7.9.37)
   const leads = await apiGet('leads',
     'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,target_org_id,description,site_id,site_name,next_action_date,sites(name)');
-  await sweepHoldWake(leads);   // wake due leads now, so their reminders show immediately
+  await applyLeadSweeps(leads, sweepP, { wakeOnly: true });   // wake due leads now, so their reminders show immediately
   const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
   // Soothing (v7.9.07): a group touch quiets the aging nags too. Orgs may not be
   // cached on the dashboard — use a SLIM local list, never written to allData
@@ -14993,6 +15010,7 @@ async function renderLeadsPage(opts) {
       // Client-only re-render: the rows are already in memory — no network, no sweeps.
       ({ leads, sources, regions, services, people, orgs, campaigns, sites, sectors } = _leadsPageData);
     } else {
+    const sweepP = startLeadSweep();   // server-side sweeps overlap the reads (v7.9.37)
     // Load lookups + leads in parallel
     [leads, sources, regions, services, people, orgs, campaigns, sites, sectors] = await Promise.all([
       apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
@@ -15020,8 +15038,7 @@ async function renderLeadsPage(opts) {
 
     // App-layer sweeps: flip eligible New leads to Working, and wake held leads
     // whose wake date has arrived (replaces the retired DB status triggers).
-    leads = await sweepNewToWorking(leads);
-    leads = await sweepHoldWake(leads);
+    leads = await applyLeadSweeps(leads, sweepP);
     _leadsPageData = { leads, sources, regions, services, people, orgs, campaigns, sites, sectors };
     }
 
@@ -15837,6 +15854,7 @@ async function renderResearchCampaignCockpit() {
 
   try {
     const cid = cockpitCampaignId;
+    const sweepP = startLeadSweep();   // server-side sweeps overlap the reads (v7.9.37)
     const [campArr, regions, services, people, sources, targets, leads, steps, orgs] = await Promise.all([
       apiGet('research_campaigns', 'id=eq.' + cid + '&select=*'),
       allData['regions']       || apiGet('regions', 'select=*'),
@@ -15861,8 +15879,7 @@ async function renderResearchCampaignCockpit() {
     // Apply the same New→Working classification the Leads page runs, so a promoted
     // lead that has met its Working prerequisites shows as Working here too — even
     // while its edit-grace countdown is still running. Wake sweep rides along.
-    await sweepNewToWorking(leads);
-    await sweepHoldWake(leads);
+    await applyLeadSweeps(leads, sweepP);
 
     // Cadence progress needs each worked lead's interaction history.
     let interactions = [];
@@ -23768,6 +23785,38 @@ async function recomputeOpenLeadStatus() {
 // owner + sales manager until dismissed or re-engaged). The engine derives the
 // landing stage: Working normally, Qualified if the lead was parked all-green.
 // Runs on leads-list load and dashboard render (same pattern as sweepNewToWorking).
+// ── Server-side lead sweeps (v7.9.37) ────────────────────────────────────────
+// sweep_leads() (sql/perf_tier1_sweeps_heartbeat.sql) does the New→Working flip
+// and the Hold wake as two set-based statements, replacing one PATCH per lead
+// per page load. startLeadSweep() fires it so it overlaps the page's own reads;
+// applyLeadSweeps() patches the returned rows into the list. Where the function
+// is absent (404 / PGRST202) or in mock mode, the client sweeps below still run.
+let _sweepRpcMissing = false;
+function startLeadSweep(opts) {
+  if (MOCK || _sweepRpcMissing) return null;
+  const flip = !(opts && opts.wakeOnly);
+  return api('rpc/sweep_leads', 'POST', { p_flip: flip }, '', { prefer: '' }).catch(e => {
+    if (/^404\b|PGRST202/.test((e && e.message) || '')) _sweepRpcMissing = true;
+    else console.warn('sweep_leads failed — using the client sweeps:', e && e.message);
+    return null;
+  });
+}
+async function applyLeadSweeps(leads, sweepP, opts) {
+  const flip = !(opts && opts.wakeOnly);
+  const r = sweepP ? await sweepP : null;
+  if (r && typeof r === 'object' && !Array.isArray(r)) {
+    const byId = new Map((leads || []).map(l => [+l.id, l]));
+    const flipped = [];
+    (r.woke || []).forEach(u => { const l = byId.get(+u.id); if (l) Object.assign(l, u); });
+    (r.working || []).forEach(u => { const l = byId.get(+u.id); if (l) { Object.assign(l, u); flipped.push(l); } });
+    // one member up = the group up (v7.9.11, best-effort) — as sweepNewToWorking does
+    flipped.forEach(l => { try { applyGroupStageCohesion(l, 'Working'); } catch (e) {} });
+    return leads;
+  }
+  if (flip) leads = await sweepNewToWorking(leads);
+  return sweepHoldWake(leads);
+}
+
 async function sweepHoldWake(leads) {
   const today = new Date().toISOString().slice(0, 10);
   const due = (leads || []).filter(l =>
@@ -26537,6 +26586,11 @@ async function saveLeadInteraction(editId) {
     const sst = (!editId && window._liStream) ? window._liStream : null;
     const contStream = (sst && sst.mode === 'continue')
       ? (sst.streams.find(s => s.rootId === sst.selectedRoot) || null) : null;
+    // A NEW stream's label rides in the INSERT (v7.9.37). With the
+    // engagements_default_stream trigger installed the row comes back with
+    // stream_id = id and no second write is needed.
+    const newStreamLabel = (sst && !contStream) ? ((sst.label || '').trim() || _liAutoStreamLabel()) : null;
+    let inserted = null;
     if (editId) {
       await api('engagements', 'PATCH', payload, 'id=eq.' + editId);
       showStatus('Engagement updated');
@@ -26560,9 +26614,11 @@ async function saveLeadInteraction(editId) {
       const res = await api('engagements', 'POST', {
         ...payload,
         ...target,
+        ...(newStreamLabel ? { stream_label: newStreamLabel } : {}),
         created_by: currentUser?.personId || null,
       }, 'select=*');
       engId = res && res[0] ? res[0].id : null;
+      inserted = res && res[0] ? res[0] : null;
       window._liRelatedTo = null;
       showStatus('Engagement logged');
     }
@@ -26589,10 +26645,11 @@ async function saveLeadInteraction(editId) {
             }, 'id=eq.' + contStream.open.engId));
           }
           await Promise.all(ops);
-        } else {
+        } else if (!(inserted && inserted.stream_id)) {
+          // No engagements_default_stream trigger on this database: root the stream by hand.
           await api('engagements', 'PATCH', {
             stream_id: engId,
-            stream_label: (sst.label || '').trim() || _liAutoStreamLabel(),
+            stream_label: newStreamLabel || (sst.label || '').trim() || _liAutoStreamLabel(),
           }, 'id=eq.' + engId);
         }
       } catch (e) { console.warn('Stream bookkeeping failed:', e.message); }
