@@ -283,14 +283,21 @@ exports.handler = async (event) => {
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
-  // Compression (v7.9.38, Tier 3.2): until now every body travelled as raw JSON
-  // on BOTH legs — PostgREST → this function → browser — so a 500 KB list page
-  // crossed two continents uncompressed. Ask the gateway for gzip and hand the
-  // compressed bytes straight to the browser. system_users stays plain because
-  // scrubCredentials rewrites its body. SB_GZIP=0 in the Netlify environment
-  // switches the whole thing off without a deploy.
-  const wantGzip = process.env.SB_GZIP !== '0' && !isSystemUsers;
-  const clientTakesGzip = event.headers['accept-encoding'] == null || /\bgzip\b/i.test(event.headers['accept-encoding']);
+  // Compression (Tier 3.2). Every body used to travel as raw JSON on BOTH legs —
+  // PostgREST → this function → browser. SB_GZIP in the Netlify environment:
+  //   unset / '0'    off: plain JSON on both legs (the v7.9.37 behaviour). DEFAULT.
+  //   '1'            ask the gateway for gzip and inflate HERE: the cross-Atlantic
+  //                  leg shrinks 5–10×; the browser still gets plain JSON.
+  //   'passthrough'  also hand the compressed bytes to the browser untouched
+  //                  (isBase64Encoded + Content-Encoding). v7.9.38 shipped this as
+  //                  the default and the Dev site crawled (2026-09-10): reads
+  //                  failed in the browser and the client retried each one, so it
+  //                  stays opt-in until proven in devtools on Dev.
+  // system_users always stays plain because scrubCredentials rewrites its body.
+  const gzMode = String(process.env.SB_GZIP || '0').toLowerCase();
+  const wantGzip = (gzMode === '1' || gzMode === 'passthrough') && !isSystemUsers;
+  const passThrough = gzMode === 'passthrough'
+    && (event.headers['accept-encoding'] == null || /\bgzip\b/i.test(event.headers['accept-encoding']));
   return new Promise(resolve => {
     const doReq = (attempt) => {
       const req = https.request({
@@ -320,11 +327,10 @@ exports.handler = async (event) => {
             'Content-Type': 'application/json', ...CORS,
             ...(res.headers['content-range'] ? { 'Content-Range': res.headers['content-range'] } : {}),
           };
-          // Compressed bytes go through untouched (base64 is how a Lambda-style
-          // function returns binary; fetch() in the browser inflates them). Only
-          // inflate here when the body must be rewritten or the client cannot
-          // take gzip.
-          if (gz && wantGzip && clientTakesGzip) {
+          // passthrough mode only: compressed bytes go through untouched (base64
+          // is how a Lambda-style function returns binary). Otherwise inflate here
+          // and answer with plain JSON exactly as before.
+          if (gz && wantGzip && passThrough) {
             return resolve({
               statusCode: res.statusCode,
               headers: { ...headers, 'Content-Encoding': 'gzip', 'Vary': 'Accept-Encoding' },
