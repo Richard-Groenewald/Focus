@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.43 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -733,7 +733,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.43 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2051,6 +2051,8 @@ function _mockSeed() {
       ['contract_manager_site_seniors','Contract Manager/Site Seniors'],['dog_handler','Dog Handler'],['regulation_21','Regulation 21'],['fire_fighting','Fire Fighting'],['specialised_training','Specialised Training'],
       ['armed_response_officers','Armed Response Officers'],['snake_handling','Snake Handling'],['first_aid_1_3','First Aid 1-3']
     ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, created_at: now })),
+    quote_accessory_costs: [],
+    quote_training_costs: [],
     quote_post_accessories: [],
     quote_post_training: [],
     proposal_templates: [
@@ -3697,8 +3699,8 @@ async function loadTable(page) {
     if (page === 'pb_human_resources')        { await renderPbHumanResourcesPage(); return; }
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
     if (page === 'pb_standard_headings')      { await renderPbCatalogPage('quote_standard_heading_names', 'Standard Headings');  return; }
-    if (page === 'pb_accessories')            { await renderPbCatalogPage('quote_accessories',            'Accessories');        return; }
-    if (page === 'pb_training_courses')       { await renderPbCatalogPage('quote_training_courses',       'Training Courses');   return; }
+    if (page === 'pb_accessories')            { await renderPbItemCatalogPage('accessory'); return; }
+    if (page === 'pb_training_courses')       { await renderPbItemCatalogPage('training');  return; }
     if (page === 'pb_proposal_templates')     { await renderPgTemplatesPage(); return; }
     if (page === 'pb_regions')                { await renderPbPlaceholderPage('Regions');                 return; }
     if (page === 'pb_system_settings')        { await renderPbPlaceholderPage('System Settings');         return; }
@@ -6230,7 +6232,9 @@ async function openQuote(id) {
     const catP = Promise.all([
       apiGet('quote_accessories', 'select=*&order=display_order,id'),
       apiGet('quote_training_courses', 'select=*&order=display_order,id'),
-    ]).catch(() => [[], []]);
+      apiGet('quote_accessory_costs', 'select=*').catch(() => []),      // v7.9.43: dated costs (absent table → none)
+      apiGet('quote_training_costs', 'select=*').catch(() => []),
+    ]).catch(() => [[], [], [], []]);
     const [qRows, posts, grades, areas, statAllow, discAllow, discInc, rules, postNames, headingNames, pg, cats] = await Promise.all([
       apiGet('quote_quotes', 'id=eq.' + id + '&select=*'),
       apiGet('quote_posts', 'quote_id=eq.' + id + '&select=*&order=display_order,id'),
@@ -6252,6 +6256,8 @@ async function openQuote(id) {
     if (!pbQ) return;
     allData['quote_accessories'] = cats[0];
     allData['quote_training_courses'] = cats[1];
+    allData['quote_accessory_costs'] = cats[2];
+    allData['quote_training_costs'] = cats[3];
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
@@ -6342,23 +6348,180 @@ function renderQuoteEditorTabContent() {
   }
 }
 
+// ── Accessories / Training Courses: dated items with a cost history (v7.9.43) ──
+// sql/proposal_generator_item_costs.sql. An item has a window (in_use_date ..
+// retired_date, inclusive, NULL = open) and cost rows, one per price change,
+// effective-dated like the rate cards. pbItemCurrentCost picks the newest row
+// that has arrived as at a date; nothing is ever edited in place.
+const PB_ITEM_KINDS = {
+  accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'unit_cost', title: 'Accessories', one: 'accessory',
+    bases: { once_off_per_officer: 'once-off per officer', once_off_per_post: 'once-off per post', monthly_per_officer: 'monthly per officer', monthly_per_post: 'monthly per post' } },
+  training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', title: 'Training Courses', one: 'training course' }
+};
+function pbItemInWindow(item, asAt) {
+  if (item.active === false) return false;
+  if (item.in_use_date && String(item.in_use_date) > asAt) return false;
+  if (item.retired_date && String(item.retired_date) < asAt) return false;
+  return true;
+}
+function pbItemCurrentCost(costs, fk, itemId, asAt) {
+  let best = null;
+  (costs || []).forEach(c => {
+    if (+c[fk] !== +itemId) return;
+    if (String(c.effective_date) > asAt) return;
+    if (!best || String(c.effective_date) > String(best.effective_date)) best = c;
+  });
+  return best;
+}
+function pbItemCostLabel(kind, c) {
+  if (!c) return '';
+  const k = PB_ITEM_KINDS[kind];
+  const amt = 'R ' + (+c[k.amount]).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/,/g, ' ');
+  return kind === 'accessory' ? amt + ' ' + (k.bases[c.cost_basis] || '') : amt + ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : '');
+}
+function pbSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || ('item_' + Date.now()); }
+
+let pbItemAdmin = { kind: null, open: null, editing: null, addingCost: false };
+async function renderPbItemCatalogPage(kind) {
+  const k = PB_ITEM_KINDS[kind];
+  pbActiveSchema = null; pbEditingRowId = null;
+  if (pbItemAdmin.kind !== kind) pbItemAdmin = { kind, open: null, editing: null, addingCost: false };
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  let items = [], costs = [], costsMissing = false;
+  try {
+    [items, costs] = await Promise.all([
+      apiGet(k.table, 'select=*&order=display_order,id'),
+      apiGet(k.costTable, 'select=*&order=effective_date.desc,id.desc').catch(e => { costsMissing = true; return []; }),
+    ]);
+  } catch (e) { body.innerHTML = '<tr><td style="padding:30px;color:var(--red);">' + pbEsc(e.message) + '</td></tr>'; return; }
+  allData[k.table] = items; allData[k.costTable] = costs;
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('page-sub').textContent = k.title + ' · ' + items.length + ' item' + (items.length === 1 ? '' : 's') + (costsMissing ? ' · cost history not installed (sql/proposal_generator_item_costs.sql)' : '');
+  const rows = items.map(it => {
+    const ed = pbItemAdmin.editing === it.id, open = pbItemAdmin.open === it.id;
+    const cur = pbItemCurrentCost(costs, k.fk, it.id, today);
+    const live = pbItemInWindow(it, today);
+    const state = it.active === false ? 'inactive' : (it.retired_date && String(it.retired_date) < today ? 'retired' : (it.in_use_date && String(it.in_use_date) > today ? 'not yet in use' : 'in use'));
+    let html = '<tr style="' + (ed ? 'background:#FFF8DC;' : (live ? '' : 'color:var(--text3);')) + '">' +
+      '<td>' + (ed ? '<input type="number" class="form-control" style="width:64px;" id="pbi-order" value="' + pbEsc(it.display_order ?? '') + '">' : pbEsc(it.display_order ?? '')) + '</td>' +
+      '<td>' + (ed ? '<input type="text" class="form-control" id="pbi-name" value="' + pbEsc(it.name) + '">' : '<strong>' + pbEsc(it.name) + '</strong>' + (it.description ? '<div class="pg-muted">' + pbEsc(it.description) + '</div>' : '')) + '</td>' +
+      '<td>' + (ed ? '<input type="date" class="form-control" id="pbi-inuse" value="' + pbEsc(it.in_use_date || '') + '">' : pbEsc(it.in_use_date || '—')) + '</td>' +
+      '<td>' + (ed ? '<input type="date" class="form-control" id="pbi-retired" value="' + pbEsc(it.retired_date || '') + '">' : pbEsc(it.retired_date || '—')) + '</td>' +
+      '<td>' + (cur ? pbEsc(pbItemCostLabel(kind, cur)) + '<div class="pg-muted">from ' + pbEsc(cur.effective_date) + '</div>' : '<span class="pg-muted">no cost yet</span>') + '</td>' +
+      '<td><span class="badge" style="background:' + (state === 'in use' ? '#DCFCE7;color:#166534' : '#F3F4F6;color:#6B7280') + ';">' + state + '</span></td>' +
+      '<td style="white-space:nowrap;">' + (ed
+        ? '<button class="btn btn-primary btn-sm" onclick="pbItemSave(' + it.id + ')">Done</button> <button class="btn btn-ghost btn-sm" onclick="pbItemEdit(null)">Cancel</button>'
+        : '<button class="btn btn-ghost btn-sm" onclick="pbItemToggle(' + it.id + ')">' + (open ? 'Hide costs' : 'Costs') + '</button> <button class="btn btn-ghost btn-sm" onclick="pbItemEdit(' + it.id + ')">Edit</button>' +
+          (it.retired_date ? '' : ' <button class="btn btn-ghost btn-sm" onclick="pbItemRetire(' + it.id + ')">Retire</button>')) + '</td></tr>';
+    if (open) {
+      const hist = costs.filter(c => +c[k.fk] === +it.id);
+      html += '<tr><td colspan="7" style="background:#F7F8FA;padding:10px 18px;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="color:var(--navy);font-size:12px;">Cost history</strong>' +
+          (costsMissing ? '' : '<button class="btn btn-primary btn-sm" onclick="pbItemAddCostForm(' + it.id + ')">+ New cost from date</button>') + '</div>' +
+        (pbItemAdmin.addingCost === it.id ? pbItemCostForm(kind, it) : '') +
+        (hist.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Effective</th><th>Cost</th><th>' + (kind === 'accessory' ? 'Basis' : 'Refresher') + '</th><th>Note</th><th>Entered</th></tr></thead><tbody>' +
+          hist.map(c => '<tr' + (cur && c.id === cur.id ? ' style="font-weight:600;"' : '') + '><td>' + pbEsc(c.effective_date) + (cur && c.id === cur.id ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">current</span>' : (String(c.effective_date) > today ? ' <span class="badge">future</span>' : '')) + '</td>' +
+            '<td>R ' + (+c[k.amount]).toLocaleString('en-US', { minimumFractionDigits: 2 }).replace(/,/g, ' ') + '</td>' +
+            '<td>' + pbEsc(kind === 'accessory' ? (k.bases[c.cost_basis] || c.cost_basis) : (c.validity_months ? 'every ' + c.validity_months + ' months' : 'once')) + '</td>' +
+            '<td>' + pbEsc(c.note || '') + '</td><td class="pg-muted">' + pbEsc(String(c.created_at || '').slice(0, 10)) + (c.created_by ? ' · ' + pbEsc(pbPersonName(c.created_by)) : '') + '</td></tr>').join('') + '</tbody></table>'
+          : '<div class="pg-muted">No cost recorded. Add the first cost with the date it applies from.</div>') +
+      '</td></tr>';
+    }
+    return html;
+  }).join('');
+  head.innerHTML = '<tr><th colspan="7" style="background:var(--bg);text-align:left;padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button>' +
+    '<span class="pg-muted" style="margin-left:12px;">An item can be ticked on a post while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
+    '<tr><th>Order</th><th>Name</th><th>In use from</th><th>Retired</th><th>Current cost</th><th>State</th><th style="width:230px;">Actions</th></tr>';
+  body.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
+}
+function pbPersonName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Person #' + id; }
+function pbItemCostForm(kind, it) {
+  const today = new Date().toISOString().slice(0, 10);
+  const k = PB_ITEM_KINDS[kind];
+  return '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:8px;">' +
+    '<div class="form-group"><label class="form-label">Effective from</label><input type="date" class="form-control" id="pbc-date" value="' + today + '"></div>' +
+    '<div class="form-group"><label class="form-label">' + (kind === 'accessory' ? 'Unit cost (R)' : 'Cost per officer (R)') + '</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-amount" style="width:130px;"></div>' +
+    (kind === 'accessory'
+      ? '<div class="form-group"><label class="form-label">Basis</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>'
+      : '<div class="form-group"><label class="form-label">Refresher every (months, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
+    '<div class="form-group" style="flex:1;min-width:160px;"><label class="form-label">Note (optional)</label><input type="text" class="form-control" id="pbc-note" placeholder="Supplier quote, PSIRA increase…"></div>' +
+    '<button class="btn btn-primary btn-sm" onclick="pbItemSaveCost(\'' + kind + '\', ' + it.id + ')">Save cost</button>' +
+    '<button class="btn btn-ghost btn-sm" onclick="pbItemAddCostForm(null)">Cancel</button></div>';
+}
+function pbItemToggle(id) { pbItemAdmin.open = pbItemAdmin.open === id ? null : id; pbItemAdmin.addingCost = false; renderPbItemCatalogPage(pbItemAdmin.kind); }
+function pbItemEdit(id) { pbItemAdmin.editing = id; renderPbItemCatalogPage(pbItemAdmin.kind); }
+function pbItemAddCostForm(id) { pbItemAdmin.addingCost = id; if (id) pbItemAdmin.open = id; renderPbItemCatalogPage(pbItemAdmin.kind); }
+async function pbItemAdd() {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind];
+  const name = await promptDialog({ title: 'New ' + k.one, message: 'Name?', confirmLabel: 'Add' });
+  if (!name) return;
+  const items = allData[k.table] || [];
+  const order = items.reduce((m, i) => Math.max(m, i.display_order || 0), 0) + 1;
+  try {
+    const r = await apiPost(k.table, { code: pbSlug(name) + '_' + (Date.now() % 100000), name: name.trim(), display_order: order, active: true, in_use_date: new Date().toISOString().slice(0, 10), created_by: currentUser.personId });
+    if (r[0]) { pbItemAdmin.open = r[0].id; pbItemAdmin.addingCost = r[0].id; }
+  } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbItemSave(id) {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind];
+  const g = i => document.getElementById(i);
+  const patch = { name: g('pbi-name').value.trim(), display_order: Math.round(+g('pbi-order').value || 0), in_use_date: g('pbi-inuse').value || null, retired_date: g('pbi-retired').value || null, updated_at: new Date().toISOString() };
+  if (!patch.name) { showStatus('A name is required', 'error'); return; }
+  if (patch.in_use_date && patch.retired_date && patch.retired_date < patch.in_use_date) { showStatus('Retired date is before the in-use date', 'error'); return; }
+  try { await apiPatch(k.table, id, patch); pbItemAdmin.editing = null; showStatus('Saved', 'success'); }
+  catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbItemRetire(id) {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind];
+  const it = (allData[k.table] || []).find(x => +x.id === +id); if (!it) return;
+  const d = await promptDialog({ title: 'Retire ' + it.name, message: 'Last active day (YYYY-MM-DD)? Quotes starting after this date can no longer tick it; posts that already have it keep it.', confirmLabel: 'Retire', value: new Date().toISOString().slice(0, 10) });
+  if (!d) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) { showStatus('Use YYYY-MM-DD', 'error'); return; }
+  try { await apiPatch(k.table, id, { retired_date: d, updated_at: new Date().toISOString() }); showStatus('Retired from ' + d, 'success'); }
+  catch (e) { showStatus('Could not retire: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbItemSaveCost(kind, itemId) {
+  const k = PB_ITEM_KINDS[kind];
+  const g = i => document.getElementById(i);
+  const date = g('pbc-date').value, amount = g('pbc-amount').value;
+  if (!date) { showStatus('An effective date is required', 'error'); return; }
+  if (amount === '' || +amount < 0) { showStatus('Enter the cost', 'error'); return; }
+  const row = { [k.fk]: itemId, effective_date: date, [k.amount]: +amount, note: g('pbc-note').value.trim() || null, created_by: currentUser.personId };
+  if (kind === 'accessory') row.cost_basis = g('pbc-basis').value;
+  else row.validity_months = g('pbc-validity').value ? Math.round(+g('pbc-validity').value) : null;
+  try { await api(k.costTable, 'POST', row, '', { prefer: 'return=minimal' }); pbItemAdmin.addingCost = false; showStatus('Cost recorded from ' + date, 'success'); }
+  catch (e) { showStatus(/duplicate|unique/i.test(e.message) ? 'A cost already exists for that date — pick another date' : 'Could not save: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(kind);
+}
+
 // ── Per-post checklists: Required Accessories and Training (v7.9.41) ─────────
 // Both lists are dynamic: site admin maintains them under Admin → Proposal
 // Builder (Accessories / Training Courses); a post ticks the ones that apply.
 // A tick is a row in quote_post_accessories / quote_post_training — presence
 // = ticked — so a toggle is one POST or one DELETE and no re-download.
 function pbChecklistCols(p) {
+  // v7.9.43: an item is offered while the quote's start date falls inside its in-use window;
+  // a retired or not-yet-in-use item stays visible (greyed) only where it is already ticked.
+  const asAt = pbQuoteAsAt();
   const col = (title, items, set, kind) => '<div style="min-width:0;">' +
     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
     (items.length
-      ? '<div style="display:flex;flex-direction:column;gap:2px;">' + items.map(r =>
-          '<label class="pb-allow-row" style="display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text2);">' +
-            '<input type="checkbox" ' + (set.has(+r.id) ? 'checked' : '') + ' onchange="pbToggleChecklist(' + p.id + ', \'' + kind + '\', ' + r.id + ', this)">' +
-            '<span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name) + '</span>' +
-          '</label>').join('') + '</div>'
+      ? '<div style="display:flex;flex-direction:column;gap:2px;">' + items.map(r => {
+          const live = pbItemInWindow(r, asAt);
+          const k = PB_ITEM_KINDS[kind];
+          const cost = pbItemCurrentCost(allData[k.costTable], k.fk, r.id, asAt);
+          return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:7px;font-size:12px;color:' + (live ? 'var(--text2)' : 'var(--text3)') + ';"' + (live ? '' : ' title="Outside this item\'s in-use window for the quote start date"') + '>' +
+            '<input type="checkbox" ' + (set.has(+r.id) ? 'checked' : '') + (live ? '' : ' disabled') + ' onchange="pbToggleChecklist(' + p.id + ', \'' + kind + '\', ' + r.id + ', this)">' +
+            '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name) + (live ? '' : ' <em>(' + (r.retired_date && String(r.retired_date) < asAt ? 'retired' : 'not in use') + ')</em>') + '</span>' +
+            '<span style="white-space:nowrap;color:var(--text3);font-size:11px;">' + pbEsc(cost ? pbItemCostLabel(kind, cost) : '') + '</span>' +
+          '</label>'; }).join('') + '</div>'
       : '<div class="pb-placeholder-text">Nothing in the catalogue yet — add items under Admin → Proposal Builder → ' + title + '.</div>') +
     '</div>';
-  const keep = (rows, set) => (rows || []).filter(r => r.active !== false || set.has(+r.id));   // retired items stay visible where already ticked
+  const keep = (rows, set) => (rows || []).filter(r => pbItemInWindow(r, asAt) || set.has(+r.id));
   const accSet = p.accessories || new Set(), trnSet = p.training || new Set();
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:6px 2px;">' +
     col('Required Accessories', keep(allData['quote_accessories'], accSet), accSet, 'accessory') +
