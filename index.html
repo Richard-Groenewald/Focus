@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.43 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.44 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -733,7 +733,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.43 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.44 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2053,6 +2053,7 @@ function _mockSeed() {
     ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, created_at: now })),
     quote_accessory_costs: [],
     quote_training_costs: [],
+    quote_contract_accessories: [],
     quote_post_accessories: [],
     quote_post_training: [],
     proposal_templates: [
@@ -6234,7 +6235,8 @@ async function openQuote(id) {
       apiGet('quote_training_courses', 'select=*&order=display_order,id'),
       apiGet('quote_accessory_costs', 'select=*').catch(() => []),      // v7.9.43: dated costs (absent table → none)
       apiGet('quote_training_costs', 'select=*').catch(() => []),
-    ]).catch(() => [[], [], [], []]);
+      apiGet('quote_contract_accessories', 'quote_id=eq.' + id + '&select=*').catch(() => []),   // v7.9.44: per-contract items
+    ]).catch(() => [[], [], [], [], []]);
     const [qRows, posts, grades, areas, statAllow, discAllow, discInc, rules, postNames, headingNames, pg, cats] = await Promise.all([
       apiGet('quote_quotes', 'id=eq.' + id + '&select=*'),
       apiGet('quote_posts', 'quote_id=eq.' + id + '&select=*&order=display_order,id'),
@@ -6258,6 +6260,7 @@ async function openQuote(id) {
     allData['quote_training_courses'] = cats[1];
     allData['quote_accessory_costs'] = cats[2];
     allData['quote_training_costs'] = cats[3];
+    pbContractAcc = new Map((cats[4] || []).map(r => [+r.accessory_id, +r.quantity || 1]));
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
@@ -6340,7 +6343,7 @@ function renderQuoteEditorTabContent() {
     case 'basic': return renderBasicInfoTab();
     case 'posts': return renderPeopleSection();
     case 'workforce': return renderPbPlaceholderTab('Workforce Support Items', 'Uniforms, PPE, training certificates, equipment associated with the people deployed on this contract.');
-    case 'contract':  return renderPbPlaceholderTab('Contract Support Items',  'Once-off and recurring contract-level items: setup costs, recruitment, polygraphs, medicals, accommodation, flights, etc.');
+    case 'contract':  return renderContractItemsTab();
     case 'service':   return renderPbPlaceholderTab('Service Support Items',   'Service overhead and operational support items.');
     case 'mobility':  return renderPbPlaceholderTab('Site Mobility',           'Vehicles, fuel, tracking, vehicle extras (lease + km + fuel surcharges).');
     case 'proposal':  return renderProposalTab();
@@ -6354,8 +6357,9 @@ function renderQuoteEditorTabContent() {
 // effective-dated like the rate cards. pbItemCurrentCost picks the newest row
 // that has arrived as at a date; nothing is ever edited in place.
 const PB_ITEM_KINDS = {
-  accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'unit_cost', title: 'Accessories', one: 'accessory',
-    bases: { once_off_per_officer: 'once-off per officer', once_off_per_post: 'once-off per post', monthly_per_officer: 'monthly per officer', monthly_per_post: 'monthly per post' } },
+  accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', title: 'Accessories', one: 'accessory',
+    bases: { per_officer: 'per officer', per_duty_position: 'per duty position', per_post: 'per post', per_contract: 'per contract' },
+    recovery: { amortised: 'amortised monthly', once_off: 'once-off to client', absorbed: 'absorbed' } },
   training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', title: 'Training Courses', one: 'training course' }
 };
 function pbItemInWindow(item, asAt) {
@@ -6373,11 +6377,28 @@ function pbItemCurrentCost(costs, fk, itemId, asAt) {
   });
   return best;
 }
+// v7.9.44 accessory cost model: one unit's monthly cost = replacement provision
+// (acquisition / life) + running cost + loss allowance (acquisition × % / 12).
+function pbAccMonthlyUnit(c) {
+  if (!c) return 0;
+  const acq = +c.acquisition_cost || 0, life = +c.life_months || 0;
+  return (life > 0 ? acq / life : 0) + (+c.monthly_cost || 0) + acq * (+c.loss_pct_per_year || 0) / 100 / 12;
+}
+function pbRand(n) { return 'R ' + (+n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/,/g, ' '); }
+// How many units a post needs for a basis (per_contract lives on the quote, not the post).
+function pbAccQtyForPost(basis, p) {
+  if (basis === 'per_officer') return pbOfficersForPost(p);          // rounded requirement; replacement pool excluded for now
+  if (basis === 'per_duty_position') return pbPeakHeadcount(p);
+  if (basis === 'per_post') return 1;
+  return 0;
+}
 function pbItemCostLabel(kind, c) {
   if (!c) return '';
   const k = PB_ITEM_KINDS[kind];
-  const amt = 'R ' + (+c[k.amount]).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).replace(/,/g, ' ');
-  return kind === 'accessory' ? amt + ' ' + (k.bases[c.cost_basis] || '') : amt + ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : '');
+  if (kind === 'accessory') {
+    return pbRand(pbAccMonthlyUnit(c)) + '/mo ' + (k.bases[c.cost_basis] || '') + (c.recovery === 'once_off' ? ' · ' + pbRand(c.acquisition_cost) + ' once-off' : c.recovery === 'absorbed' ? ' · absorbed' : '');
+  }
+  return pbRand(c[k.amount]) + ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : '');
 }
 function pbSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || ('item_' + Date.now()); }
 
@@ -6416,14 +6437,17 @@ async function renderPbItemCatalogPage(kind) {
           (it.retired_date ? '' : ' <button class="btn btn-ghost btn-sm" onclick="pbItemRetire(' + it.id + ')">Retire</button>')) + '</td></tr>';
     if (open) {
       const hist = costs.filter(c => +c[k.fk] === +it.id);
-      html += '<tr><td colspan="7" style="background:#F7F8FA;padding:10px 18px;">' +
+      html += '<tr><td colspan="7" style="background:#F7F8FA;padding:10px 18px;overflow-x:auto;">' +
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;"><strong style="color:var(--navy);font-size:12px;">Cost history</strong>' +
           (costsMissing ? '' : '<button class="btn btn-primary btn-sm" onclick="pbItemAddCostForm(' + it.id + ')">+ New cost from date</button>') + '</div>' +
         (pbItemAdmin.addingCost === it.id ? pbItemCostForm(kind, it) : '') +
-        (hist.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Effective</th><th>Cost</th><th>' + (kind === 'accessory' ? 'Basis' : 'Refresher') + '</th><th>Note</th><th>Entered</th></tr></thead><tbody>' +
+        (hist.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Effective</th>' +
+            (kind === 'accessory' ? '<th>Acquisition</th><th>Life</th><th>Running /mo</th><th>Loss %/yr</th><th><strong>Unit /mo</strong></th><th>Basis</th><th>Recovery</th>' : '<th>Cost</th><th>Refresher</th>') +
+            '<th>Note</th><th>Entered</th></tr></thead><tbody>' +
           hist.map(c => '<tr' + (cur && c.id === cur.id ? ' style="font-weight:600;"' : '') + '><td>' + pbEsc(c.effective_date) + (cur && c.id === cur.id ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">current</span>' : (String(c.effective_date) > today ? ' <span class="badge">future</span>' : '')) + '</td>' +
-            '<td>R ' + (+c[k.amount]).toLocaleString('en-US', { minimumFractionDigits: 2 }).replace(/,/g, ' ') + '</td>' +
-            '<td>' + pbEsc(kind === 'accessory' ? (k.bases[c.cost_basis] || c.cost_basis) : (c.validity_months ? 'every ' + c.validity_months + ' months' : 'once')) + '</td>' +
+            (kind === 'accessory'
+              ? '<td>' + pbRand(c.acquisition_cost) + '</td><td>' + (c.life_months ? c.life_months + ' mo' : '—') + '</td><td>' + pbRand(c.monthly_cost) + '</td><td>' + (+c.loss_pct_per_year || 0) + '%</td><td><strong>' + pbRand(pbAccMonthlyUnit(c)) + '</strong></td><td>' + pbEsc(k.bases[c.cost_basis] || c.cost_basis) + '</td><td>' + pbEsc(k.recovery[c.recovery] || c.recovery || '') + '</td>'
+              : '<td>' + pbRand(c[k.amount]) + '</td><td>' + pbEsc(c.validity_months ? 'every ' + c.validity_months + ' months' : 'once') + '</td>') +
             '<td>' + pbEsc(c.note || '') + '</td><td class="pg-muted">' + pbEsc(String(c.created_at || '').slice(0, 10)) + (c.created_by ? ' · ' + pbEsc(pbPersonName(c.created_by)) : '') + '</td></tr>').join('') + '</tbody></table>'
           : '<div class="pg-muted">No cost recorded. Add the first cost with the date it applies from.</div>') +
       '</td></tr>';
@@ -6441,10 +6465,15 @@ function pbItemCostForm(kind, it) {
   const k = PB_ITEM_KINDS[kind];
   return '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:8px;">' +
     '<div class="form-group"><label class="form-label">Effective from</label><input type="date" class="form-control" id="pbc-date" value="' + today + '"></div>' +
-    '<div class="form-group"><label class="form-label">' + (kind === 'accessory' ? 'Unit cost (R)' : 'Cost per officer (R)') + '</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-amount" style="width:130px;"></div>' +
     (kind === 'accessory'
-      ? '<div class="form-group"><label class="form-label">Basis</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>'
-      : '<div class="form-group"><label class="form-label">Refresher every (months, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
+      ? '<div class="form-group"><label class="form-label">Acquisition (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-acq" style="width:110px;" value="0"></div>' +
+        '<div class="form-group"><label class="form-label">Life (months)</label><input type="number" min="1" class="form-control" id="pbc-life" style="width:90px;" placeholder="blank = no replacement"></div>' +
+        '<div class="form-group"><label class="form-label">Running cost /mo (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-monthly" style="width:110px;" value="0"></div>' +
+        '<div class="form-group"><label class="form-label">Loss %/yr</label><input type="number" step="0.1" min="0" class="form-control" id="pbc-loss" style="width:80px;" value="0"></div>' +
+        '<div class="form-group"><label class="form-label">Basis (quantity)</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>' +
+        '<div class="form-group"><label class="form-label">Recovery</label><select class="form-control" id="pbc-recovery">' + Object.entries(k.recovery).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>'
+      : '<div class="form-group"><label class="form-label">Cost per officer (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-amount" style="width:130px;"></div>' +
+        '<div class="form-group"><label class="form-label">Refresher every (months, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
     '<div class="form-group" style="flex:1;min-width:160px;"><label class="form-label">Note (optional)</label><input type="text" class="form-control" id="pbc-note" placeholder="Supplier quote, PSIRA increase…"></div>' +
     '<button class="btn btn-primary btn-sm" onclick="pbItemSaveCost(\'' + kind + '\', ' + it.id + ')">Save cost</button>' +
     '<button class="btn btn-ghost btn-sm" onclick="pbItemAddCostForm(null)">Cancel</button></div>';
@@ -6487,15 +6516,93 @@ async function pbItemRetire(id) {
 async function pbItemSaveCost(kind, itemId) {
   const k = PB_ITEM_KINDS[kind];
   const g = i => document.getElementById(i);
-  const date = g('pbc-date').value, amount = g('pbc-amount').value;
+  const date = g('pbc-date').value;
   if (!date) { showStatus('An effective date is required', 'error'); return; }
-  if (amount === '' || +amount < 0) { showStatus('Enter the cost', 'error'); return; }
-  const row = { [k.fk]: itemId, effective_date: date, [k.amount]: +amount, note: g('pbc-note').value.trim() || null, created_by: currentUser.personId };
-  if (kind === 'accessory') row.cost_basis = g('pbc-basis').value;
-  else row.validity_months = g('pbc-validity').value ? Math.round(+g('pbc-validity').value) : null;
+  const row = { [k.fk]: itemId, effective_date: date, note: g('pbc-note').value.trim() || null, created_by: currentUser.personId };
+  if (kind === 'accessory') {
+    Object.assign(row, { acquisition_cost: +g('pbc-acq').value || 0, life_months: g('pbc-life').value ? Math.round(+g('pbc-life').value) : null,
+      monthly_cost: +g('pbc-monthly').value || 0, loss_pct_per_year: +g('pbc-loss').value || 0, cost_basis: g('pbc-basis').value, recovery: g('pbc-recovery').value });
+    if (!row.acquisition_cost && !row.monthly_cost) { showStatus('Enter an acquisition cost or a running cost', 'error'); return; }
+    if (row.acquisition_cost && !row.life_months && row.recovery === 'amortised') { showStatus('An amortised item needs an expected life in months', 'error'); return; }
+  } else {
+    const amount = g('pbc-amount').value;
+    if (amount === '' || +amount < 0) { showStatus('Enter the cost', 'error'); return; }
+    row[k.amount] = +amount; row.validity_months = g('pbc-validity').value ? Math.round(+g('pbc-validity').value) : null;
+  }
   try { await api(k.costTable, 'POST', row, '', { prefer: 'return=minimal' }); pbItemAdmin.addingCost = false; showStatus('Cost recorded from ' + date, 'success'); }
   catch (e) { showStatus(/duplicate|unique/i.test(e.message) ? 'A cost already exists for that date — pick another date' : 'Could not save: ' + e.message, 'error'); }
   renderPbItemCatalogPage(kind);
+}
+
+// ── Contract Support Items: per-contract accessories + equipment summary (v7.9.44) ──
+// Items whose current cost basis is per_contract are ticked once on the quote
+// (quote_contract_accessories), not on a post. The summary below rolls every
+// ticked accessory on the quote into the two figures the proposal prints:
+// amortised monthly (joins the post prices) and once-off setup (one line).
+let pbContractAcc = new Map();   // accessory_id → quantity
+function pbAccSummary() {
+  const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [], items = allData['quote_accessories'] || [];
+  const out = { monthly: 0, onceOff: 0, absorbed: 0, byPost: {}, lines: [] };
+  const add = (item, cost, qty, where) => {
+    if (!cost || !qty) return;
+    const unit = pbAccMonthlyUnit(cost);
+    const line = { name: item.name, where, qty, unit, basis: cost.cost_basis, recovery: cost.recovery, monthly: 0, onceOff: 0 };
+    if (cost.recovery === 'absorbed') { out.absorbed += unit * qty; }
+    else if (cost.recovery === 'once_off') { line.onceOff = qty * (+cost.acquisition_cost || 0); line.monthly = qty * ((+cost.monthly_cost || 0)); }
+    else { line.monthly = qty * unit; }
+    out.monthly += line.monthly; out.onceOff += line.onceOff; out.lines.push(line);
+  };
+  pbHeadings.forEach(h => h.posts.forEach(p => {
+    out.byPost[p.id] = 0;
+    (p.accessories || new Set()).forEach(id => {
+      const item = items.find(i => +i.id === +id); const cost = pbItemCurrentCost(costs, 'accessory_id', id, asAt);
+      if (!item || !cost) return;
+      const before = out.monthly;
+      add(item, cost, pbAccQtyForPost(cost.cost_basis, p), p.name);
+      out.byPost[p.id] += out.monthly - before;
+    });
+  }));
+  pbContractAcc.forEach((qty, id) => {
+    const item = items.find(i => +i.id === +id); const cost = pbItemCurrentCost(costs, 'accessory_id', id, asAt);
+    if (item && cost) add(item, cost, qty, 'Contract');
+  });
+  return out;
+}
+function renderContractItemsTab() {
+  const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
+  const items = (allData['quote_accessories'] || []).filter(i => {
+    const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt);
+    return (c && c.cost_basis === 'per_contract' && pbItemInWindow(i, asAt)) || pbContractAcc.has(+i.id);
+  });
+  const rows = items.map(i => {
+    const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt), on = pbContractAcc.has(+i.id), qty = pbContractAcc.get(+i.id) || 1;
+    return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:8px;font-size:13px;">' +
+      '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="pbToggleContractAcc(' + i.id + ', this.checked, 1)">' +
+      '<span style="flex:1;">' + pbEsc(i.name) + '</span>' +
+      (on ? '<span style="font-size:12px;color:var(--text3);">qty <input type="number" min="1" value="' + qty + '" style="width:54px;padding:2px 4px;" onchange="pbToggleContractAcc(' + i.id + ', true, +this.value)"></span>' : '') +
+      '<span style="white-space:nowrap;color:var(--text3);font-size:11px;">' + pbEsc(c ? pbItemCostLabel('accessory', c) : '') + '</span></label>';
+  }).join('');
+  const sum = pbAccSummary();
+  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">' +
+    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract-level accessories</div>' +
+      (rows || '<div class="pb-placeholder-text">No accessory is costed "per contract" as at ' + pbEsc(asAt) + '. Set the basis under Admin → Proposal Builder → Accessories.</div>') +
+      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">One per quote regardless of posts (site gun safe, bullet trap, base station). Per-officer, per-duty-position and per-post items are ticked on each post.</p></div>' +
+    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Equipment summary (as at ' + pbEsc(asAt) + ')</div>' +
+      (sum.lines.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Item</th><th>Where</th><th class="num" style="text-align:right;">Qty</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th></tr></thead><tbody>' +
+        sum.lines.map(l => '<tr><td>' + pbEsc(l.name) + (l.recovery === 'absorbed' ? ' <span class="pg-muted">(absorbed)</span>' : '') + '</td><td>' + pbEsc(l.where) + '</td><td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + pbRand(l.monthly) + '</td><td style="text-align:right;">' + (l.onceOff ? pbRand(l.onceOff) : '—') + '</td></tr>').join('') +
+        '</tbody><tfoot><tr style="font-weight:700;"><td colspan="3">Total</td><td style="text-align:right;">' + pbRand(sum.monthly) + '/mo</td><td style="text-align:right;">' + pbRand(sum.onceOff) + '</td></tr></tfoot></table>' +
+        (sum.absorbed ? '<div class="pg-muted" style="margin-top:6px;font-size:11px;">Absorbed (costed, not itemised): ' + pbRand(sum.absorbed) + '/mo</div>' : '')
+        : '<div class="pb-placeholder-text">Nothing ticked yet, or no costs recorded for the ticked items.</div>') +
+      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Monthly amounts join the post prices; once-off amounts print as one "Setup and equipment" line on the proposal. Recruitment, polygraphs, medicals, accommodation and flights are still to come on this tab.</p></div>' +
+  '</div>';
+}
+async function pbToggleContractAcc(id, on, qty) {
+  qty = Math.max(1, Math.round(+qty || 1));
+  try {
+    if (on) { await api('quote_contract_accessories', 'POST', { quote_id: pbQ.id, accessory_id: id, quantity: qty }, 'on_conflict=quote_id,accessory_id', { prefer: 'resolution=merge-duplicates,return=minimal' }); pbContractAcc.set(+id, qty); }
+    else { await api('quote_contract_accessories', 'DELETE', null, 'quote_id=eq.' + pbQ.id + '&accessory_id=eq.' + id); pbContractAcc.delete(+id); }
+  } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
+  renderQuoteEditor();
 }
 
 // ── Per-post checklists: Required Accessories and Training (v7.9.41) ─────────
@@ -6514,10 +6621,12 @@ function pbChecklistCols(p) {
           const live = pbItemInWindow(r, asAt);
           const k = PB_ITEM_KINDS[kind];
           const cost = pbItemCurrentCost(allData[k.costTable], k.fk, r.id, asAt);
+          if (kind === 'accessory' && cost && cost.cost_basis === 'per_contract' && !set.has(+r.id)) return '';   // ticked on the Contract Support Items tab
           return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:7px;font-size:12px;color:' + (live ? 'var(--text2)' : 'var(--text3)') + ';"' + (live ? '' : ' title="Outside this item\'s in-use window for the quote start date"') + '>' +
             '<input type="checkbox" ' + (set.has(+r.id) ? 'checked' : '') + (live ? '' : ' disabled') + ' onchange="pbToggleChecklist(' + p.id + ', \'' + kind + '\', ' + r.id + ', this)">' +
             '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name) + (live ? '' : ' <em>(' + (r.retired_date && String(r.retired_date) < asAt ? 'retired' : 'not in use') + ')</em>') + '</span>' +
-            '<span style="white-space:nowrap;color:var(--text3);font-size:11px;">' + pbEsc(cost ? pbItemCostLabel(kind, cost) : '') + '</span>' +
+            '<span style="white-space:nowrap;color:var(--text3);font-size:11px;" title="' + pbEsc(cost ? pbItemCostLabel(kind, cost) : '') + '">' +
+              (cost ? (kind === 'accessory' ? (() => { const q = pbAccQtyForPost(cost.cost_basis, p); return q + ' × ' + pbRand(pbAccMonthlyUnit(cost)) + ' = ' + pbRand(q * pbAccMonthlyUnit(cost)) + '/mo' + (cost.recovery === 'once_off' ? ' + ' + pbRand(q * (+cost.acquisition_cost || 0)) + ' once-off' : ''); })() : pbItemCostLabel(kind, cost)) : '') + '</span>' +
           '</label>'; }).join('') + '</div>'
       : '<div class="pb-placeholder-text">Nothing in the catalogue yet — add items under Admin → Proposal Builder → ' + title + '.</div>') +
     '</div>';
@@ -6667,7 +6776,7 @@ function pgPricing() {
   const vatPct = +(appSettings['proposal_vat_pct'] || 15);
   const snap = pgState.snapshot && pgState.snapshot.rate_data && pgState.snapshot.rate_data.pricing;
   const groups = [];
-  let monthly = 0;
+  let monthly = 0, setupOnceOff = +(snap && snap.setup_once_off) || 0;
   if (snap && Array.isArray(snap.groups)) {
     snap.groups.forEach(g => {
       const posts = (g.posts || []).map(p => ({ name: p.name, officers: +p.officers || 0, monthly: +p.monthly || 0 }));
@@ -6675,15 +6784,20 @@ function pgPricing() {
       groups.push({ name: g.name, posts, sub });
     });
   } else {
+    const acc = pbAccSummary();
     pbHeadings.forEach(h => {
       if (!h.posts.length) return;
-      const posts = h.posts.map(p => ({ name: p.name, officers: pbOfficersForPost(p), monthly: pbPostSummaryCost(p) }));
+      const posts = h.posts.map(p => ({ name: p.name, officers: pbOfficersForPost(p), monthly: pbPostSummaryCost(p) + (acc.byPost[p.id] || 0) }));
       const sub = posts.reduce((a, p) => a + p.monthly, 0); monthly += sub;
       groups.push({ name: h.isUngrouped ? 'General' : h.name, posts, sub });
     });
+    // Contract-level amortised items ride as their own group; once-off setup is one line.
+    const contractMonthly = acc.lines.filter(l => l.where === 'Contract').reduce((a, l) => a + l.monthly, 0);
+    if (contractMonthly) { groups.push({ name: 'Contract equipment', posts: [{ name: 'Site equipment (amortised)', officers: '', monthly: contractMonthly }], sub: contractMonthly }); monthly += contractMonthly; }
+    setupOnceOff = acc.onceOff;
   }
   const months = +pbQ.contract_duration_months || 0;
-  return { groups, monthly, contract: monthly * months, months, vatPct, indicative: !snap, asOf: snap ? pgState.snapshot.as_of_date : null };
+  return { groups, monthly, contract: monthly * months, months, vatPct, indicative: !snap, asOf: snap ? pgState.snapshot.as_of_date : null, setupOnceOff };
 }
 
 // Generated sections
@@ -6733,6 +6847,10 @@ function pgRenderScope() {
     });
     html += '</tbody></table>';
   });
+  if (pbContractAcc.size) {
+    const names = [...pbContractAcc.entries()].map(([id, qty]) => { const i = acc.find(x => +x.id === +id); return i ? pbEsc(i.name) + (qty > 1 ? ' × ' + qty : '') : ''; }).filter(Boolean);
+    if (names.length) html += '<p><strong>Site equipment:</strong> ' + names.join(', ') + '</p>';
+  }
   return html || '<p class="pg-muted">No posts on this quote yet.</p>';
 }
 function pgRenderPricing(pr) {
@@ -6751,6 +6869,7 @@ function pgRenderPricing(pr) {
     '<tr><td colspan="2">VAT @ ' + pr.vatPct + '%</td><td class="num">' + pgMoney(vat) + '</td></tr>' +
     '<tr class="pg-total"><td colspan="2">Monthly total (incl. VAT)</td><td class="num">' + pgMoney(pr.monthly + vat) + '</td></tr>' +
     '<tr><td colspan="2">Contract value over ' + pr.months + ' months (excl. VAT)</td><td class="num">' + pgMoney(pr.contract) + '</td></tr>' +
+    (pr.setupOnceOff ? '<tr><td colspan="2">Setup and equipment, once-off (excl. VAT)</td><td class="num">' + pgMoney(pr.setupOnceOff) + '</td></tr>' : '') +
     '</tfoot></table>';
   return html;
 }
