@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.45 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.46 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -733,7 +733,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.45 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.46 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2071,7 +2071,10 @@ function _mockSeed() {
     quote_accessory_costs: [],
     quote_training_costs: [],
     quote_contract_accessories: [],
-    quote_annual_escalations: [2025, 2026, 2027].map((y, i) => ({ id: i + 1, year: y, escalation_pct: 6, note: '', created_at: now })),
+    quote_annual_escalations: [2025, 2026, 2027].flatMap((y, i) => [
+      { id: i * 2 + 1, year: y, escalation_pct: 6, service_major_id: null, service_sub_id: null, note: '', created_at: now },
+      { id: i * 2 + 2, year: y, escalation_pct: 7.5, service_major_id: 1, service_sub_id: null, note: 'Manpower', created_at: now },
+    ]),
     quote_opportunity_margin_rules: [
       { id: 1, effective_date: '2025-01-01', revenue_type: 'annuity', service_sub_id: null, min_margin_pct: 20, default_margin_pct: 25, max_margin_pct: 40, active: true, created_at: now },
       { id: 2, effective_date: '2025-01-01', revenue_type: 'project', service_sub_id: null, min_margin_pct: 15, default_margin_pct: 25, max_margin_pct: 45, active: true, created_at: now },
@@ -6385,6 +6388,62 @@ function renderQuoteEditorTabContent() {
   }
 }
 
+// ── Annual escalation by service type (v7.9.46) ─────────────────────────
+// Rows in quote_annual_escalations are scoped: sub → major → general. The
+// Manpower major is edited as a horizontal band above the Statutory Salary
+// Rates grid; every other scope through the Human Resources tile.
+function rsgEscalationRowsFor(sub) {
+  const rows = allData['quote_annual_escalations'] || [];
+  if (sub) {
+    const bySub = rows.filter(r => +r.service_sub_id === +sub.id);
+    if (bySub.length) return bySub;
+    const byMajor = rows.filter(r => r.service_sub_id == null && +r.service_major_id === +sub.major_id);
+    if (byMajor.length) return byMajor;
+  }
+  return rows.filter(r => r.service_major_id == null && r.service_sub_id == null);
+}
+function _srManpowerMajorId() {
+  const m = (allData['service_major'] || []).find(x => /manpower/i.test(x.name || ''));
+  return m ? +m.id : null;
+}
+async function srRenderEscalationBand(hostId) {
+  const host = document.getElementById(hostId); if (!host) return;
+  try {
+    if (!allData['service_major']) allData['service_major'] = await apiGet('service_major', 'select=*&order=name.asc');
+    allData['quote_annual_escalations'] = await apiGet('quote_annual_escalations', 'select=*&order=year');
+  } catch (e) { host.innerHTML = ''; return; }
+  const majorId = _srManpowerMajorId();
+  if (!majorId) { host.innerHTML = ''; return; }
+  const rows = (allData['quote_annual_escalations'] || []).filter(r => +r.service_major_id === majorId && r.service_sub_id == null).sort((a, b) => a.year - b.year);
+  const thisYear = new Date().getFullYear();
+  host.innerHTML = '<div class="pb-qheader" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">' +
+    '<div style="min-width:170px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);">Annual Escalation — Manpower</div>' +
+      '<div class="pg-muted" style="font-size:11px;">% applied in the escalation month of each year; the Revenue Stream Generator defaults from the start year.</div></div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;">' +
+      (rows.length ? rows.map(r => '<div style="text-align:center;">' +
+          '<div style="font-size:11px;font-weight:700;color:' + (+r.year === thisYear ? 'var(--red)' : 'var(--navy)') + ';">' + r.year + '</div>' +
+          '<div style="display:flex;align-items:center;gap:2px;"><input type="number" step="0.1" min="0" class="form-control" style="width:70px;padding:3px 6px;font-size:12px;text-align:right;" value="' + pbEsc(r.escalation_pct) + '" title="' + pbEsc(r.note || '') + '" onchange="srSaveEscalation(' + r.id + ', this.value)"><span style="font-size:11px;color:var(--text3);">%</span></div>' +
+        '</div>').join('') : '<span class="pg-muted">No Manpower rows yet.</span>') +
+      '<button class="btn btn-ghost btn-sm" onclick="srAddEscalationYear()" title="Add the next year">+ Year</button>' +
+    '</div></div>';
+}
+async function srSaveEscalation(id, value) {
+  const v = +value;
+  if (!(v >= 0)) { showStatus('Enter a percentage', 'error'); return; }
+  try { await apiPatch('quote_annual_escalations', id, { escalation_pct: v, updated_at: new Date().toISOString() }); const r = (allData['quote_annual_escalations'] || []).find(x => +x.id === +id); if (r) r.escalation_pct = v; showStatus('Saved', 'success'); }
+  catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+}
+async function srAddEscalationYear() {
+  const majorId = _srManpowerMajorId(); if (!majorId) return;
+  const rows = (allData['quote_annual_escalations'] || []).filter(r => +r.service_major_id === majorId && r.service_sub_id == null);
+  const year = rows.length ? Math.max(...rows.map(r => +r.year)) + 1 : new Date().getFullYear();
+  const last = rows.sort((a, b) => a.year - b.year).slice(-1)[0];
+  try {
+    await apiPost('quote_annual_escalations', { year, escalation_pct: last ? +last.escalation_pct : 0, service_major_id: majorId, created_by: currentUser.personId });
+    await srRenderEscalationBand('sr-escalation');
+  } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
+}
+
 // ── Revenue Stream Generator (v7.9.45) ──────────────────────────────────
 // The top block of the Proposal Builder tab. Builds the opportunity stream
 // BEFORE a proposal exists: the General tab's service type decides annuity
@@ -6402,8 +6461,8 @@ function rsgRevenueType(sub) {
   return sub.is_recurring === false ? 'project' : 'annuity';   // pre-migration fallback
 }
 function rsgProbabilityCap() { const v = +(appSettings['rsg_probability_cap'] || 20); return v > 0 ? v : 20; }
-function rsgDefaultEscalation(startDate) {
-  const rows = allData['quote_annual_escalations'] || [];
+function rsgDefaultEscalation(startDate, sub) {
+  const rows = rsgEscalationRowsFor(sub === undefined ? rsgServiceSub() : sub);
   if (!rows.length) return null;
   const year = startDate ? +String(startDate).slice(0, 4) : new Date().getFullYear();
   const exact = rows.find(r => +r.year === year);
@@ -6433,7 +6492,7 @@ function rsgRefresh() {
   if (ann) ann.style.display = (!sub || rt === 'annuity') ? '' : 'none';
   if (prj) prj.style.display = rt === 'project' ? '' : 'none';
   const esc = document.getElementById('opp-escalation');
-  if (esc && esc.value === '') { const d = rsgDefaultEscalation(document.getElementById('opp-start-date')?.value); if (d != null) esc.value = d; }
+  if (esc && esc.value === '') { const d = rsgDefaultEscalation(document.getElementById('opp-start-date')?.value, sub); if (d != null) esc.value = d; }
   const rule = rsgMarginRule(sub);
   const ruleEl = document.getElementById('rsg-margin-rule');
   if (ruleEl) ruleEl.textContent = rule ? 'Margin rule: ' + (+rule.min_margin_pct) + '% – ' + (+rule.max_margin_pct) + '%, default ' + (+rule.default_margin_pct) + '%' + (rule.service_sub_id ? ' (this service type)' : ' (' + (rt === 'project' ? 'projects' : 'annuities') + ')') : 'No margin rule yet — set one under Admin → Proposal Builder → Opportunity Margin Rules.';
@@ -8633,7 +8692,7 @@ const PB_HR_TILES = [
   { id: 'replacement-pool',          label: 'Replacement Pool Provision' },
   { id: 'area-management-overhead',  label: 'Area Management Overhead' },
   { id: 'hr-calculation-ratios',     label: 'HR Calculation Ratios' },
-  { id: 'annual-escalation',         label: 'Annual Escalation (by year)' }
+  { id: 'annual-escalation',         label: 'Annual Escalation (by service type and year)' }
 ];
 
 function pbSharedSchema(title, typeId) {
@@ -8814,9 +8873,11 @@ const PB_SCHEMAS = {
     table: 'quote_annual_escalations',
     sortBy: 'year',
     columns: [
-      { key:'year',           label:'Year',            type:'int', default: new Date().getFullYear() },
-      { key:'escalation_pct', label:'Escalation %',    type:'decimal' },
-      { key:'note',           label:'Note',            type:'text' }
+      { key:'year',             label:'Year',            type:'int', default: new Date().getFullYear() },
+      { key:'service_major_id', label:'Service Major (blank = general)', type:'lookup', lookup:'service_major', lookupLabel:'name' },
+      { key:'service_sub_id',   label:'Service Type (blank = whole major)', type:'lookup', lookup:'service_sub', lookupLabel:'name' },
+      { key:'escalation_pct',   label:'Escalation %',    type:'decimal' },
+      { key:'note',             label:'Note',            type:'text' }
     ]
   },
   'opportunity-margin-rules': {
@@ -8947,9 +9008,11 @@ async function renderSalaryRateGrid() {
   body.innerHTML = `<tr><td style="padding:0;border:none;">
     <div id="sr-page" style="padding:0 0 24px;">
       <div id="sr-top" style="margin-bottom:14px;"></div>
+      <div id="sr-escalation" style="margin-bottom:14px;"></div>
       <div id="sr-body"><div style="padding:20px;color:var(--text3);">Loading rates…</div></div>
       <div id="sr-menu" style="display:none;position:fixed;z-index:100001;background:var(--bg2);border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.18);padding:4px;min-width:210px;"></div>
     </div></td></tr>`;
+  srRenderEscalationBand('sr-escalation');   // v7.9.46: Manpower escalation band, independent of the rate migrations
   try {
     const [rates, areas, grades] = await Promise.all([
       apiGetAll('quote_salary_rates', 'select=*'),
