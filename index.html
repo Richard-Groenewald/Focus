@@ -694,7 +694,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.46 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.47 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -733,7 +733,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.46 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.47 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -914,49 +914,67 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
         <!-- Revenue Stream Generator (v7.9.45): collapsed by default; the service
              type on the General tab picks annuity or project. Input ids are kept
              (autosave, calcMargin and saveRevenueStream read them). -->
-        <details id="rsg-details" style="background:var(--bg);border-radius:var(--radius);padding:14px;margin-top:4px;" ontoggle="if (this.open) rsgRefresh()">
-          <summary style="cursor:pointer;font-weight:600;color:var(--navy);font-size:13px;">Revenue Stream Generator</summary>
-          <p id="rsg-intro" style="font-size:13px;color:var(--text2);margin:10px 0 6px;line-height:1.5;"></p>
-          <div id="rsg-type" style="font-size:12px;color:var(--text2);margin-bottom:10px;"></div>
-          <div id="rsg-annuity">
-            <div class="opp-grid-3">
-              <div class="form-group">
-                <label class="form-label">Monthly Base Amount (R)</label>
-                <input type="number" id="opp-base-amount" class="form-control" placeholder="0">
+        <!-- Revenue Stream Generator (v7.9.47): a compact pop-out modal. The inputs
+             keep their ids (autosave, calcMargin and saveRevenueStream read them),
+             so the modal is static markup that is shown and hidden, never rebuilt. -->
+        <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="rsgOpen()">Revenue Stream Generator</button>
+          <span id="rsg-summary" style="font-size:12px;color:var(--text3);"></span>
+        </div>
+        <div id="rsg-modal" class="modal-overlay" style="display:none;" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)rsgClose()">
+          <div class="modal" style="width:640px;">
+            <div class="modal-header"><div class="modal-title">Revenue Stream Generator</div><button class="modal-close" onclick="rsgClose()">×</button></div>
+            <div class="modal-body" style="padding:16px 22px;">
+              <p id="rsg-intro" style="font-size:12px;color:var(--text2);margin:0 0 10px;line-height:1.5;"></p>
+              <div style="display:grid;grid-template-columns:2fr 1fr;gap:10px;align-items:end;">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label class="form-label">Product/Service Type</label>
+                  <select id="rsg-service-sub" class="form-control" onchange="rsgServiceChanged(this.value)"></select>
+                </div>
+                <div id="rsg-type" style="font-size:12px;color:var(--text2);padding-bottom:6px;"></div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Expected Order Date</label>
-                <input type="date" id="opp-order-date" class="form-control" onchange="rsgSyncOrderDate('gen')">
+              <div id="rsg-annuity" style="margin-top:10px;">
+                <div class="opp-grid-3">
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Monthly Base Amount (R)</label>
+                    <input type="number" id="opp-base-amount" class="form-control" placeholder="0">
+                  </div>
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Expected Order Date</label>
+                    <input type="date" id="opp-order-date" class="form-control" onchange="rsgSyncOrderDate('gen')">
+                  </div>
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Expected Start Date</label>
+                    <input type="date" id="opp-start-date" class="form-control" onchange="rsgRefresh()">
+                  </div>
+                </div>
+                <div class="opp-grid-3">
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Number of Months</label>
+                    <input type="number" id="opp-num-months" class="form-control" placeholder="12" min="1" max="60">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Annual Escalation %</label>
+                    <input type="number" id="opp-escalation" class="form-control" placeholder="0" step="0.1">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Margin %</label>
+                    <input type="number" id="opp-margin-pct" class="form-control" step="0.1" min="0" max="100" value="25" oninput="recalcGrid()">
+                    <div id="rsg-margin-rule" style="font-size:11px;color:var(--text3);margin-top:3px;"></div>
+                  </div>
+                </div>
               </div>
-              <div class="form-group">
-                <label class="form-label">Expected Start Date</label>
-                <input type="date" id="opp-start-date" class="form-control" onchange="rsgRefresh()">
+              <div id="rsg-project" style="display:none;margin-top:10px;padding:18px;text-align:center;color:var(--text3);border:1px dashed var(--border);border-radius:var(--radius);">
+                <strong style="color:var(--navy);">Project revenue generator</strong><br>In development.
               </div>
             </div>
-            <div class="opp-grid-4">
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label">Number of Months</label>
-                <input type="number" id="opp-num-months" class="form-control" placeholder="12" min="1" max="60">
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label">Annual Escalation %</label>
-                <input type="number" id="opp-escalation" class="form-control" placeholder="0" step="0.1">
-              </div>
-              <div class="form-group" style="margin-bottom:0">
-                <label class="form-label">Margin %</label>
-                <input type="number" id="opp-margin-pct" class="form-control" step="0.1" min="0" max="100" value="25" oninput="recalcGrid()">
-                <div id="rsg-margin-rule" style="font-size:11px;color:var(--text3);margin-top:3px;"></div>
-              </div>
-              <div class="form-group" style="margin-bottom:0;display:flex;align-items:flex-end;gap:8px;">
-                <button class="btn btn-secondary" style="flex:1;" onclick="rsgAutoPopulate()">Auto-Populate</button>
-                <button class="btn btn-ghost btn-sm" onclick="rsgClear()" title="Remove every month from the revenue stream">Clear</button>
-              </div>
+            <div class="modal-footer">
+              <button class="btn btn-ghost btn-sm" onclick="rsgClear()" title="Remove every month from the revenue stream">Clear stream</button>
+              <button class="btn btn-secondary" onclick="rsgClose()">Close</button>
+              <button class="btn btn-primary" onclick="rsgAutoPopulate()">Auto-Populate</button>
             </div>
           </div>
-          <div id="rsg-project" style="display:none;padding:18px;text-align:center;color:var(--text3);border:1px dashed var(--border);border-radius:var(--radius);">
-            <strong style="color:var(--navy);">Project revenue generator</strong><br>In development.
-          </div>
-        </details>
+        </div>
       </div>
 
       <div style="height:1px;background:var(--border);margin:18px 0;"></div>
@@ -5873,7 +5891,7 @@ async function initOppForm() {
     probEl.value = oppData.probability;
   }
   if (oppData.order_date) document.getElementById('opp-order-date').value = oppData.order_date;
-  rsgSyncOrderDate('gen'); rsgRefresh();
+  rsgSyncOrderDate('gen'); rsgRefresh(); rsgSummary();
   if (oppData.start_date) document.getElementById('opp-start-date').value = oppData.start_date;
   if (oppData.notes) document.getElementById('opp-notes').value = oppData.notes;
   const extNotesEl = document.getElementById('opp-ext-notes');
@@ -6479,8 +6497,28 @@ function rsgMarginRule(sub) {
   const pick = list => list.sort((a, b) => String(b.effective_date).localeCompare(String(a.effective_date)))[0] || null;
   return (sub && pick(rules.filter(r => +r.service_sub_id === +sub.id))) || pick(rules.filter(r => r.service_sub_id == null)) || null;
 }
+function rsgOpen() {
+  const gen = document.getElementById('opp-service-sub-id'), mine = document.getElementById('rsg-service-sub');
+  if (gen && mine) { mine.innerHTML = gen.innerHTML; mine.value = gen.value; }
+  document.getElementById('rsg-modal').style.display = 'flex';
+  rsgRefresh();
+}
+function rsgClose() { document.getElementById('rsg-modal').style.display = 'none'; rsgSummary(); }
+// The service type is the deal's: changing it here changes it on the General tab too.
+function rsgServiceChanged(v) {
+  const gen = document.getElementById('opp-service-sub-id');
+  if (gen) { gen.value = v; onOppServiceChange(); }
+  rsgRefresh();
+}
+function rsgSummary() {
+  const el = document.getElementById('rsg-summary'); if (!el) return;
+  const sub = rsgServiceSub();
+  const base = +document.getElementById('opp-base-amount')?.value || 0, months = document.getElementById('opp-num-months')?.value, margin = document.getElementById('opp-margin-pct')?.value;
+  el.textContent = sub ? sub.name + ' · ' + (rsgRevenueType(sub) === 'project' ? 'project' : 'annuity') + (base ? ' · R ' + base.toLocaleString('en-US') + '/mo × ' + (months || '?') + ' mo' : '') + (margin !== '' ? ' · margin ' + margin + '%' : '') : 'No service type chosen yet.';
+}
 function rsgRefresh() {
   const sub = rsgServiceSub();
+  const mine = document.getElementById('rsg-service-sub'); if (mine && sub && mine.value !== String(sub.id)) mine.value = sub.id;
   const rt = rsgRevenueType(sub);
   const intro = document.getElementById('rsg-intro');
   if (intro) intro.textContent = 'This allows you to generate a revenue stream pipeline for this opportunity, to be used before a proposal (or preliminary proposal) is developed. The maximum probability is capped at ' + rsgProbabilityCap() + '%.';
@@ -6497,6 +6535,7 @@ function rsgRefresh() {
   const ruleEl = document.getElementById('rsg-margin-rule');
   if (ruleEl) ruleEl.textContent = rule ? 'Margin rule: ' + (+rule.min_margin_pct) + '% – ' + (+rule.max_margin_pct) + '%, default ' + (+rule.default_margin_pct) + '%' + (rule.service_sub_id ? ' (this service type)' : ' (' + (rt === 'project' ? 'projects' : 'annuities') + ')') : 'No margin rule yet — set one under Admin → Proposal Builder → Opportunity Margin Rules.';
   rsgSyncOrderDate('gen');
+  rsgSummary();
 }
 // Expected order date lives on the deal once, shown on both tabs.
 function rsgSyncOrderDate(from) {
@@ -6513,15 +6552,11 @@ async function rsgAutoPopulate() {
   const startDate = document.getElementById('opp-start-date').value;
   if (!base) { showStatus('Enter the monthly base amount first', 'error'); return; }
   if (!startDate) { showStatus('Enter the expected start date first', 'error'); return; }
-  // Margin before anything is written: the rule sets the default and the bounds.
+  // Margin is a field on the modal; the rule sets the default and the bounds.
   const rule = rsgMarginRule(sub);
   const marginEl = document.getElementById('opp-margin-pct');
-  const suggested = marginEl.value !== '' ? +marginEl.value : (rule ? +rule.default_margin_pct : (+sub.default_margin || 25));
-  const answer = await promptDialog({ title: 'Margin for this revenue stream', confirmLabel: 'Populate',
-    message: rule ? 'Rule for ' + sub.name + ': minimum ' + (+rule.min_margin_pct) + '%, default ' + (+rule.default_margin_pct) + '%, maximum ' + (+rule.max_margin_pct) + '%.' : 'No margin rule is defined for this service type; the service default applies.',
-    value: String(suggested), placeholder: 'Margin %' });
-  if (answer == null) return;
-  const margin = +String(answer).replace(/[^0-9.]/g, '');
+  if (marginEl.value === '') marginEl.value = rule ? +rule.default_margin_pct : (+sub.default_margin || 25);
+  const margin = +marginEl.value;
   if (!(margin >= 0)) { showStatus('Enter the margin as a percentage', 'error'); return; }
   if (rule && (margin < +rule.min_margin_pct || margin > +rule.max_margin_pct)) { showStatus('Margin ' + margin + '% is outside the rule (' + (+rule.min_margin_pct) + '–' + (+rule.max_margin_pct) + '%)', 'error'); return; }
   marginEl.value = margin;
@@ -6533,6 +6568,7 @@ async function rsgAutoPopulate() {
   updateRevTotals();
   const tcv = document.getElementById('rev-tcv')?.textContent || '';
   showStatus('Stream generated at ' + margin + '% margin — TCV ' + tcv + ', probability capped at ' + cap + '%', 'success');
+  rsgClose();
 }
 async function rsgClear() {
   if (oppRevLocked) { showStatus('Forecast is locked.', 'error'); return; }
@@ -10389,7 +10425,7 @@ function buildRevGrid() {
             <td class="total-col" id="rev-yr-rev-${fy}">${formatRev(yearRevTotal)}</td>
           </tr>
           <tr>
-            <td class="row-label">Margin</td>
+            <td class="row-label">Margin <span class="rev-margin-pct" style="font-weight:normal;color:var(--text3);">(${+(document.getElementById('opp-margin-pct')?.value || 25)}%)</span></td>
             ${marginCalcs}
             <td class="total-col" id="rev-yr-mar-${fy}">${formatRev(yearMarginTotal)}</td>
           </tr>
@@ -10442,6 +10478,9 @@ function onRevBlur(month) {
 }
 
 function recalcGrid() {
+  // v7.9.47: the margin row always names the % it is computed at
+  const pctNow = +(document.getElementById('opp-margin-pct')?.value || 25);
+  document.querySelectorAll('.rev-margin-pct').forEach(el => { el.textContent = '(' + pctNow + '%)'; });
   // Recalc all margin cells when margin % changes
   Object.keys(oppMonths).forEach(month => {
     const marginEl = document.getElementById('rev-m-' + month);
