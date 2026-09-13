@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8000,7 +8000,7 @@ async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
       const clash = rSt && pbRuleConflict(p, 'statutory', rSt.code);
       if (clash) {
         el.checked = false;
-        pbRowFlash(el, 'Blocked by "' + clash.rule + '" — ' + clash.other + ' is already active on this post');
+        pbRowFlash(el, clash.message);
         return;
       }
       // Ticking. An auto item that was overridden just loses its override row; a manual item
@@ -8014,7 +8014,12 @@ async function pbStatAllowToggle(postId, allowanceId, isAuto, el) {
       renderQuoteEditor();
       return;
     }
-    // Unticking.
+    // Unticking. A 'requires' target stays while its trigger is active.
+    {
+      const rSt = pbCurrentByCode(allData['quote_statutory_allowances'], pbQuoteAsAt()).find(x => +x.id === +allowanceId);
+      const block = rSt && pbRuleRemovalBlock(p, 'statutory', rSt.code);
+      if (block) { el.checked = true; pbRowFlash(el, block); return; }
+    }
     if (!isAuto) {
       if (saved) { await api('quote_post_statutory_allowances', 'DELETE', null, where); delete p.statAllow[+allowanceId]; }
       renderQuoteEditor();
@@ -8059,7 +8064,14 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
   const where = 'post_id=eq.' + postId + '&' + idCol + '=eq.' + itemId;
   try {
     if (!raw) {
-      if ((p[mapKey] || {})[+itemId] != null) { await api(table, 'DELETE', null, where); delete p[mapKey][+itemId]; }
+      if ((p[mapKey] || {})[+itemId] != null) {
+        const kindOf = mapKey === 'discAllow' ? 'discretionary' : 'incentive';
+        const tableOf = mapKey === 'discAllow' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
+        const rIt = pbCurrentByCode(allData[tableOf], pbQuoteAsAt()).find(x => +x.id === +itemId);
+        const block = rIt && pbRuleRemovalBlock(p, kindOf, rIt.code);
+        if (block) { el.value = 'R ' + Number(p[mapKey][+itemId]).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); pbRowFlash(el, block); return; }
+        await api(table, 'DELETE', null, where); delete p[mapKey][+itemId];
+      }
       el.value = '';
       return;
     }
@@ -8072,7 +8084,7 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
       const clash = rIt && pbRuleConflict(p, kindOf, rIt.code);
       if (clash) {
         el.value = '';
-        pbRowFlash(el, 'Blocked by "' + clash.rule + '" — ' + clash.other + ' is already active on this post');
+        pbRowFlash(el, clash.message);
         return;
       }
     }
@@ -8154,18 +8166,19 @@ function pbAllowanceCols(p) {
 
   const night = pbPostHasMidnightShift(p);
   const asAt = pbQuoteAsAt();
+  const implied = pbImpliedStat(p);
   const stat = pbCurrentByCode(allData['quote_statutory_allowances'], asAt)
     .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
     .map(r => {
       const saved = (p.statAllow || {})[+r.id];
-      const auto = r.auto_rule === 'night_shift' && night;
+      const auto = pbStatIsAuto(r, night, implied);
       // Ticked when: the rule applies and has not been overridden away, or a manual tick is saved.
       const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
       const overridden = auto && saved && saved.state === 'off';
       const rate = [money(r.rate), r.occurrence_type === 'shift' ? 'per shift' : r.occurrence_type === 'monthly' ? 'monthly' : '']
         .filter(Boolean).join(' · ');
       let chips = '';
-      if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="Ticks itself: this post has a shift crossing midnight">auto</span>';
+      if (auto && on) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:0 5px;color:var(--text3);" title="' + pbEsc(implied[r.code] ? 'Ticks itself: condition "' + implied[r.code] + '"' : 'Ticks itself: this post has a shift crossing midnight') + '">auto</span>';
       if (overridden) chips = ' <span style="font-size:9px;font-weight:700;text-transform:uppercase;background:#FEF3C7;border:1px solid #E9C46A;border-radius:8px;padding:0 5px;color:#7A5B10;" title="' + pbEsc(saved.reason) + '">overridden</span>';
       return { html:
         '<label class="pb-allow-row"' + (r.help_text ? ' data-help="' + pbEsc(r.help_text) + '"' : '') + ' style="font-size:12px;color:var(--text2);display:flex;align-items:center;gap:6px;min-width:0;">' +
@@ -10239,13 +10252,65 @@ function pbRowFlash(el, msg) {
   setTimeout(() => { b.remove(); }, 4500);
 }
 
-function pbActiveAllowSet(p) {
+// v7.9.52: post conditions a rule may fire on (kind 'post' in the members table).
+const PB_POST_CONDITIONS = {
+  midnight_shift: 'a shift crosses midnight',
+  public_holiday: 'staffed on public holidays',
+  saturday: 'staffed on Saturdays',
+  sunday: 'staffed on Sundays',
+  weekend: 'staffed on weekends'
+};
+function pbPostCondition(p, code) {
+  const staffed = dt => Object.entries((p && p.shifts) || {}).some(([k, s]) => s && +s.num > 0 && k.endsWith('|' + dt));
+  switch (code) {
+    case 'midnight_shift': return pbPostHasMidnightShift(p);
+    case 'public_holiday': return staffed('public_holiday');
+    case 'saturday': return staffed('saturday');
+    case 'sunday': return staffed('sunday');
+    case 'weekend': return staffed('saturday') || staffed('sunday');
+    default: return false;
+  }
+}
+function pbRuleParts(rule) {
+  const mem = (allData['quote_allowance_rule_members'] || []).filter(m => +m.rule_id === +rule.id);
+  return { triggers: mem.filter(m => m.role === 'trigger'), targets: mem.filter(m => m.role === 'target'), members: mem.filter(m => !m.role || m.role === 'member') };
+}
+function pbTriggerActive(p, m, active) {
+  return m.kind === 'post' ? pbPostCondition(p, m.code) : active.has(m.kind + ':' + m.code);
+}
+function pbActiveRules(type) {
+  return (allData['quote_allowance_rules'] || []).filter(r => r.active !== false && r.rule_type === type);
+}
+// Statutory codes ticked by an 'implies' rule whose trigger is active on this post, with the
+// rule name for the chip. Iterates so an implied item can itself trigger another rule.
+function pbImpliedStat(p) {
+  const out = {};
+  const rules = pbActiveRules('implies');
+  if (!rules.length) return out;
+  for (let i = 0; i < 5; i++) {
+    const active = pbActiveAllowSet(p, out);
+    let grew = false;
+    rules.forEach(r => {
+      const { triggers, targets } = pbRuleParts(r);
+      if (!triggers.some(t => pbTriggerActive(p, t, active))) return;
+      targets.forEach(t => { if (t.kind === 'statutory' && !out[t.code]) { out[t.code] = r.name; grew = true; } });
+    });
+    if (!grew) break;
+  }
+  return out;
+}
+function pbStatIsAuto(r, night, implied) {
+  return (r.auto_rule === 'night_shift' && night) || !!(implied && implied[r.code]);
+}
+
+function pbActiveAllowSet(p, implied) {
   const out = new Set();
   const asAt = pbQuoteAsAt();
   const night = pbPostHasMidnightShift(p);
+  if (implied === undefined) implied = pbImpliedStat(p);
   pbCurrentByCode(allData['quote_statutory_allowances'], asAt).forEach(r => {
     const saved = (p.statAllow || {})[+r.id];
-    const auto = r.auto_rule === 'night_shift' && night;
+    const auto = pbStatIsAuto(r, night, implied);
     const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
     if (on) out.add('statutory:' + r.code);
   });
@@ -10259,6 +10324,7 @@ function pbActiveAllowSet(p) {
 }
 
 function pbAllowLabelFor(kind, code) {
+  if (kind === 'post') return PB_POST_CONDITIONS[code] || code;
   const table = kind === 'statutory' ? 'quote_statutory_allowances'
     : kind === 'discretionary' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
   const r = pbCurrentByCode(allData[table], pbQuoteAsAt()).find(x => x.code === code)
@@ -10268,16 +10334,34 @@ function pbAllowLabelFor(kind, code) {
 
 // Would activating (kind, code) on this post break an exclusive rule? Returns the conflict -
 // the rule's name and the member already active - or null.
+// Returns { rule, other, message } or null. Exclusive: another member is active. Requires: the
+// item is a trigger and a target is missing.
 function pbRuleConflict(p, kind, code) {
   const active = pbActiveAllowSet(p);
-  const rules = allData['quote_allowance_rules'] || [];
-  const members = allData['quote_allowance_rule_members'] || [];
-  for (const rule of rules) {
-    if (rule.active === false || rule.rule_type !== 'exclusive') continue;
-    const mem = members.filter(m => +m.rule_id === +rule.id);
-    if (!mem.some(m => m.kind === kind && m.code === code)) continue;
-    const clash = mem.find(m => !(m.kind === kind && m.code === code) && active.has(m.kind + ':' + m.code));
-    if (clash) return { rule: rule.name, other: pbAllowLabelFor(clash.kind, clash.code) };
+  const isMe = m => m.kind === kind && m.code === code;
+  for (const rule of pbActiveRules('exclusive')) {
+    const mem = pbRuleParts(rule).members;
+    if (!mem.some(isMe)) continue;
+    const clash = mem.find(m => !isMe(m) && active.has(m.kind + ':' + m.code));
+    if (clash) { const other = pbAllowLabelFor(clash.kind, clash.code); return { rule: rule.name, other, message: 'Blocked by "' + rule.name + '" — ' + other + ' is already active on this post' }; }
+  }
+  for (const rule of pbActiveRules('requires')) {
+    const { triggers, targets } = pbRuleParts(rule);
+    if (!triggers.some(isMe)) continue;
+    const missing = targets.find(t => !active.has(t.kind + ':' + t.code));
+    if (missing) { const other = pbAllowLabelFor(missing.kind, missing.code); return { rule: rule.name, other, message: '"' + rule.name + '" — ' + other + ' must be active on this post first' }; }
+  }
+  return null;
+}
+// Would removing (kind, code) break a 'requires' rule whose trigger is active? Returns the
+// message or null. (An 'implies' target may still be overridden off with a reason.)
+function pbRuleRemovalBlock(p, kind, code) {
+  const active = pbActiveAllowSet(p);
+  for (const rule of pbActiveRules('requires')) {
+    const { triggers, targets } = pbRuleParts(rule);
+    if (!targets.some(t => t.kind === kind && t.code === code)) continue;
+    const by = triggers.find(t => pbTriggerActive(p, t, active));
+    if (by) return '"' + rule.name + '" — required while ' + pbAllowLabelFor(by.kind, by.code) + (by.kind === 'post' ? '' : ' is active');
   }
   return null;
 }
@@ -10316,14 +10400,21 @@ async function renderAllowRules() {
   }
 }
 
-function _arItems() {
+function _arItems(withPost) {
   const today = new Date().toISOString().slice(0, 10);
-  return [
+  const out = [
     { kind: 'statutory', title: 'Statutory Allowances', rows: pbCurrentByCode(allData['quote_statutory_allowances'], today) },
     { kind: 'discretionary', title: 'Discretionary Allowances', rows: pbCurrentByCode(allData['quote_discretionary_allowances'], today) },
-    { kind: 'incentive', title: 'Incentives', rows: pbCurrentByCode(allData['quote_discretionary_incentives'], today) },
+    { kind: 'incentive', title: 'Performance Incentives', rows: pbCurrentByCode(allData['quote_discretionary_incentives'], today) },
   ];
+  if (withPost) out.push({ kind: 'post', title: 'Post conditions', rows: Object.entries(PB_POST_CONDITIONS).map(([code, name]) => ({ code, name })) });
+  return out;
 }
+const AR_TYPES = {
+  exclusive: { badge: 'only one may be active', hint: 'Pick the items that may never be active together — only one of them will be allowed per post.' },
+  requires:  { badge: 'requires', hint: 'When any trigger is active, every target must already be active: the trigger is refused without them, and a target cannot be cleared while a trigger is active.' },
+  implies:   { badge: 'auto-includes', hint: 'When any trigger is active, the statutory targets tick themselves (like the night rule) and may be overridden off with a reason.' }
+};
 
 function _arPaint() {
   const out = document.getElementById('ar-body');
@@ -10332,49 +10423,67 @@ function _arPaint() {
   const members = allData['quote_allowance_rule_members'] || [];
   const st = _arState;
 
-  const chips = rid => members.filter(m => +m.rule_id === +rid)
-    .map(m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:var(--bg);border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`)
-    .join(' <span style="color:var(--text3);font-size:10px;font-weight:700;">OR</span> ');
+  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
+  const word = w => ` <span style="color:var(--text3);font-size:10px;font-weight:700;">${w}</span> `;
+  const chips = r => {
+    const { triggers, targets, members: mem } = pbRuleParts(r);
+    if (r.rule_type === 'exclusive' || (!triggers.length && !targets.length)) return mem.map(chip).join(word('OR'));
+    return word('IF') + triggers.map(chip).join(word('OR')) + word(r.rule_type === 'implies' ? 'THEN TICK' : 'THEN NEEDS') + targets.map(chip).join(word('AND'));
+  };
 
   const list = rules.length ? rules.map(r => `
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;${r.active === false ? 'opacity:.55;' : ''}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <strong style="font-size:13px;color:var(--navy);">${pbEsc(r.name)}</strong>
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">only one may be active</span>
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">${(AR_TYPES[r.rule_type] || AR_TYPES.exclusive).badge}</span>
         <span style="flex:1 1 auto;"></span>
         <button class="btn btn-sm btn-secondary" onclick="_arEdit(${r.id})">Edit</button>
         <button class="btn btn-sm btn-secondary" onclick="_arToggle(${r.id}, ${r.active === false})">${r.active === false ? 'Enable' : 'Disable'}</button>
         <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_arDelete(${r.id})">Delete</button>
       </div>
-      <div style="margin-top:7px;">${chips(r.id) || '<span style="color:var(--text3);font-size:12px;">no members yet</span>'}</div>
+      <div style="margin-top:7px;">${chips(r) || '<span style="color:var(--text3);font-size:12px;">no members yet</span>'}</div>
     </div>`).join('')
     : `<div style="padding:24px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;margin-bottom:10px;">No conditions yet.</div>`;
 
   let editor = '';
   if (st.editing != null) {
     const rule = st.editing === 'new' ? null : rules.find(r => +r.id === +st.editing);
-    const mine = rule ? new Set(members.filter(m => +m.rule_id === +rule.id).map(m => m.kind + ':' + m.code)) : new Set();
-    editor = `
-    <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">
-        <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
-        <input id="ar-name" class="form-control" placeholder="Name — e.g. Armed role" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
-        <span style="font-size:11px;color:var(--text3);">Pick the items that may never be active together — only one of them will be allowed per post.</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;">
-        ${_arItems().map(g => `
+    const type = st.type || (rule ? rule.rule_type : 'exclusive') || 'exclusive';
+    const roleOf = m => (type === 'exclusive' ? 'member' : (m.role === 'member' ? 'trigger' : m.role));
+    const mine = new Set(rule ? members.filter(m => +m.rule_id === +rule.id).map(m => roleOf(m) + ':' + m.kind + ':' + m.code) : []);
+    const picker = (role, groups) => `
+      <div style="display:grid;grid-template-columns:repeat(${groups.length},minmax(0,1fr));gap:14px;">
+        ${groups.map(g => `
           <div style="min-width:0;">
             <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:3px;margin-bottom:5px;">${g.title}</div>
             ${g.rows.map(r => `
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);padding:1px 0;cursor:pointer;">
-                <input type="checkbox" class="ar-member" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(g.kind + ':' + r.code) ? 'checked' : ''}>
+                <input type="checkbox" class="ar-member" data-role="${role}" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(role + ':' + g.kind + ':' + r.code) ? 'checked' : ''}>
                 <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pbEsc(r.name || r.description || r.code)}</span>
-              </label>`).join('')}
+              </label>`).join('') || '<div style="font-size:11px;color:var(--text3);">none</div>'}
           </div>`).join('')}
+      </div>`;
+    const section = (title, inner) => `<div style="font-size:11px;font-weight:700;color:var(--navy);margin:10px 0 6px;">${title}</div>${inner}`;
+    const body = type === 'exclusive'
+      ? picker('member', _arItems(false))
+      : section('IF any of these is active on the post', picker('trigger', _arItems(true))) +
+        section(type === 'implies' ? 'THEN tick these statutory allowances automatically' : 'THEN all of these must already be active', picker('target', type === 'implies' ? _arItems(false).slice(0, 1) : _arItems(false)));
+    editor = `
+    <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
+        <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
+        <input id="ar-name" class="form-control" placeholder="Name — e.g. Armed role" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
+        <select id="ar-type" class="form-control" style="flex:0 0 auto;font-size:12px;" onchange="_arState.type=this.value;_arPaint()">
+          <option value="exclusive" ${type === 'exclusive' ? 'selected' : ''}>Only one may be active</option>
+          <option value="requires" ${type === 'requires' ? 'selected' : ''}>Requires (if this, then that must be on)</option>
+          <option value="implies" ${type === 'implies' ? 'selected' : ''}>Auto-includes (if this, tick that)</option>
+        </select>
       </div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">${AR_TYPES[type].hint}</div>
+      ${body}
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button class="btn btn-sm btn-primary" onclick="_arSave(${rule ? rule.id : 'null'})">Save condition</button>
-        <button class="btn btn-sm btn-ghost" onclick="_arState.editing=null;_arPaint()">Cancel</button>
+        <button class="btn btn-sm btn-ghost" onclick="_arState.editing=null;_arState.type=null;_arPaint()">Cancel</button>
       </div>
     </div>`;
   }
@@ -10383,40 +10492,53 @@ function _arPaint() {
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
       <button class="btn btn-sm btn-ghost" onclick="pbBackToHrGrid()">‹ Setup areas</button>
       <span style="flex:1 1 auto;"></span>
-      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_arState.editing='new';_arPaint()">+ New condition</button>` : ''}
+      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_arState.editing='new';_arState.type='exclusive';_arPaint()">+ New condition</button>` : ''}
     </div>
     ${editor}${list}
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       Conditions apply the moment someone ticks an allowance or types an incentive amount on a post:
-      the second member of a group is refused with a message naming the rule.
+      an exclusive group's second member is refused, a "requires" trigger is refused until its targets are on
+      (and the targets cannot be cleared while it is), and an "auto-includes" target ticks itself when its
+      trigger is active — including post conditions such as a shift crossing midnight. Messages name the rule.
     </div>`;
 }
 
-function _arEdit(id) { _arState.editing = id; _arPaint(); }
+function _arEdit(id) { _arState.editing = id; _arState.type = null; _arPaint(); }
 
 async function _arSave(id) {
   const name = String((document.getElementById('ar-name') || {}).value || '').trim();
   if (!name) { showStatus('Give the condition a name', 'error'); return; }
+  const type = String((document.getElementById('ar-type') || {}).value || 'exclusive');
   const picked = [...document.querySelectorAll('.ar-member:checked')]
-    .map(el => ({ kind: el.dataset.kind, code: el.dataset.code }));
-  if (picked.length < 2) { showStatus('Pick at least two items — a condition needs something to be exclusive WITH', 'error'); return; }
+    .map(el => ({ role: el.dataset.role, kind: el.dataset.kind, code: el.dataset.code }));
+  if (type === 'exclusive') {
+    if (picked.length < 2) { showStatus('Pick at least two items — a condition needs something to be exclusive WITH', 'error'); return; }
+  } else {
+    const trig = picked.filter(m => m.role === 'trigger'), targ = picked.filter(m => m.role === 'target');
+    if (!trig.length || !targ.length) { showStatus('Pick at least one trigger (IF) and one target (THEN)', 'error'); return; }
+    const both = targ.find(t => trig.some(x => x.kind === t.kind && x.code === t.code));
+    if (both) { showStatus(pbAllowLabelFor(both.kind, both.code) + ' cannot be both a trigger and a target', 'error'); return; }
+  }
   const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
   try {
     let rid = id;
     if (rid == null) {
       const made = await api('quote_allowance_rules', 'POST',
-        { rule_type: 'exclusive', name, created_by: me }, 'select=id');
+        { rule_type: type, name, created_by: me }, 'select=id');
       rid = Array.isArray(made) ? made[0].id : made.id;
     } else {
-      await api('quote_allowance_rules', 'PATCH', { name }, 'id=eq.' + rid);
+      await api('quote_allowance_rules', 'PATCH', { name, rule_type: type }, 'id=eq.' + rid);
       await api('quote_allowance_rule_members', 'DELETE', null, 'rule_id=eq.' + rid);
     }
-    await api('quote_allowance_rule_members', 'POST',
-      picked.map(m => ({ rule_id: rid, kind: m.kind, code: m.code })), '');
+    const rows = picked.map(m => type === 'exclusive' ? { rule_id: rid, kind: m.kind, code: m.code } : { rule_id: rid, kind: m.kind, code: m.code, role: m.role });
+    await api('quote_allowance_rule_members', 'POST', rows, '');
     showStatus('Condition saved');
-    _arState.editing = null;
+    _arState.editing = null; _arState.type = null;
     await renderAllowRules();
-  } catch (e) { showStatus('Could not save the condition: ' + e.message, 'error'); }
+  } catch (e) {
+    const hint = /role|rule_type|check constraint|kind/i.test(e.message) ? ' — has sql/allowance_rules_complex.sql been run?' : '';
+    showStatus('Could not save the condition: ' + e.message + hint, 'error');
+  }
 }
 
 async function _arToggle(id, on) {
