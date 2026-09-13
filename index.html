@@ -6813,11 +6813,14 @@ const PB_ACC_BASES = { per_officer: 'per officer', per_duty_position: 'per duty 
 const PB_ACC_RECOVERY = { amortised: 'amortised monthly', once_off: 'once-off to client', absorbed: 'absorbed' };
 const PB_ITEM_KINDS = {
   accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'workforce',
-    title: 'Workforce Support Items', one: 'workforce support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_officer' },
+    title: 'Workforce Support Items', one: 'workforce support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_officer',
+    hint: 'Things an officer carries or needs (pocket book, baton, bullet-proof vest, torch). Ticked on each post.' },
   contract:  { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'contract',
-    title: 'Contract Support Items', one: 'contract support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract' },
+    title: 'Contract Support Items', one: 'contract support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract',
+    hint: 'Physical things a contract needs to be delivered (site gun safe, bullet trap, base station, vehicle). Ticked once per quote.' },
   service:   { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'service',
-    title: 'Service Support Items', one: 'service support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract' },
+    title: 'Service Support Items', one: 'service support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract',
+    hint: 'Service things a contract needs to be delivered (armed response, monitoring, vehicle tracking, airtime). Ticked once per quote.' },
   training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', model: 'training', title: 'Training Courses', one: 'training course' }
 };
 function pbItemCategory(item) { return item.category || 'workforce'; }
@@ -6915,7 +6918,7 @@ async function renderPbItemCatalogPage(kind) {
     return html;
   }).join('');
   head.innerHTML = '<tr><th colspan="7" style="background:var(--bg);text-align:left;padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button>' +
-    '<span class="pg-muted" style="margin-left:12px;">' + (k.category === 'workforce' || !k.category ? 'An item can be ticked on a post' : 'An item can be ticked once on a quote (Contract Support Items tab)') + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
+    '<span class="pg-muted" style="margin-left:12px;">' + (k.hint ? pbEsc(k.hint) + ' ' : '') + (k.category === 'workforce' || !k.category ? 'An item can be ticked on a post' : 'An item can be ticked once on a quote (Contract Support Items tab)') + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
     '<tr><th>Order</th><th>Name</th><th>In use from</th><th>Retired</th><th>Current cost</th><th>State</th><th style="width:230px;">Actions</th></tr>';
   body.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
 }
@@ -7053,7 +7056,7 @@ function renderContractItemsTab() {
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">' +
     '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract and service support items</div>' +
       (rows || '<div class="pb-placeholder-text">No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Contract Support Items / Service Support Items.</div>') +
-      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts (site gun safe, bullet trap, base station, service vehicle). Workforce support items are ticked on each post.</p></div>' +
+      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts. Contract support items are the physical things a contract needs to be delivered; service support items are the service things it needs. Workforce support items (what an officer carries or needs) are ticked on each post.</p></div>' +
     '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Equipment summary (as at ' + pbEsc(asAt) + ')</div>' +
       (sum.lines.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Item</th><th>Where</th><th class="num" style="text-align:right;">Qty</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th></tr></thead><tbody>' +
         sum.lines.map(l => '<tr><td>' + pbEsc(l.name) + (l.recovery === 'absorbed' ? ' <span class="pg-muted">(absorbed)</span>' : '') + '</td><td>' + pbEsc(l.where) + '</td><td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + pbRand(l.monthly) + '</td><td style="text-align:right;">' + (l.onceOff ? pbRand(l.onceOff) : '—') + '</td></tr>').join('') +

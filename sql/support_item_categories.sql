@@ -1,9 +1,12 @@
 -- Focus v7.9.51 — Support item categories (2026-09-13). Idempotent. Dev first, then prod.
 --
 -- The accessory catalogue (quote_accessories) is split into three admin pages:
---   workforce  Workforce Support Items — ticked on each post (pocket book, baton, BPV…)
---   contract   Contract Support Items  — ticked once per quote (site gun safe, bullet trap, base station)
---   service    Service Support Items   — ticked once per quote (service vehicle, response unit…)
+--   workforce  Workforce Support Items — things an officer carries or needs (pocket book,
+--              baton, BPV…); ticked on each post
+--   contract   Contract Support Items  — physical things a contract needs to be delivered
+--              (site gun safe, bullet trap, base station, vehicle); ticked once per quote
+--   service    Service Support Items   — service things a contract needs to be delivered
+--              (armed response, monitoring, airtime…); ticked once per quote
 -- All three keep the same table, cost history (quote_accessory_costs) and cost
 -- model; only the category differs. The client treats a NULL category as workforce
 -- so it keeps working before this script has run.
