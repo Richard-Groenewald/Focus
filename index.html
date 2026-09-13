@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -813,6 +813,7 @@ td.rev-past { background:#EEF0F3; }
 
     <!-- General Tab -->
     <div class="opp-tab-content active" id="opp-tab-general">
+      <div id="opp-suspended-banner" style="display:none;margin:0 0 12px;padding:10px 14px;background:#FEF3C7;border-left:4px solid #D97706;border-radius:6px;font-size:13px;color:#78350F;"></div>
       <div style="display:grid;grid-template-columns:600px 1fr;gap:24px;">
 
         <!-- Left column -->
@@ -949,7 +950,7 @@ td.rev-past { background:#EEF0F3; }
                   </div>
                   <div class="form-group" style="margin-bottom:8px;">
                     <label class="form-label">Expected Start Date</label>
-                    <input type="date" id="opp-start-date" class="form-control" onchange="rsgRefresh()">
+                    <input type="date" id="opp-start-date" class="form-control" onchange="rsgRefresh(); buildRevGrid(); recalcGrid();">
                   </div>
                 </div>
                 <div class="opp-grid-3">
@@ -2044,6 +2045,17 @@ function _mockSeed() {
     strategic_decisions: [
       { id: 1, name: 'Strategic logo win', active: true, sort_order: 1 },
       { id: 2, name: 'Reference account', active: true, sort_order: 2 },
+    ],
+    stage_categories: [
+      { id: 1, name: 'Opportunity-Open', sort_order: 1 }, { id: 2, name: 'Opportunity-Closed', sort_order: 2 }, { id: 3, name: 'Fulfilment-Active', sort_order: 3 }, { id: 4, name: 'Fulfilment-Complete', sort_order: 4 },
+    ],
+    stages: [
+      { id: 2, category_id: 1, name: 'Prospect',    probability: 40,  sort_order: 2, active: true, min_probability: 0, max_probability: 100 },
+      { id: 3, category_id: 1, name: 'Proposal',    probability: 60,  sort_order: 3, active: true, min_probability: 0, max_probability: 100 },
+      { id: 4, category_id: 1, name: 'Negotiation', probability: 80,  sort_order: 4, active: true, min_probability: 0, max_probability: 100 },
+      { id: 9, category_id: 1, name: 'Suspended',   probability: 0,   sort_order: 5, active: true, min_probability: 0, max_probability: 0 },
+      { id: 5, category_id: 2, name: 'Secured',     probability: 100, sort_order: 1, active: true, min_probability: 100, max_probability: 100 },
+      { id: 6, category_id: 2, name: 'Lost',        probability: 0,   sort_order: 2, active: true, min_probability: 0, max_probability: 100 },
     ],
     settings: [
       { id: 1, key: 'environment',            value: 'Development' },
@@ -5493,6 +5505,7 @@ async function openOpportunity(id, adminMode = false) {
     document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
     setupOppOwnerReassign();
     applyOppReadOnly(level);
+    await oppSuspensionOnOpen();
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
   }
@@ -6473,6 +6486,157 @@ async function srAddEscalationYear() {
   } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
 }
 
+// ── Start-date discipline and suspension (v7.9.50) ───────────────────────
+// Revenue is projected from the start date; the start date is on or after the
+// order date; and an open opportunity whose start date arrives unsecured is
+// suspended (stage "Suspended", probability 0, the prior stage and probability
+// kept on the deal) until the allocated salesperson sets a workable start date
+// and confirms the restore. SQL: sql/opportunity_suspension.sql.
+function _stageByName(name) { return (allData['stages'] || []).find(s => String(s.name).toLowerCase() === name.toLowerCase()) || null; }
+function _stageIsOpen(stageId) {
+  const st = (allData['stages'] || []).find(s => +s.id === +stageId); if (!st) return false;
+  const cat = (allData['stage_categories'] || []).find(c => +c.id === +st.category_id);
+  return !!cat && cat.name === 'Opportunity-Open' && String(st.name).toLowerCase() !== 'suspended';
+}
+function _today() { return new Date().toISOString().slice(0, 10); }
+function dealStartDateStale(deal) {
+  return !!(deal && deal.start_date && String(deal.start_date) <= _today() && _stageIsOpen(deal.stage_id));
+}
+function dealIsSuspended(deal) { const s = _stageByName('Suspended'); return !!(s && deal && +deal.stage_id === +s.id); }
+function checkDatesOrder(orderDate, startDate) {
+  if (orderDate && startDate && String(startDate) < String(orderDate)) return 'The start date must be on or after the order date';
+  return null;
+}
+async function suspendDeal(deal) {
+  const s = _stageByName('Suspended');
+  if (!s || dealIsSuspended(deal)) return deal;
+  const patch = { stage_id: s.id, probability: 0, suspended_from_stage_id: deal.stage_id, suspended_probability: deal.probability, suspended_at: new Date().toISOString() };
+  const r = await api('deals', 'PATCH', patch, 'id=eq.' + deal.id + '&select=*');
+  const row = (r && r[0]) || Object.assign({}, deal, patch);
+  try {
+    await api('engagements', 'POST', { deal_id: deal.id, engagement_date: _today(), engagement_type: 'Suspended', notes: 'Suspended automatically: start date ' + deal.start_date + ' arrived without the opportunity being secured. Probability set to 0 (was ' + (deal.probability ?? '—') + '%). Set a workable start date to restore.', next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
+  } catch (e) {}
+  return row;
+}
+// Runs once per session on the first dashboard render: the current user's
+// own open deals with a passed start date are suspended, then every suspended
+// deal of theirs is put in front of them for review.
+let _staleSweepDone = false;
+async function sweepStaleStartDeals() {
+  if (_staleSweepDone || !currentUser || !currentUser.personId) return;
+  _staleSweepDone = true;
+  try {
+    if (!allData['stages']) allData['stages'] = await apiGet('stages', 'active=eq.true&select=*&order=sort_order.asc');
+    if (!allData['stage_categories']) allData['stage_categories'] = await apiGet('stage_categories', 'select=*&order=sort_order.asc');
+    const s = _stageByName('Suspended'); if (!s) return;   // SQL not run yet
+    const openIds = (allData['stages'] || []).filter(st => _stageIsOpen(st.id)).map(st => st.id);
+    const [stale, suspended] = await Promise.all([
+      openIds.length ? apiGet('deals', 'owner_id=eq.' + currentUser.personId + '&stage_id=in.(' + openIds.join(',') + ')&start_date=lte.' + _today() + '&select=*') : Promise.resolve([]),
+      apiGet('deals', 'owner_id=eq.' + currentUser.personId + '&stage_id=eq.' + s.id + '&select=*'),
+    ]);
+    const now = [];
+    for (const d of stale) now.push(await suspendDeal(d));
+    const queue = [...now, ...suspended.filter(d => !now.some(n => +n.id === +d.id))];
+    if (queue.length) await reviewSuspendedDeals(queue);
+  } catch (e) { console.warn('stale start sweep:', e.message); }
+}
+async function reviewSuspendedDeals(list) {
+  for (const d of list) { await reviewSuspendedDeal(d); }
+}
+function reviewSuspendedDeal(deal) {
+  return new Promise(resolve => {
+    const from = (allData['stages'] || []).find(s => +s.id === +deal.suspended_from_stage_id);
+    const org = (allData['organisations'] || []).find(o => +o.id === +deal.org_id);
+    const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+    const minStart = tomorrow.toISOString().slice(0, 10);
+    showModal(`
+    <div class="modal-overlay">
+      <div class="modal" style="width:560px;">
+        <div class="modal-header"><div class="modal-title">Suspended opportunity — review required</div></div>
+        <div class="modal-body">
+          <div style="font-size:15px;font-weight:700;color:var(--navy);">${pbEsc(deal.name || ('Deal #' + deal.id))}</div>
+          <div class="pg-muted" style="margin-bottom:12px;">${pbEsc(org ? org.name : '')}</div>
+          <p style="font-size:13px;color:var(--text2);line-height:1.5;">The start date <strong>${pbEsc(deal.start_date || '—')}</strong> arrived without the opportunity being secured, so it was suspended: stage <strong>Suspended</strong>, probability <strong>0%</strong>. It came from <strong>${pbEsc(from ? from.name : 'its prior stage')}</strong> at <strong>${pbEsc(deal.suspended_probability ?? '—')}%</strong>. Set a workable start date to restore it, or keep it suspended for now.</p>
+          <div class="opp-grid-3" style="margin-top:8px;">
+            <div class="form-group"><label class="form-label">New expected order date</label><input type="date" class="form-control" id="susp-order" value="${pbEsc(deal.order_date || '')}"></div>
+            <div class="form-group"><label class="form-label">New expected start date</label><input type="date" class="form-control" id="susp-start" min="${minStart}" value=""></div>
+            <div class="form-group" style="display:flex;align-items:flex-end;"><label style="font-size:12px;"><input type="checkbox" id="susp-shift" checked> Shift the revenue stream to the new start date</label></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="susp-keep">Keep suspended</button>
+          <button class="btn btn-primary" id="susp-restore">Restore opportunity</button>
+        </div>
+      </div>
+    </div>`);
+    document.getElementById('susp-keep').onclick = () => { closeModal(); resolve(false); };
+    document.getElementById('susp-restore').onclick = async () => {
+      const order = document.getElementById('susp-order').value || null, start = document.getElementById('susp-start').value;
+      if (!start) { showStatus('Enter the new start date', 'error'); return; }
+      if (start <= _today()) { showStatus('The new start date must be after today', 'error'); return; }
+      const err = checkDatesOrder(order, start); if (err) { showStatus(err, 'error'); return; }
+      const shift = document.getElementById('susp-shift').checked;
+      const ok = await confirmDialog({ title: 'Restore ' + (deal.name || 'opportunity') + '?', confirmLabel: 'Restore',
+        message: 'Restore to ' + (from ? from.name : 'the prior stage') + ' at ' + (deal.suspended_probability ?? 0) + '% probability, with start date ' + start + (order ? ' and order date ' + order : '') + (shift ? ', shifting the revenue stream to start in ' + start.slice(0, 7) : '') + '?' });
+      if (!ok) return;
+      try {
+        await restoreSuspendedDeal(deal, { order, start, shift });
+        closeModal(); resolve(true);
+      } catch (e) { showStatus('Could not restore: ' + e.message, 'error'); }
+    };
+  });
+}
+async function restoreSuspendedDeal(deal, o) {
+  const patch = { start_date: o.start, order_date: o.order, stage_id: deal.suspended_from_stage_id || (_stageByName('Prospect') || {}).id || deal.stage_id,
+    probability: deal.suspended_probability ?? 0, suspended_from_stage_id: null, suspended_probability: null, suspended_at: null };
+  await api('deals', 'PATCH', patch, 'id=eq.' + deal.id, { prefer: 'return=minimal' });
+  if (o.shift) await shiftRevenueStreamTo(deal.id, o.start.slice(0, 7));
+  try {
+    await api('engagements', 'POST', { deal_id: deal.id, engagement_date: _today(), engagement_type: 'Restored', notes: 'Restored from suspension by ' + (currentUser.name || 'the owner') + ': start date ' + o.start + (o.order ? ', order date ' + o.order : '') + '; stage and probability (' + patch.probability + '%) reinstated' + (o.shift ? '; revenue stream shifted to ' + o.start.slice(0, 7) : '') + '.', next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
+  } catch (e) {}
+  Object.assign(deal, patch);
+  if (oppData && +oppData.id === +deal.id) { Object.assign(oppData, patch); try { await openOpportunity(deal.id, dealAdminMode); } catch (e) {} }
+  showStatus('Restored — ' + (deal.name || 'opportunity') + ' back at ' + patch.probability + '%', 'success');
+}
+// Move every month of the opportunity stream so the first revenue month becomes
+// the start month; revenue and margin values are kept, only the calendar moves.
+async function shiftRevenueStreamTo(dealId, startMonth) {
+  const streams = await apiGet('revenue_streams', 'deal_id=eq.' + dealId + '&stream_type=eq.opportunity&select=id');
+  if (!streams.length) return;
+  const sid = streams[0].id;
+  const rows = await apiGet('revenue_stream_months', 'stream_id=eq.' + sid + '&select=*&order=month.asc');
+  const withRev = rows.filter(r => +r.opportunity_revenue > 0);
+  if (!withRev.length) return;
+  const first = withRev[0].month;
+  const idx = m => { const [y, mo] = String(m).split('-').map(Number); return y * 12 + (mo - 1); };
+  const delta = idx(startMonth) - idx(first);
+  if (!delta) return;
+  const moved = rows.map(r => { const i = idx(r.month) + delta; const row = Object.assign({}, r, { month: Math.floor(i / 12) + '-' + String((i % 12) + 1).padStart(2, '0') }); delete row.id; delete row.created_at; delete row.updated_at; return row; });
+  await api('revenue_stream_months', 'DELETE', null, 'stream_id=eq.' + sid);
+  await api('revenue_stream_months', 'POST', moved, '', { prefer: 'return=minimal' });
+}
+// The deal form: a suspended deal shows why and offers the review; a stale one
+// opened by someone who may edit it is suspended on the spot.
+async function oppSuspensionOnOpen() {
+  const banner = document.getElementById('opp-suspended-banner'); if (!banner) return;
+  banner.style.display = 'none';
+  if (!oppData || !oppData.id) return;
+  if (dealStartDateStale(oppData) && _stageByName('Suspended') && canEditRecord(oppData)) {
+    const row = await suspendDeal(oppData);
+    Object.assign(oppData, row);
+    const sel = document.getElementById('opp-stage-id'); if (sel) sel.value = oppData.stage_id;
+    const prob = document.getElementById('opp-probability'); if (prob) { prob.value = 0; prob.dataset.userSet = '1'; }
+    if (typeof _oppAsOpened === 'object' && _oppAsOpened) { _oppAsOpened.stage_id = oppData.stage_id; _oppAsOpened.probability = 0; }
+    showStatus('Start date has passed — opportunity suspended', 'error');
+  }
+  if (dealIsSuspended(oppData)) {
+    const from = (allData['stages'] || []).find(s => +s.id === +oppData.suspended_from_stage_id);
+    banner.innerHTML = '<strong>Suspended</strong> — the start date ' + pbEsc(oppData.start_date || '') + ' passed without securing. Probability is held at 0%' + (from ? '; it came from ' + pbEsc(from.name) + ' at ' + pbEsc(oppData.suspended_probability ?? 0) + '%' : '') + '. ' +
+      (canEditRecord(oppData) ? '<button class="btn btn-primary btn-sm" style="margin-left:8px;" onclick="reviewSuspendedDeal(oppData)">Set a workable start date</button>' : 'The allocated salesperson must review it.');
+    banner.style.display = '';
+  }
+}
+
 // ── Revenue Stream Generator (v7.9.45) ──────────────────────────────────
 // The top block of the Proposal Builder tab. Builds the opportunity stream
 // BEFORE a proposal exists: the General tab's service type decides annuity
@@ -6593,6 +6757,7 @@ async function rsgAutoPopulate() {
   const startDate = document.getElementById('opp-start-date').value;
   if (!base) { showStatus('Enter the monthly base amount first', 'error'); return; }
   if (!startDate) { showStatus('Enter the expected start date first', 'error'); return; }
+  const dateErr = checkDatesOrder(document.getElementById('opp-order-date').value, startDate); if (dateErr) { showStatus(dateErr, 'error'); return; }
   // Margin is a field on the modal; the rule sets the default and the bounds.
   const rule = rsgMarginRule(sub);
   const marginEl = document.getElementById('opp-margin-pct');
@@ -10417,9 +10582,13 @@ function buildRevGrid() {
   const currentFY = getCurrentFY();
   // v7.9.48: no past years unless they hold revenue (then they show, greyed, so
   // nothing on the deal is hidden); totals still sum every FY listed here.
-  const pastWithRevenue = [...new Set(Object.keys(oppMonths).filter(m => +oppMonths[m]?.revenue > 0).map(m => _fyOfMonth(m)))].filter(fy => fy < currentFY).sort();
-  oppFYs = [...pastWithRevenue, currentFY, currentFY + 1, currentFY + 2];
+  // v7.9.50: current FY, every FY that holds a projection, and the FY of the start date.
+  const withRevenue = [...new Set(Object.keys(oppMonths).filter(m => +oppMonths[m]?.revenue > 0).map(m => _fyOfMonth(m)))];
+  const startDate = document.getElementById('opp-start-date')?.value || '';
+  const startFY = startDate ? _fyOfMonth(startDate.slice(0, 7)) : null;
+  oppFYs = [...new Set([...withRevenue, currentFY, ...(startFY != null && startFY >= currentFY ? [startFY] : [])])].sort((a, b) => a - b);
   const thisMonth = new Date().toISOString().slice(0, 7);
+  const startMonth = startDate ? startDate.slice(0, 7) : null;
 
   const tabsEl = document.getElementById('rev-fy-tabs');
   const contentsEl = document.getElementById('rev-fy-contents');
@@ -10445,9 +10614,9 @@ function buildRevGrid() {
     const revenueInputs = months.map(m => {
       const v = oppMonths[m]?.revenue;
       const display = v && +v > 0 ? Math.round(+v).toLocaleString('en-US') : '';
-      const past = m < thisMonth;
+      const past = m < thisMonth || (startMonth && m < startMonth && !(+oppMonths[m]?.revenue > 0));   // revenue is projected from the start date
       const dis = (oppRevLocked || past) ? ' disabled' : '';
-      return `<td${past ? ' class="rev-past"' : ''}><input class="rev-input${past ? ' rev-past' : ''}" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="${past ? '' : '0'}"${dis}${past ? ' title="Past month"' : ''} oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
+      return `<td${past ? ' class="rev-past"' : ''}><input class="rev-input${past ? ' rev-past' : ''}" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="${past ? '' : '0'}"${dis}${past ? ' title="' + (m < thisMonth ? 'Past month' : 'Before the start date') + '"' : ''} oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
     }).join('');
 
     const marginCalcs = months.map(m =>
@@ -10995,6 +11164,15 @@ async function saveOpportunity() {
   // Securing locks probability at 100% — folded into this same PATCH (v7.9.36)
   // so runSecuredProcess no longer needs a second write to the deal row.
   if (+stageId === 5 && +prevStageId !== 5) payload.probability = 100;
+  // v7.9.50: start date on or after order date; a suspended deal with a workable start date is restored only with confirmation.
+  { const derr = checkDatesOrder(payload.order_date, payload.start_date); if (derr) { showStatus(derr, 'error'); return; } }
+  if (oppData.id && dealIsSuspended(oppData) && +stageId === +oppData.stage_id && payload.start_date && payload.start_date > _today()) {
+    const from = (allData['stages'] || []).find(s => +s.id === +oppData.suspended_from_stage_id);
+    if (await confirmDialog({ title: 'Restore opportunity?', confirmLabel: 'Restore', message: 'The start date is now ' + payload.start_date + '. Restore to ' + (from ? from.name : 'the prior stage') + ' at ' + (oppData.suspended_probability ?? 0) + '% probability?' })) {
+      payload.stage_id = from ? from.id : payload.stage_id; payload.probability = oppData.suspended_probability ?? 0;
+      payload.suspended_from_stage_id = null; payload.suspended_probability = null; payload.suspended_at = null;
+    }
+  }
 
   try {
     let deal;
@@ -14028,6 +14206,7 @@ async function dismissWokeReminder(leadId) {
 }
 
 async function renderDashboard(opts) {
+  sweepStaleStartDeals();   // v7.9.50: once per session, the owner's stale-start deals are suspended and reviewed
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
   head.innerHTML = '';
