@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2096,7 +2096,7 @@ function _mockSeed() {
       ['tazer','Tazer (Electric Paralyzer)'],['pepper_spray','Pepper Spray'],['bullet_proof_vest','Bullet Proof Vest'],['non_lethal_paintball','Non-Lethal - Paintball Gun'],['non_lethal_9mm_pellet','Non-Lethal - 9mm Pellet Gun'],
       ['bodyworn_camera','Bodyworn camera'],['extendable_baton','Extendable Baton'],['rubberized_baton','Rubberized Baton'],['bullet_trap','Bullet Trap'],['site_gun_safe','Site Gun Safe'],
       ['handheld_metal_detector','Handheld Metal Detector'],['occurrence_book','Occurrence Book'],['bodyworn_harness','Bodyworn Harness'],['torch_zartek','Torch/Spotlight - Zartek hand held'],['parabellum_9mm','9mm Parabellum']
-    ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, created_at: now })),
+    ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, category: ['bullet_trap','site_gun_safe'].includes(x[0]) ? 'contract' : 'workforce', created_at: now })),
     quote_training_courses: [
       ['induction_all_staff','Induction training - All staff'],['control_room_operators','Control Room Operators'],['security_officer_semi_skilled','Security Officer (Semi-skilled)'],['supervisors_shift_leaders','Supervisors/Shift Leaders'],
       ['contract_manager_site_seniors','Contract Manager/Site Seniors'],['dog_handler','Dog Handler'],['regulation_21','Regulation 21'],['fire_fighting','Fire Fighting'],['specialised_training','Specialised Training'],
@@ -2857,7 +2857,9 @@ const PAGES = {
   pb_human_resources:       { title: 'Proposal Builder — Human Resources', custom: true, columns: [], fields: [] },
   pb_standard_posts:        { title: 'Proposal Builder — Standard Posts',  custom: true, columns: [], fields: [] },
   pb_standard_headings:     { title: 'Proposal Builder — Standard Headings', custom: true, columns: [], fields: [] },
-  pb_accessories:           { title: 'Proposal Builder — Accessories',       custom: true, columns: [], fields: [] },
+  pb_accessories:           { title: 'Proposal Builder — Workforce Support Items', custom: true, columns: [], fields: [] },
+  pb_contract_items:        { title: 'Proposal Builder — Contract Support Items',  custom: true, columns: [], fields: [] },
+  pb_service_items:         { title: 'Proposal Builder — Service Support Items',   custom: true, columns: [], fields: [] },
   pb_training_courses:      { title: 'Proposal Builder — Training Courses',  custom: true, columns: [], fields: [] },
   pb_proposal_templates:    { title: 'Proposal Builder — Proposal Templates', custom: true, columns: [], fields: [] },
   pb_margin_rules:          { title: 'Proposal Builder — Opportunity Margin Rules', custom: true, columns: [], fields: [] },
@@ -3763,6 +3765,8 @@ async function loadTable(page) {
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
     if (page === 'pb_standard_headings')      { await renderPbCatalogPage('quote_standard_heading_names', 'Standard Headings');  return; }
     if (page === 'pb_accessories')            { await renderPbItemCatalogPage('accessory'); return; }
+    if (page === 'pb_contract_items')         { await renderPbItemCatalogPage('contract');  return; }
+    if (page === 'pb_service_items')          { await renderPbItemCatalogPage('service');   return; }
     if (page === 'pb_training_courses')       { await renderPbItemCatalogPage('training');  return; }
     if (page === 'pb_proposal_templates')     { await renderPgTemplatesPage(); return; }
     if (page === 'pb_margin_rules')           { await renderPbCatalogPage('quote_opportunity_margin_rules', 'Opportunity Margin Rules'); return; }
@@ -5181,8 +5185,12 @@ const MENU = [
             icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
           { page: 'pb_standard_headings',     label: 'Standard Headings',           permission: 'administer_quote_rates',
             icon: '<path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' },
-          { page: 'pb_accessories',           label: 'Accessories',                 permission: 'administer_quote_rates',
+          { page: 'pb_accessories',           label: 'Workforce Support Items',     permission: 'administer_quote_rates',
             icon: '<rect x="3" y="2" width="10" height="12" rx="2"/><path d="M6 6h4M6 9h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
+          { page: 'pb_contract_items',        label: 'Contract Support Items',      permission: 'administer_quote_rates',
+            icon: '<path d="M3 2h7l3 3v9H3z"/><path d="M5 8h6M5 11h6" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
+          { page: 'pb_service_items',         label: 'Service Support Items',       permission: 'administer_quote_rates',
+            icon: '<circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2" fill="none" stroke="white" stroke-width="1.3" stroke-linecap="round"/>' },
           { page: 'pb_training_courses',      label: 'Training Courses',            permission: 'administer_quote_rates',
             icon: '<path d="M2 6l6-3 6 3-6 3-6-3z"/><path d="M5 8v3c0 1 1.5 2 3 2s3-1 3-2V8" fill="none" stroke="currentColor" stroke-width="1.4"/>' },
           { page: 'pb_proposal_templates',    label: 'Proposal Templates',          permission: 'administer_quote_rates',
@@ -6796,12 +6804,23 @@ async function rsgClear() {
 // retired_date, inclusive, NULL = open) and cost rows, one per price change,
 // effective-dated like the rate cards. pbItemCurrentCost picks the newest row
 // that has arrived as at a date; nothing is ever edited in place.
+// v7.9.51: the accessory catalogue is split by `category` (sql/support_item_categories.sql)
+// into three admin pages — Workforce Support Items (ticked per post), Contract Support
+// Items and Service Support Items (ticked once per quote). All three share the table,
+// the cost history and the cost model; `model` picks the cost form. A row with no
+// category (SQL not run yet) counts as workforce.
+const PB_ACC_BASES = { per_officer: 'per officer', per_duty_position: 'per duty position', per_post: 'per post', per_contract: 'per contract' };
+const PB_ACC_RECOVERY = { amortised: 'amortised monthly', once_off: 'once-off to client', absorbed: 'absorbed' };
 const PB_ITEM_KINDS = {
-  accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', title: 'Accessories', one: 'accessory',
-    bases: { per_officer: 'per officer', per_duty_position: 'per duty position', per_post: 'per post', per_contract: 'per contract' },
-    recovery: { amortised: 'amortised monthly', once_off: 'once-off to client', absorbed: 'absorbed' } },
-  training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', title: 'Training Courses', one: 'training course' }
+  accessory: { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'workforce',
+    title: 'Workforce Support Items', one: 'workforce support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_officer' },
+  contract:  { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'contract',
+    title: 'Contract Support Items', one: 'contract support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract' },
+  service:   { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'service',
+    title: 'Service Support Items', one: 'service support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract' },
+  training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', model: 'training', title: 'Training Courses', one: 'training course' }
 };
+function pbItemCategory(item) { return item.category || 'workforce'; }
 function pbItemInWindow(item, asAt) {
   if (item.active === false) return false;
   if (item.in_use_date && String(item.in_use_date) > asAt) return false;
@@ -6835,7 +6854,7 @@ function pbAccQtyForPost(basis, p) {
 function pbItemCostLabel(kind, c) {
   if (!c) return '';
   const k = PB_ITEM_KINDS[kind];
-  if (kind === 'accessory') {
+  if (k.model === 'accessory') {
     return pbRand(pbAccMonthlyUnit(c)) + '/mo ' + (k.bases[c.cost_basis] || '') + (c.recovery === 'once_off' ? ' · ' + pbRand(c.acquisition_cost) + ' once-off' : c.recovery === 'absorbed' ? ' · absorbed' : '');
   }
   return pbRand(c[k.amount]) + ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : '');
@@ -6857,6 +6876,7 @@ async function renderPbItemCatalogPage(kind) {
     ]);
   } catch (e) { body.innerHTML = '<tr><td style="padding:30px;color:var(--red);">' + pbEsc(e.message) + '</td></tr>'; return; }
   allData[k.table] = items; allData[k.costTable] = costs;
+  if (k.category) items = items.filter(it => pbItemCategory(it) === k.category);
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById('page-sub').textContent = k.title + ' · ' + items.length + ' item' + (items.length === 1 ? '' : 's') + (costsMissing ? ' · cost history not installed (sql/proposal_generator_item_costs.sql)' : '');
   const rows = items.map(it => {
@@ -6882,10 +6902,10 @@ async function renderPbItemCatalogPage(kind) {
           (costsMissing ? '' : '<button class="btn btn-primary btn-sm" onclick="pbItemAddCostForm(' + it.id + ')">+ New cost from date</button>') + '</div>' +
         (pbItemAdmin.addingCost === it.id ? pbItemCostForm(kind, it) : '') +
         (hist.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Effective</th>' +
-            (kind === 'accessory' ? '<th>Acquisition</th><th>Life</th><th>Running /mo</th><th>Loss %/yr</th><th><strong>Unit /mo</strong></th><th>Basis</th><th>Recovery</th>' : '<th>Cost</th><th>Refresher</th>') +
+            (k.model === 'accessory' ? '<th>Acquisition</th><th>Life</th><th>Running /mo</th><th>Loss %/yr</th><th><strong>Unit /mo</strong></th><th>Basis</th><th>Recovery</th>' : '<th>Cost</th><th>Refresher</th>') +
             '<th>Note</th><th>Entered</th></tr></thead><tbody>' +
           hist.map(c => '<tr' + (cur && c.id === cur.id ? ' style="font-weight:600;"' : '') + '><td>' + pbEsc(c.effective_date) + (cur && c.id === cur.id ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">current</span>' : (String(c.effective_date) > today ? ' <span class="badge">future</span>' : '')) + '</td>' +
-            (kind === 'accessory'
+            (k.model === 'accessory'
               ? '<td>' + pbRand(c.acquisition_cost) + '</td><td>' + (c.life_months ? c.life_months + ' mo' : '—') + '</td><td>' + pbRand(c.monthly_cost) + '</td><td>' + (+c.loss_pct_per_year || 0) + '%</td><td><strong>' + pbRand(pbAccMonthlyUnit(c)) + '</strong></td><td>' + pbEsc(k.bases[c.cost_basis] || c.cost_basis) + '</td><td>' + pbEsc(k.recovery[c.recovery] || c.recovery || '') + '</td>'
               : '<td>' + pbRand(c[k.amount]) + '</td><td>' + pbEsc(c.validity_months ? 'every ' + c.validity_months + ' months' : 'once') + '</td>') +
             '<td>' + pbEsc(c.note || '') + '</td><td class="pg-muted">' + pbEsc(String(c.created_at || '').slice(0, 10)) + (c.created_by ? ' · ' + pbEsc(pbPersonName(c.created_by)) : '') + '</td></tr>').join('') + '</tbody></table>'
@@ -6895,7 +6915,7 @@ async function renderPbItemCatalogPage(kind) {
     return html;
   }).join('');
   head.innerHTML = '<tr><th colspan="7" style="background:var(--bg);text-align:left;padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button>' +
-    '<span class="pg-muted" style="margin-left:12px;">An item can be ticked on a post while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
+    '<span class="pg-muted" style="margin-left:12px;">' + (k.category === 'workforce' || !k.category ? 'An item can be ticked on a post' : 'An item can be ticked once on a quote (Contract Support Items tab)') + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
     '<tr><th>Order</th><th>Name</th><th>In use from</th><th>Retired</th><th>Current cost</th><th>State</th><th style="width:230px;">Actions</th></tr>';
   body.innerHTML = rows || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
 }
@@ -6905,12 +6925,12 @@ function pbItemCostForm(kind, it) {
   const k = PB_ITEM_KINDS[kind];
   return '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:#fff;border:1px solid var(--border);border-radius:4px;padding:10px;margin-bottom:8px;">' +
     '<div class="form-group"><label class="form-label">Effective from</label><input type="date" class="form-control" id="pbc-date" value="' + today + '"></div>' +
-    (kind === 'accessory'
+    (k.model === 'accessory'
       ? '<div class="form-group"><label class="form-label">Acquisition (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-acq" style="width:110px;" value="0"></div>' +
         '<div class="form-group"><label class="form-label">Life (months)</label><input type="number" min="1" class="form-control" id="pbc-life" style="width:90px;" placeholder="blank = no replacement"></div>' +
         '<div class="form-group"><label class="form-label">Running cost /mo (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-monthly" style="width:110px;" value="0"></div>' +
         '<div class="form-group"><label class="form-label">Loss %/yr</label><input type="number" step="0.1" min="0" class="form-control" id="pbc-loss" style="width:80px;" value="0"></div>' +
-        '<div class="form-group"><label class="form-label">Basis (quantity)</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>' +
+        '<div class="form-group"><label class="form-label">Basis (quantity)</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '"' + (v === k.defaultBasis ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +
         '<div class="form-group"><label class="form-label">Recovery</label><select class="form-control" id="pbc-recovery">' + Object.entries(k.recovery).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>'
       : '<div class="form-group"><label class="form-label">Cost per officer (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-amount" style="width:130px;"></div>' +
         '<div class="form-group"><label class="form-label">Refresher every (months, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
@@ -6928,7 +6948,12 @@ async function pbItemAdd() {
   const items = allData[k.table] || [];
   const order = items.reduce((m, i) => Math.max(m, i.display_order || 0), 0) + 1;
   try {
-    const r = await apiPost(k.table, { code: pbSlug(name) + '_' + (Date.now() % 100000), name: name.trim(), display_order: order, active: true, in_use_date: new Date().toISOString().slice(0, 10), created_by: currentUser.personId });
+    const base = { code: pbSlug(name) + '_' + (Date.now() % 100000), name: name.trim(), display_order: order, active: true, in_use_date: new Date().toISOString().slice(0, 10), created_by: currentUser.personId };
+    if (k.category && k.category !== 'workforce') base.category = k.category;   // workforce is the column default
+    const r = await apiPost(k.table, base).catch(e => {
+      if (k.category && /category/i.test(e.message)) throw new Error('sql/support_item_categories.sql has not been run — the category column is missing');
+      throw e;
+    });
     if (r[0]) { pbItemAdmin.open = r[0].id; pbItemAdmin.addingCost = r[0].id; }
   } catch (e) { showStatus('Could not add: ' + e.message, 'error'); }
   renderPbItemCatalogPage(pbItemAdmin.kind);
@@ -6959,7 +6984,7 @@ async function pbItemSaveCost(kind, itemId) {
   const date = g('pbc-date').value;
   if (!date) { showStatus('An effective date is required', 'error'); return; }
   const row = { [k.fk]: itemId, effective_date: date, note: g('pbc-note').value.trim() || null, created_by: currentUser.personId };
-  if (kind === 'accessory') {
+  if (k.model === 'accessory') {
     Object.assign(row, { acquisition_cost: +g('pbc-acq').value || 0, life_months: g('pbc-life').value ? Math.round(+g('pbc-life').value) : null,
       monthly_cost: +g('pbc-monthly').value || 0, loss_pct_per_year: +g('pbc-loss').value || 0, cost_basis: g('pbc-basis').value, recovery: g('pbc-recovery').value });
     if (!row.acquisition_cost && !row.monthly_cost) { showStatus('Enter an acquisition cost or a running cost', 'error'); return; }
@@ -7012,21 +7037,23 @@ function renderContractItemsTab() {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
   const items = (allData['quote_accessories'] || []).filter(i => {
     const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt);
-    return (c && c.cost_basis === 'per_contract' && pbItemInWindow(i, asAt)) || pbContractAcc.has(+i.id);
+    return ((pbItemCategory(i) !== 'workforce' || (c && c.cost_basis === 'per_contract')) && pbItemInWindow(i, asAt)) || pbContractAcc.has(+i.id);
   });
-  const rows = items.map(i => {
+  const rowOf = i => {
     const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt), on = pbContractAcc.has(+i.id), qty = pbContractAcc.get(+i.id) || 1;
     return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:8px;font-size:13px;">' +
       '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="pbToggleContractAcc(' + i.id + ', this.checked, 1)">' +
       '<span style="flex:1;">' + pbEsc(i.name) + '</span>' +
       (on ? '<span style="font-size:12px;color:var(--text3);">qty <input type="number" min="1" value="' + qty + '" style="width:54px;padding:2px 4px;" onchange="pbToggleContractAcc(' + i.id + ', true, +this.value)"></span>' : '') +
       '<span style="white-space:nowrap;color:var(--text3);font-size:11px;">' + pbEsc(c ? pbItemCostLabel('accessory', c) : '') + '</span></label>';
-  }).join('');
+  };
+  const group = (label, list) => list.length ? '<div style="font-size:11px;font-weight:600;color:var(--text3);margin:6px 0 2px;">' + label + '</div>' + list.map(rowOf).join('') : '';
+  const rows = group('Contract support items', items.filter(i => pbItemCategory(i) !== 'service')) + group('Service support items', items.filter(i => pbItemCategory(i) === 'service'));
   const sum = pbAccSummary();
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">' +
-    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract-level accessories</div>' +
-      (rows || '<div class="pb-placeholder-text">No accessory is costed "per contract" as at ' + pbEsc(asAt) + '. Set the basis under Admin → Proposal Builder → Accessories.</div>') +
-      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">One per quote regardless of posts (site gun safe, bullet trap, base station). Per-officer, per-duty-position and per-post items are ticked on each post.</p></div>' +
+    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract and service support items</div>' +
+      (rows || '<div class="pb-placeholder-text">No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Contract Support Items / Service Support Items.</div>') +
+      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts (site gun safe, bullet trap, base station, service vehicle). Workforce support items are ticked on each post.</p></div>' +
     '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Equipment summary (as at ' + pbEsc(asAt) + ')</div>' +
       (sum.lines.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Item</th><th>Where</th><th class="num" style="text-align:right;">Qty</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th></tr></thead><tbody>' +
         sum.lines.map(l => '<tr><td>' + pbEsc(l.name) + (l.recovery === 'absorbed' ? ' <span class="pg-muted">(absorbed)</span>' : '') + '</td><td>' + pbEsc(l.where) + '</td><td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + pbRand(l.monthly) + '</td><td style="text-align:right;">' + (l.onceOff ? pbRand(l.onceOff) : '—') + '</td></tr>').join('') +
@@ -7061,19 +7088,19 @@ function pbChecklistCols(p) {
           const live = pbItemInWindow(r, asAt);
           const k = PB_ITEM_KINDS[kind];
           const cost = pbItemCurrentCost(allData[k.costTable], k.fk, r.id, asAt);
-          if (kind === 'accessory' && cost && cost.cost_basis === 'per_contract' && !set.has(+r.id)) return '';   // ticked on the Contract Support Items tab
+          if (kind === 'accessory' && !set.has(+r.id) && (pbItemCategory(r) !== 'workforce' || (cost && cost.cost_basis === 'per_contract'))) return '';   // ticked on the Contract Support Items tab
           return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:7px;font-size:12px;color:' + (live ? 'var(--text2)' : 'var(--text3)') + ';"' + (live ? '' : ' title="Outside this item\'s in-use window for the quote start date"') + '>' +
             '<input type="checkbox" ' + (set.has(+r.id) ? 'checked' : '') + (live ? '' : ' disabled') + ' onchange="pbToggleChecklist(' + p.id + ', \'' + kind + '\', ' + r.id + ', this)">' +
             '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + pbEsc(r.name) + (live ? '' : ' <em>(' + (r.retired_date && String(r.retired_date) < asAt ? 'retired' : 'not in use') + ')</em>') + '</span>' +
             '<span style="white-space:nowrap;color:var(--text3);font-size:11px;" title="' + pbEsc(cost ? pbItemCostLabel(kind, cost) : '') + '">' +
               (cost ? (kind === 'accessory' ? (() => { const q = pbAccQtyForPost(cost.cost_basis, p); return q + ' × ' + pbRand(pbAccMonthlyUnit(cost)) + ' = ' + pbRand(q * pbAccMonthlyUnit(cost)) + '/mo' + (cost.recovery === 'once_off' ? ' + ' + pbRand(q * (+cost.acquisition_cost || 0)) + ' once-off' : ''); })() : pbItemCostLabel(kind, cost)) : '') + '</span>' +
           '</label>'; }).join('') + '</div>'
-      : '<div class="pb-placeholder-text">Nothing in the catalogue yet — add items under Admin → Proposal Builder → ' + title + '.</div>') +
+      : '<div class="pb-placeholder-text">Nothing in the catalogue yet — add items under Admin → Proposal Builder → ' + PB_ITEM_KINDS[kind].title + '.</div>') +
     '</div>';
   const keep = (rows, set) => (rows || []).filter(r => pbItemInWindow(r, asAt) || set.has(+r.id));
   const accSet = p.accessories || new Set(), trnSet = p.training || new Set();
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:6px 2px;">' +
-    col('Required Accessories', keep(allData['quote_accessories'], accSet), accSet, 'accessory') +
+    col('Workforce Support Items', keep(allData['quote_accessories'], accSet), accSet, 'accessory') +
     col('Training', keep(allData['quote_training_courses'], trnSet), trnSet, 'training') +
   '</div>';
 }
@@ -9088,7 +9115,7 @@ const PB_SCHEMAS = {
   // v7.9.41: the two per-post checklists (Required Accessories / Training) are
   // fed from these catalogues — the lists a post ticks are whatever is active here.
   'accessories': {
-    title: 'Accessories',
+    title: 'Workforce Support Items',
     table: 'quote_accessories',
     sortBy: 'display_order',
     columns: [
