@@ -8985,7 +8985,7 @@ const PB_SCHEMAS = {
     sortBy: 'effective_date',
     columns: [
       { key:'effective_date', label:'Effective Date', type:'date' },
-      { key:'code',           label:'Code',           type:'text' },
+      { key:'code',           label:'Code',           type:'text', editOnly:true },
       { key:'name',           label:'Name',           type:'text' },
       { key:'description',    label:'Description',    type:'text' },
       { key:'retired_date',   label:'Last Active',    type:'date' },
@@ -9009,7 +9009,7 @@ const PB_SCHEMAS = {
     sortBy: 'effective_date',
     columns: [
       { key:'effective_date',  label:'Effective Date', type:'date' },
-      { key:'code',            label:'Code',           type:'text' },
+      { key:'code',            label:'Code',           type:'text', editOnly:true },
       { key:'description',     label:'Description',    type:'text' },
       { key:'rate',            label:'Rate',           type:'decimal', prefix:'R ' },
       { key:'occurrence_type', label:'Occurrence',     type:'enum',
@@ -9024,7 +9024,7 @@ const PB_SCHEMAS = {
     sortBy: 'effective_date',
     columns: [
       { key:'effective_date', label:'Effective Date', type:'date' },
-      { key:'code',           label:'Code',           type:'text' },
+      { key:'code',           label:'Code',           type:'text', editOnly:true },
       { key:'name',           label:'Name',           type:'text' },
       { key:'description',    label:'Description',    type:'text' },
       { key:'retired_date',   label:'Last Active',    type:'date' },
@@ -9057,7 +9057,7 @@ const PB_SCHEMAS = {
     sortBy: 'description',
     columns: [
       { key:'effective_date', label:'Effective Date', type:'date' },
-      { key:'code',           label:'Code',           type:'text' },
+      { key:'code',           label:'Code',           type:'text', editOnly:true },
       { key:'description',    label:'Description',    type:'text' },
       { key:'ratio_value',    label:'Value',          type:'text' },
       { key:'unit',           label:'Unit',           type:'text' },
@@ -9092,7 +9092,7 @@ const PB_SCHEMAS = {
     table: 'quote_accessories',
     sortBy: 'display_order',
     columns: [
-      { key:'code',          label:'Code',          type:'text' },
+      { key:'code',          label:'Code',          type:'text', editOnly:true },
       { key:'name',          label:'Name',          type:'text' },
       { key:'display_order', label:'Display Order', type:'int' },
       { key:'active',        label:'Active',        type:'bool' }
@@ -9103,7 +9103,7 @@ const PB_SCHEMAS = {
     table: 'quote_training_courses',
     sortBy: 'display_order',
     columns: [
-      { key:'code',          label:'Code',          type:'text' },
+      { key:'code',          label:'Code',          type:'text', editOnly:true },
       { key:'name',          label:'Name',          type:'text' },
       { key:'display_order', label:'Display Order', type:'int' },
       { key:'active',        label:'Active',        type:'bool' }
@@ -10440,26 +10440,35 @@ async function renderPbEditor(schemaId, opts) {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
 
+  // Columns flagged editOnly (the internal code) carry nothing for the reader — they show
+  // only while a row is being edited.
+  const cols = pbVisibleColumns(schema);
+
   head.innerHTML = `
-    <tr><th colspan="${schema.columns.length + 1}" style="background:var(--bg);text-align:left;padding:10px 14px;">
+    <tr><th colspan="${cols.length + 1}" style="background:var(--bg);text-align:left;padding:10px 14px;">
       ${opts.withBack ? `<button class="btn btn-ghost btn-sm" onclick="pbBackToHrGrid()">← Back to HR Setup</button>` : ''}
       <button class="btn btn-primary btn-sm" onclick="pbAddRow()" style="${opts.withBack ? 'margin-left:8px;' : ''}">+ Add row</button>
     </th></tr>
     <tr>
-      ${schema.columns.map(c => `<th>${pbEsc(c.label)}</th>`).join('')}
+      ${cols.map(c => `<th>${pbEsc(c.label)}</th>`).join('')}
       <th style="width:140px;">Actions</th>
     </tr>`;
 
   if (!pbRows.length) {
-    body.innerHTML = `<tr><td colspan="${schema.columns.length + 1}" style="text-align:center;color:var(--text3);padding:24px;">No rows yet. Click <strong>+ Add row</strong>.</td></tr>`;
+    body.innerHTML = `<tr><td colspan="${cols.length + 1}" style="text-align:center;color:var(--text3);padding:24px;">No rows yet. Click <strong>+ Add row</strong>.</td></tr>`;
     return;
   }
   body.innerHTML = pbRows.map(r => pbRenderRow(r, schema)).join('');
 }
 
+function pbVisibleColumns(schema) {
+  const editing = pbEditingRowId != null && pbRows.some(r => r.id === pbEditingRowId);
+  return editing ? schema.columns : schema.columns.filter(c => !c.editOnly);
+}
+
 function pbRenderRow(row, schema) {
   const editing = pbEditingRowId === row.id;
-  const cells = schema.columns.map(c =>
+  const cells = pbVisibleColumns(schema).map(c =>
     `<td>${editing ? pbRenderEditCell(c, row) : pbRenderViewCell(c, row[c.key])}</td>`
   ).join('');
   const actions = editing ? `
