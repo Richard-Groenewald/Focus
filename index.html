@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.53 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.53 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2105,6 +2105,7 @@ function _mockSeed() {
     quote_accessory_costs: [],
     quote_training_costs: [],
     quote_contract_accessories: [],
+    quote_workforce_adjustments: [],
     quote_annual_escalations: [2025, 2026, 2027].flatMap((y, i) => [
       { id: i * 2 + 1, year: y, escalation_pct: 6, service_major_id: null, service_sub_id: null, note: '', created_at: now },
       { id: i * 2 + 2, year: y, escalation_pct: 7.5, service_major_id: 1, service_sub_id: null, note: 'Manpower', created_at: now },
@@ -6323,7 +6324,8 @@ async function openQuote(id) {
       apiGet('quote_accessory_costs', 'select=*').catch(() => []),      // v7.9.43: dated costs (absent table → none)
       apiGet('quote_training_costs', 'select=*').catch(() => []),
       apiGet('quote_contract_accessories', 'quote_id=eq.' + id + '&select=*').catch(() => []),   // v7.9.44: per-contract items
-    ]).catch(() => [[], [], [], [], []]);
+      apiGet('quote_workforce_adjustments', 'quote_id=eq.' + id + '&select=*').catch(() => []),  // v7.9.53: quote-level workforce adjustments
+    ]).catch(() => [[], [], [], [], [], []]);
     const [qRows, posts, grades, areas, statAllow, discAllow, discInc, rules, postNames, headingNames, pg, cats] = await Promise.all([
       apiGet('quote_quotes', 'id=eq.' + id + '&select=*'),
       apiGet('quote_posts', 'quote_id=eq.' + id + '&select=*&order=display_order,id'),
@@ -6348,6 +6350,7 @@ async function openQuote(id) {
     allData['quote_accessory_costs'] = cats[2];
     allData['quote_training_costs'] = cats[3];
     pbContractAcc = new Map((cats[4] || []).map(r => [+r.accessory_id, +r.quantity || 1]));
+    pbWorkforceAdj = new Map((cats[5] || []).map(r => [+r.accessory_id, { mode: r.mode, quantity: +r.quantity || 0, reason: r.reason || '' }]));
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
@@ -6429,7 +6432,7 @@ function renderQuoteEditorTabContent() {
   switch (pbActiveTab) {
     case 'basic': return renderBasicInfoTab();
     case 'posts': return renderPeopleSection();
-    case 'workforce': return renderPbPlaceholderTab('Workforce Support Items', 'Uniforms, PPE, training certificates, equipment associated with the people deployed on this contract.');
+    case 'workforce': return renderWorkforceTab();
     case 'contract':  return renderContractItemsTab();
     case 'service':   return renderPbPlaceholderTab('Service Support Items',   'Service overhead and operational support items.');
     case 'mobility':  return renderPbPlaceholderTab('Site Mobility',           'Vehicles, fuel, tracking, vehicle extras (lease + km + fuel surcharges).');
@@ -7030,11 +7033,177 @@ function pbAccSummary() {
       out.byPost[p.id] += out.monthly - before;
     });
   }));
+  // v7.9.53: quote-level workforce adjustments ride as their own lines, positive or negative,
+  // so the per-post prices stay rule-based and the departure is visible on its own.
+  pbWorkforceAdj.forEach((adj, id) => {
+    const item = items.find(i => +i.id === +id); const cost = pbItemCurrentCost(costs, 'accessory_id', id, asAt);
+    if (!item || !cost || cost.cost_basis === 'per_contract') return;
+    const delta = pbWfFinal(pbWfRuleTotal(id, cost), adj) - pbWfRuleTotal(id, cost);
+    if (delta) add(item, cost, delta, 'Workforce adjustment');
+  });
   pbContractAcc.forEach((qty, id) => {
     const item = items.find(i => +i.id === +id); const cost = pbItemCurrentCost(costs, 'accessory_id', id, asAt);
     if (item && cost) add(item, cost, qty, 'Contract');
   });
   return out;
+}
+
+// ── Workforce Support Items tab (v7.9.53) ───────────────────────────────────
+// The per-post ticks and the cost basis set the RULE total of each workforce item. This tab
+// rolls them up per item and lets the quote add to, subtract from or override that total with
+// a recorded reason (quote_workforce_adjustments), after a warning. Colours: green = as per
+// rule, blue = above the rule, amber = below the rule, red = no cost or outside the in-use
+// window. The adjustment prices as its own line; the posts keep their ticks.
+let pbWorkforceAdj = new Map();   // accessory_id → { mode, quantity, reason }
+let _wfState = { editing: null, showAll: false };
+const PB_WF_LEVEL = {
+  ok:   { bg: '',        badge: '#DCFCE7', fg: '#166534' },
+  info: { bg: '#EFF6FF', badge: '#DBEAFE', fg: '#1E40AF' },
+  warn: { bg: '#FFFBEB', badge: '#FEF3C7', fg: '#7A5B10' },
+  bad:  { bg: '#FEF2F2', badge: '#FEE2E2', fg: '#991B1B' }
+};
+function pbWfFinal(auto, adj) {
+  if (!adj) return auto;
+  const q = Math.max(0, Math.round(+adj.quantity || 0));
+  if (adj.mode === 'override') return q;
+  if (adj.mode === 'subtract') return Math.max(0, auto - q);
+  return auto + q;
+}
+function pbWfPosts(id, cost) {
+  const out = [];
+  pbHeadings.forEach(h => h.posts.forEach(p => {
+    if (!(p.accessories || new Set()).has(+id)) return;
+    out.push({ name: p.name, qty: cost ? pbAccQtyForPost(cost.cost_basis, p) : pbOfficersForPost(p) });
+  }));
+  return out;
+}
+function pbWfRuleTotal(id, cost) { return pbWfPosts(id, cost).reduce((a, x) => a + x.qty, 0); }
+function pbWfMoney(cost, qty) {
+  if (!cost) return { monthly: 0, onceOff: 0 };
+  if (cost.recovery === 'absorbed') return { monthly: 0, onceOff: 0 };
+  if (cost.recovery === 'once_off') return { monthly: qty * (+cost.monthly_cost || 0), onceOff: qty * (+cost.acquisition_cost || 0) };
+  return { monthly: qty * pbAccMonthlyUnit(cost), onceOff: 0 };
+}
+function pbWorkforceRollup(includeAll) {
+  const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
+  const rows = [];
+  (allData['quote_accessories'] || []).filter(i => pbItemCategory(i) === 'workforce').forEach(item => {
+    const cost = pbItemCurrentCost(costs, 'accessory_id', item.id, asAt);
+    if (cost && cost.cost_basis === 'per_contract') return;   // ticked on the Contract Support Items tab
+    const posts = pbWfPosts(item.id, cost);
+    const auto = posts.reduce((a, x) => a + x.qty, 0);
+    const adj = pbWorkforceAdj.get(+item.id) || null;
+    const live = pbItemInWindow(item, asAt);
+    if (!posts.length && !adj && !(includeAll && live)) return;
+    const final = pbWfFinal(auto, adj);
+    const rule = pbWfMoney(cost, auto), money = pbWfMoney(cost, final);
+    const warnings = [];
+    let level = 'ok', label = 'as per rule';
+    if (adj && final > auto) { level = 'info'; label = 'above rule'; warnings.push('Above the rule by ' + (final - auto)); }
+    if (adj && final < auto) { level = 'warn'; label = 'below rule'; warnings.push('Below the rule by ' + (auto - final) + ' — officers on the ticked posts may go without'); }
+    if (adj && final === auto) warnings.push('The adjustment leaves the rule total unchanged');
+    if (adj && adj.mode === 'subtract' && adj.quantity > auto) warnings.push('Subtracts more than the rule total — floored at 0');
+    if (adj && !posts.length) warnings.push('No post ticks this item — the whole quantity comes from the adjustment');
+    if (!live) { level = 'bad'; label = item.retired_date && String(item.retired_date) < asAt ? 'retired' : 'not in use'; warnings.push((label === 'retired' ? 'Retired before' : 'Not yet in use at') + ' the contract start ' + asAt); }
+    if (!cost) { level = 'bad'; label = 'no cost'; warnings.push('No cost recorded as at ' + asAt + ' — nothing is priced for it'); }
+    rows.push({ item, cost, posts, auto, adj, final, unit: cost ? pbAccMonthlyUnit(cost) : 0, rule, money, warnings, level, label, live });
+  });
+  return rows;
+}
+function renderWorkforceTab() {
+  const asAt = pbQuoteAsAt();
+  const rows = pbWorkforceRollup(_wfState.showAll);
+  const tot = rows.reduce((a, r) => { a.ruleM += r.rule.monthly; a.ruleO += r.rule.onceOff; a.m += r.money.monthly; a.o += r.money.onceOff; if (r.level === 'bad') a.bad++; else if (r.level === 'warn') a.warn++; if (r.adj) a.adj++; return a; }, { ruleM: 0, ruleO: 0, m: 0, o: 0, bad: 0, warn: 0, adj: 0 });
+  const badge = (level, text) => '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:' + PB_WF_LEVEL[level].badge + ';color:' + PB_WF_LEVEL[level].fg + ';">' + pbEsc(text) + '</span>';
+  const adjText = a => !a ? '<span class="pg-muted">—</span>' : pbEsc(a.mode === 'add' ? '+ ' + a.quantity : a.mode === 'subtract' ? '− ' + a.quantity : '= ' + a.quantity) + '<div class="pg-muted" style="font-size:11px;white-space:normal;">' + pbEsc(a.reason) + '</div>';
+  const body = rows.map(r => {
+    const L = PB_WF_LEVEL[r.level], ed = _wfState.editing === +r.item.id;
+    let html = '<tr style="' + (L.bg ? 'background:' + L.bg + ';' : '') + (ed ? 'outline:2px solid var(--navy);' : '') + '">' +
+      '<td><strong>' + pbEsc(r.item.name) + '</strong>' + (r.cost ? '<div class="pg-muted" style="font-size:11px;">' + pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) + (r.cost.recovery === 'once_off' ? ' · once-off to client' : r.cost.recovery === 'absorbed' ? ' · absorbed' : '') + '</div>' : '') + '</td>' +
+      '<td style="font-size:11px;color:var(--text2);">' + (r.posts.length ? r.posts.map(x => pbEsc(x.name) + ' ×' + x.qty).join('<br>') : '<span class="pg-muted">none</span>') + '</td>' +
+      '<td style="text-align:right;">' + r.auto + '</td>' +
+      '<td>' + adjText(r.adj) + '</td>' +
+      '<td style="text-align:right;font-weight:700;color:' + (r.final !== r.auto ? L.fg : 'inherit') + ';">' + r.final + '</td>' +
+      '<td style="text-align:right;">' + (r.cost ? pbRand(r.unit) : '<span class="pg-muted">—</span>') + '</td>' +
+      '<td style="text-align:right;">' + (r.cost && r.cost.recovery === 'absorbed' ? '<span class="pg-muted">absorbed</span>' : pbRand(r.money.monthly)) + '</td>' +
+      '<td style="text-align:right;">' + (r.money.onceOff ? pbRand(r.money.onceOff) : '<span class="pg-muted">—</span>') + '</td>' +
+      '<td>' + badge(r.level, r.label) + (r.warnings.length ? '<div style="font-size:11px;color:' + L.fg + ';margin-top:3px;white-space:normal;">' + r.warnings.map(pbEsc).join('<br>') + '</div>' : '') + '</td>' +
+      '<td style="white-space:nowrap;">' + (ed ? '' : '<button class="btn btn-ghost btn-sm" onclick="pbWfAdjustOpen(' + r.item.id + ')">' + (r.adj ? 'Change' : 'Adjust') + '</button>') + '</td></tr>';
+    if (ed) {
+      const a = r.adj || { mode: 'add', quantity: 0, reason: '' };
+      html += '<tr><td colspan="10" style="background:#F7F8FA;padding:10px 14px;">' +
+        '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">' +
+          '<div class="form-group"><label class="form-label">Adjustment</label><select class="form-control" id="wf-mode-' + r.item.id + '" onchange="pbWfPreview(' + r.item.id + ',' + r.auto + ')">' +
+            ['add:Add to the rule total', 'subtract:Subtract from the rule total', 'override:Override the total'].map(o => { const [v, l] = o.split(':'); return '<option value="' + v + '"' + (a.mode === v ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select></div>' +
+          '<div class="form-group"><label class="form-label">Quantity</label><input type="number" min="0" step="1" class="form-control" id="wf-qty-' + r.item.id + '" style="width:90px;" value="' + a.quantity + '" oninput="pbWfPreview(' + r.item.id + ',' + r.auto + ')"></div>' +
+          '<div class="form-group" style="flex:1;min-width:220px;"><label class="form-label">Reason (required, recorded on the quote)</label><input type="text" class="form-control" id="wf-reason-' + r.item.id + '" value="' + pbEsc(a.reason) + '" placeholder="Client supplies its own torches · spares for a remote site · …"></div>' +
+          '<div id="wf-preview-' + r.item.id + '" style="font-size:12px;font-weight:700;min-width:120px;"></div>' +
+          '<button class="btn btn-primary btn-sm" onclick="pbWfAdjustSave(' + r.item.id + ')">Apply</button>' +
+          (r.adj ? '<button class="btn btn-ghost btn-sm" onclick="pbWfAdjustClear(' + r.item.id + ')">Remove adjustment</button>' : '') +
+          '<button class="btn btn-ghost btn-sm" onclick="_wfState.editing=null;renderQuoteEditor()">Cancel</button>' +
+        '</div><div class="pg-muted" style="font-size:11px;margin-top:6px;">Rule total ' + r.auto + ' comes from the posts that tick this item and the item\'s basis. An adjustment departs from that rule: you will be asked to confirm, and the difference prices as its own line.</div></td></tr>';
+    }
+    return html;
+  }).join('');
+  return '<div class="pb-qheader">' +
+    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">' +
+      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);">Workforce support items (as at ' + pbEsc(asAt) + ')</div>' +
+      '<span style="flex:1;"></span>' +
+      (tot.bad ? badge('bad', tot.bad + ' warning' + (tot.bad === 1 ? '' : 's')) : '') + (tot.warn ? badge('warn', tot.warn + ' below rule') : '') + (tot.adj ? badge('info', tot.adj + ' adjusted') : '') +
+      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;"><input type="checkbox" ' + (_wfState.showAll ? 'checked' : '') + ' onchange="_wfState.showAll=this.checked;renderQuoteEditor()"> show every item in use, ticked or not</label>' +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Each row totals the item across the posts that tick it, by the item\'s basis (per officer, per duty position, per post). Adjust adds to, subtracts from or overrides that total for this quote with a recorded reason. ' +
+      badge('ok', 'as per rule') + ' ' + badge('info', 'above rule') + ' ' + badge('warn', 'below rule') + ' ' + badge('bad', 'no cost / retired') + '</div>' +
+    (rows.length ? '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th>Posts</th><th style="text-align:right;">Rule</th><th>Adjustment</th><th style="text-align:right;">Final</th><th style="text-align:right;">Unit /mo</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th><th>Status</th><th></th></tr></thead><tbody>' + body + '</tbody>' +
+      '<tfoot><tr style="font-weight:700;border-top:2px solid var(--navy);"><td colspan="6">Rule total</td><td style="text-align:right;">' + pbRand(tot.ruleM) + '</td><td style="text-align:right;">' + pbRand(tot.ruleO) + '</td><td colspan="2"></td></tr>' +
+      '<tr style="font-weight:700;"><td colspan="6">Priced total (after adjustments)</td><td style="text-align:right;color:' + (tot.m > tot.ruleM ? PB_WF_LEVEL.info.fg : tot.m < tot.ruleM ? PB_WF_LEVEL.warn.fg : 'inherit') + ';">' + pbRand(tot.m) + '/mo</td><td style="text-align:right;color:' + (tot.o > tot.ruleO ? PB_WF_LEVEL.info.fg : tot.o < tot.ruleO ? PB_WF_LEVEL.warn.fg : 'inherit') + ';">' + pbRand(tot.o) + '</td><td colspan="2"></td></tr></tfoot></table></div>'
+      : '<div class="pb-placeholder-text">No workforce support item is ticked on any post yet. Tick them under each post\'s "Workforce Support Items and Training", or show every item above to add one here.</div>') +
+    '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">The posts keep their ticks and their rule-based prices; an adjustment prices as one "Workforce support items" line on the proposal, positive or negative. Once-off amounts join the "Setup and equipment" line.</p>' +
+  '</div>';
+}
+function pbWfPreview(id, auto) {
+  const g = k => document.getElementById('wf-' + k + '-' + id);
+  const el = g('preview'); if (!el || !g('mode') || !g('qty')) return;
+  const final = pbWfFinal(auto, { mode: g('mode').value, quantity: +g('qty').value || 0 });
+  const level = final > auto ? 'info' : final < auto ? 'warn' : 'ok';
+  el.style.color = PB_WF_LEVEL[level].fg;
+  el.textContent = 'Rule ' + auto + ' → ' + final;
+}
+function pbWfAdjustOpen(id) { _wfState.editing = +id; renderQuoteEditor(); setTimeout(() => { const r = pbWorkforceRollup(true).find(x => +x.item.id === +id); if (r) pbWfPreview(id, r.auto); }, 0); }
+async function pbWfAdjustSave(id) {
+  const g = k => document.getElementById('wf-' + k + '-' + id);
+  const mode = g('mode').value, quantity = Math.max(0, Math.round(+g('qty').value || 0)), reason = String(g('reason').value || '').trim();
+  if (!reason) { showStatus('A reason is required — the adjustment departs from the per-post rule', 'error'); g('reason').focus(); return; }
+  const r = pbWorkforceRollup(true).find(x => +x.item.id === +id);
+  if (!r) return;
+  const final = pbWfFinal(r.auto, { mode, quantity });
+  const diff = final - r.auto;
+  const lines = [
+    r.item.name + ': the posts that tick it require ' + r.auto + '.',
+    'This quote will provision ' + final + (diff ? ' (' + (diff > 0 ? '+' : '') + diff + ' against the rule).' : ' — the same as the rule.'),
+    diff < 0 ? '\nWARNING: fewer than the posts require. Officers on those posts may go without.' : '',
+    !r.cost ? '\nWARNING: no cost is recorded for this item, so nothing is priced.' : '',
+    '\nReason recorded: ' + reason
+  ].filter(Boolean).join('\n');
+  if (!await confirmDialog({ title: 'Depart from the rule?', message: lines, confirmLabel: 'Apply adjustment', danger: diff < 0 })) return;
+  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
+  try {
+    await api('quote_workforce_adjustments', 'POST', { quote_id: pbQ.id, accessory_id: id, mode, quantity, reason, created_by: me, updated_at: new Date().toISOString() },
+      'on_conflict=quote_id,accessory_id', { prefer: 'resolution=merge-duplicates,return=minimal' });
+    pbWorkforceAdj.set(+id, { mode, quantity, reason });
+    _wfState.editing = null;
+    showStatus('Adjustment applied', 'success');
+  } catch (e) { showStatus(/404|PGRST205/.test(e.message) ? 'sql/workforce_support_adjustments.sql has not been run' : 'Could not save: ' + e.message, 'error'); }
+  renderQuoteEditor();
+}
+async function pbWfAdjustClear(id) {
+  if (!await confirmDialog({ title: 'Remove the adjustment?', message: 'The item goes back to its rule total from the posts.', confirmLabel: 'Remove' })) return;
+  try {
+    await api('quote_workforce_adjustments', 'DELETE', null, 'quote_id=eq.' + pbQ.id + '&accessory_id=eq.' + id);
+    pbWorkforceAdj.delete(+id);
+    _wfState.editing = null;
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+  renderQuoteEditor();
 }
 function renderContractItemsTab() {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
@@ -7262,6 +7431,8 @@ function pgPricing() {
       groups.push({ name: h.isUngrouped ? 'General' : h.name, posts, sub });
     });
     // Contract-level amortised items ride as their own group; once-off setup is one line.
+    const wfAdjMonthly = acc.lines.filter(l => l.where === 'Workforce adjustment').reduce((a, l) => a + l.monthly, 0);
+    if (wfAdjMonthly) { groups.push({ name: 'Workforce support items', posts: [{ name: 'Adjustment to the per-post provision', officers: '', monthly: wfAdjMonthly }], sub: wfAdjMonthly }); monthly += wfAdjMonthly; }
     const contractMonthly = acc.lines.filter(l => l.where === 'Contract').reduce((a, l) => a + l.monthly, 0);
     if (contractMonthly) { groups.push({ name: 'Contract equipment', posts: [{ name: 'Site equipment (amortised)', officers: '', monthly: contractMonthly }], sub: contractMonthly }); monthly += contractMonthly; }
     setupOnceOff = acc.onceOff;
