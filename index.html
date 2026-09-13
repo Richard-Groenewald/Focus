@@ -7299,19 +7299,27 @@ function pgShiftPattern(p) {
   }
   return parts.join('; ') || 'No shifts scheduled';
 }
+// Performance incentives (Richard, 2026-09-13): the proposal names them per post and carries
+// this descriptor once, so the client never reads them as guaranteed pay.
+const PB_PERF_INCENTIVE_NOTE = 'Performance Incentives are not part of an officer\'s guaranteed remuneration, but are only payable on the officer\'s achievement of a defined performance metric.';
 function pgRenderScope() {
   const acc = allData['quote_accessories'] || [], trn = allData['quote_training_courses'] || [];
+  const inc = allData['quote_discretionary_incentives'] || [];
   const names = (rows, set) => rows.filter(r => set && set.has(+r.id)).map(r => pbEsc(r.name)).join(', ');
+  const incNames = p => inc.filter(r => +((p.incAllow || {})[+r.id]) > 0).map(r => pbEsc(r.name || r.description || r.code)).join(', ');
+  let anyInc = false;
   let html = '';
   pbHeadings.forEach(h => {
     if (!h.posts.length) return;
     html += '<h3>' + pbEsc(h.isUngrouped ? 'General' : h.name) + '</h3>' +
       '<table class="pg-table"><thead><tr><th>Post</th><th>Uniform</th><th>Shift pattern</th><th class="num">Officers per shift</th><th class="num">Officers required</th></tr></thead><tbody>';
     h.posts.forEach(p => {
-      const a = names(acc, p.accessories), t = names(trn, p.training);
+      const a = names(acc, p.accessories), t = names(trn, p.training), pi = incNames(p);
+      if (pi) anyInc = true;
       html += '<tr><td><strong>' + pbEsc(p.name) + '</strong>' + (p.description ? '<br><span class="pg-muted">' + pbEsc(p.description) + '</span>' : '') +
         (a ? '<br><span class="pg-muted"><em>Workforce support items:</em> ' + a + '</span>' : '') +
-        (t ? '<br><span class="pg-muted"><em>Training:</em> ' + t + '</span>' : '') + '</td>' +
+        (t ? '<br><span class="pg-muted"><em>Training:</em> ' + t + '</span>' : '') +
+        (pi ? '<br><span class="pg-muted"><em>Performance incentives:</em> ' + pi + '</span>' : '') + '</td>' +
         '<td>' + pbEsc(p.uniform || '—') + '</td><td>' + pbEsc(pgShiftPattern(p)) + '</td>' +
         '<td class="num">' + pbEsc(pbNoPerShift(p)) + '</td><td class="num">' + pbOfficersForPost(p) + '</td></tr>';
     });
@@ -7321,6 +7329,7 @@ function pgRenderScope() {
     const names = [...pbContractAcc.entries()].map(([id, qty]) => { const i = acc.find(x => +x.id === +id); return i ? pbEsc(i.name) + (qty > 1 ? ' × ' + qty : '') : ''; }).filter(Boolean);
     if (names.length) html += '<p><strong>Site equipment:</strong> ' + names.join(', ') + '</p>';
   }
+  if (anyInc) html += '<p class="pg-muted"><em>' + pbEsc(PB_PERF_INCENTIVE_NOTE) + '</em></p>';
   return html || '<p class="pg-muted">No posts on this quote yet.</p>';
 }
 function pgRenderPricing(pr) {
@@ -8195,8 +8204,9 @@ function pbAllowanceCols(p) {
   return '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;align-items:start;">' +
       col('Statutory Allowances', stat, 'None defined — add them under Human Resources.') +
       col('Discretionary Allowances', disc, 'None defined — add them under Human Resources.') +
-      col('Incentives', inc, 'None defined — add them under Human Resources.') +
+      col('Performance Incentives', inc, 'None defined — add them under Human Resources.') +
     '</div>' +
+    '<div class="pb-placeholder-text" style="margin-top:8px;">' + PB_PERF_INCENTIVE_NOTE + '</div>' +
     '<div class="pb-placeholder-text" style="margin-top:8px;">Statutory ticks save as you click; Night Shift ticks itself when a shift crosses midnight, and unticking it asks for a reason. An amount on a discretionary item includes it — clear the amount to exclude it. Items show only while the quote\'s contract start falls inside their effective window. Pricing joins in the costing round.</div>';
 }
 
@@ -8210,7 +8220,7 @@ function renderPostDetail(p, h, others) {
   return '<div class="pb-post-detail" onclick="event.stopPropagation()">' +
     sec('shift', 'Shift schedule', renderShiftTable(p)) +
     (pbDetailOpen(p.id, 'shift') ? sec('hours', 'Hours summary', renderShiftReadout(p)) : '') +
-    sec('allowances', 'Allowances and Incentives', pbAllowanceCols(p)) +
+    sec('allowances', 'Allowances and Performance Incentives', pbAllowanceCols(p)) +
     sec('checklists', 'Workforce Support Items and Training', pbChecklistCols(p)) +
     (others.length ? '<div class="pb-move-row"><span>Move this post to:</span><select onchange="pbMovePostToHeading(' + p.id + ', this.value)"><option value="">(stay in ' + pbEsc(h.isUngrouped ? 'Ungrouped' : h.name) + ')</option>' +
       others.map(oh => '<option value="' + oh.id + '">' + pbEsc(oh.isUngrouped ? 'Ungrouped' : oh.name) + '</option>').join('') + '</select></div>' : '') +
