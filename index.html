@@ -473,6 +473,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pb-section-twist { font-size:16px; color:var(--navy); line-height:1; }
 .pb-section.collapsed .pb-section-body { display:none; }
 .pb-section-actions { display:flex; gap:6px; align-items:center; }
+/* v7.9.48: past months on the revenue grid are read-only and greyed */
+td.rev-past { background:#EEF0F3; }
+.rev-input.rev-past { background:#EEF0F3; color:#8A94A3; cursor:not-allowed; }
+.rev-fy-tab.rev-fy-past { opacity:0.6; }
 /* ─── Proposal Generator (v7.9.41): tab layout, section list, in-app preview ─ */
 .pg-wrap { display:flex; gap:18px; align-items:flex-start; }
 .pg-side { flex:0 0 330px; position:sticky; top:12px; background:#fff; border:1px solid var(--border); border-radius:4px; padding:12px; max-height:calc(100vh - 140px); overflow-y:auto; }
@@ -694,7 +698,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.47 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.48 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -733,7 +737,7 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.47 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.48 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5361,9 +5365,15 @@ function getFYMonths(fy) {
   return months;
 }
 
+function _fyOfMonth(m) {
+  const startMonthName = appSettings['fy_start_month'] || 'April';
+  const startM = ['January','February','March','April','May','June','July','August','September','October','November','December'].indexOf(startMonthName);
+  const [y, mo] = m.split('-').map(Number);
+  return (mo - 1) >= startM ? y : y - 1;
+}
 function getCurrentFY() {
-  const now = new Date();
-  return now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+  // v7.9.48: follows settings.fy_start_month like getFYMonths (was hard-coded to April).
+  return _fyOfMonth(new Date().toISOString().slice(0, 7));
 }
 
 function getFYLabel(fy) {
@@ -5708,6 +5718,7 @@ function applyOppReadOnly(level) {
   page.querySelectorAll('input, select, textarea').forEach(el => {
     const inEng = engTab && engTab.contains(el);
     el.disabled = oppReadOnly && !(level === 'engagement' && inEng);
+    if (el.classList.contains('rev-past')) el.disabled = true;   // v7.9.48: past months stay read-only
   });
 
   // Core Save is only available with full edit rights.
@@ -10374,13 +10385,17 @@ function pbEsc(v) {
 // ── Revenue Grid ─────────────────────────────────────────
 function buildRevGrid() {
   const currentFY = getCurrentFY();
-  oppFYs = [currentFY - 1, currentFY, currentFY + 1, currentFY + 2];
+  // v7.9.48: no past years unless they hold revenue (then they show, greyed, so
+  // nothing on the deal is hidden); totals still sum every FY listed here.
+  const pastWithRevenue = [...new Set(Object.keys(oppMonths).filter(m => +oppMonths[m]?.revenue > 0).map(m => _fyOfMonth(m)))].filter(fy => fy < currentFY).sort();
+  oppFYs = [...pastWithRevenue, currentFY, currentFY + 1, currentFY + 2];
+  const thisMonth = new Date().toISOString().slice(0, 7);
 
   const tabsEl = document.getElementById('rev-fy-tabs');
   const contentsEl = document.getElementById('rev-fy-contents');
 
   tabsEl.innerHTML = oppFYs.map((fy, i) =>
-    `<button class="rev-fy-tab ${i===1?'active':''}" onclick="switchFYTab(${fy}, this)">${getFYLabel(fy)}</button>`
+    `<button class="rev-fy-tab ${fy===currentFY?'active':''}${fy<currentFY?' rev-fy-past':''}" onclick="switchFYTab(${fy}, this)" title="${fy<currentFY?'Past year — shown because it holds revenue':''}">${getFYLabel(fy)}</button>`
   ).join('');
 
   // Secured deals: contracted forecast is read-only. Margin % follows the lock.
@@ -10400,8 +10415,9 @@ function buildRevGrid() {
     const revenueInputs = months.map(m => {
       const v = oppMonths[m]?.revenue;
       const display = v && +v > 0 ? Math.round(+v).toLocaleString('en-US') : '';
-      const dis = oppRevLocked ? ' disabled' : '';
-      return `<td><input class="rev-input" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="0"${dis} oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
+      const past = m < thisMonth;
+      const dis = (oppRevLocked || past) ? ' disabled' : '';
+      return `<td${past ? ' class="rev-past"' : ''}><input class="rev-input${past ? ' rev-past' : ''}" type="text" inputmode="numeric" id="rev-r-${m}" value="${display}" placeholder="${past ? '' : '0'}"${dis}${past ? ' title="Past month"' : ''} oninput="onRevInput('${m}')" onfocus="onRevFocus('${m}')" onblur="onRevBlur('${m}')"></td>`;
     }).join('');
 
     const marginCalcs = months.map(m =>
@@ -10411,7 +10427,7 @@ function buildRevGrid() {
     const yearRevTotal = months.reduce((s,m) => s + (+oppMonths[m]?.revenue||0), 0);
     const yearMarginTotal = months.reduce((s,m) => s + calcMargin(m), 0);
 
-    return `<div class="rev-fy-content ${i===1?'active':''}" id="rev-fy-${fy}">
+    return `<div class="rev-fy-content ${fy===currentFY?'active':''}" id="rev-fy-${fy}">
       <table class="rev-table">
         <thead><tr>
           <th class="row-label">Month</th>
