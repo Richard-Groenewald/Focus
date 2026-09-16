@@ -2096,7 +2096,7 @@ function _mockSeed() {
       ['tazer','Tazer (Electric Paralyzer)'],['pepper_spray','Pepper Spray'],['bullet_proof_vest','Bullet Proof Vest'],['non_lethal_paintball','Non-Lethal - Paintball Gun'],['non_lethal_9mm_pellet','Non-Lethal - 9mm Pellet Gun'],
       ['bodyworn_camera','Bodyworn camera'],['extendable_baton','Extendable Baton'],['rubberized_baton','Rubberized Baton'],['bullet_trap','Bullet Trap'],['site_gun_safe','Site Gun Safe'],
       ['handheld_metal_detector','Handheld Metal Detector'],['occurrence_book','Occurrence Book'],['bodyworn_harness','Bodyworn Harness'],['torch_zartek','Torch/Spotlight - Zartek hand held'],['parabellum_9mm','9mm Parabellum']
-    ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, category: ['bullet_trap','site_gun_safe'].includes(x[0]) ? 'contract' : 'workforce', created_at: now }))
+    ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: !['rubberized_baton','bullet_trap','bodyworn_harness','handheld_metal_detector','torch_zartek','occurrence_book'].includes(x[0]), category: ['bullet_trap','site_gun_safe'].includes(x[0]) ? 'contract' : 'workforce', created_at: now }))
       // v7.9.56: uniforms (category 'uniform') — one is picked per post; prices from the Xone quote tool, effective 2025-04-23.
       .concat([['uniform_basic','Basic uniform'],['uniform_combat','Combat uniform'],['uniform_executive_corporate','Executive/Corporate uniform'],['uniform_specialised','Specialised uniform']]
         .map((x, i) => ({ id: 21 + i, code: x[0], name: x[1], display_order: i + 1, active: true, category: 'uniform', in_use_date: '2025-04-23', created_at: now }))),
@@ -2106,8 +2106,17 @@ function _mockSeed() {
       ['armed_response_officers','Armed Response Officers'],['snake_handling','Snake Handling'],['first_aid_1_3','First Aid 1-3']
     ].map((x, i) => ({ id: i + 1, code: x[0], name: x[1], display_order: i + 1, active: true, created_at: now })),
     quote_accessory_costs: [[21, 3221, 10], [22, 3500, 12], [23, 4200, 12], [24, 3380, 12]].map((x, i) =>
-      ({ id: i + 1, accessory_id: x[0], effective_date: '2025-04-23', acquisition_cost: x[1], life_months: x[2], monthly_cost: 0, loss_pct_per_year: 0, cost_basis: 'per_officer', recovery: 'amortised', note: 'Xone quote tool', created_at: now })),
-    quote_training_costs: [],
+      ({ id: i + 1, accessory_id: x[0], effective_date: '2025-04-23', acquisition_cost: x[1], life_months: x[2], monthly_cost: 0, loss_pct_per_year: 0, cost_basis: 'per_officer', recovery: 'amortised', note: 'Xone quote tool', created_at: now }))
+      // v7.9.56: the support items' current prices from the Xone quote tool (sql/support_items_seed.sql), keyed by code.
+      .concat([['officer_pocket_book',11.3,12,0,'per_officer','2026-07-29'],['restraints_pouch',164.5,18,0,'per_officer','2026-07-29'],['baton',159,36,0,'per_officer','2026-07-29'],['torch_rubberized',670.95,10,0,'per_duty_position','2026-07-29'],['umbrella',329,18,0,'per_duty_position','2026-07-29'],
+        ['tazer',388.33,10,0,'per_duty_position','2026-07-29'],['pepper_spray',141,10,0,'per_officer','2026-07-29'],['bullet_proof_vest',4391,24,0,'per_officer','2026-07-29'],['non_lethal_paintball',4729,36,0,'per_duty_position','2026-07-29'],['non_lethal_9mm_pellet',2895,36,0,'per_duty_position','2026-07-29'],
+        ['parabellum_9mm',12000,72,50,'per_duty_position','2023-12-01'],['bodyworn_camera',5446,36,0,'per_duty_position','2026-07-29'],['extendable_baton',296,8,0,'per_officer','2026-07-29'],['rubberized_baton',115,36,0,'per_officer','2026-07-29'],['bullet_trap',8114,72,0,'per_contract','2026-07-29'],
+        ['site_gun_safe',1895,60,0,'per_contract','2026-07-29'],['bodyworn_harness',407,36,0,'per_officer','2024-07-08'],['handheld_metal_detector',3267,36,0,'per_duty_position','2026-07-29'],['torch_zartek',945,12,0,'per_duty_position','2024-07-08'],['occurrence_book',86,12,0,'per_post','2026-07-29']]
+        .map((x, i) => ({ id: 5 + i, accessory_id: ['officer_pocket_book','restraints_pouch','baton','torch_rubberized','umbrella','tazer','pepper_spray','bullet_proof_vest','non_lethal_paintball','non_lethal_9mm_pellet','bodyworn_camera','extendable_baton','rubberized_baton','bullet_trap','site_gun_safe','handheld_metal_detector','occurrence_book','bodyworn_harness','torch_zartek','parabellum_9mm'].indexOf(x[0]) + 1,
+          effective_date: x[5], acquisition_cost: x[1], life_months: x[2], monthly_cost: x[3], loss_pct_per_year: 0, cost_basis: x[4], recovery: 'amortised', note: 'Xone quote tool', created_at: now }))),
+    // v7.9.56: training prices from the Xone quote tool — a monthly provision per officer (validity 1).
+    quote_training_costs: [50, 313, 66, 86, 355, 383, 99, 12, 105, 190, 71, 70].map((m, i) =>
+      ({ id: i + 1, training_course_id: i + 1, effective_date: '2024-01-01', cost_per_officer: m, validity_months: 1, note: 'Xone quote tool', created_at: now })),
     quote_contract_accessories: [],
     quote_workforce_adjustments: [],
     quote_support_item_rules: [],
@@ -6896,7 +6905,8 @@ function pbItemCostLabel(kind, c) {
   if (k.model === 'accessory') {
     return pbRand(pbAccMonthlyUnit(c)) + '/mo ' + (k.bases[c.cost_basis] || '') + (c.recovery === 'once_off' ? ' · ' + pbRand(c.acquisition_cost) + ' once-off' : c.recovery === 'absorbed' ? ' · absorbed' : '');
   }
-  return pbRand(c[k.amount]) + ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : '');
+  // v7.9.56: the quote tool prices training as a monthly provision — a 1-month cycle reads as such.
+  return pbRand(c[k.amount]) + (+c.validity_months === 1 ? ' per officer per month' : ' per officer' + (c.validity_months ? ' · every ' + c.validity_months + ' mo' : ''));
 }
 function pbSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || ('item_' + Date.now()); }
 
@@ -6946,7 +6956,7 @@ async function renderPbItemCatalogPage(kind) {
           hist.map(c => '<tr' + (cur && c.id === cur.id ? ' style="font-weight:600;"' : '') + '><td>' + pbEsc(c.effective_date) + (cur && c.id === cur.id ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">current</span>' : (String(c.effective_date) > today ? ' <span class="badge">future</span>' : '')) + '</td>' +
             (k.model === 'accessory'
               ? '<td>' + pbRand(c.acquisition_cost) + '</td><td>' + (c.life_months ? c.life_months + ' mo' : '—') + '</td><td>' + pbRand(c.monthly_cost) + '</td><td>' + (+c.loss_pct_per_year || 0) + '%</td><td><strong>' + pbRand(pbAccMonthlyUnit(c)) + '</strong></td><td>' + pbEsc(k.bases[c.cost_basis] || c.cost_basis) + '</td><td>' + pbEsc(k.recovery[c.recovery] || c.recovery || '') + '</td>'
-              : '<td>' + pbRand(c[k.amount]) + '</td><td>' + pbEsc(c.validity_months ? 'every ' + c.validity_months + ' months' : 'once') + '</td>') +
+              : '<td>' + pbRand(c[k.amount]) + '</td><td>' + pbEsc(+c.validity_months === 1 ? 'monthly' : c.validity_months ? 'every ' + c.validity_months + ' months' : 'once') + '</td>') +
             '<td>' + pbEsc(c.note || '') + '</td><td class="pg-muted">' + pbEsc(String(c.created_at || '').slice(0, 10)) + (c.created_by ? ' · ' + pbEsc(pbPersonName(c.created_by)) : '') + '</td></tr>').join('') + '</tbody></table>'
           : '<div class="pg-muted">No cost recorded. Add the first cost with the date it applies from.</div>') +
       '</td></tr>';
@@ -6972,7 +6982,7 @@ function pbItemCostForm(kind, it) {
         '<div class="form-group"><label class="form-label">Basis (quantity)</label><select class="form-control" id="pbc-basis">' + Object.entries(k.bases).map(([v, l]) => '<option value="' + v + '"' + (v === k.defaultBasis ? ' selected' : '') + '>' + l + '</option>').join('') + '</select></div>' +
         '<div class="form-group"><label class="form-label">Recovery</label><select class="form-control" id="pbc-recovery">' + Object.entries(k.recovery).map(([v, l]) => '<option value="' + v + '">' + l + '</option>').join('') + '</select></div>'
       : '<div class="form-group"><label class="form-label">Cost per officer (R)</label><input type="number" step="0.01" min="0" class="form-control" id="pbc-amount" style="width:130px;"></div>' +
-        '<div class="form-group"><label class="form-label">Refresher every (months, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
+        '<div class="form-group"><label class="form-label">Refresher every (months; 1 = monthly provision, blank = once)</label><input type="number" min="1" class="form-control" id="pbc-validity" style="width:110px;"></div>') +
     '<div class="form-group" style="flex:1;min-width:160px;"><label class="form-label">Note (optional)</label><input type="text" class="form-control" id="pbc-note" placeholder="Supplier quote, PSIRA increase…"></div>' +
     '<button class="btn btn-primary btn-sm" onclick="pbItemSaveCost(\'' + kind + '\', ' + it.id + ')">Save cost</button>' +
     '<button class="btn btn-ghost btn-sm" onclick="pbItemAddCostForm(null)">Cancel</button></div>';
