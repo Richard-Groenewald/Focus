@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1758,7 +1758,8 @@ const FN_URL = '/.netlify/functions/sb';
 
 // ── Session ── the sb function issues a signed token at sign-in and refuses every data call
 // without one, so the login screen is no longer client-side theatre. The token lives in
-// localStorage so the PWA resumes without re-typing a password until it expires (24h).
+// localStorage so the PWA resumes without re-typing a password until it expires (24h) — or
+// until the server revokes it (v7.9.56: password changed/reset, account deactivated).
 let focusToken = null;
 function _saveSession(token, userId) {
   focusToken = token || null;
@@ -1774,10 +1775,15 @@ function _loadSession() {
   } catch (e) {}
   return null;
 }
-function _sessionExpired() {
+function _sessionExpired(reason) {
   _saveSession(null);
   try { doLogout(); } catch (e) {}
-  try { _loginMsg('Your session expired — sign in again.'); } catch (e) {}
+  // 'revoked' (v7.9.56): the server ended the session — password changed or
+  // reset, or the account deactivated — rather than the token simply timing out.
+  const msg = reason === 'revoked'
+    ? 'Your session was ended — the password was changed or reset, or the account was deactivated. Sign in again.'
+    : 'Your session expired — sign in again.';
+  try { _loginMsg(msg); } catch (e) {}
 }
 
 // ── State ────────────────────────────────────────────────
@@ -2287,7 +2293,7 @@ async function api(table, method='GET', body=null, params='', opts=null) {
         // function. Drop straight back to the sign-in screen rather than retrying.
         if (res.status === 401) {
           let j = null; try { j = JSON.parse(err); } catch (e2) {}
-          if (j && j.error === 'auth') { _sessionExpired(); throw new Error('Signed out — session expired'); }
+          if (j && j.error === 'auth') { _sessionExpired(j.reason); throw new Error('Signed out — session expired'); }
         }
         _bugApiPush({ t: new Date().toISOString(), method, table, status: res.status, ms: Date.now() - _t0 });
         if (method === 'GET' && _apiTransient(null, res.status) && attempt < maxAttempts) {
