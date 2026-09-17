@@ -112,11 +112,13 @@ BEGIN
 END;
 $$;
 
--- ── 4. Permission grant: managers issue; sales management decides the rest
---       through Admin → Roles (open decision 1 in the design brief).
+-- ── 4. Permission grant: Admin and Sales Manager issue; sales management decides
+--       the rest through Admin → Roles (open decision 1 in the design brief).
+--       (Named 'Manager' until 2026-09-17 — no role of that name exists on either
+--       database, so only Admin was reached; Richard chose Sales Manager.)
 INSERT INTO public.role_permissions (role_id, permission_id)
 SELECT r.id, p.id FROM public.roles r CROSS JOIN public.permissions p
-WHERE p.name = 'issue_proposal' AND r.name IN ('Admin', 'Manager')
+WHERE p.name = 'issue_proposal' AND r.name IN ('Admin', 'Sales Manager')
   AND NOT EXISTS (SELECT 1 FROM public.role_permissions rp WHERE rp.role_id = r.id AND rp.permission_id = p.id);
 
 COMMIT;
