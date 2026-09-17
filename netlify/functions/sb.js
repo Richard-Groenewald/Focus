@@ -62,33 +62,67 @@ function passwordPolicyError(p) {
 // The signing key is DERIVED from the service key already in the environment
 // (HMAC of a fixed label), so no new secret has to be provisioned and the
 // service key itself is never used directly as an HMAC key. Stateless means no
-// session table, nothing to migrate, and log-out is client-side; the trade-off
-// is that a token stays valid until it expires, which at a 24-hour TTL is the
-// working day plus slack.
+// session table, nothing to migrate, and log-out is client-side. The token used
+// to stay valid until it expired (24h) whatever happened to the account in the
+// meantime; since v7.9.56 it also carries the user's session_version and is
+// confirmed against the row on every request — see sessionLive() below.
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const sessionKey = (key) => crypto.createHmac('sha256', String(key)).update('focus-session-v1').digest();
 
 const b64url = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const unb64url = (s) => Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString();
 
-function issueToken(key, userId, personId) {
-  const payload = JSON.stringify({ u: +userId, p: personId == null ? null : +personId, e: Date.now() + SESSION_TTL_MS });
+// Token format v2 (v7.9.56): the payload gains v = the user's session_version
+// at sign-in. v1 tokens are refused outright — one forced re-sign-in at deploy.
+function issueToken(key, userId, personId, version) {
+  const payload = JSON.stringify({ u: +userId, p: personId == null ? null : +personId, e: Date.now() + SESSION_TTL_MS, v: +version || 1 });
   const body = b64url(payload);
   const sig = crypto.createHmac('sha256', sessionKey(key)).update(body).digest('hex');
-  return 'v1.' + body + '.' + sig;
+  return 'v2.' + body + '.' + sig;
 }
 
 function verifyToken(key, token) {
   try {
     const parts = String(token || '').split('.');
-    if (parts.length !== 3 || parts[0] !== 'v1') return null;
+    if (parts.length !== 3 || parts[0] !== 'v2') return null;
     const expect = crypto.createHmac('sha256', sessionKey(key)).update(parts[1]).digest();
     const got = Buffer.from(parts[2], 'hex');
     if (got.length !== expect.length || !crypto.timingSafeEqual(got, expect)) return null;
     const payload = JSON.parse(unb64url(parts[1]));
     if (!payload || !payload.u || !payload.e || Date.now() > +payload.e) return null;
-    return { userId: +payload.u, personId: payload.p == null ? null : +payload.p };
+    if (typeof payload.v !== 'number' || !(payload.v >= 1)) return null;
+    return { userId: +payload.u, personId: payload.p == null ? null : +payload.p, version: payload.v };
   } catch (e) { return null; }
+}
+
+// ── Session revocation (v7.9.56) ──
+// A verified token used to be the whole story, so deactivating a user or
+// resetting their password left a session they already held working for up to
+// 24 hours. Now every proxied request also confirms that the account is still
+// active and that its session_version still matches the token's. The version is
+// bumped by a DB trigger (sql/add_session_version.sql) whenever the password
+// hash changes, a forced reset is switched on, or the account is deactivated —
+// whichever code path made the change. The lookup is cached per warm instance
+// for SESSION_CHECK_MS, so it costs one extra read per user per minute rather
+// than one per request; a write to system_users through this proxy clears the
+// cache so a revocation issued from the app bites on this instance at once
+// (other instances catch up within the window).
+const SESSION_CHECK_MS = 60 * 1000;
+const sessionCache = new Map();   // userId -> { active, version, at }
+
+async function sessionLive(key, session) {
+  const now = Date.now();
+  let entry = sessionCache.get(session.userId);
+  if (!entry || now - entry.at > SESSION_CHECK_MS) {
+    let rows;
+    try {
+      rows = await sbRest(key, 'GET', `/system_users?id=eq.${session.userId}&select=active,session_version`);
+    } catch (e) { return 'error'; }
+    const row = rows && rows[0];
+    entry = { active: !!row && row.active !== false, version: row ? +row.session_version : -1, at: now };
+    sessionCache.set(session.userId, entry);
+  }
+  return (entry.active && entry.version === session.version) ? 'ok' : 'revoked';
 }
 
 // Minimal REST helper against Supabase, service key, for the auth endpoint only.
@@ -161,7 +195,7 @@ async function handleAuth(event, key) {
     } catch (e) { return authReply(200, { ok: true, environment: '' }); }
   }
 
-  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until';
+  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until,session_version';
   let rows;
   try {
     const uname = String(body.username || '').trim();
@@ -217,8 +251,9 @@ async function handleAuth(event, key) {
     const policyError = passwordPolicyError(next);
     if (policyError) return authReply(200, { ok: false, error: policyError });
     const salt = crypto.randomBytes(16).toString('hex');
+    let updated;
     try {
-      await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, {
+      updated = await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, {
         password_hash: hashPassword(next, salt),
         password_salt: salt,
         password_set_at: new Date().toISOString(),
@@ -227,9 +262,16 @@ async function handleAuth(event, key) {
         locked_until: null,
       });
     } catch (e) { return authReply(500, { ok: false, error: 'Could not save the password' }); }
+    // The hash write bumped session_version (DB trigger), so every OTHER session
+    // this user held is now dead. Sign the new session with the version the row
+    // carries after the write (the PATCH returns it), and drop this instance's
+    // cached verdict so the fresh token is honoured immediately.
+    const fresh = updated && updated[0] && updated[0].session_version != null
+      ? +updated[0].session_version : (+user.session_version || 1) + 1;
+    sessionCache.delete(userId);
     // Setting a password IS proving you hold it — sign the session straight away.
     return authReply(200, { ok: true, set: true,
-      token: issueToken(key, userId, user.person_id), userId, personId: user.person_id });
+      token: issueToken(key, userId, user.person_id, fresh), userId, personId: user.person_id });
   }
 
   if (body.action === 'login') {
@@ -244,7 +286,7 @@ async function handleAuth(event, key) {
       return authReply(200, { ok: false, mustSet: true, error: 'Choose your own password to continue' });
     }
     await clearFailures();
-    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id), userId, personId: user.person_id });
+    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id, user.session_version), userId, personId: user.person_id });
   }
 
   return authReply(400, { ok: false, error: 'Bad request' });
@@ -270,6 +312,19 @@ exports.handler = async (event) => {
   if (!session) {
     return { statusCode: 401, headers: { 'Content-Type': 'application/json', ...CORS },
              body: JSON.stringify({ error: 'auth', message: 'Sign in required' }) };
+  }
+  // A genuine token is no longer enough on its own: the account must still be
+  // active and the session not revoked (password changed/reset, deactivation).
+  const live = await sessionLive(KEY, session);
+  if (live !== 'ok') {
+    if (live === 'error') {
+      // Could not reach the row — a transient, NOT a sign-out. 503 lets the
+      // client's GET retry absorb it instead of dropping the user to the login screen.
+      return { statusCode: 503, headers: { 'Content-Type': 'application/json', ...CORS },
+               body: JSON.stringify({ error: 'session_check', message: 'Could not confirm the session — try again' }) };
+    }
+    return { statusCode: 401, headers: { 'Content-Type': 'application/json', ...CORS },
+             body: JSON.stringify({ error: 'auth', reason: 'revoked', message: 'Session ended' }) };
   }
 
   // Audit attribution is no longer taken on trust. The effective actor may be a
@@ -322,6 +377,9 @@ exports.handler = async (event) => {
       }, res => {
         const chunks = []; res.on('data', c => chunks.push(c));
         res.on('end', () => {
+          // A write to system_users may have revoked somebody (Active tick,
+          // Reset password): forget every cached verdict so it bites now.
+          if (isSystemUsers && event.httpMethod !== 'GET') sessionCache.clear();
           const raw = Buffer.concat(chunks);
           const gz = raw.length > 0 && /\bgzip\b/i.test(res.headers['content-encoding'] || '');
           const headers = {
