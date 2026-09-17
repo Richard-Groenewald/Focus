@@ -1,4 +1,4 @@
--- Focus v7.9.56 — Conditional Criteria → Support Items and Training (2026-09-17). Idempotent.
+-- Focus v7.9.57 — Conditional Criteria → Support Items and Training (2026-09-17). Idempotent.
 -- Run on BOTH databases, Test first. Run AFTER sql/support_item_conditions.sql.
 --
 -- Training courses join the Support Items conditions: a course may be a TRIGGER (kind
