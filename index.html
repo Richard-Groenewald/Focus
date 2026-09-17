@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6390,7 +6390,9 @@ async function openQuote(id) {
         p.accessories = new Set(accTicks.filter(t => +t.post_id === +p.id && t.state !== 'off').map(t => +t.accessory_id));
         p.accessoriesOff = {};
         accTicks.filter(t => +t.post_id === +p.id && t.state === 'off').forEach(t => { p.accessoriesOff[+t.accessory_id] = t.override_reason || ''; });
-        p.training = new Set(trnTicks.filter(t => +t.post_id === +p.id).map(t => +t.training_course_id));
+        p.training = new Set(trnTicks.filter(t => +t.post_id === +p.id && t.state !== 'off').map(t => +t.training_course_id));
+        p.trainingOff = {};   // v7.9.56: a course a condition ticked, overridden off with its reason
+        trnTicks.filter(t => +t.post_id === +p.id && t.state === 'off').forEach(t => { p.trainingOff[+t.training_course_id] = t.override_reason || ''; });
         p.statAllow = {};
         statTicks.filter(t => +t.post_id === +p.id).forEach(t => {
           p.statAllow[+t.statutory_allowance_id] = { state: t.state || 'on', reason: t.override_reason || '' };
@@ -7299,15 +7301,16 @@ function pbChecklistCols(p) {
   const asAt = pbQuoteAsAt();
   // v7.9.55: a workforce item a Support Items condition ticked shows an "auto" chip naming the
   // rule; unticking it opens an inline reason row and the override shows as "overridden".
-  const imp = pbSupportEval().posts[p.id] || {}, off = p.accessoriesOff || {};
-  const col = (title, items, set, kind) => '<div style="min-width:0;">' +
+  // v7.9.56: a training course a condition ticked behaves the same way.
+  const ev = pbSupportEval();
+  const col = (title, items, set, kind) => { const ct = PB_CHECKLIST_TABLES[kind], imp = ev[ct.evalKey][p.id] || {}, off = p[ct.off] || {}; return '<div style="min-width:0;">' +
     '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">' + title + '</div>' +
     (items.length
       ? '<div style="display:flex;flex-direction:column;gap:2px;">' + items.map(r => {
           const live = pbItemInWindow(r, asAt);
           const k = PB_ITEM_KINDS[kind];
           const cost = pbItemCurrentCost(allData[k.costTable], k.fk, r.id, asAt);
-          const auto = kind === 'accessory' && !!imp[r.id], overridden = auto && off[r.id] != null;
+          const auto = !!imp[r.id], overridden = auto && off[r.id] != null;
           if (kind === 'accessory' && !set.has(+r.id) && !overridden && (pbItemCategory(r) !== 'workforce' || (cost && cost.cost_basis === 'per_contract'))) return '';   // ticked on the Contract Support Items tab
           return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:7px;font-size:12px;color:' + (live ? 'var(--text2)' : 'var(--text3)') + ';"' + (live ? '' : ' title="Outside this item\'s in-use window for the quote start date"') + '>' +
             '<input type="checkbox" ' + (set.has(+r.id) ? 'checked' : '') + (live || auto ? '' : ' disabled') + ' onchange="pbToggleChecklist(' + p.id + ', \'' + kind + '\', ' + r.id + ', this)">' +
@@ -7316,19 +7319,21 @@ function pbChecklistCols(p) {
               (cost ? (kind === 'accessory' ? (() => { const q = pbAccQtyForPost(cost.cost_basis, p); return q + ' × ' + pbRand(pbAccMonthlyUnit(cost)) + ' = ' + pbRand(q * pbAccMonthlyUnit(cost)) + '/mo' + (cost.recovery === 'once_off' ? ' + ' + pbRand(q * (+cost.acquisition_cost || 0)) + ' once-off' : ''); })() : pbItemCostLabel(kind, cost)) : '') + '</span>' +
           '</label>' +
           (overridden ? '<div style="font-size:11px;color:#7A5B10;margin:-1px 0 2px 22px;">' + pbEsc(off[r.id]) + '</div>' : '') +
-          (kind === 'accessory' && p._accOvrPending === +r.id ? pbSupportReasonRow('pb-accovr-' + p.id + '-' + r.id, 'pbAccOverrideConfirm(' + p.id + ',' + r.id + ')', 'pbAccOverrideCancel(' + p.id + ')') : ''); }).join('') + '</div>'
+          (p[ct.pending] === +r.id ? pbSupportReasonRow('pb-' + kind + 'ovr-' + p.id + '-' + r.id, 'pbChecklistOverrideConfirm(' + p.id + ',\'' + kind + '\',' + r.id + ')', 'pbChecklistOverrideCancel(' + p.id + ',\'' + kind + '\')') : ''); }).join('') + '</div>'
       : '<div class="pb-placeholder-text">Nothing in the catalogue yet — add items under Admin → Proposal Builder → ' + PB_ITEM_KINDS[kind].title + '.</div>') +
-    '</div>';
-  const keep = (rows, set) => (rows || []).filter(r => pbItemInWindow(r, asAt) || set.has(+r.id) || (set === accSet && off[r.id] != null));
-  const accSet = pbPostAccSet(p), trnSet = p.training || new Set();
+    '</div>'; };
+  const keep = (rows, set, kind) => { const off = p[PB_CHECKLIST_TABLES[kind].off] || {}; return (rows || []).filter(r => pbItemInWindow(r, asAt) || set.has(+r.id) || off[r.id] != null); };
+  const accSet = pbPostAccSet(p), trnSet = pbPostTrnSet(p);
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:6px 2px;">' +
-    col('Workforce Support Items', keep(allData['quote_accessories'], accSet), accSet, 'accessory') +
-    col('Training', keep(allData['quote_training_courses'], trnSet), trnSet, 'training') +
+    col('Workforce Support Items', keep(allData['quote_accessories'], accSet, 'accessory'), accSet, 'accessory') +
+    col('Training', keep(allData['quote_training_courses'], trnSet, 'training'), trnSet, 'training') +
   '</div>';
 }
+// v7.9.56: `off` holds the per-post overrides {id: reason}, `evalKey` the pbSupportEval() bucket
+// of items a condition ticked, `pending` the item whose inline reason row is open.
 const PB_CHECKLIST_TABLES = {
-  accessory: { table: 'quote_post_accessories', fk: 'accessory_id',        set: 'accessories' },
-  training:  { table: 'quote_post_training',    fk: 'training_course_id',  set: 'training' }
+  accessory: { table: 'quote_post_accessories', fk: 'accessory_id',        set: 'accessories', off: 'accessoriesOff', evalKey: 'posts',    pending: '_accOvrPending' },
+  training:  { table: 'quote_post_training',    fk: 'training_course_id',  set: 'training',    off: 'trainingOff',    evalKey: 'training', pending: '_trnOvrPending' }
 };
 async function pbToggleChecklist(postId, kind, itemId, cb) {
   const loc = pbFindPostLocation(postId); if (!loc) return;
@@ -7337,42 +7342,46 @@ async function pbToggleChecklist(postId, kind, itemId, cb) {
   if (!p[t.set]) p[t.set] = new Set();
   const on = cb.checked;
   const where = 'post_id=eq.' + postId + '&' + t.fk + '=eq.' + itemId;
-  // v7.9.55: an item a Support Items condition ticked. Re-ticking an overridden one just drops
-  // the override row; unticking it needs a reason — an inline row, never a native prompt().
-  const auto = kind === 'accessory' && !!(pbSupportEval().posts[p.id] || {})[itemId];
+  // v7.9.55: an item a Support Items condition ticked (v7.9.56: or a training course). Re-ticking
+  // an overridden one just drops the override row; unticking it needs a reason — an inline row,
+  // never a native prompt().
+  const auto = !!(pbSupportEval()[t.evalKey][p.id] || {})[itemId];
   try {
     if (auto) {
-      p.accessoriesOff = p.accessoriesOff || {};
-      if (on) { await api(t.table, 'DELETE', null, where); delete p.accessoriesOff[+itemId]; p[t.set].delete(+itemId); }
-      else { cb.checked = true; p._accOvrPending = +itemId; }
+      p[t.off] = p[t.off] || {};
+      if (on) { await api(t.table, 'DELETE', null, where); delete p[t.off][+itemId]; p[t.set].delete(+itemId); }
+      else { cb.checked = true; p[t.pending] = +itemId; }
       renderQuoteEditor();
       return;
     }
     if (on) await api(t.table, 'POST', { post_id: postId, [t.fk]: itemId }, '', { prefer: 'return=minimal' });
     else await api(t.table, 'DELETE', null, where);
     if (on) p[t.set].add(+itemId); else p[t.set].delete(+itemId);
-    // A workforce tick may itself be another condition's trigger — repaint while any exist.
-    if (kind === 'accessory' && pbSupportRules().length) renderQuoteEditor();
+    // A tick may itself be another condition's trigger — repaint while any exist.
+    if (pbSupportRules().length) renderQuoteEditor();
   } catch (e) { cb.checked = !on; showStatus('Could not save: ' + e.message, 'error'); }
 }
-async function pbAccOverrideConfirm(postId, itemId) {
+// Override an item or course a condition ticked: the 'on' row goes, an 'off' row with the reason
+// takes its place (one row per post and item, so DELETE then POST).
+async function pbChecklistOverrideConfirm(postId, kind, itemId) {
   const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId); if (!p) return;
-  const el = document.getElementById('pb-accovr-' + postId + '-' + itemId);
+  const t = PB_CHECKLIST_TABLES[kind];
+  const el = document.getElementById('pb-' + kind + 'ovr-' + postId + '-' + itemId);
   const reason = String((el && el.value) || '').trim();
-  if (!reason) { showStatus('Give a reason — a support item a condition requires is being switched off', 'error'); return; }
-  const where = 'post_id=eq.' + postId + '&accessory_id=eq.' + itemId;
+  if (!reason) { showStatus('Give a reason — a ' + (kind === 'training' ? 'training course' : 'support item') + ' a condition requires is being switched off', 'error'); return; }
+  const where = 'post_id=eq.' + postId + '&' + t.fk + '=eq.' + itemId;
   try {
-    await api('quote_post_accessories', 'DELETE', null, where);
-    await api('quote_post_accessories', 'POST', { post_id: postId, accessory_id: itemId, state: 'off', override_reason: reason }, '', { prefer: 'return=minimal' });
-    p.accessories = p.accessories || new Set(); p.accessories.delete(+itemId);
-    p.accessoriesOff = p.accessoriesOff || {}; p.accessoriesOff[+itemId] = reason;
-  } catch (e) { showStatus(pbSupportSqlHint(e), 'error'); }
-  p._accOvrPending = null;
+    await api(t.table, 'DELETE', null, where);
+    await api(t.table, 'POST', { post_id: postId, [t.fk]: itemId, state: 'off', override_reason: reason }, '', { prefer: 'return=minimal' });
+    p[t.set] = p[t.set] || new Set(); p[t.set].delete(+itemId);
+    p[t.off] = p[t.off] || {}; p[t.off][+itemId] = reason;
+  } catch (e) { showStatus(pbSupportSqlHint(e, kind), 'error'); }
+  p[t.pending] = null;
   renderQuoteEditor();
 }
-function pbAccOverrideCancel(postId) {
+function pbChecklistOverrideCancel(postId, kind) {
   const p = pbHeadings.flatMap(h => h.posts).find(x => +x.id === +postId);
-  if (p) p._accOvrPending = null;
+  if (p) p[PB_CHECKLIST_TABLES[kind].pending] = null;
   renderQuoteEditor();
 }
 
@@ -7568,7 +7577,7 @@ function pgRenderScope() {
     html += '<h3>' + pbEsc(h.isUngrouped ? 'General' : h.name) + '</h3>' +
       '<table class="pg-table"><thead><tr><th>Post</th><th>Uniform</th><th>Shift pattern</th><th class="num">Officers per shift</th><th class="num">Officers required</th></tr></thead><tbody>';
     h.posts.forEach(p => {
-      const a = names(acc, pbPostAccSet(p)), t = names(trn, p.training), pi = incNames(p);
+      const a = names(acc, pbPostAccSet(p)), t = names(trn, pbPostTrnSet(p)), pi = incNames(p);
       if (pi) anyInc = true;
       html += '<tr><td><strong>' + pbEsc(p.name) + '</strong>' + (p.description ? '<br><span class="pg-muted">' + pbEsc(p.description) + '</span>' : '') +
         (a ? '<br><span class="pg-muted"><em>Workforce support items:</em> ' + a + '</span>' : '') +
@@ -9497,13 +9506,14 @@ function pbBackToHrGrid() { pbActiveSchema = null; pbEditingRowId = null; render
 
 // ── Conditional Criteria (v7.9.55) — landing page with two areas ─────────────
 // Incentives and Allowances: the allowance conditions, moved here from Human Resources.
-// Support Items: support items of any category that tick themselves when an allowance, a
-// post condition or another support item is active. The sidebar entry always lands on the
-// grid; the two screens re-render themselves after a save.
+// Support Items and Training: support items of any category and training courses (v7.9.56)
+// that tick themselves when an allowance, a post condition, another support item or a course
+// is active. The sidebar entry always lands on the grid; the two screens re-render themselves
+// after a save.
 let _ccActive = null;   // null | 'allowances' | 'support'
 const PB_CC_TILES = [
-  { id: 'allowances', label: 'Incentives and Allowances', sub: 'Conditions between allowances and incentives: only one of, requires, auto-includes.' },
-  { id: 'support',    label: 'Support Items',             sub: 'Support items that tick themselves when an allowance, a post condition or another item is active.' },
+  { id: 'allowances', label: 'Incentives and Allowances',    sub: 'Conditions between allowances and incentives: only one of, requires, auto-includes.' },
+  { id: 'support',    label: 'Support Items and Training',   sub: 'Support items and training courses that tick themselves when an allowance, a post condition, another item or a course is active.' },
 ];
 async function renderPbConditionalCriteriaPage() {
   if (_ccActive === 'allowances') { await renderAllowRules(); return; }
@@ -10615,6 +10625,7 @@ function pbActiveAllowSet(p, implied) {
 function pbAllowLabelFor(kind, code) {
   if (kind === 'post') return PB_POST_CONDITIONS[code] || code;
   if (kind === 'support') { const it = pbSupportItemById(code); return it ? it.name : 'support item #' + code; }
+  if (kind === 'training') { const c = pbTrainingCourseById(code); return c ? c.name : 'training course #' + code; }   // v7.9.56
   const table = kind === 'statutory' ? 'quote_statutory_allowances'
     : kind === 'discretionary' ? 'quote_discretionary_allowances' : 'quote_discretionary_incentives';
   const r = pbCurrentByCode(allData[table], pbQuoteAsAt()).find(x => x.code === code)
@@ -10656,24 +10667,27 @@ function pbRuleRemovalBlock(p, kind, code) {
   return null;
 }
 
-// ── Support Items conditions (v7.9.55) ──────────────────────────────────────
-// A rule: IF any trigger is active THEN its target support items tick themselves. Triggers are
-// allowances / incentives active on a post, post conditions, or other support items; targets
-// are support items of any category, referenced by id (kind 'support', code = id as text).
-// A workforce target ticks on each post whose trigger is active; a contract or service target
-// (or a legacy per-contract-basis workforce item) ticks once on the quote when any post, or a
-// contract-level item, has the trigger. Like an implies rule, an item ticked by a condition
-// may be overridden off with a reason (state 'off' on its tick row). Evaluated as one fixpoint
-// over the whole quote, so chains work in both directions (post → contract → post).
+// ── Support Items and Training conditions (v7.9.55; training v7.9.56) ────────
+// A rule: IF any trigger is active THEN its targets tick themselves. Triggers are allowances /
+// incentives active on a post, post conditions, other support items or training courses;
+// targets are support items of any category (kind 'support', code = id as text) or training
+// courses (kind 'training', code = id as text). A workforce item or a course ticks on each post
+// whose trigger is active; a contract or service target (or a legacy per-contract-basis
+// workforce item) ticks once on the quote when any post, or a contract-level item, has the
+// trigger. Like an implies rule, anything ticked by a condition may be overridden off with a
+// reason (state 'off' on its tick row). Evaluated as one fixpoint over the whole quote, so
+// chains work in both directions (post → contract → post) and across items and courses.
 let pbContractAccOff = new Map();   // accessory_id → reason: contract-level overrides
 let _pbSupportEval = null;          // memo for one render; cleared by renderQuoteEditor and the toggles
 function pbSupportRules() { return (allData['quote_support_item_rules'] || []).filter(r => r.active !== false); }
 function pbSupportItemById(id) { return (allData['quote_accessories'] || []).find(i => +i.id === +id) || null; }
+function pbTrainingCourseById(id) { return (allData['quote_training_courses'] || []).find(i => +i.id === +id) || null; }
 function pbSupportEval() {
   if (_pbSupportEval) return _pbSupportEval;
-  const out = { posts: {}, contract: {} };   // posts[postId][accessoryId] = rule name; contract[accessoryId] = rule name
+  // posts[postId][accessoryId] / training[postId][courseId] = rule name; contract[accessoryId] = rule name
+  const out = { posts: {}, contract: {}, training: {} };
   const posts = (pbHeadings || []).flatMap(h => h.posts);
-  posts.forEach(p => { out.posts[p.id] = {}; });
+  posts.forEach(p => { out.posts[p.id] = {}; out.training[p.id] = {}; });
   const rules = pbSupportRules();
   if (!rules.length) return (_pbSupportEval = out);
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
@@ -10697,6 +10711,8 @@ function pbSupportEval() {
       contractOn.forEach(id => a.add('support:' + id));   // a contract-level fact holds on every post
       (p.accessories || new Set()).forEach(id => a.add('support:' + id));
       Object.keys(out.posts[p.id]).forEach(id => { if ((p.accessoriesOff || {})[id] == null) a.add('support:' + id); });
+      (p.training || new Set()).forEach(id => a.add('training:' + id));   // v7.9.56: courses trigger too
+      Object.keys(out.training[p.id]).forEach(id => { if ((p.trainingOff || {})[id] == null) a.add('training:' + id); });
       postActive.set(p.id, a);
       a.forEach(k => quoteActive.add(k));
     });
@@ -10704,6 +10720,11 @@ function pbSupportEval() {
       const firesOn = p => triggers.some(t => pbTriggerActive(p, t, postActive.get(p.id)));
       const firesOnQuote = posts.some(firesOn) || triggers.some(t => t.kind !== 'post' && quoteActive.has(t.kind + ':' + t.code));
       targets.forEach(t => {
+        if (t.kind === 'training') {   // v7.9.56: a course ticks per post, never once on the quote
+          if (!pbTrainingCourseById(t.code)) return;
+          posts.forEach(p => { if (!out.training[p.id][+t.code] && firesOn(p)) { out.training[p.id][+t.code] = r.name; grew = true; } });
+          return;
+        }
         if (t.kind !== 'support') return;
         const it = pbSupportItemById(t.code); if (!it) return;
         if (quoteLevel(it)) { if (firesOnQuote && !out.contract[it.id]) { out.contract[it.id] = r.name; grew = true; } }
@@ -10719,6 +10740,13 @@ function pbPostAccSet(p) {
   const out = new Set(p.accessories || []);
   const imp = pbSupportEval().posts[p.id] || {};
   Object.keys(imp).forEach(id => { if ((p.accessoriesOff || {})[id] == null) out.add(+id); });
+  return out;
+}
+// Effective training ticks on a post: manual ticks plus courses a condition ticked, less overrides.
+function pbPostTrnSet(p) {
+  const out = new Set(p.training || []);
+  const imp = pbSupportEval().training[p.id] || {};
+  Object.keys(imp).forEach(id => { if ((p.trainingOff || {})[id] == null) out.add(+id); });
   return out;
 }
 // Effective contract-level ticks, accessory_id → quantity (an item a condition ticked counts once).
@@ -10739,29 +10767,31 @@ function pbSupportReasonRow(inputId, confirmJs, cancelJs) {
     '<button class="pb-btn xs" onclick="' + cancelJs + '">Cancel</button>' +
   '</div>';
 }
-function pbSupportSqlHint(e) {
-  return /state|override_reason|column/i.test((e && e.message) || '') ? 'sql/support_item_conditions.sql has not been run on this database' : 'Could not save the override: ' + e.message;
+function pbSupportSqlHint(e, kind) {
+  const sql = kind === 'training' ? 'sql/training_conditions.sql' : 'sql/support_item_conditions.sql';
+  return /state|override_reason|column/i.test((e && e.message) || '') ? sql + ' has not been run on this database' : 'Could not save the override: ' + e.message;
 }
 
-// ── The admin screen: Conditional Criteria → Support Items ───────────────────
+// ── The admin screen: Conditional Criteria → Support Items and Training ──────
 let _supState = { editing: null, _confirmDel: null };   // editing: null | 'new' | rule id
 
 async function renderSupportRules() {
   _ccActive = 'support'; pbActiveSchema = null;
   document.getElementById('table-head').innerHTML = '';
-  document.getElementById('page-sub').textContent = 'Support items that follow from allowances, post conditions or other items';
+  document.getElementById('page-sub').textContent = 'Support items and training courses that follow from allowances, post conditions, other items or courses';
   document.getElementById('table-body').innerHTML = `<tr><td style="padding:0;border:none;">
     <div id="sup-page" style="padding:0 0 24px;max-width:860px;">
       <div id="sup-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
     </div></td></tr>`;
   try {
-    const [rules, members, stat, disc, inc, items] = await Promise.all([
+    const [rules, members, stat, disc, inc, items, courses] = await Promise.all([
       apiGetAll('quote_support_item_rules', 'select=*'),
       apiGet('quote_support_item_rule_members', 'select=*&order=rule_id.asc'),
       apiGetAll('quote_statutory_allowances', 'select=*'),
       apiGetAll('quote_discretionary_allowances', 'select=*'),
       apiGetAll('quote_discretionary_incentives', 'select=*'),
       apiGet('quote_accessories', 'select=*&order=display_order,id'),
+      apiGet('quote_training_courses', 'select=*&order=display_order,id'),   // v7.9.56
     ]);
     allData['quote_support_item_rules'] = rules;
     allData['quote_support_item_rule_members'] = members;
@@ -10769,6 +10799,7 @@ async function renderSupportRules() {
     allData['quote_discretionary_allowances'] = disc;
     allData['quote_discretionary_incentives'] = inc;
     allData['quote_accessories'] = items;
+    allData['quote_training_courses'] = courses;
     _supPaint();
   } catch (e) {
     document.getElementById('sup-body').innerHTML =
@@ -10784,6 +10815,12 @@ function _supItemGroups(titles) {
   const g = (cat, title) => ({ kind: 'support', title, rows: items.filter(i => pbItemCategory(i) === cat).map(i => ({ code: String(i.id), name: i.name })) });
   return [g('workforce', titles ? titles[0] : 'Workforce Support Items'), g('contract', titles ? titles[1] : 'Contract Support Items'), g('service', titles ? titles[2] : 'Service Support Items')];
 }
+// Training courses in use today as one picker group (kind 'training', code = id). v7.9.56.
+function _supTrainingGroup(title) {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = (allData['quote_training_courses'] || []).filter(c => pbItemInWindow(c, today)).map(c => ({ code: String(c.id), name: c.name }));
+  return { kind: 'training', title, rows };
+}
 
 function _supPaint() {
   const out = document.getElementById('sup-body');
@@ -10791,7 +10828,7 @@ function _supPaint() {
   const rules = allData['quote_support_item_rules'] || [];
   const st = _supState;
 
-  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : m.kind === 'support' ? '#F3F0E8' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
+  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : m.kind === 'support' ? '#F3F0E8' : m.kind === 'training' ? '#EAF3EC' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
   const word = w => ` <span style="color:var(--text3);font-size:10px;font-weight:700;">${w}</span> `;
   const chips = r => {
     const { triggers, targets } = pbRuleParts(r, 'quote_support_item_rule_members');
@@ -10830,16 +10867,17 @@ function _supPaint() {
           </div>`).join('')}
       </div>`;
     const section = (title, inner) => `<div style="font-size:11px;font-weight:700;color:var(--navy);margin:10px 0 6px;">${title}</div>${inner}`;
-    const triggerGroups = _arItems(true).concat(_supItemGroups(['Workforce items ticked', 'Contract items ticked', 'Service items ticked']));
+    const triggerGroups = _arItems(true).concat(_supItemGroups(['Workforce items ticked', 'Contract items ticked', 'Service items ticked']), [_supTrainingGroup('Training courses ticked')]);
+    const targetGroups = _supItemGroups().concat([_supTrainingGroup('Training Courses')]);
     editor = `
     <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
         <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
         <input id="sup-name" class="form-control" placeholder="Name — e.g. Armed post kit" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">When any trigger is active, the support items below tick themselves — on each post for a workforce item, once on the quote for a contract or service item. They may be overridden off with a reason.</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">When any trigger is active, the support items and training courses below tick themselves — on each post for a workforce item or a course, once on the quote for a contract or service item. They may be overridden off with a reason.</div>
       ${section('IF any of these is active', picker('trigger', triggerGroups))}
-      ${section('THEN tick these support items', picker('target', _supItemGroups()))}
+      ${section('THEN tick these support items and training courses', picker('target', targetGroups))}
       <div style="display:flex;gap:8px;margin-top:12px;">
         <button class="btn btn-sm btn-primary" onclick="_supSave(${rule ? rule.id : 'null'})">Save condition</button>
         <button class="btn btn-sm btn-ghost" onclick="_supState.editing=null;_supPaint()">Cancel</button>
@@ -10857,8 +10895,9 @@ function _supPaint() {
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
       A condition fires the moment its trigger holds on a post: an allowance is ticked, an incentive carries an amount,
       a post condition applies (a shift crossing midnight, weekend staffing, or simply "the post is staffed"), or another
-      support item is ticked. A workforce item then ticks itself on that post; a contract or service item ticks itself once
-      on the quote when any post has the trigger. Unticking an item a condition ticked asks for a reason. Messages name the rule.
+      support item or a training course is ticked. A workforce item or a course then ticks itself on that post; a contract
+      or service item ticks itself once on the quote when any post has the trigger. Unticking anything a condition ticked
+      asks for a reason. Messages name the rule.
     </div>`;
 }
 
@@ -10870,7 +10909,7 @@ async function _supSave(id) {
   const picked = [...document.querySelectorAll('.sup-member:checked')]
     .map(el => ({ role: el.dataset.role, kind: el.dataset.kind, code: el.dataset.code }));
   const trig = picked.filter(m => m.role === 'trigger'), targ = picked.filter(m => m.role === 'target');
-  if (!trig.length || !targ.length) { showStatus('Pick at least one trigger (IF) and one support item (THEN)', 'error'); return; }
+  if (!trig.length || !targ.length) { showStatus('Pick at least one trigger (IF) and one support item or training course (THEN)', 'error'); return; }
   const both = targ.find(t => trig.some(x => x.kind === t.kind && x.code === t.code));
   if (both) { showStatus(pbAllowLabelFor(both.kind, both.code) + ' cannot be both a trigger and a target', 'error'); return; }
   const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
@@ -10888,7 +10927,8 @@ async function _supSave(id) {
     _supState.editing = null;
     await renderSupportRules();
   } catch (e) {
-    showStatus('Could not save the condition: ' + e.message + (/404|PGRST205/.test(e.message) ? ' — has sql/support_item_conditions.sql been run?' : ''), 'error');
+    showStatus('Could not save the condition: ' + e.message + (/404|PGRST205/.test(e.message) ? ' — has sql/support_item_conditions.sql been run?'
+      : /kind_check|check constraint/i.test(e.message) && picked.some(m => m.kind === 'training') ? ' — has sql/training_conditions.sql been run?' : ''), 'error');
   }
 }
 
