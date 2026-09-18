@@ -708,7 +708,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.64 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -747,7 +747,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.64 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3800,7 +3800,7 @@ async function loadTable(page) {
     if (page === 'pb_conditional_criteria')   { _ccActive = null; await renderPbConditionalCriteriaPage(); return; }
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
     if (page === 'pb_standard_headings')      { await renderPbCatalogPage('quote_standard_heading_names', 'Standard Headings');  return; }
-    if (page === 'pb_uniform_types')          { await renderPbCatalogPage('quote_uniform_types',          'Uniform Types');      return; }
+    if (page === 'pb_uniform_types')          { await renderPbItemCatalogPage('uniform'); return; }
     if (page === 'pb_accessories')            { await renderPbItemCatalogPage('accessory'); return; }
     if (page === 'pb_contract_items')         { await renderPbItemCatalogPage('contract');  return; }
     if (page === 'pb_service_items')          { await renderPbItemCatalogPage('service');   return; }
@@ -6367,13 +6367,14 @@ async function openQuote(id) {
       apiGet('quote_training_costs', 'select=*').catch(() => []),
       apiGet('quote_contract_accessories', 'quote_id=eq.' + id + '&select=*').catch(() => []),   // v7.9.44: per-contract items
       apiGet('quote_workforce_adjustments', 'quote_id=eq.' + id + '&select=*').catch(() => []),  // v7.9.53: quote-level workforce adjustments
-    ]).catch(() => [[], [], [], [], [], []]);
-    const [qRows, posts, grades, areas, uniformTypes, statAllow, discAllow, discInc, rules, postNames, headingNames, pg, cats] = await Promise.all([
+      apiGet('quote_uniform_types', 'select=*&order=display_order,id').catch(() => []),          // v7.9.65
+      apiGet('quote_uniform_type_costs', 'select=*').catch(() => []),                            // v7.9.65
+    ]).catch(() => [[], [], [], [], [], [], [], []]);
+    const [qRows, posts, grades, areas, statAllow, discAllow, discInc, rules, postNames, headingNames, pg, cats] = await Promise.all([
       apiGet('quote_quotes', 'id=eq.' + id + '&select=*'),
       apiGet('quote_posts', 'quote_id=eq.' + id + '&select=*&order=display_order,id'),
       allData['quote_grades'] || apiGet('quote_grades', 'select=*&order=display_order'),
       allData['quote_areas'] || apiGet('quote_areas', 'select=*&order=display_order'),
-      allData['quote_uniform_types'] || apiGet('quote_uniform_types', 'select=*&active=eq.true&order=display_order'),   // v7.9.64
       // Always fresh: help text and windows edited under Human Resources must reach a quote
       // opened a minute later, so these three never trust the session cache.
       apiGet('quote_statutory_allowances', 'select=*&order=effective_date.asc,id.asc'),
@@ -6398,7 +6399,8 @@ async function openQuote(id) {
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
-    allData['quote_uniform_types'] = uniformTypes;   // v7.9.64
+    allData['quote_uniform_types'] = cats[6] || [];        // v7.9.65
+    allData['quote_uniform_type_costs'] = cats[7] || [];   // v7.9.65
     allData['quote_statutory_allowances'] = statAllow;
     allData['quote_discretionary_allowances'] = discAllow;
     allData['quote_discretionary_incentives'] = discInc;
@@ -6878,7 +6880,14 @@ const PB_ITEM_KINDS = {
   service:   { table: 'quote_accessories', costTable: 'quote_accessory_costs', fk: 'accessory_id', amount: 'acquisition_cost', model: 'accessory', category: 'service',
     title: 'Service Support Items', one: 'service support item', bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_contract',
     hint: 'Service things a contract needs to be delivered (armed response, monitoring, vehicle tracking, airtime). Ticked once per quote.' },
-  training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', model: 'training', title: 'Training Courses', one: 'training course' }
+  training:  { table: 'quote_training_courses', costTable: 'quote_training_costs', fk: 'training_course_id', amount: 'cost_per_officer', model: 'training', title: 'Training Courses', one: 'training course' },
+  // v7.9.65: a post picks ONE uniform type from a dropdown (quote_posts.uniform_id)
+  // rather than ticking a checklist, so this stays its own table — but the cost
+  // history is the identical accessory shape (acquisition/life/running/loss/
+  // basis/recovery), so it reuses every generic pbItem*/pbAcc* function as-is.
+  uniform:   { table: 'quote_uniform_types', costTable: 'quote_uniform_type_costs', fk: 'uniform_type_id', amount: 'acquisition_cost', model: 'accessory',
+    bases: PB_ACC_BASES, recovery: PB_ACC_RECOVERY, defaultBasis: 'per_officer',
+    title: 'Uniform Types', one: 'uniform type', hint: 'A uniform set an officer wears on a post, picked once from the post row\'s Uniform dropdown, with its own replacement lifecycle.' }
 };
 function pbItemCategory(item) { return item.category || 'workforce'; }
 function pbItemInWindow(item, asAt) {
@@ -7077,6 +7086,7 @@ function pbAccSummary() {
     else { line.monthly = qty * unit; }
     out.monthly += line.monthly; out.onceOff += line.onceOff; out.lines.push(line);
   };
+  const unifItems = allData['quote_uniform_types'] || [], unifCosts = allData['quote_uniform_type_costs'] || [];   // v7.9.65
   pbHeadings.forEach(h => h.posts.forEach(p => {
     out.byPost[p.id] = 0;
     pbPostAccSet(p).forEach(id => {
@@ -7086,6 +7096,16 @@ function pbAccSummary() {
       add(item, cost, pbAccQtyForPost(cost.cost_basis, p), p.name);
       out.byPost[p.id] += out.monthly - before;
     });
+    // v7.9.65: the post's one picked uniform type, same math as a ticked accessory.
+    if (p.uniform_id) {
+      const uItem = unifItems.find(i => +i.id === +p.uniform_id);
+      const uCost = pbItemCurrentCost(unifCosts, 'uniform_type_id', p.uniform_id, asAt);
+      if (uItem && uCost) {
+        const before = out.monthly;
+        add(uItem, uCost, pbAccQtyForPost(uCost.cost_basis, p), p.name);
+        out.byPost[p.id] += out.monthly - before;
+      }
+    }
   }));
   // v7.9.53: quote-level workforce adjustments ride as their own lines, positive or negative,
   // so the per-post prices stay rule-based and the departure is visible on its own.
@@ -8239,7 +8259,8 @@ function renderHeading(h) {
 function renderPost(p, h) {
   const expanded = pbExpandedPosts.has(p.id);
   const grades = allData['quote_grades'] || [];
-  const uniformTypes = allData['quote_uniform_types'] || [];   // v7.9.64
+  const uniformTypes = (allData['quote_uniform_types'] || [])
+    .filter(u => pbItemInWindow(u, pbQuoteAsAt()) || +u.id === +p.uniform_id);   // v7.9.65
   const officers = pbOfficersForPost(p);
   return '<div class="pb-post ' + (expanded ? 'expanded' : '') + '" data-post-id="' + p.id + '" ondragover="pbPostDragOver(event)" ondrop="pbPostDrop(event, ' + p.id + ')">' +
     '<div class="pb-post-summary" onclick="pbTogglePostExpanded(' + p.id + ')">' +
@@ -9552,18 +9573,6 @@ const PB_SCHEMAS = {
       { key:'active',        label:'Active',        type:'bool' }
     ]
   },
-  // v7.9.64: the post row's Uniform dropdown draws on this — "uniform is
-  // individual, and common per post" (Richard), so one pick applies to the post.
-  'uniform-types': {
-    title: 'Uniform Types',
-    table: 'quote_uniform_types',
-    sortBy: 'display_order',
-    columns: [
-      { key:'name',          label:'Name',          type:'text' },
-      { key:'display_order', label:'Display Order', type:'int' },
-      { key:'active',        label:'Active',        type:'bool' }
-    ]
-  },
   // v7.9.41: the two per-post checklists (Workforce Support Items / Training) are
   // fed from these catalogues — the lists a post ticks are whatever is active here.
   'accessories': {
@@ -9621,7 +9630,6 @@ const PB_CATALOG_SCHEMA_BY_TABLE = {
   quote_opportunity_margin_rules: 'opportunity-margin-rules',
   quote_standard_post_names:    'standard-posts',
   quote_standard_heading_names: 'standard-headings',
-  quote_uniform_types:           'uniform-types',
   quote_accessories:            'accessories',
   quote_training_courses:       'training-courses'
 };
