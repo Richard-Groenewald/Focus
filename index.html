@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1835,6 +1835,20 @@ function _mockStore() {
 }
 function _mockPersist() { try { localStorage.setItem('focus_mock_db', JSON.stringify(_mockDB)); } catch (e) {} }
 function _mockNextId(rows) { return rows.reduce((m, r) => Math.max(m, Number(r.id) || 0), 0) + 1; }
+
+// ── HTML escaping (v7.9.59, XSS sweep) ───────────────────────────────────────
+// One shared escaper for any database or user value written into innerHTML. Use
+// escHtml for text / element content AND for a value inside a quoted attribute —
+// it escapes both quote styles, so escAttr is the same function. Only skip it for
+// values the app itself constructs as markup (a column's render() output, a
+// pre-built HTML fragment). The app carries ~28 local `esc` helpers from before
+// this; prefer escHtml at every new sink and migrate the old ones opportunistically.
+function escHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+const escAttr = escHtml;
 
 function _mockCoerce(v) {
   if (v === 'true') return true;
@@ -3874,13 +3888,13 @@ async function loadTable(page) {
     const rowRenderer = (row) => {
       const cells = cfg.columns.map(col => {
         let val = row[col.key];
-        if (col.render) return `<td>${col.render(val)}</td>`;
+        if (col.render) return `<td>${col.render(val)}</td>`;   // render() owns its own markup
         if (col.lookup) {
           const lookup = allData[col.lookup] || [];
           const found = lookup.find(r => +r.id === +val);
           val = found ? col.lookupLabel(found) : (val || '—');
         }
-        return `<td>${val ?? '—'}</td>`;
+        return `<td>${escHtml(val ?? '—')}</td>`;
       }).join('');
       const contactsBtn = currentPage === 'clients'
         ? `<button class="btn btn-ghost btn-sm" onclick="showClientContacts(${row.id})">Contacts</button>`
@@ -4097,7 +4111,7 @@ function renderField(f, val, locked) {
 
   if (f.type === 'select') {
     const onchange = (currentPage === 'parties' && f.key === 'party_type') ? ' onchange="onPartyTypeChange(this.value)"' : '';
-    const opts = f.options.map(o => `<option value="${o}" ${val==o?'selected':''}>${o||'— select —'}</option>`).join('');
+    const opts = f.options.map(o => `<option value="${o}" ${val==o?'selected':''}>${escHtml(o||'— select —')}</option>`).join('');
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}${onchange}>${opts}</select></div>`;
   }
 
@@ -4106,7 +4120,7 @@ function renderField(f, val, locked) {
     // parents only) — but the record's CURRENT value is always kept, so an
     // existing link never silently falls out of its own select.
     const lookupData = (allData[f.lookupTable] || []).filter(r => !f.lookupFilter || f.lookupFilter(r) || +r.id === +val);
-    const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${f.lookupLabel(r)}</option>`).join('');
+    const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${escHtml(f.lookupLabel(r))}</option>`).join('');
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select —</option>${opts}</select></div>`;
   }
 
@@ -4448,7 +4462,7 @@ async function openEditClientContact(affiliationId, personId) {
         </div>
       </div>` : '';
     const titleOpts = ['', 'Mr', 'Mrs', 'Ms', 'Dr', 'Prof']
-      .map(t => `<option value="${t}" ${(p.title || '') === t ? 'selected' : ''}>${t || '—'}</option>`).join('');
+      .map(t => `<option value="${t}" ${(p.title || '') === t ? 'selected' : ''}>${escHtml(t || '—')}</option>`).join('');
     document.getElementById('modal-root').innerHTML = `
       <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
         <div class="modal" style="width:560px;">
@@ -4461,9 +4475,9 @@ async function openEditClientContact(affiliationId, personId) {
               <div class="form-group" style="flex:0 0 80px;"><label class="form-label">Title</label>
                 <select id="ec-title" class="form-control">${titleOpts}</select></div>
               <div class="form-group"><label class="form-label">First Name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                <input type="text" id="ec-first" class="form-control" value="${p.first_name || ''}"></div>
+                <input type="text" id="ec-first" class="form-control" value="${escAttr(p.first_name || '')}"></div>
               <div class="form-group"><label class="form-label">Last Name <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
-                <input type="text" id="ec-last" class="form-control" value="${p.last_name || ''}"></div>
+                <input type="text" id="ec-last" class="form-control" value="${escAttr(p.last_name || '')}"></div>
             </div>
             <div class="form-row">
               <div class="form-group"><label class="form-label">Job title</label>
@@ -4737,7 +4751,7 @@ function openHelpDrawer(key) {
   // section under a red-ruled navy heading (numbering matches the setup guide).
   let n = 0;
   const sectionsHtml = content.sections.filter(s => s.body || s.note).map(s =>
-    s.note ? `<div class="help-note"${s.colour ? ` style="background:${s.colour};"` : ''}>${s.note}</div>`
+    s.note ? `<div class="help-note"${s.colour ? ` style="background:${escAttr(s.colour)};"` : ''}>${escHtml(s.note)}</div>`
            : `<h4>${++n}. ${s.h}</h4><div>${s.body}</div>`).join('');
   drawer.innerHTML = `
     <div class="help-drawer-header">
@@ -5797,7 +5811,7 @@ function setupOppOwnerReassign() {
   sel.innerHTML = '<option value="">— unassigned —</option>' +
     pool.map(p => {
       const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}" ${String(current) === String(p.id) ? 'selected' : ''}>${name}</option>`;
+      return `<option value="${p.id}" ${String(current) === String(p.id) ? 'selected' : ''}>${escHtml(name)}</option>`;
     }).join('');
 }
 
@@ -5855,7 +5869,7 @@ async function initOppForm() {
   // Populate organisation dropdown
   const orgSel = document.getElementById('opp-org-id');
   orgSel.innerHTML = '<option value="">— select client —</option>' +
-    orgs.map(o => `<option value="${o.id}" ${oppData.org_id==o.id?'selected':''}>${o.name}</option>`).join('');
+    orgs.map(o => `<option value="${o.id}" ${oppData.org_id==o.id?'selected':''}>${escHtml(o.name)}</option>`).join('');
 
   // If editing an existing deal, lock the client field
   const editEl = document.getElementById('opp-org-edit');
@@ -5878,7 +5892,7 @@ async function initOppForm() {
   // Populate region dropdown
   const regSel = document.getElementById('opp-region-id');
   regSel.innerHTML = '<option value="">— select region —</option>' +
-    regions.map(r => `<option value="${r.id}" ${oppData.region_id==r.id?'selected':''}>${r.name}</option>`).join('');
+    regions.map(r => `<option value="${r.id}" ${oppData.region_id==r.id?'selected':''}>${escHtml(r.name)}</option>`).join('');
 
   // Branch — auto-fills from region, overridable
   const brSel = document.getElementById('opp-branch-id');
@@ -5893,7 +5907,7 @@ async function initOppForm() {
     const catStages = oppStages.filter(s => +s.category_id === +cat.id);
     if (catStages.length) {
       stageSel.innerHTML += `<optgroup label="${cat.name}">` +
-        catStages.map(s => `<option value="${s.id}" ${oppData.stage_id==s.id?'selected':''}>${s.name}</option>`).join('') +
+        catStages.map(s => `<option value="${s.id}" ${oppData.stage_id==s.id?'selected':''}>${escHtml(s.name)}</option>`).join('') +
         '</optgroup>';
     }
   });
@@ -5907,7 +5921,7 @@ async function initOppForm() {
     const subs = allSubs.filter(s => +s.major_id === +m.id);
     if (subs.length) {
       subSel.innerHTML += `<optgroup label="${m.name}">` +
-        subs.map(s => `<option value="${s.id}" data-major-id="${s.major_id}" ${oppData.service_sub_id==s.id?'selected':''}>${s.name}</option>`).join('') +
+        subs.map(s => `<option value="${s.id}" data-major-id="${s.major_id}" ${oppData.service_sub_id==s.id?'selected':''}>${escHtml(s.name)}</option>`).join('') +
         '</optgroup>';
     }
   });
@@ -5923,7 +5937,7 @@ async function initOppForm() {
   ownerSel.innerHTML = '<option value="">— select owner —</option>' +
     ownerPool.map(p => {
       const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}" ${oppData.owner_id==p.id?'selected':''}>${name}</option>`;
+      return `<option value="${p.id}" ${oppData.owner_id==p.id?'selected':''}>${escHtml(name)}</option>`;
     }).join('');
 
   // Populate form fields
@@ -11560,7 +11574,7 @@ function addCollaboratorRow() {
       <label class="form-label">Person</label>
       <select class="form-control collab-person">
         <option value="">— select —</option>
-        ${people.map(p => `<option value="${p.id}">${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+        ${people.map(p => `<option value="${p.id}">${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
       </select>
     </div>
     <div class="form-group" style="margin-bottom:0;">
@@ -11830,7 +11844,7 @@ async function loadFilteredLookup(table, filter, selectId, currentValue) {
     if (sel) {
       const current = currentValue !== undefined ? currentValue : sel.value;
       sel.innerHTML = '<option value="">— select —</option>' +
-        data.map(n => `<option value="${n.id}">${n.name}</option>`).join('');
+        data.map(n => `<option value="${n.id}">${escHtml(n.name)}</option>`).join('');
       if (current) sel.value = current;
     }
   } catch(e) {
@@ -12310,14 +12324,14 @@ async function openAddClientModal(mode) {
                 <label class="form-label">Industry Sector</label>
                 <select id="nc-org-sector" class="form-control">
                   <option value="">— select —</option>
-                  ${(allData['industry_sectors']||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
+                  ${(allData['industry_sectors']||[]).map(s=>`<option value="${s.id}">${escHtml(s.name)}</option>`).join('')}
                 </select>
               </div>
               <div class="form-group">
                 <label class="form-label">Region</label>
                 <select id="nc-org-region" class="form-control" onchange="syncBranchToRegion('nc-org-region','nc-org-branch')">
                   <option value="">— select —</option>
-                  ${(allData['regions']||[]).map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}
+                  ${(allData['regions']||[]).map(r=>`<option value="${r.id}">${escHtml(r.name)}</option>`).join('')}
                 </select>
               </div>
               <div class="form-group">
@@ -12353,14 +12367,14 @@ async function openAddClientModal(mode) {
     apiGet('industry_sectors', 'active=eq.true&select=*&order=name.asc').then(d => {
       allData['industry_sectors'] = d;
       const sel = document.getElementById('nc-org-sector');
-      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(s=>`<option value="${s.id}">${s.name}</option>`).join('');
+      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(s=>`<option value="${s.id}">${escHtml(s.name)}</option>`).join('');
     });
   }
   if (!allData['regions']) {
     apiGet('regions', 'active=eq.true&select=*&order=name.asc').then(d => {
       allData['regions'] = d;
       const sel = document.getElementById('nc-org-region');
-      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(r=>`<option value="${r.id}">${r.name}</option>`).join('');
+      if (sel) sel.innerHTML = '<option value="">— select —</option>' + d.map(r=>`<option value="${r.id}">${escHtml(r.name)}</option>`).join('');
     });
   }
   if (!allData['branches']) {
@@ -12600,7 +12614,7 @@ async function saveNewClient() {
       const orgSel = document.getElementById('opp-org-id');
       if (orgSel) {
         orgSel.innerHTML = '<option value="">— select client —</option>' +
-          allData['organisations'].map(o => `<option value="${o.id}" ${o.id===org.id?'selected':''}>${o.name}</option>`).join('');
+          allData['organisations'].map(o => `<option value="${o.id}" ${o.id===org.id?'selected':''}>${escHtml(o.name)}</option>`).join('');
       }
     }
 
@@ -12716,7 +12730,7 @@ function renderOppContacts() {
             <td style="padding:10px 12px;color:var(--text2);">${c.title || '—'}</td>
             <td style="padding:10px 12px;color:var(--text2);">${c.phone || '—'}</td>
             <td style="padding:10px 12px;"><span class="badge badge-blue">${c.dmuRole || '—'}</span></td>
-            <td style="padding:10px 12px;color:var(--text2);font-size:12px;">${c.note || ''}</td>
+            <td style="padding:10px 12px;color:var(--text2);font-size:12px;">${escHtml(c.note || '')}</td>
             <td style="padding:10px 12px;text-align:right;">
               <button class="btn btn-ghost btn-sm" onclick="editOppContact(${i})">Edit</button>
               <button class="btn btn-danger btn-sm" onclick="removeOppContact(${i})">Remove</button>
@@ -12764,12 +12778,12 @@ async function openAddOppContactModal(editIdx) {
             <label class="form-label">DMU Role</label>
             <select id="oc-dmu-role-id" class="form-control">
               <option value="">— select role —</option>
-              ${dmuRoles.map(r => `<option value="${r.id}" ${editing?.dmuRoleId==r.id?'selected':''}>${r.name}</option>`).join('')}
+              ${dmuRoles.map(r => `<option value="${r.id}" ${editing?.dmuRoleId==r.id?'selected':''}>${escHtml(r.name)}</option>`).join('')}
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Note</label>
-            <textarea id="oc-note" class="form-control" rows="3">${editing?.note||''}</textarea>
+            <textarea id="oc-note" class="form-control" rows="3">${escHtml(editing?.note||'')}</textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -12905,7 +12919,7 @@ async function openCreateOppContactModal() {
               <label class="form-label">DMU Role</label>
               <select id="noc-dmu-role-id" class="form-control">
                 <option value="">— select role —</option>
-                ${dmuRoles.map(r => `<option value="${r.id}">${r.name}</option>`).join('')}
+                ${dmuRoles.map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -13109,7 +13123,7 @@ function renderCollaborators() {
   list.innerHTML = oppCollaborators.map((c, i) => `
     <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;">
       <div style="flex:1;">
-        <div style="font-weight:600;font-size:13px;">${c.name}</div>
+        <div style="font-weight:600;font-size:13px;">${escHtml(c.name)}</div>
         <div style="font-size:11px;color:var(--text3);">${c.role}</div>
       </div>
       ${c.isOwner ? '<span class="badge badge-blue">Owner</span>' : ''}
@@ -13185,7 +13199,7 @@ async function openAddCollaboratorModal() {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="collab-person-id" class="form-control">
               <option value="">— select person —</option>
-              ${pool.map(p => `<option value="${p.id}">${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+              ${pool.map(p => `<option value="${p.id}">${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
             </select>
             ${!pool.length ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No eligible people found — use "Create New Person" instead</div>' : ''}
           </div>
@@ -13952,7 +13966,7 @@ function recordInUserScope(record) {
 function branchOptionsHtml(selectedId) {
   const branches = (allData['branches'] || []).filter(b => b.active !== false);
   return '<option value="">— select —</option>' + branches.map(b =>
-    `<option value="${b.id}" ${(+selectedId === +b.id) ? 'selected' : ''}>${b.name}</option>`).join('');
+    `<option value="${b.id}" ${(+selectedId === +b.id) ? 'selected' : ''}>${escHtml(b.name)}</option>`).join('');
 }
 // The parent branch id of a region (its default), or '' if none.
 function branchForRegion(regionId) {
@@ -16641,7 +16655,7 @@ async function renderAuditLogPage() {
       <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-bottom:14px;">
         <div><label class="form-label" style="font-size:11px;">From</label><input type="date" id="audit-from" ${inp}></div>
         <div><label class="form-label" style="font-size:11px;">To</label><input type="date" id="audit-to" ${inp}></div>
-        <div><label class="form-label" style="font-size:11px;">Table</label><select id="audit-table" ${inp}><option value="">All tables</option>${AUDIT_TABLES.map(t => `<option value="${t}">${t}</option>`).join('')}</select></div>
+        <div><label class="form-label" style="font-size:11px;">Table</label><select id="audit-table" ${inp}><option value="">All tables</option>${AUDIT_TABLES.map(t => `<option value="${t}">${escHtml(t)}</option>`).join('')}</select></div>
         <div><label class="form-label" style="font-size:11px;">Who</label><select id="audit-actor" ${inp}><option value="">Everyone</option><option value="__system__">System / SQL</option></select></div>
         <div><label class="form-label" style="font-size:11px;">Action</label><select id="audit-op" ${inp}><option value="">All</option><option>INSERT</option><option>UPDATE</option><option>DELETE</option></select></div>
         <div><label class="form-label" style="font-size:11px;">Row ID</label><input type="number" id="audit-rowid" ${inp} style="width:90px;font-size:12px;padding:6px 8px;" placeholder="e.g. 42"></div>
@@ -16657,7 +16671,7 @@ async function renderAuditLogPage() {
   const actorSel = document.getElementById('audit-actor');
   if (actorSel) actorSel.innerHTML += (allData['people'] || [])
     .slice().sort((a, b) => String(a.first_name).localeCompare(String(b.first_name)))
-    .map(p => `<option value="${p.id}">${[p.first_name, p.last_name].filter(Boolean).join(' ')}</option>`).join('');
+    .map(p => `<option value="${p.id}">${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('');
   await _auditReload(false);
 }
 
@@ -18453,7 +18467,7 @@ function cockpitMissionHeader(c, regions, services, people) {
     ? `${fmt(c.start_date) || '—'} → ${fmt(c.end_date) || '—'}`
     : 'No timeframe set';
   const statusOptions = ['Active','Paused','Completed','Abandoned']
-    .map(s => `<option value="${s}" ${c.status===s?'selected':''}>${s}</option>`).join('');
+    .map(s => `<option value="${s}" ${c.status===s?'selected':''}>${escHtml(s)}</option>`).join('');
 
   const cell = (label, val) => `<div style="min-width:140px;">
     <div style="font-size:10px;font-weight:700;letter-spacing:0.05em;color:var(--text3);text-transform:uppercase;margin-bottom:3px;">${label}</div>
@@ -18686,7 +18700,7 @@ function cockpitCadenceHtml() {
     <td style="padding:6px 8px;text-align:center;color:var(--text3);font-weight:600;">${idx + 1}</td>
     <td style="padding:6px 8px;"><input type="number" min="0" class="form-control cad-day" style="width:90px;" value="${s.day_offset ?? 0}"></td>
     <td style="padding:6px 8px;"><select class="form-control cad-channel" style="width:130px;">${
-      channels.map(c => `<option value="${c}" ${s.channel===c?'selected':''}>${c}</option>`).join('')}</select></td>
+      channels.map(c => `<option value="${c}" ${s.channel===c?'selected':''}>${escHtml(c)}</option>`).join('')}</select></td>
     <td style="padding:6px 8px;"><input type="text" class="form-control cad-instruction" value="${cEsc(s.instruction||'')}" placeholder="e.g. Intro email referencing trigger"></td>
     <td style="padding:6px 8px;text-align:right;"><button class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()">✕</button></td>
   </tr>`;
@@ -18725,7 +18739,7 @@ function cockpitAddCadenceRow(day, channel, instruction) {
   tr.innerHTML = `<td style="padding:6px 8px;text-align:center;color:var(--text3);font-weight:600;">${idx + 1}</td>
     <td style="padding:6px 8px;"><input type="number" min="0" class="form-control cad-day" style="width:90px;" value="${day ?? 0}"></td>
     <td style="padding:6px 8px;"><select class="form-control cad-channel" style="width:130px;">${
-      channels.map(c => `<option value="${c}" ${channel===c?'selected':''}>${c}</option>`).join('')}</select></td>
+      channels.map(c => `<option value="${c}" ${channel===c?'selected':''}>${escHtml(c)}</option>`).join('')}</select></td>
     <td style="padding:6px 8px;"><input type="text" class="form-control cad-instruction" value="${cEsc(instruction||'')}" placeholder="e.g. Follow-up call"></td>
     <td style="padding:6px 8px;text-align:right;"><button class="btn btn-ghost btn-sm" onclick="this.closest('tr').remove()">✕</button></td>`;
   tbody.appendChild(tr);
@@ -19012,14 +19026,14 @@ function renderCampaignTargetModal() {
             <div class="form-group">
               <label class="form-label">Priority</label>
               <select id="ct-priority" class="form-control">
-                ${['Hot','Warm','Cold'].map(p => `<option value="${p}" ${(d.priority||'Warm')===p?'selected':''}>${p}</option>`).join('')}
+                ${['Hot','Warm','Cold'].map(p => `<option value="${p}" ${(d.priority||'Warm')===p?'selected':''}>${escHtml(p)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
               <label class="form-label">Status</label>
               <select id="ct-status" class="form-control">
-                ${['Researching','Ready'].map(s => `<option value="${s}" ${(d.status||'Researching')===s?'selected':''}>${s}</option>`).join('')}
-                ${(d.status==='Promoted'||d.status==='Disqualified') ? `<option value="${d.status}" selected>${d.status}</option>` : ''}
+                ${['Researching','Ready'].map(s => `<option value="${s}" ${(d.status||'Researching')===s?'selected':''}>${escHtml(s)}</option>`).join('')}
+                ${(d.status==='Promoted'||d.status==='Disqualified') ? `<option value="${d.status}" selected>${escHtml(d.status)}</option>` : ''}
               </select>
             </div>
           </div>
@@ -20597,7 +20611,7 @@ function refreshLeadRedFlagPool() {
   const selectedIds = new Set(window._leadRedFlags.map(x => +x.id));
   sel.innerHTML = '<option value="">— add red flag —</option>' +
     all.filter(x => !selectedIds.has(+x.id))
-       .map(x => `<option value="${x.id}">${x.name}</option>`).join('');
+       .map(x => `<option value="${x.id}">${escHtml(x.name)}</option>`).join('');
 }
 
 function refreshLeadStrategicDecisionPool() {
@@ -20607,7 +20621,7 @@ function refreshLeadStrategicDecisionPool() {
   const selectedIds = new Set(window._leadStrategicDecisions.map(x => +x.id));
   sel.innerHTML = '<option value="">— add decision —</option>' +
     all.filter(x => !selectedIds.has(+x.id))
-       .map(x => `<option value="${x.id}">${x.name}</option>`).join('');
+       .map(x => `<option value="${x.id}">${escHtml(x.name)}</option>`).join('');
 }
 
 function addLeadRedFlag() {
@@ -20853,7 +20867,7 @@ async function initLeadForm() {
   // Populate dropdowns
   const sourceSel = document.getElementById('lead-source-id');
   sourceSel.innerHTML = '<option value="">— select source —</option>' +
-    sources.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+    sources.map(s => `<option value="${s.id}">${escHtml(s.name)}</option>`).join('');
 
   // Progressive reveal also depends on the source's follow-up detail, so re-check on
   // any edit within the Source section (typed referrer/detail, campaign/client pick).
@@ -20867,7 +20881,7 @@ async function initLeadForm() {
 
   const regionSel = document.getElementById('lead-region-id');
   regionSel.innerHTML = '<option value="">— select —</option>' +
-    regions.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+    regions.map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('');
 
   const branchSel = document.getElementById('lead-branch-id');
   if (branchSel) branchSel.innerHTML = branchOptionsHtml();
@@ -20881,7 +20895,7 @@ async function initLeadForm() {
   ownerSel.innerHTML = '<option value="">— shared pool —</option>' +
     ownerPool.map(p => {
       const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-      return `<option value="${p.id}">${name}</option>`;
+      return `<option value="${p.id}">${escHtml(name)}</option>`;
     }).join('');
 
   // Source-person (referrer) is a free-type field with similarity matching —
@@ -20895,22 +20909,22 @@ async function initLeadForm() {
   // Source-org picker: all active orgs
   const srcOrgSel = document.getElementById('lead-source-org-id');
   srcOrgSel.innerHTML = '<option value="">— select client —</option>' +
-    pickerOrgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name)}</option>`).join('');
 
   // Research campaign picker
   const campaignSel = document.getElementById('lead-research-campaign-id');
   campaignSel.innerHTML = '<option value="">— select campaign —</option>' +
-    campaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    campaigns.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
 
   // Sales campaign picker
   const salesCampaignSel = document.getElementById('lead-sales-campaign-id');
   salesCampaignSel.innerHTML = '<option value="">— select campaign —</option>' +
-    salesCampaigns.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    salesCampaigns.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
 
   // Organisation sub-picker (shown only when adding a new site): all active orgs
   const tgtOrgSel = document.getElementById('lead-target-org-id');
   tgtOrgSel.innerHTML = '<option value="">Pick a known organisation or create a new one below</option>' +
-    pickerOrgs.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name)}</option>`).join('');
 
   // Primary Site typeahead starts empty (search is live against allData['sites']).
   // Under the populating flag: this re-enters onLeadTargetOrgChange with a blank
@@ -21974,7 +21988,7 @@ function renderLeadServiceEstimates() {
     // in the same cell (blur it empty to get the dropdown back).
     const monthsOpts = rec ? [12, 24, 36, 48, 60] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     const monthsCell = `<div style="min-width:0;"><select id="lse-months-sel-${m.id}" class="form-control" style="width:100%;min-width:0;" title="${rec ? 'Duration in months' : 'Spread over months'}" onchange="_svcEstMonthsSel(${m.id})">
-        <option value="">${rec ? 'months' : 'over…'}</option>
+        <option value="">${escHtml(rec ? 'months' : 'over…')}</option>
         ${monthsOpts.map(n => `<option value="${n}">${n} ${n === 1 ? 'month' : 'months'}</option>`).join('')}
         <option value="other">Other…</option>
       </select><div id="lse-months-customwrap-${m.id}" style="display:none;align-items:center;gap:4px;">
@@ -24059,7 +24073,7 @@ async function openRejectPromotion() {
     try { reasons = await apiGet('promotion_reject_reasons', 'active=eq.true&select=*&order=sort_order,name'); allData['promotion_reject_reasons'] = reasons; }
     catch { reasons = []; }
   }
-  const opts = '<option value="">— select —</option>' + (reasons || []).map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  const opts = '<option value="">— select —</option>' + (reasons || []).map(r => `<option value="${r.id}">${escHtml(r.name)}</option>`).join('');
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:520px;">
@@ -24217,7 +24231,7 @@ async function promoteWizardRedFlag(hasFlag) {
       }
       return;
     }
-    const opts = available.map(f => `<option value="${f.id}">${f.name}</option>`).join('');
+    const opts = available.map(f => `<option value="${f.id}">${escHtml(f.name)}</option>`).join('');
     showModal(`
       <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
         <div class="modal" style="width:480px;">
@@ -24679,7 +24693,7 @@ async function _openPromoteOrgScreen2() {
         <div class="form-group">
           <label class="form-label">Title</label>
           <select id="promote-person-title" class="form-control">
-            ${['','Mr','Mrs','Ms','Dr','Prof'].map(t => `<option value="${t}" ${np.title===t?'selected':''}>${t || '—'}</option>`).join('')}
+            ${['','Mr','Mrs','Ms','Dr','Prof'].map(t => `<option value="${t}" ${np.title===t?'selected':''}>${escHtml(t || '—')}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -24854,7 +24868,7 @@ async function openPromoteQ4Screen1() {
   }
   const nextActions = allData['_next_actions_opps'] || [];
   const naOpts = '<option value="">— select —</option>' +
-    nextActions.map(n => `<option value="${n.id}" ${+s.q4.nextActionId===+n.id?'selected':''}>${n.name}</option>`).join('');
+    nextActions.map(n => `<option value="${n.id}" ${+s.q4.nextActionId===+n.id?'selected':''}>${escHtml(n.name)}</option>`).join('');
 
   // Outstanding actions on the lead (Richard 2026-08-28: the user must be TOLD).
   // Mirrors the commit's carry-forward filter exactly (next_action_done=false),
@@ -29643,7 +29657,7 @@ async function renderResearchCampaignModal() {
               <label class="form-label">Region</label>
               <select id="rc-region-id" class="form-control" onchange="syncBranchToRegion('rc-region-id','rc-branch-id')">
                 <option value="">— select —</option>
-                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+                ${regions.map(r => `<option value="${r.id}" ${d.region_id==r.id?'selected':''}>${escHtml(r.name)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -29661,7 +29675,7 @@ async function renderResearchCampaignModal() {
             <div class="form-group">
               <label class="form-label">Status</label>
               <select id="rc-status" class="form-control">
-                ${['Active','Paused','Completed','Abandoned'].map(s => `<option value="${s}" ${(d.status||'Active')==s?'selected':''}>${s}</option>`).join('')}
+                ${['Active','Paused','Completed','Abandoned'].map(s => `<option value="${s}" ${(d.status||'Active')==s?'selected':''}>${escHtml(s)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -29671,7 +29685,7 @@ async function renderResearchCampaignModal() {
                 ${ownerPool.map(p => {
                   const name = [p.first_name,p.last_name].filter(Boolean).join(' ');
                   const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':'';
-                  return `<option value="${p.id}" ${sel}>${name}</option>`;
+                  return `<option value="${p.id}" ${sel}>${escHtml(name)}</option>`;
                 }).join('')}
               </select>
             </div>
@@ -29705,7 +29719,7 @@ async function renderResearchCampaignModal() {
           </div>
           <div class="form-group">
             <label class="form-label">Notes</label>
-            <textarea id="rc-notes" class="form-control" rows="3" placeholder="Approach, target list, talking points…">${d.notes||''}</textarea>
+            <textarea id="rc-notes" class="form-control" rows="3" placeholder="Approach, target list, talking points…">${escHtml(d.notes||'')}</textarea>
           </div>
         </div>
         <div class="modal-footer">
@@ -29760,7 +29774,7 @@ async function saveResearchCampaign() {
       const sel = document.getElementById('lead-research-campaign-id');
       if (sel) {
         sel.innerHTML = '<option value="">— select campaign —</option>' +
-          fresh.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+          fresh.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
         sel.value = saved.id;
       }
     } else if (currentPage === 'research_campaigns') {
@@ -30087,7 +30101,7 @@ async function renderSalesCampaignModal() {
             <div class="form-group">
               <label class="form-label">Status</label>
               <select id="sc-status" class="form-control">
-                ${['Active','Paused','Completed','Abandoned'].map(s => `<option value="${s}" ${(d.status||'Active')==s?'selected':''}>${s}</option>`).join('')}
+                ${['Active','Paused','Completed','Abandoned'].map(s => `<option value="${s}" ${(d.status||'Active')==s?'selected':''}>${escHtml(s)}</option>`).join('')}
               </select>
             </div>
             <div class="form-group">
@@ -30156,7 +30170,7 @@ async function saveSalesCampaign() {
       const sel = document.getElementById('lead-sales-campaign-id');
       if (sel) {
         sel.innerHTML = '<option value="">— select campaign —</option>' +
-          fresh.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+          fresh.map(c => `<option value="${c.id}">${escHtml(c.name)}</option>`).join('');
         sel.value = saved.id;
       }
     } else if (currentPage === 'sales_campaigns') {
@@ -30253,7 +30267,7 @@ async function renderSettingsPage() {
             <select id="setting-eng-edit" class="form-control">
               ${[15,30,60,120,240,480,1440].map(m => {
                 const label = m < 60 ? m+'m' : (m/60)+'h';
-                return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${label}</option>`;
+                return `<option value="${m}" ${(appSettings['engagement_edit_minutes']||'60')==String(m)?'selected':''}>${escHtml(label)}</option>`;
               }).join('')}
               <option value="indefinite" ${(appSettings['engagement_edit_minutes']||'60')==='indefinite'?'selected':''}>Indefinite — never locks</option>
             </select>
@@ -30268,8 +30282,8 @@ async function renderSettingsPage() {
           ${(allData['roles']||[]).map(r => {
             const selected = (appSettings['eligible_collaborator_roles']||'Sales Manager,Sales User').split(',').includes(r.name);
             return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;">
-              <input type="checkbox" class="setting-collab-role" value="${r.name}" ${selected?'checked':''} style="accent-color:var(--red);">
-              ${r.name}${r.is_system?'':' <span style="font-size:10px;color:var(--text3);">(org)</span>'}
+              <input type="checkbox" class="setting-collab-role" value="${escAttr(r.name)}" ${selected?'checked':''} style="accent-color:var(--red);">
+              ${escHtml(r.name)}${r.is_system?'':' <span style="font-size:10px;color:var(--text3);">(org)</span>'}
             </label>`;
           }).join('')}
         </div>
@@ -30309,7 +30323,7 @@ async function renderSettingsPage() {
             <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;">Working (days)</div>
             ${homeOrgPeople(allData['people'] || []).map(p => {
               const ov = _agingOverrides()[String(p.id)] || {};
-              return `<div style="font-size:12px;">${(p.first_name || '') + ' ' + (p.last_name || '')}</div>
+              return `<div style="font-size:12px;">${escHtml((p.first_name || '') + ' ' + (p.last_name || ''))}</div>
                 <input type="number" min="1" step="1" class="form-control setting-aging-ov" data-person="${p.id}" data-kind="new" value="${ov.new || ''}" style="padding:4px 8px;font-size:12px;">
                 <input type="number" min="1" step="1" class="form-control setting-aging-ov" data-person="${p.id}" data-kind="working" value="${ov.working || ''}" style="padding:4px 8px;font-size:12px;">`;
             }).join('')}
@@ -30350,7 +30364,7 @@ async function renderSettingsPage() {
             <label class="form-label">Leads register — sort by</label>
             <select id="setting-leads-sort-key" class="form-control">
               ${[['', 'Created (newest first)'], ['target', 'Site'], ['source', 'Source'], ['region', 'Region'], ['branch', 'Branch'], ['qual', 'F A C T score'], ['owner', 'Owner'], ['nxt', 'Next Action'], ['touch', 'Last Touch (days since)']]
-                .map(([v, l]) => `<option value="${v}" ${(appSettings['leads_default_sort_key'] || '') === v ? 'selected' : ''}>${l}</option>`).join('')}
+                .map(([v, l]) => `<option value="${v}" ${(appSettings['leads_default_sort_key'] || '') === v ? 'selected' : ''}>${escHtml(l)}</option>`).join('')}
             </select>
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">Applies to every status tab on the Leads Register. "Created (newest first)" is the classic behaviour.</div>
           </div>
@@ -30599,8 +30613,8 @@ async function renderRolePermissions() {
         </td>`;
       }).join('');
       return `<tr>
-        <td><div style="font-weight:600;font-size:13px;">${p.name}</div>
-            <div style="font-size:11px;color:var(--text3);">${p.description||''}</div></td>
+        <td><div style="font-weight:600;font-size:13px;">${escHtml(p.name)}</div>
+            <div style="font-size:11px;color:var(--text3);">${escHtml(p.description||'')}</div></td>
         ${cells}
       </tr>`;
     }).join('');
@@ -30672,8 +30686,8 @@ async function renderUserRegions() {
         (branches.length ? `<th colspan="${branches.length}" style="text-align:center;${divider}">Branches <span style="font-weight:400;color:var(--text3);">(covers all the branch's regions)</span></th>` : '') +
         (regions.length ? `<th colspan="${regions.length}" style="text-align:center;${divider}">Regions</th>` : '') +
       '</tr><tr>' +
-        branches.map((b, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${b.name}</th>`).join('') +
-        regions.map((r, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${r.name}</th>`).join('') +
+        branches.map((b, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${escHtml(b.name)}</th>`).join('') +
+        regions.map((r, i) => `<th style="text-align:center;white-space:nowrap;${i === 0 ? divider : ''}">${escHtml(r.name)}</th>`).join('') +
       '</tr>';
 
     if (!rows.length) {
@@ -30688,7 +30702,7 @@ async function renderUserRegions() {
           <input type="checkbox" ${checked ? 'checked' : ''}
             style="width:16px;height:16px;accent-color:var(--navy);cursor:pointer;"
             onchange="toggleUserBranch(${u.id}, ${b.id}, this.checked)"
-            title="${checked ? 'Remove' : 'Assign'} ${b.name} ${checked ? 'from' : 'to'} ${u._name}">
+            title="${escAttr((checked ? 'Remove ' : 'Assign ') + b.name + (checked ? ' from ' : ' to ') + u._name)}">
         </td>`;
       }).join('');
       const regionCells = regions.map((r, i) => {
@@ -30697,11 +30711,11 @@ async function renderUserRegions() {
           <input type="checkbox" ${checked ? 'checked' : ''}
             style="width:16px;height:16px;accent-color:var(--red);cursor:pointer;"
             onchange="toggleUserRegion(${u.id}, ${r.id}, this.checked)"
-            title="${checked ? 'Remove' : 'Assign'} ${r.name} ${checked ? 'from' : 'to'} ${u._name}">
+            title="${escAttr((checked ? 'Remove ' : 'Assign ') + r.name + (checked ? ' from ' : ' to ') + u._name)}">
         </td>`;
       }).join('');
       return `<tr>
-        <td><div style="font-weight:600;font-size:13px;">${u._name}</div></td>
+        <td><div style="font-weight:600;font-size:13px;">${escHtml(u._name)}</div></td>
         ${branchCells}${regionCells}
       </tr>`;
     }).join('');
@@ -30763,13 +30777,13 @@ async function onPartyTypeChange(type) {
       refEl.innerHTML = '<option value="">— select person —</option>' +
         records.map(p => {
           const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
-          return `<option value="${p.id}">${name}</option>`;
+          return `<option value="${p.id}">${escHtml(name)}</option>`;
         }).join('');
     } else if (type === 'organisation') {
       records = allData['organisations'] || await apiGet('organisations', 'select=*&order=name.asc');
       allData['organisations'] = records;
       refEl.innerHTML = '<option value="">— select organisation —</option>' +
-        records.map(o => `<option value="${o.id}">${o.name}</option>`).join('');
+        records.map(o => `<option value="${o.id}">${escHtml(o.name)}</option>`).join('');
     } else {
       refEl.innerHTML = '<option value="">— select type first —</option>';
     }
@@ -30838,7 +30852,7 @@ async function renderAllOppContacts() {
         <td>${orgName(c) || '—'}</td>
         <td>${ctxName(c) || '—'}</td>
         <td>${dmu ? '<span class="badge badge-blue">'+dmu.name+'</span>' : '—'}</td>
-        <td style="font-size:12px;color:var(--text2);">${c.note || ''}</td>
+        <td style="font-size:12px;color:var(--text2);">${escHtml(c.note || '')}</td>
       </tr>`;
     };
 
@@ -30942,14 +30956,14 @@ async function openAddHomeMemberModal(editMember) {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="hom-person-id" class="form-control" onchange="checkHomeOrgAffiliation()">
               <option value="">— select person —</option>
-              ${people.map(p => `<option value="${p.id}" ${editMember?.person_id==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}</option>`).join('')}
+              ${people.map(p => `<option value="${p.id}" ${editMember?.person_id==p.id?'selected':''}>${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
             </select>
           </div>
           <div class="form-group">
             <label class="form-label">Home Organisation <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="hom-org-id" class="form-control" onchange="checkHomeOrgAffiliation()">
               <option value="">— select —</option>
-              ${homeOrgs.map(o => `<option value="${o.id}" ${editMember?.org_id==o.id?'selected':''}>${o.name}</option>`).join('')}
+              ${homeOrgs.map(o => `<option value="${o.id}" ${editMember?.org_id==o.id?'selected':''}>${escHtml(o.name)}</option>`).join('')}
             </select>
           </div>
           <div id="hom-affiliation-warning" style="display:none;padding:8px 12px;background:#FEF9C3;border:1px solid #FCD34D;border-radius:var(--radius);font-size:12px;margin-bottom:12px;">
@@ -30960,10 +30974,10 @@ async function openAddHomeMemberModal(editMember) {
             <select id="hom-role-id" class="form-control">
               <option value="">— select role —</option>
               <optgroup label="System Roles">
-                ${roles.filter(r=>r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+                ${roles.filter(r=>r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${escHtml(r.name)}</option>`).join('')}
               </optgroup>
               <optgroup label="Organisational Roles">
-                ${roles.filter(r=>!r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${r.name}</option>`).join('')}
+                ${roles.filter(r=>!r.is_system).map(r=>`<option value="${r.id}" ${editMember?.role_id==r.id?'selected':''}>${escHtml(r.name)}</option>`).join('')}
               </optgroup>
             </select>
           </div>
