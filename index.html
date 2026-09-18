@@ -698,7 +698,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.59 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.60 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -737,7 +737,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.59 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.60 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6230,7 +6230,7 @@ let pbSandboxMode = false;   // true = builder is hosted on the Proposal Sandbox
 function pbRoot() { return document.getElementById(pbSandboxMode ? 'sandbox-builder-root' : 'proposal-builder-root'); }
 let pbHeadings = [];
 let pbExpandedPosts = new Set();
-let pbDetailToggled = new Set();   // 'postId:section' keys flipped away from their default open/closed state
+let pbDetailToggled = new Set();   // 'postId:section' keys of sections the user opened (every default is closed since v7.9.60); pbExpandPost() clears a post's keys each time it is expanded
 let pbPromptShown = {};
 let pbPeopleCollapsed = false;
 let pbAllPostsExpanded = false;
@@ -8237,10 +8237,14 @@ function renderPost(p, h, idx) {
     '</div>';
 }
 
-// Post-detail sections: 'shift' and 'hours' default open (collapsing the shift
-// schedule leaves the hours summary showing; collapsing that is the further
-// step). Allowances / accessories / training default collapsed, always toggleable.
-const PB_DETAIL_DEFAULT_OPEN = { shift: true, hours: true };
+// Post-detail sections ALL start collapsed (Richard, 2026-09-18: "when you open a
+// post all sub headings start collapsed") — this reverses v7.8.02's shift/hours
+// default-open. A key in pbDetailToggled now simply means "the user opened that
+// section", and pbExpandPost() forgets a post's keys each time the post is
+// expanded, so every open starts clean. pbDetailOpen still honours an entry here
+// if a default-open section is ever wanted again. Note the nesting in
+// renderPostDetail: 'hours' is listed only while 'shift' is open.
+const PB_DETAIL_DEFAULT_OPEN = {};
 
 function pbDetailOpen(postId, sec) {
   const open = !!PB_DETAIL_DEFAULT_OPEN[sec];
@@ -8752,7 +8756,8 @@ async function pbAddPost(headingId) {
     rows.forEach(rw => { post.shifts[pbKey(rw.shift_index, rw.day_type)] = { num: rw.num_officers, start: rw.start_time.slice(0,5), end: rw.end_time.slice(0,5) }; });
     post.weekdaysExpanded = false;
     h.posts.push(post);
-    pbExpandedPosts.add(post.id);
+    // v7.9.60: a new post lands collapsed like every other (its name and grade stay
+    // editable on the summary row); the user opens it when ready.
     renderQuoteEditor();
   } catch (e) { showStatus('Add post failed: ' + e.message, 'error'); }
 }
@@ -8791,7 +8796,7 @@ async function pbDuplicatePost(postId) {
     rows.forEach(rw => { newPost.shifts[pbKey(rw.shift_index, rw.day_type)] = { num: rw.num_officers, start: rw.start_time.slice(0,5), end: rw.end_time.slice(0,5) }; });
     newPost.weekdaysExpanded = false;
     loc.heading.posts.splice(loc.index + 1, 0, newPost);
-    pbExpandedPosts.add(newPost.id);
+    // v7.9.60: the copy lands collapsed beneath its source, like every post.
     renderQuoteEditor();
   } catch (e) { showStatus('Duplicate failed: ' + e.message, 'error'); }
 }
@@ -8921,9 +8926,20 @@ async function pbDropPostAt(toHeadingId, toIndex) {
   catch (e) { showStatus('Move failed: ' + e.message, 'error'); await openQuote(pbQ.id); }
 }
 
+// v7.9.60: the ONE way a post becomes expanded. It forgets the sections the user
+// had opened before collapsing the post, so every open shows all sub headings
+// collapsed (Richard, 2026-09-18). Top-level on purpose — build.js minifies the
+// inline script as a global script and only top-level names survive for the
+// inline onclick handlers.
+function pbExpandPost(postId) {
+  const pre = postId + ':';
+  [...pbDetailToggled].filter(k => k.startsWith(pre)).forEach(k => pbDetailToggled.delete(k));
+  pbExpandedPosts.add(postId);
+}
+
 function pbTogglePostExpanded(postId) {
   if (pbExpandedPosts.has(postId)) pbExpandedPosts.delete(postId);
-  else pbExpandedPosts.add(postId);
+  else pbExpandPost(postId);
   renderQuoteEditor();
 }
 
@@ -9047,7 +9063,11 @@ function pbToggleSection(key) { if (key === 'people') { pbPeopleCollapsed = !pbP
 function pbToggleAllPosts() {
   const anyExpanded = pbHeadings.some(h => h.posts.some(p => pbExpandedPosts.has(p.id)));
   if (anyExpanded) pbExpandedPosts = new Set();
-  else pbHeadings.forEach(h => h.posts.forEach(p => pbExpandedPosts.add(p.id)));
+  else {
+    // Every post transitions to expanded here, so every section restarts collapsed (v7.9.60).
+    pbDetailToggled = new Set();
+    pbHeadings.forEach(h => h.posts.forEach(p => pbExpandedPosts.add(p.id)));
+  }
   renderQuoteEditor();
 }
 
