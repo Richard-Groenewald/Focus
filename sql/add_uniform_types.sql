@@ -47,6 +47,44 @@ CREATE TABLE IF NOT EXISTS quote_uniform_type_costs (
 );
 
 ALTER TABLE quote_posts ADD COLUMN IF NOT EXISTS uniform_id BIGINT REFERENCES quote_uniform_types(id);
+
+-- v_quote_posts_full (sql/quote_tool_phase_b.sql, re-defined in
+-- sql/prod_sync_v7_6_98.sql) selects p.uniform -- not read by the live app
+-- anywhere (grep index.html/sb.js: no hits), but it blocks the DROP below
+-- with a real dependency error until it stops referencing the retired column.
+-- Re-created rather than dropped, so whatever ad-hoc use it still has keeps
+-- working: uniform_id in place of uniform, plus a resolved uniform_name join
+-- matching the existing grade_code/area_code pattern. Postgres refuses to
+-- RENAME a view's output column via CREATE OR REPLACE (uniform -> uniform_id
+-- at the same position) -- drop and recreate instead of replace.
+DROP VIEW IF EXISTS v_quote_posts_full;
+CREATE VIEW v_quote_posts_full AS
+ SELECT p.id,
+    p.quote_id,
+    p.heading_text,
+    p.display_order,
+    p.name,
+    p.grade_id,
+    p.area_id,
+    p.uniform_id,
+    p.description,
+    p.fixed_salary,
+    p.exclude_replacement_pool,
+    p.margin_pct_override,
+    p.owner_id,
+    p.created_by,
+    p.created_at,
+    p.updated_at,
+    g.code AS grade_code,
+    g.description AS grade_description,
+    a.code AS area_code,
+    a.description AS area_description,
+    u.name AS uniform_name
+   FROM quote_posts p
+     LEFT JOIN quote_grades g ON g.id = p.grade_id
+     LEFT JOIN quote_areas a ON a.id = p.area_id
+     LEFT JOIN quote_uniform_types u ON u.id = p.uniform_id;
+
 ALTER TABLE quote_posts DROP COLUMN IF EXISTS uniform;   -- the old free-text column: never wired to any input, zero rows
 
 -- A short starting list -- names only, no cost seeded (nobody but Richard
@@ -87,3 +125,4 @@ SELECT count(*) AS cost_rows_seeded_should_be_0 FROM quote_uniform_type_costs;
 SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'quote_posts' AND column_name IN ('uniform', 'uniform_id');
 SELECT tablename, rowsecurity FROM pg_tables WHERE tablename IN ('quote_uniform_types', 'quote_uniform_type_costs');
 SELECT tgrelid::regclass::text AS tbl, tgname FROM pg_trigger WHERE tgrelid IN ('quote_uniform_types'::regclass, 'quote_uniform_type_costs'::regclass) AND NOT tgisinternal ORDER BY 1, 2;
+SELECT count(*) AS v_quote_posts_full_rows FROM v_quote_posts_full;
