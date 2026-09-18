@@ -58,6 +58,15 @@ https.request = function (opts, cb) {
       out = JSON.stringify(rows.map(u => cols[0] === '*' ? { ...u } : Object.fromEntries(cols.map(c => [c, u[c]]))));
     } else if (pathOnly === '/rest/v1/settings') {
       out = JSON.stringify([{ value: 'Test' }]);
+    } else if (pathOnly === '/rest/v1/audit_log') {
+      // What the trail looked like before sql/audit_log_scrub_credentials.sql.
+      out = JSON.stringify([
+        { id: 1, table_name: 'system_users', op: 'UPDATE', row_data: null,
+          changes: { password_hash: { o: 'h1', n: 'h2' }, password_salt: { o: 's1', n: 's2' }, must_set_password: { o: true, n: false } } },
+        { id: 2, table_name: 'system_users', op: 'INSERT', changes: null,
+          row_data: { id: 4, username: 'richard', password_hash: 'h', password_salt: 's', password: '' } },
+        { id: 3, table_name: 'leads', op: 'UPDATE', row_data: null, changes: { notes: { o: 'a', n: 'b' } } },
+      ]);
     } else {
       out = JSON.stringify([{ echoed: opts.path }]);
     }
@@ -231,6 +240,26 @@ async function check(name, fn) {
   await check('inactive account cannot sign in', async () => {
     const r = await auth({ action: 'login', username: 'gone', password: 'whatever1!A' });
     assert.strictEqual(r.ok, false);
+  });
+
+  await check('audit_log read is scrubbed inside changes and row_data, rest intact', async () => {
+    const r = await data(tokenC, '/audit_log', { rawQuery: 'select=*&order=at.desc', headers: { 'x-focus-gzip': '1' } });
+    assert.strictEqual(r.statusCode, 200, r.body);
+    assert.notStrictEqual(r.isBase64Encoded, true, 'must not be gzip-passed-through');
+    const rows = JSON.parse(r.body);
+    assert.strictEqual(rows.length, 3);
+    assert.deepStrictEqual(Object.keys(rows[0].changes), ['must_set_password']);
+    assert.deepStrictEqual(Object.keys(rows[1].row_data).sort(), ['id', 'username']);
+    assert.deepStrictEqual(rows[2].changes, { notes: { o: 'a', n: 'b' } });
+    const last = calls[calls.length - 1];
+    assert.strictEqual(last.headers['Accept-Encoding'], undefined, 'audit_log is never requested compressed');
+  });
+
+  await check('an ordinary table is still requested compressed when the browser can inflate', async () => {
+    const r = await data(tokenC, '/leads', { headers: { 'x-focus-gzip': '1' } });
+    assert.strictEqual(r.statusCode, 200);
+    const last = calls[calls.length - 1];
+    assert.strictEqual(last.headers['Accept-Encoding'], 'gzip');
   });
 
   console.log(`\n${passed} passed, ${failed} failed`);
