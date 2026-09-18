@@ -167,6 +167,28 @@ function scrubCredentials(bodyText) {
   return JSON.stringify(out);
 }
 
+// The audit trail is the side door (v7.9.58): the audit triggers used to record
+// the FULL system_users row, so every hash write sat in audit_log.changes /
+// row_data, readable by any signed-in user. The database no longer records or
+// holds them (sql/audit_log_scrub_credentials.sql); this strips the same keys
+// from every audit_log response as a backstop, one level down inside each row's
+// changes and row_data documents. Like system_users, audit_log stays plain so
+// there is always a body here to rewrite.
+function scrubAuditCredentials(bodyText) {
+  let parsed;
+  try { parsed = JSON.parse(bodyText); } catch (e) { return bodyText; }
+  const strip = (row) => {
+    if (!row || typeof row !== 'object') return row;
+    ['changes', 'row_data'].forEach(k => {
+      const doc = row[k];
+      if (doc && typeof doc === 'object') CREDENTIAL_COLUMNS.forEach(c => { if (c in doc) delete doc[c]; });
+    });
+    return row;
+  };
+  const out = Array.isArray(parsed) ? parsed.map(strip) : strip(parsed);
+  return JSON.stringify(out);
+}
+
 const authReply = (statusCode, obj) => ({
   statusCode, headers: { 'Content-Type': 'application/json', ...CORS }, body: JSON.stringify(obj),
 });
@@ -339,6 +361,7 @@ exports.handler = async (event) => {
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
+  const isAuditLog = /\/rest\/v1\/audit_log\b/.test(path);
   // Compression (Tier 3.2, v7.9.40). Every body used to travel as raw JSON on
   // BOTH legs — PostgREST → this function → browser — and Netlify does not
   // compress function responses (devtools on Dev, 2026-09-10: no content-encoding
@@ -350,9 +373,10 @@ exports.handler = async (event) => {
   //     might (the v7.9.38 attempt could not be verified and was pulled);
   //   • any other client, and every non-2xx reply, gets the body inflated here
   //     and answered as plain JSON exactly as before.
-  // system_users always stays plain (scrubCredentials rewrites it). SB_GZIP=0 in
-  // the Netlify environment switches all of it off without a deploy.
-  const wantGzip = String(process.env.SB_GZIP || '') !== '0' && !isSystemUsers;
+  // system_users and audit_log always stay plain (scrubCredentials /
+  // scrubAuditCredentials rewrite them). SB_GZIP=0 in the Netlify environment
+  // switches all of it off without a deploy.
+  const wantGzip = String(process.env.SB_GZIP || '') !== '0' && !isSystemUsers && !isAuditLog;
   const clientInflates = wantGzip && String(event.headers['x-focus-gzip'] || '') === '1';
   return new Promise(resolve => {
     const doReq = (attempt) => {
@@ -399,7 +423,8 @@ exports.handler = async (event) => {
           let text;
           try { text = gz ? zlib.gunzipSync(raw).toString('utf8') : raw.toString('utf8'); }
           catch (e) { return resolve({ statusCode: 502, headers, body: JSON.stringify({ error: 'Bad upstream encoding' }) }); }
-          resolve({ statusCode: res.statusCode, headers, body: isSystemUsers ? scrubCredentials(text) : text });
+          resolve({ statusCode: res.statusCode, headers,
+                    body: isSystemUsers ? scrubCredentials(text) : isAuditLog ? scrubAuditCredentials(text) : text });
         });
       });
       req.on('error', e => {
