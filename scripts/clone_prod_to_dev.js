@@ -154,9 +154,20 @@ const p = before.split('|'), d = after.split('|');
 const labels = ['tables', 'columns', 'functions', 'views', 'triggers', 'organisations', 'people', 'leads', 'deals', 'engagements', 'audit_log', 'rls_on', 'env'];
 let bad = 0;
 labels.forEach((l, i) => {
-  const ok = l === 'env' ? d[i] === 'Development' : p[i] === d[i];
+  let ok;
+  if (l === 'env') ok = d[i] === 'Development';
+  // Step 8's settings UPDATE is itself audited, so dev carries exactly one row
+  // more than the snapshot (first run, 2026-09-18: 7899 vs 7900).
+  else if (l === 'audit_log') ok = +d[i] === +p[i] + 1;
+  // Step 7 enables RLS on EVERY dev table; prod may lag when a migration forgot
+  // to (2026-09-18: prod 95 of 107). Dev must be complete; prod is reported below.
+  else if (l === 'rls_on') ok = +d[i] === +d[0];
+  else ok = p[i] === d[i];
   if (!ok) { bad++; console.log(`   MISMATCH ${l}: prod=${p[i]} dev=${d[i]}`); }
 });
+if (+p[labels.indexOf('rls_on')] < +p[0]) {
+  console.log(`   NOTE prod has RLS off on ${+p[0] - +p[labels.indexOf('rls_on')]} table(s) — re-run sql/enable_rls_lockdown.sql on PROD (idempotent).`);
+}
 const grants = sql(DEV, "select count(*) from information_schema.role_table_grants where table_schema='public' and grantee in ('anon','authenticated')");
 console.log(`   anon/authenticated table grants on dev: ${grants} (must be 0)`);
 if (+grants) bad++;
