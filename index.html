@@ -560,6 +560,11 @@ td.rev-past { background:#EEF0F3; }
 .pb-drag-handle, .drag-grab { cursor:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="white" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>') 16 16, grab; cursor:-webkit-image-set(url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="white" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>') 2x) 16 16, grab; cursor:image-set(url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="white" stroke="black" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>') 2x) 16 16, grab; }
 .pb-drag-handle { color:#9aa7b5; font-size:14px; line-height:1; text-align:center; user-select:none; }
 .pb-drag-handle:hover { color:var(--navy); }
+/* v7.9.73: drag-and-drop on the item catalogue pages (table rows) */
+tr.pbi-dragging { opacity:.45; }
+tr.pbi-drop-above > td { box-shadow:inset 0 3px 0 var(--red); }
+tr.pbi-drop-below > td { box-shadow:inset 0 -3px 0 var(--red); }
+tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
 /* v7.9.63: the post drag handle's default colours read fine on white; on the
    heading bar's navy (or khaki, for Ungrouped) they need their own contrast. */
 .pb-heading-bar .pb-drag-handle { color:rgba(255,255,255,0.55); }
@@ -709,7 +714,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.72 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.73 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -748,7 +753,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.72 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.73 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6912,27 +6917,28 @@ function pbSubcats(category, all) {
 function pbSubcatOf(item) { return (allData['quote_support_subcategories'] || []).find(s => +s.id === +item.subcategory_id) || null; }
 function pbSubcatLabel(s) { return !s ? '' : (s.group_name && s.group_name !== s.name ? s.group_name + ' · ' + s.name : s.name) + (s.active === false ? ' (inactive)' : ''); }
 // Items in subcategory order (catalogue order within each); anything unfiled last, under sub = null.
-function pbGroupBySubcat(items, category) {
+function pbGroupBySubcat(items, category, includeEmpty) {   // includeEmpty (admin page): empty subcategories and Unfiled stay as drop targets
   const subs = pbSubcats(category, true), groups = [];
-  subs.forEach(s => { const rows = items.filter(i => +i.subcategory_id === +s.id); if (rows.length) groups.push({ sub: s, items: rows }); });
+  subs.forEach(s => { const rows = items.filter(i => +i.subcategory_id === +s.id); if (rows.length || includeEmpty) groups.push({ sub: s, items: rows }); });
   const rest = items.filter(i => !subs.some(s => +s.id === +i.subcategory_id));
-  if (rest.length) groups.push({ sub: null, items: rest });
+  if (rest.length || includeEmpty) groups.push({ sub: null, items: rest });
   return groups;
 }
 function pbSubName(s) { return !s ? 'Unfiled' : s.name + (s.active === false ? ' (inactive)' : ''); }
 // v7.9.72: the display tree — GROUP → subcategory → items ("OFFENSIVE SUPPORT / Lethal / 9mm
 // Parabellum"). A leaf that is its own group (Communications) collapses to one level (single);
 // unfiled items hang off a final 'Unfiled' group. Groups keep first-appearance order.
-function pbSubcatTree(items, category) {
+function pbSubcatTree(items, category, includeEmpty) {
   const nodes = new Map();
-  pbGroupBySubcat(items, category).forEach(g => {
-    const s = g.sub, gname = s ? (s.group_name || s.name) : 'Unfiled';
-    const single = !s || !s.group_name || s.group_name === s.name;
-    const key = single ? '' + (s ? s.id : 'unfiled') : gname;
-    if (!nodes.has(key)) nodes.set(key, { group: single && s ? pbSubName(s) : gname, single, subs: [] });
+  pbGroupBySubcat(items, category, includeEmpty).forEach(g => {
+    const s = g.sub, gname = s ? (s.group_name || s.name) : null, key = s ? gname : 'unfiled';
+    if (!nodes.has(key)) nodes.set(key, { group: gname || 'Unfiled', groupName: gname, single: false, subs: [] });
     nodes.get(key).subs.push({ sub: s, items: g.items });
   });
-  return [...nodes.values()];
+  const out = [...nodes.values()];
+  // single = the group IS its one leaf (name === group name), or Unfiled: no subcategory level.
+  out.forEach(n => { n.single = !n.groupName || (n.subs.length === 1 && n.subs[0].sub.name === n.groupName); if (n.single && n.subs[0].sub) n.group = pbSubName(n.subs[0].sub); });
+  return out;
 }
 // A checklist column's rows as that tree, when the kind has subcategories.
 function pbChecklistGrouped(kind, items, rowOf) {
@@ -7011,8 +7017,8 @@ async function renderPbItemCatalogPage(kind) {
     const cur = pbItemCurrentCost(costs, k.fk, it.id, today);
     const live = pbItemInWindow(it, today);
     const state = it.active === false ? 'inactive' : (it.retired_date && String(it.retired_date) < today ? 'retired' : (it.in_use_date && String(it.in_use_date) > today ? 'not yet in use' : 'in use'));
-    let html = '<tr style="' + (ed ? 'background:#FFF8DC;' : (live ? '' : 'color:var(--text3);')) + '">' +
-      '<td>' + (ed ? '<input type="number" class="form-control" style="width:64px;" id="pbi-order" value="' + pbEsc(it.display_order ?? '') + '">' : pbEsc(it.display_order ?? '')) + '</td>' +
+    let html = '<tr data-pbi="item" ondragover="pbiDragOver(event, \'item\')" ondrop="pbiDrop(event, \'item\', ' + it.id + ')" style="' + (ed ? 'background:#FFF8DC;' : (live ? '' : 'color:var(--text3);')) + '">' +
+      '<td style="width:22px;"><span class="pb-drag-handle" draggable="true" title="Drag to reorder' + (hasSub ? ' or move to another subcategory' : '') + '" ondragstart="pbiDragStart(event, \'item\', ' + it.id + ')" ondragend="pbiDragEnd(event)">⠿</span></td>' +
       '<td>' + (indent ? '<span style="display:inline-block;width:' + indent + 'px;"></span>' : '') + (ed ? '<input type="text" class="form-control" id="pbi-name" value="' + pbEsc(it.name) + '">' : '<strong>' + pbEsc(it.name) + '</strong>' + (it.description ? '<div class="pg-muted">' + pbEsc(it.description) + '</div>' : '')) + '</td>' +
       (hasSub ? '<td>' + (ed
         ? '<select class="form-control" id="pbi-subcat"><option value="">— unfiled —</option>' + pbSubcats(k.category).concat(pbSubcats(k.category, true).filter(s => s.active === false && +s.id === +it.subcategory_id)).map(s => '<option value="' + s.id + '"' + (+s.id === +it.subcategory_id ? ' selected' : '') + '>' + pbEsc(pbSubcatLabel(s)) + '</option>').join('') + '</select>'
@@ -7045,14 +7051,32 @@ async function renderPbItemCatalogPage(kind) {
     return html;
   };
   // v7.9.71: grouped under subcategory header rows when the kind has them; unfiled items last.
-  const groupRow = t => '<tr><td colspan="' + cols + '" style="background:var(--navy);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:6px 14px;">' + pbEsc(t) + '</td></tr>';
-  const subRow = s => '<tr><td colspan="' + cols + '" style="background:var(--bg);font-size:11px;font-weight:700;color:var(--navy);padding:5px 14px 5px 30px;">' + pbEsc(pbSubName(s)) + '</td></tr>';
+  // v7.9.73: the page is a drag-and-drop tree editor. Every group and subcategory row is a drag
+  // handle and a drop target; empty subcategories and Unfiled stay visible so items can land there.
+  const tree = hasSub ? pbSubcatTree(items, k.category, true) : [{ group: '', groupName: null, single: true, subs: [{ sub: null, items }] }];
+  pbItemAdmin.tree = tree;
+  const ghost = '<button class="btn btn-ghost btn-sm" style="color:#fff;opacity:.85;" ';
+  const groupRow = (n, gi) => '<tr data-pbi="group" ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')"><td colspan="' + cols + '" style="background:var(--navy);color:#fff;padding:4px 10px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        (n.groupName != null ? '<span class="pb-drag-handle" draggable="true" style="color:rgba(255,255,255,.6);" title="Drag to reorder groups" ondragstart="pbiDragStart(event, \'group\', ' + gi + ')" ondragend="pbiDragEnd(event)">⠿</span>' : '<span style="display:inline-block;width:14px;"></span>') +
+        '<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;flex:1;">' + pbEsc(n.group) + '</span>' +
+        (n.groupName != null ? ghost + 'onclick="pbiRenameGroup(' + gi + ')">Rename</button>' + ghost + 'onclick="pbiAddSub(' + gi + ')">+ Subcategory</button>' : '<span class="pg-muted" style="font-size:11px;color:rgba(255,255,255,.7);">drag items here to unfile them</span>') +
+      '</div></td></tr>';
+  const subRow = sn => { const s = sn.sub; return '<tr data-pbi="sub" ondragover="pbiDragOver(event, \'sub\', ' + s.id + ')" ondrop="pbiDrop(event, \'sub\', ' + s.id + ')"><td colspan="' + cols + '" style="background:var(--bg);padding:3px 10px 3px 26px;">' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<span class="pb-drag-handle" draggable="true" title="Drag to reorder or move to another group" ondragstart="pbiDragStart(event, \'sub\', ' + s.id + ')" ondragend="pbiDragEnd(event)">⠿</span>' +
+        '<span style="font-size:11px;font-weight:700;color:var(--navy);flex:1;">' + pbEsc(pbSubName(s)) + '</span>' +
+        '<button class="btn btn-ghost btn-sm" onclick="pbiRenameSub(' + s.id + ')">Rename</button>' +
+        '<button class="btn btn-ghost btn-sm" onclick="pbiToggleSub(' + s.id + ', ' + (s.active === false) + ')">' + (s.active === false ? 'Reactivate' : 'Deactivate') + '</button>' +
+        (sn.items.length ? '' : '<button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="pbiRemoveSub(' + s.id + ')">Remove</button>') +
+      '</div></td></tr>'; };
+  const emptyRow = (sn, n, gi) => sn.items.length ? '' : '<tr data-pbi="empty"' + (sn.sub ? ' ondragover="pbiDragOver(event, \'sub\', ' + sn.sub.id + ')" ondrop="pbiDrop(event, \'sub\', ' + sn.sub.id + ')"' : ' ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')"') + '><td colspan="' + cols + '" class="pg-muted" style="font-size:11px;padding:3px 10px 5px ' + (n.single ? 30 : 46) + 'px;">no items — drag one here</td></tr>';
   const rows = hasSub
-    ? pbSubcatTree(items, k.category).map(n => groupRow(n.group) + n.subs.map(sn => (n.single ? '' : subRow(sn.sub)) + sn.items.map(it => rowOf(it, n.single ? 16 : 32)).join('')).join('')).join('')
+    ? tree.map((n, gi) => groupRow(n, gi) + n.subs.map(sn => (n.single ? '' : subRow(sn)) + sn.items.map(it => rowOf(it, n.single ? 16 : 32)).join('') + emptyRow(sn, n, gi)).join('')).join('')
     : items.map(it => rowOf(it, 0)).join('');
-  head.innerHTML = '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button>' +
+  head.innerHTML = '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button>' + (k.category ? ' <button class="btn btn-secondary btn-sm" onclick="pbiAddGroup()">+ Add group</button>' : '') +
     '<span class="pg-muted" style="margin-left:12px;">' + (k.hint ? pbEsc(k.hint) + ' ' : '') + (k.category === 'workforce' || !k.category ? 'An item can be ticked on a post' : 'An item can be ticked once on a quote (Contract Support Items tab)') + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
-    '<tr><th>Order</th><th>Name</th>' + (hasSub ? '<th>Subcategory</th>' : '') + '<th>In use from</th><th>Retired</th><th>Current cost</th><th>State</th><th style="width:230px;">Actions</th></tr>';
+    '<tr><th></th><th>Name</th>' + (hasSub ? '<th>Subcategory</th>' : '') + '<th>In use from</th><th>Retired</th><th>Current cost</th><th>State</th><th style="width:230px;">Actions</th></tr>';
   body.innerHTML = rows || '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
 }
 function pbPersonName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Person #' + id; }
@@ -7077,6 +7101,150 @@ function pbItemCostForm(kind, it) {
 function pbItemToggle(id) { pbItemAdmin.open = pbItemAdmin.open === id ? null : id; pbItemAdmin.addingCost = false; renderPbItemCatalogPage(pbItemAdmin.kind); }
 function pbItemEdit(id) { pbItemAdmin.editing = id; renderPbItemCatalogPage(pbItemAdmin.kind); }
 function pbItemAddCostForm(id) { pbItemAdmin.addingCost = id; if (id) pbItemAdmin.open = id; renderPbItemCatalogPage(pbItemAdmin.kind); }
+
+// ── v7.9.73: drag-and-drop ordering and hierarchy on the item catalogue pages ──
+// Items drag within and between subcategories (a drop re-files the item), subcategories within
+// and between groups (a drop re-parents), groups against each other; Unfiled is a target only.
+// After a drop the whole tree (pbItemAdmin.tree, as last rendered) is renumbered — subcategories
+// 1..N, items 1..M in tree order — and only the rows whose order or parent changed are PATCHed.
+function pbiDragStart(e, kind, ref) {
+  pbItemAdmin.drag = { kind, ref };
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', kind + ':' + ref); } catch (x) {}
+  const tr = e.target.closest('tr'); if (tr) tr.classList.add('pbi-dragging');
+}
+function pbiDragEnd() {
+  pbItemAdmin.drag = null;
+  document.querySelectorAll('.pbi-dragging, .pbi-drop-above, .pbi-drop-below, .pbi-drop-into').forEach(el => el.classList.remove('pbi-dragging', 'pbi-drop-above', 'pbi-drop-below', 'pbi-drop-into'));
+}
+// 'beside' (above/below the target row), 'into' (append to the target), or null when illegal.
+function pbiDropMode(targetKind, ref) {
+  const d = pbItemAdmin.drag, tree = pbItemAdmin.tree; if (!d || !tree) return null;
+  if (pbItemAdmin.editing != null) return null;   // a drop re-renders the page; never while an item's editor holds unsaved input
+  const node = targetKind === 'group' ? tree[ref] : null;
+  const inactive = s => !!(s && s.active === false);   // a deactivated subcategory takes no new filing, by drag either
+  if (d.kind === 'item') {
+    if (targetKind === 'item') return 'beside';
+    if (targetKind === 'sub') { const s = (allData['quote_support_subcategories'] || []).find(x => +x.id === +ref); return inactive(s) ? null : 'into'; }
+    return node && node.single && !inactive(node.subs[0].sub) ? 'into' : null;
+  }
+  if (d.kind === 'sub') return targetKind === 'sub' ? 'beside' : (node && node.groupName != null ? 'into' : null);
+  if (d.kind === 'group') return node && node.groupName != null ? 'beside' : null;
+  return null;
+}
+function pbiDragOver(e, targetKind, ref) {
+  document.querySelectorAll('.pbi-drop-above, .pbi-drop-below, .pbi-drop-into').forEach(el => el.classList.remove('pbi-drop-above', 'pbi-drop-below', 'pbi-drop-into'));   // an illegal target clears the last legal one's bar too
+  const mode = pbiDropMode(targetKind, ref); if (!mode) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+  const tr = e.currentTarget;
+  if (mode === 'into') { tr.classList.add('pbi-drop-into'); return; }
+  const r = tr.getBoundingClientRect();
+  tr.classList.add(e.clientY < r.top + r.height / 2 ? 'pbi-drop-above' : 'pbi-drop-below');
+}
+async function pbiDrop(e, targetKind, ref) {
+  const d = pbItemAdmin.drag, tree = pbItemAdmin.tree, mode = pbiDropMode(targetKind, ref);
+  if (!d || !tree || !mode) return;
+  e.preventDefault(); e.stopPropagation();
+  const rect = e.currentTarget.getBoundingClientRect(), after = e.clientY >= rect.top + rect.height / 2;
+  pbiDragEnd();
+  const locItem = id => { for (const n of tree) for (const sn of n.subs) { const i = sn.items.findIndex(x => +x.id === +id); if (i > -1) return { sn, i }; } return null; };
+  const locSub = id => { for (const n of tree) { const i = n.subs.findIndex(sn => sn.sub && +sn.sub.id === +id); if (i > -1) return { n, i }; } return null; };
+  const recompute = n => { n.single = !n.groupName || (n.subs.length === 1 && n.subs[0].sub.name === n.groupName); };
+  if (d.kind === 'item') {
+    if (targetKind === 'item' && +d.ref === +ref) return;
+    const src = locItem(d.ref); if (!src) return;
+    const [it] = src.sn.items.splice(src.i, 1);
+    if (targetKind === 'item') { const dst = locItem(ref); if (!dst) return; dst.sn.items.splice(dst.i + (after ? 1 : 0), 0, it); }
+    else if (targetKind === 'sub') { const dst = locSub(ref); if (!dst) return; dst.n.subs[dst.i].items.push(it); }
+    else tree[ref].subs[0].items.push(it);
+  } else if (d.kind === 'sub') {
+    if (targetKind === 'sub' && +d.ref === +ref) return;
+    const src = locSub(d.ref); if (!src) return;
+    // Resolve the target BEFORE anything is removed: a group index shifts once an emptied group goes.
+    let n;
+    if (targetKind === 'sub') { const dst = locSub(ref); if (!dst) return; n = dst.n; }
+    else { n = tree[ref]; if (!n) return; }
+    const [sn] = src.n.subs.splice(src.i, 1);
+    if (targetKind === 'sub') { const i = n.subs.findIndex(x => x.sub && +x.sub.id === +ref); n.subs.splice(i + (after ? 1 : 0), 0, sn); }
+    else n.subs.push(sn);
+    if (src.n !== n && !src.n.subs.length) tree.splice(tree.indexOf(src.n), 1); else recompute(src.n);
+    recompute(n);
+  } else {
+    const from = +d.ref, to = +ref; if (from === to) return;
+    const [n] = tree.splice(from, 1);
+    let at = to + (after ? 1 : 0); if (from < at) at--;
+    tree.splice(at, 0, n);
+    const u = tree.findIndex(x => x.groupName == null); if (u > -1 && u !== tree.length - 1) tree.push(...tree.splice(u, 1));   // Unfiled stays last
+  }
+  try { await pbiPersistOrder(tree); } catch (x) { showStatus('Could not save the new order: ' + x.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiPersistOrder(tree) {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind], calls = [];
+  let so = 0, io = 0;
+  tree.forEach(n => n.subs.forEach(sn => {
+    if (sn.sub) {
+      so++; const p = {};
+      if (+sn.sub.display_order !== so) p.display_order = so;
+      if (sn.sub.group_name !== n.groupName) p.group_name = n.groupName;
+      if (Object.keys(p).length) calls.push(apiPatch('quote_support_subcategories', sn.sub.id, p));
+    }
+    const sid = sn.sub ? +sn.sub.id : null;
+    sn.items.forEach(it => {
+      io++; const p = {};
+      if (+it.display_order !== io) p.display_order = io;
+      if (k.category && (it.subcategory_id ? +it.subcategory_id : null) !== sid) p.subcategory_id = sid;
+      if (Object.keys(p).length) calls.push(apiPatch(k.table, it.id, p));
+    });
+  }));
+  await Promise.all(calls);
+}
+function pbiSubMaxOrder() { return (allData['quote_support_subcategories'] || []).reduce((m, s) => Math.max(m, +s.display_order || 0), 0); }
+async function pbiAddGroup() {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind];
+  const name = await promptDialog({ title: 'New group', message: 'Group name? (e.g. Offensive Support). It starts as a group of one; add subcategories to it afterwards.', confirmLabel: 'Add' });
+  if (!name || !name.trim()) return;
+  try { await apiPost('quote_support_subcategories', { category: k.category, group_name: name.trim(), name: name.trim(), display_order: pbiSubMaxOrder() + 1, created_by: currentUser.personId }); }
+  catch (e) { showStatus('Could not add the group: ' + e.message + (/404|PGRST205/.test(e.message) ? ' — has sql/add_support_subcategories.sql been run?' : ''), 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiAddSub(gi) {
+  const k = PB_ITEM_KINDS[pbItemAdmin.kind], n = (pbItemAdmin.tree || [])[gi]; if (!n || n.groupName == null) return;
+  const name = await promptDialog({ title: 'New subcategory in ' + n.groupName, message: 'Subcategory name?', confirmLabel: 'Add' });
+  if (!name || !name.trim()) return;
+  try { await apiPost('quote_support_subcategories', { category: k.category, group_name: n.groupName, name: name.trim(), display_order: pbiSubMaxOrder() + 1, created_by: currentUser.personId }); }
+  catch (e) { showStatus('Could not add the subcategory: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiRenameGroup(gi) {
+  const n = (pbItemAdmin.tree || [])[gi]; if (!n || n.groupName == null) return;
+  const name = await promptDialog({ title: 'Rename group', message: 'New name for ' + n.groupName + '?', confirmLabel: 'Rename', value: n.groupName });
+  if (!name || !name.trim() || name.trim() === n.groupName) return;
+  try {
+    // A group of one is its own leaf: the leaf's name follows the group's.
+    await Promise.all(n.subs.filter(sn => sn.sub).map(sn => apiPatch('quote_support_subcategories', sn.sub.id, Object.assign({ group_name: name.trim() }, n.single ? { name: name.trim() } : {}))));
+  } catch (e) { showStatus('Could not rename: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiRenameSub(id) {
+  const s = (allData['quote_support_subcategories'] || []).find(x => +x.id === +id); if (!s) return;
+  const name = await promptDialog({ title: 'Rename subcategory', message: 'New name for ' + s.name + '?', confirmLabel: 'Rename', value: s.name });
+  if (!name || !name.trim() || name.trim() === s.name) return;
+  try { await apiPatch('quote_support_subcategories', id, { name: name.trim() }); } catch (e) { showStatus('Could not rename: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiToggleSub(id, on) {
+  try { await apiPatch('quote_support_subcategories', id, { active: !!on }); showStatus(on ? 'Subcategory reactivated' : 'Subcategory deactivated — its items keep their heading; it is no longer offered for new filing'); }
+  catch (e) { showStatus('Could not update: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
+async function pbiRemoveSub(id) {
+  const s = (allData['quote_support_subcategories'] || []).find(x => +x.id === +id); if (!s) return;
+  if (!await confirmDialog({ title: 'Remove ' + s.name + '?', message: 'Only an empty subcategory can be removed; one that still files items is refused. Deactivate it instead to keep it on record.', confirmLabel: 'Remove', danger: true })) return;
+  try { await apiDelete('quote_support_subcategories', id); showStatus('Removed'); }
+  catch (e) { showStatus(/foreign key|violates/i.test(e.message) ? 'Still files items — move them first, or deactivate the subcategory' : 'Could not remove: ' + e.message, 'error'); }
+  renderPbItemCatalogPage(pbItemAdmin.kind);
+}
 async function pbItemAdd() {
   const k = PB_ITEM_KINDS[pbItemAdmin.kind];
   const name = await promptDialog({ title: 'New ' + k.one, message: 'Name?', confirmLabel: 'Add' });
@@ -7097,7 +7265,7 @@ async function pbItemAdd() {
 async function pbItemSave(id) {
   const k = PB_ITEM_KINDS[pbItemAdmin.kind];
   const g = i => document.getElementById(i);
-  const patch = { name: g('pbi-name').value.trim(), display_order: Math.round(+g('pbi-order').value || 0), in_use_date: g('pbi-inuse').value || null, retired_date: g('pbi-retired').value || null, updated_at: new Date().toISOString() };
+  const patch = { name: g('pbi-name').value.trim(), in_use_date: g('pbi-inuse').value || null, retired_date: g('pbi-retired').value || null, updated_at: new Date().toISOString() };   // v7.9.73: order is set by dragging, not typed
   if (g('pbi-subcat')) patch.subcategory_id = +g('pbi-subcat').value || null;   // v7.9.71: only rendered when the kind has subcategories
   if (!patch.name) { showStatus('A name is required', 'error'); return; }
   if (patch.in_use_date && patch.retired_date && patch.retired_date < patch.in_use_date) { showStatus('Retired date is before the in-use date', 'error'); return; }
