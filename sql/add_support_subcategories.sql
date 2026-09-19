@@ -1,7 +1,7 @@
 -- Focus v7.9.71 — Support item subcategories (Richard, 2026-09-19).
 -- "I want to create a number of subcategories to make working with them easier." Agreed list:
---   Offensive   — Lethal · Less-lethal · Impact · Restraint
---   Defensive   — Protective · Detection · Lighting
+--   Offensive Support — Lethal · Less-lethal · Impact · Restraint
+--   Defensive Support — Protective · Detection · Lighting
 --   Communications
 --   Evidence and Recording
 --   Welfare
@@ -49,17 +49,24 @@ UPDATE quote_support_subcategories s
  WHERE s.code IS NULL AND s.category = 'workforce' AND s.group_name = v.group_name AND s.name = v.name;
 
 INSERT INTO quote_support_subcategories (category, code, group_name, name, display_order) VALUES
-  ('workforce', 'wf_lethal',             'Offensive',              'Lethal',                  1),
-  ('workforce', 'wf_less_lethal',        'Offensive',              'Less-lethal',             2),
-  ('workforce', 'wf_impact',             'Offensive',              'Impact',                  3),
-  ('workforce', 'wf_restraint',          'Offensive',              'Restraint',               4),
-  ('workforce', 'wf_protective',         'Defensive',              'Protective',              5),
-  ('workforce', 'wf_detection',          'Defensive',              'Detection',               6),
-  ('workforce', 'wf_lighting',           'Defensive',              'Lighting',                7),
+  ('workforce', 'wf_lethal',             'Offensive Support',      'Lethal',                  1),
+  ('workforce', 'wf_less_lethal',        'Offensive Support',      'Less-lethal',             2),
+  ('workforce', 'wf_impact',             'Offensive Support',      'Impact',                  3),
+  ('workforce', 'wf_restraint',          'Offensive Support',      'Restraint',               4),
+  ('workforce', 'wf_protective',         'Defensive Support',      'Protective',              5),
+  ('workforce', 'wf_detection',          'Defensive Support',      'Detection',               6),
+  ('workforce', 'wf_lighting',           'Defensive Support',      'Lighting',                7),
   ('workforce', 'wf_communications',     'Communications',         'Communications',          8),
   ('workforce', 'wf_evidence_recording', 'Evidence and Recording', 'Evidence and Recording',  9),
   ('workforce', 'wf_welfare',            'Welfare',                'Welfare',                10)
 ON CONFLICT (code) WHERE code IS NOT NULL DO NOTHING;
+
+-- v7.9.72 (Richard: "OFFENSIVE SUPPORT / Lethal / 9mm Parabellum"): the two grouped headings read
+-- "… Support". A database seeded by the earlier cut is renamed here, keyed on code, and only while
+-- it still carries the old name — a later rename on the admin page is left alone.
+UPDATE quote_support_subcategories
+   SET group_name = CASE group_name WHEN 'Offensive' THEN 'Offensive Support' WHEN 'Defensive' THEN 'Defensive Support' END
+ WHERE code LIKE 'wf\_%' AND group_name IN ('Offensive', 'Defensive');
 
 -- The item's filing. Plain REFERENCES (RESTRICT): a subcategory with items cannot be deleted.
 ALTER TABLE quote_accessories ADD COLUMN IF NOT EXISTS subcategory_id BIGINT;
