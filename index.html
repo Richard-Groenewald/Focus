@@ -708,7 +708,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.65 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.66 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -747,7 +747,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.65 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.66 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2136,8 +2136,8 @@ function _mockSeed() {
     quote_training_costs: [],
     quote_contract_accessories: [],
     quote_workforce_adjustments: [],
-    quote_support_item_rules: [],
-    quote_support_item_rule_members: [],
+    quote_condition_rules: [],
+    quote_condition_rule_members: [],
     quote_annual_escalations: [2025, 2026, 2027].flatMap((y, i) => [
       { id: i * 2 + 1, year: y, escalation_pct: 6, service_major_id: null, service_sub_id: null, note: '', created_at: now },
       { id: i * 2 + 2, year: y, escalation_pct: 7.5, service_major_id: 1, service_sub_id: null, note: 'Manpower', created_at: now },
@@ -2888,7 +2888,7 @@ const PAGES = {
   reports:           { title: 'Reports', custom: true, readOnly: true, columns: [], fields: [] },
   proposal_sandbox:         { title: 'Proposal Sandbox', custom: true, columns: [], fields: [] },
   pb_human_resources:       { title: 'Proposal Builder — Human Resources', custom: true, columns: [], fields: [] },
-  pb_conditional_criteria:  { title: 'Proposal Builder — Conditional Criteria', custom: true, columns: [], fields: [] },
+  pb_conditional_criteria:  { title: 'Proposal Builder — Conditions & Rules', custom: true, columns: [], fields: [] },
   pb_standard_posts:        { title: 'Proposal Builder — Standard Posts',  custom: true, columns: [], fields: [] },
   pb_standard_headings:     { title: 'Proposal Builder — Standard Headings', custom: true, columns: [], fields: [] },
   pb_uniform_types:         { title: 'Proposal Builder — Uniform Types',    custom: true, columns: [], fields: [] },
@@ -3797,7 +3797,7 @@ async function loadTable(page) {
     if (page === 'internal_activity') { await renderInternalActivityPage(); return; }
     if (page === 'proposal_sandbox')          { await renderProposalSandboxPage(); return; }
     if (page === 'pb_human_resources')        { await renderPbHumanResourcesPage(); return; }
-    if (page === 'pb_conditional_criteria')   { _ccActive = null; await renderPbConditionalCriteriaPage(); return; }
+    if (page === 'pb_conditional_criteria')   { await renderPbConditionalCriteriaPage(); return; }
     if (page === 'pb_standard_posts')         { await renderPbCatalogPage('quote_standard_post_names',    'Standard Posts');     return; }
     if (page === 'pb_standard_headings')      { await renderPbCatalogPage('quote_standard_heading_names', 'Standard Headings');  return; }
     if (page === 'pb_uniform_types')          { await renderPbItemCatalogPage('uniform'); return; }
@@ -5218,7 +5218,7 @@ const MENU = [
         items: [
           { page: 'pb_human_resources',       label: 'Human Resources',             permission: 'administer_quote_rates',
             icon: '<circle cx="8" cy="5" r="3"/><path d="M2 13c0-3 2.7-5 6-5s6 2 6 5"/>' },
-          { page: 'pb_conditional_criteria',  label: 'Conditional Criteria',        permission: 'administer_quote_rates',
+          { page: 'pb_conditional_criteria',  label: 'Conditions & Rules',          permission: 'administer_quote_rates',
             icon: '<path d="M8 2v4M8 6L4 10M8 6l4 4M4 10v4M12 10v4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'pb_standard_posts',        label: 'Standard Posts',              permission: 'administer_quote_rates',
             icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
@@ -6346,11 +6346,9 @@ async function openQuote(id) {
     // its posts and every catalogue/lookup (all independent); round 2 — the four
     // per-post child tables, which need the post ids.
     const rulesP = Promise.all([
-      apiGetAll('quote_allowance_rules', 'select=*'),
-      apiGet('quote_allowance_rule_members', 'select=*&order=rule_id.asc'),
-      apiGetAll('quote_support_item_rules', 'select=*').catch(() => []),                        // v7.9.55: support item conditions (absent table → none)
-      apiGet('quote_support_item_rule_members', 'select=*&order=rule_id.asc').catch(() => []),
-    ]).catch(() => [[], [], [], []]);
+      apiGetAll('quote_condition_rules', 'select=*').catch(() => []),          // v7.9.66: unified conditions (absent table → none)
+      apiGet('quote_condition_rule_members', 'select=*&order=rule_id.asc').catch(() => []),
+    ]).catch(() => [[], []]);
     // v7.9.41: the two catalogues behind the per-post checklists, plus the
     // proposal template list and this quote's draft proposal. An absent
     // proposal_templates table (SQL not yet installed) hides the Proposal tab.
@@ -6404,10 +6402,8 @@ async function openQuote(id) {
     allData['quote_statutory_allowances'] = statAllow;
     allData['quote_discretionary_allowances'] = discAllow;
     allData['quote_discretionary_incentives'] = discInc;
-    allData['quote_allowance_rules'] = rules[0];
-    allData['quote_allowance_rule_members'] = rules[1];
-    allData['quote_support_item_rules'] = rules[2] || [];
-    allData['quote_support_item_rule_members'] = rules[3] || [];
+    allData['quote_condition_rules'] = rules[0] || [];
+    allData['quote_condition_rule_members'] = rules[1] || [];
     pbCachedPostNames = postNames;
     pbCachedHeadingNames = headingNames;
     if (posts.length) {
@@ -7303,7 +7299,7 @@ function renderContractItemsTab() {
   return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">' +
     '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract and service support items</div>' +
       (rows || '<div class="pb-placeholder-text">No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Contract Support Items / Service Support Items.</div>') +
-      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts. Contract support items are the physical things a contract needs to be delivered; service support items are the service things it needs. Workforce support items (what an officer carries or needs) are ticked on each post. An item marked <em>auto</em> was ticked by a Support Items condition (Admin → Proposal Builder → Conditional Criteria); unticking it asks for a reason.</p></div>' +
+      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts. Contract support items are the physical things a contract needs to be delivered; service support items are the service things it needs. Workforce support items (what an officer carries or needs) are ticked on each post. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); unticking it asks for a reason.</p></div>' +
     '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Equipment summary (as at ' + pbEsc(asAt) + ')</div>' +
       (sum.lines.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Item</th><th>Where</th><th class="num" style="text-align:right;">Qty</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th></tr></thead><tbody>' +
         sum.lines.map(l => '<tr><td>' + pbEsc(l.name) + (l.recovery === 'absorbed' ? ' <span class="pg-muted">(absorbed)</span>' : '') + '</td><td>' + pbEsc(l.where) + '</td><td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + pbRand(l.monthly) + '</td><td style="text-align:right;">' + (l.onceOff ? pbRand(l.onceOff) : '—') + '</td></tr>').join('') +
@@ -7398,6 +7394,7 @@ async function pbToggleChecklist(postId, kind, itemId, cb) {
   if (!p[t.set]) p[t.set] = new Set();
   const on = cb.checked;
   const where = 'post_id=eq.' + postId + '&' + t.fk + '=eq.' + itemId;
+  const ruleKind = kind === 'accessory' ? 'support' : kind;   // v7.9.66: the rule engine calls a workforce item 'support'
   // v7.9.55: an item a Support Items condition ticked (v7.9.57: or a training course). Re-ticking
   // an overridden one just drops the override row; unticking it needs a reason — an inline row,
   // never a native prompt().
@@ -7410,11 +7407,20 @@ async function pbToggleChecklist(postId, kind, itemId, cb) {
       renderQuoteEditor();
       return;
     }
-    if (on) await api(t.table, 'POST', { post_id: postId, [t.fk]: itemId }, '', { prefer: 'return=minimal' });
-    else await api(t.table, 'DELETE', null, where);
+    // v7.9.66: a support item or training course can now be an exclusive/requires member too.
+    if (on) {
+      const clash = pbRuleConflict(p, ruleKind, String(itemId));
+      if (clash) { cb.checked = false; pbRowFlash(cb, clash.message); return; }
+      await api(t.table, 'POST', { post_id: postId, [t.fk]: itemId }, '', { prefer: 'return=minimal' });
+    } else {
+      const block = pbRuleRemovalBlock(p, ruleKind, String(itemId));
+      if (block) { cb.checked = true; pbRowFlash(cb, block); return; }
+      await api(t.table, 'DELETE', null, where);
+    }
     if (on) p[t.set].add(+itemId); else p[t.set].delete(+itemId);
+    _pbSupportEval = null;   // the next conflict check must see this tick, render or no render
     // A tick may itself be another condition's trigger — repaint while any exist.
-    if (pbSupportRules().length) renderQuoteEditor();
+    if (pbActiveRules('implies').length) renderQuoteEditor();
   } catch (e) { cb.checked = !on; showStatus('Could not save: ' + e.message, 'error'); }
 }
 // Override an item or course a condition ticked: the 'on' row goes, an 'off' row with the reason
@@ -8413,7 +8419,7 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
         const rIt = pbCurrentByCode(allData[tableOf], pbQuoteAsAt()).find(x => +x.id === +itemId);
         const block = rIt && pbRuleRemovalBlock(p, kindOf, rIt.code);
         if (block) { el.value = 'R ' + Number(p[mapKey][+itemId]).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); pbRowFlash(el, block); return; }
-        await api(table, 'DELETE', null, where); delete p[mapKey][+itemId];
+        await api(table, 'DELETE', null, where); delete p[mapKey][+itemId]; _pbSupportEval = null;
       }
       el.value = '';
       return;
@@ -8437,6 +8443,7 @@ async function pbAmtSave(postId, itemId, el, table, idCol, mapKey) {
     await api(table, 'POST', row, '');
     p[mapKey] = p[mapKey] || {};
     p[mapKey][+itemId] = n;
+    _pbSupportEval = null;   // an amount is an inclusion: the next conflict check must see it
     el.value = 'R ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   } catch (e) { showStatus('Could not save the amount: ' + e.message, 'error'); }
 }
@@ -8509,7 +8516,7 @@ function pbAllowanceCols(p) {
 
   const night = pbPostHasMidnightShift(p);
   const asAt = pbQuoteAsAt();
-  const implied = pbImpliedStat(p);
+  const implied = pbSupportEval().statutory[p.id] || {};
   const stat = pbCurrentByCode(allData['quote_statutory_allowances'], asAt)
     .sort((a, b) => String(a.description || a.code).localeCompare(String(b.description || b.code)))
     .map(r => {
@@ -9676,36 +9683,12 @@ async function renderPbPlaceholderPage(label) {
 function pbOpenSchema(id) { pbActiveSchema = id; pbEditingRowId = null; renderPbEditor(id, { withBack: true }); }
 function pbBackToHrGrid() { pbActiveSchema = null; pbEditingRowId = null; renderPbHumanResourcesPage(); }
 
-// ── Conditional Criteria (v7.9.55) — landing page with two areas ─────────────
-// Incentives and Allowances: the allowance conditions, moved here from Human Resources.
-// Support Items and Training: support items of any category and training courses (v7.9.57)
-// that tick themselves when an allowance, a post condition, another support item or a course
-// is active. The sidebar entry always lands on the grid; the two screens re-render themselves
-// after a save.
-let _ccActive = null;   // null | 'allowances' | 'support'
-const PB_CC_TILES = [
-  { id: 'allowances', label: 'Incentives and Allowances',    sub: 'Conditions between allowances and incentives: only one of, requires, auto-includes.' },
-  { id: 'support',    label: 'Support Items and Training',   sub: 'Support items and training courses that tick themselves when an allowance, a post condition, another item or a course is active.' },
-];
-async function renderPbConditionalCriteriaPage() {
-  if (_ccActive === 'allowances') { await renderAllowRules(); return; }
-  if (_ccActive === 'support') { await renderSupportRules(); return; }
-  document.getElementById('page-sub').textContent = 'Pick a criteria area';
-  document.getElementById('table-head').innerHTML = '';
-  document.getElementById('table-body').innerHTML = `<tr><td style="padding:18px 0;">
-    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:860px;">
-      ${PB_CC_TILES.map(t => `
-        <button class="card" style="cursor:pointer;text-align:left;padding:22px 18px;font-family:inherit;color:var(--navy);background:#fff;border:1px solid var(--border);border-radius:8px;position:relative;"
-                onclick="pbOpenCc('${t.id}')">
-          <div style="font-size:14px;font-weight:600;padding-right:24px;">${pbEsc(t.label)}</div>
-          <div style="font-size:11px;font-weight:400;color:var(--text3);margin-top:4px;padding-right:24px;">${pbEsc(t.sub)}</div>
-          <span style="position:absolute;right:14px;top:50%;transform:translateY(-50%);color:#99a4b5;font-size:20px;">›</span>
-        </button>`).join('')}
-    </div>
-  </td></tr>`;
-}
-function pbOpenCc(id) { _ccActive = id; renderPbConditionalCriteriaPage(); }
-function pbBackToCcGrid() { _ccActive = null; renderPbConditionalCriteriaPage(); }
+// ── Conditions & Rules (v7.9.66) — one screen, one table ─────────────────────
+// Was two tiles (Incentives and Allowances; Support Items and Training) over two rule tables,
+// v7.9.55-57. Merged into one table so a rule of any type can trigger or target ANY domain —
+// an allowance, a support item or a training course — instead of allowances only ever feeding
+// support items and never the reverse. See the block above pbSupportEval for the evaluator.
+async function renderPbConditionalCriteriaPage() { await renderCondRules(); }
 
 // ── Statutory Salary Rates — the version grid ────────────────────────────────
 // Sectoral wage tables are published as a grid per determination, and this screen edits one the
@@ -10743,45 +10726,29 @@ function pbPostCondition(p, code) {
   }
 }
 function pbRuleParts(rule, table) {
-  const mem = (allData[table || 'quote_allowance_rule_members'] || []).filter(m => +m.rule_id === +rule.id);
+  const mem = (allData[table || 'quote_condition_rule_members'] || []).filter(m => +m.rule_id === +rule.id);
   return { triggers: mem.filter(m => m.role === 'trigger'), targets: mem.filter(m => m.role === 'target'), members: mem.filter(m => !m.role || m.role === 'member') };
 }
 function pbTriggerActive(p, m, active) {
   return m.kind === 'post' ? pbPostCondition(p, m.code) : active.has(m.kind + ':' + m.code);
 }
 function pbActiveRules(type) {
-  return (allData['quote_allowance_rules'] || []).filter(r => r.active !== false && r.rule_type === type);
-}
-// Statutory codes ticked by an 'implies' rule whose trigger is active on this post, with the
-// rule name for the chip. Iterates so an implied item can itself trigger another rule.
-function pbImpliedStat(p) {
-  const out = {};
-  const rules = pbActiveRules('implies');
-  if (!rules.length) return out;
-  for (let i = 0; i < 5; i++) {
-    const active = pbActiveAllowSet(p, out);
-    let grew = false;
-    rules.forEach(r => {
-      const { triggers, targets } = pbRuleParts(r);
-      if (!triggers.some(t => pbTriggerActive(p, t, active))) return;
-      targets.forEach(t => { if (t.kind === 'statutory' && !out[t.code]) { out[t.code] = r.name; grew = true; } });
-    });
-    if (!grew) break;
-  }
-  return out;
+  return (allData['quote_condition_rules'] || []).filter(r => r.active !== false && r.rule_type === type);
 }
 function pbStatIsAuto(r, night, implied) {
   return (r.auto_rule === 'night_shift' && night) || !!(implied && implied[r.code]);
 }
 
-function pbActiveAllowSet(p, implied) {
+// The facts a post carries BEFORE any condition fires: manual ticks plus the one hardcoded
+// auto-rule (night shift). pbSupportEval()'s fixpoint starts from this and layers every
+// condition-implied fact (statutory, support, training) on top, in either direction.
+function pbManualActiveSet(p) {
   const out = new Set();
   const asAt = pbQuoteAsAt();
   const night = pbPostHasMidnightShift(p);
-  if (implied === undefined) implied = pbImpliedStat(p);
   pbCurrentByCode(allData['quote_statutory_allowances'], asAt).forEach(r => {
     const saved = (p.statAllow || {})[+r.id];
-    const auto = pbStatIsAuto(r, night, implied);
+    const auto = r.auto_rule === 'night_shift' && night;
     const on = auto ? !(saved && saved.state === 'off') : !!(saved && saved.state === 'on');
     if (on) out.add('statutory:' + r.code);
   });
@@ -10791,7 +10758,15 @@ function pbActiveAllowSet(p, implied) {
   pbCurrentByCode(allData['quote_discretionary_incentives'], asAt).forEach(r => {
     if ((p.incAllow || {})[+r.id] != null) out.add('incentive:' + r.code);
   });
+  (p.accessories || new Set()).forEach(id => out.add('support:' + id));
+  (p.training || new Set()).forEach(id => out.add('training:' + id));
   return out;
+}
+// Every fact active on this post right now: manual ticks plus everything the unified condition
+// fixpoint (pbSupportEval) has settled on — statutory, support items and training all together,
+// in one pass, so a condition in any domain can trigger a target in any other domain.
+function pbActiveAllowSet(p) {
+  return pbSupportEval().active.get(p.id) || pbManualActiveSet(p);
 }
 
 function pbAllowLabelFor(kind, code) {
@@ -10810,6 +10785,7 @@ function pbAllowLabelFor(kind, code) {
 // Returns { rule, other, message } or null. Exclusive: another member is active. Requires: the
 // item is a trigger and a target is missing.
 function pbRuleConflict(p, kind, code) {
+  _pbSupportEval = null;   // a user-action check: always judge the live ticks, never a memo
   const active = pbActiveAllowSet(p);
   const isMe = m => m.kind === kind && m.code === code;
   for (const rule of pbActiveRules('exclusive')) {
@@ -10829,6 +10805,7 @@ function pbRuleConflict(p, kind, code) {
 // Would removing (kind, code) break a 'requires' rule whose trigger is active? Returns the
 // message or null. (An 'implies' target may still be overridden off with a reason.)
 function pbRuleRemovalBlock(p, kind, code) {
+  _pbSupportEval = null;   // as above
   const active = pbActiveAllowSet(p);
   for (const rule of pbActiveRules('requires')) {
     const { triggers, targets } = pbRuleParts(rule);
@@ -10839,40 +10816,58 @@ function pbRuleRemovalBlock(p, kind, code) {
   return null;
 }
 
-// ── Support Items and Training conditions (v7.9.55; training v7.9.57) ────────
-// A rule: IF any trigger is active THEN its targets tick themselves. Triggers are allowances /
-// incentives active on a post, post conditions, other support items or training courses;
-// targets are support items of any category (kind 'support', code = id as text) or training
-// courses (kind 'training', code = id as text). A workforce item or a course ticks on each post
-// whose trigger is active; a contract or service target (or a legacy per-contract-basis
-// workforce item) ticks once on the quote when any post, or a contract-level item, has the
-// trigger. Like an implies rule, anything ticked by a condition may be overridden off with a
-// reason (state 'off' on its tick row). Evaluated as one fixpoint over the whole quote, so
-// chains work in both directions (post → contract → post) and across items and courses.
+// ── Conditions & Rules (v7.9.66) — one fixpoint over the whole quote ─────────
+// A single rule table (quote_condition_rules / quote_condition_rule_members) replaced the old
+// two-table, two-phase split (allowance rules resolved first, support-item rules consumed that
+// result second). A rule is exclusive (members can't both be active), requires (every target
+// must already be active while a trigger is) or implies (a trigger ticks its targets
+// automatically — "auto-includes", the v7.9.55 Support Items behaviour, generalised). Triggers
+// may be a statutory/discretionary/incentive allowance, a post condition, a support item or a
+// training course, in any combination; targets may be any of those except a post condition
+// (never user-toggleable) and, for implies, never a discretionary/incentive allowance (they
+// carry an amount with no natural default to auto-fill). This is what lets a training course or
+// support item drive an allowance — impossible under the old two-phase design, where allowances
+// always resolved before support items ever saw the board.
+//
+// pbSupportEval() is the one evaluator: it starts from pbManualActiveSet() (what's actually
+// ticked, plus the one hardcoded night-shift auto-rule) and layers every 'implies' rule's
+// targets on top — statutory allowances, support items (per-post or once on the quote,
+// depending on the item's cost basis) and training courses — repeating until nothing new ticks.
+// The model only ever ADDS facts, never retracts one, so it always settles (the loop below is a
+// defensive cap, not a cycle guard — there is no cycle to guard against in a monotonic system).
+// 'exclusive' and 'requires' don't tick anything themselves; they're enforced where a post's
+// tick is set or cleared (pbRuleConflict / pbRuleRemovalBlock) against this same settled active
+// set — including, now, for support items and training (pbToggleChecklist). Contract-level
+// items (ticked once per quote, not per post) are NOT checked against exclusive/requires — that
+// enforcement is post-scoped by design and allowances are always post-scoped, so this was never
+// asked for; a rule whose members are only contract/service items has no runtime effect beyond
+// the "auto-includes" (implies) case, exactly as before.
 let pbContractAccOff = new Map();   // accessory_id → reason: contract-level overrides
 let _pbSupportEval = null;          // memo for one render; cleared by renderQuoteEditor and the toggles
-function pbSupportRules() { return (allData['quote_support_item_rules'] || []).filter(r => r.active !== false); }
 function pbSupportItemById(id) { return (allData['quote_accessories'] || []).find(i => +i.id === +id) || null; }
 function pbTrainingCourseById(id) { return (allData['quote_training_courses'] || []).find(i => +i.id === +id) || null; }
 function pbSupportEval() {
   if (_pbSupportEval) return _pbSupportEval;
-  // posts[postId][accessoryId] / training[postId][courseId] = rule name; contract[accessoryId] = rule name
-  const out = { posts: {}, contract: {}, training: {} };
+  // posts[postId][accessoryId] / training[postId][courseId] / statutory[postId][code] = rule
+  // name; contract[accessoryId] = rule name; active[postId] = the fully settled Set for the post.
+  const out = { posts: {}, contract: {}, training: {}, statutory: {}, active: new Map() };
   const posts = (pbHeadings || []).flatMap(h => h.posts);
-  posts.forEach(p => { out.posts[p.id] = {}; out.training[p.id] = {}; });
-  const rules = pbSupportRules();
+  posts.forEach(p => { out.posts[p.id] = {}; out.training[p.id] = {}; out.statutory[p.id] = {}; });
+  const base = new Map(posts.map(p => [p.id, pbManualActiveSet(p)]));
+  out.active = base;   // no implies rules yet — the settled state is just the manual facts
+  const rules = pbActiveRules('implies');
   if (!rules.length) return (_pbSupportEval = out);
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
+  const statIdByCode = new Map(pbCurrentByCode(allData['quote_statutory_allowances'], asAt).map(r => [r.code, r.id]));
   const quoteLevel = it => {
     if (pbItemCategory(it) !== 'workforce') return true;
     const c = pbItemCurrentCost(costs, 'accessory_id', it.id, asAt);
     return !!(c && c.cost_basis === 'per_contract');
   };
-  const parts = rules.map(r => Object.assign({ r }, pbRuleParts(r, 'quote_support_item_rule_members')));
-  const base = new Map(posts.map(p => [p.id, pbActiveAllowSet(p)]));
-  for (let i = 0; i < 8; i++) {
-    let grew = false;
-    // Effective contract-level ticks so far: manual + ticked by a condition − overridden.
+  const parts = rules.map(r => Object.assign({ r }, pbRuleParts(r)));
+  // Effective facts so far: manual + ticked by a condition − overridden. Rebuilt at the top of
+  // every pass, and once more after the loop so out.active always matches the final buckets.
+  const settle = () => {
     const contractOn = new Set(pbContractAcc.keys());
     Object.keys(out.contract).forEach(id => { if (!pbContractAccOff.has(+id)) contractOn.add(+id); });
     const quoteActive = new Set();
@@ -10881,18 +10876,30 @@ function pbSupportEval() {
     posts.forEach(p => {
       const a = new Set(base.get(p.id));
       contractOn.forEach(id => a.add('support:' + id));   // a contract-level fact holds on every post
-      (p.accessories || new Set()).forEach(id => a.add('support:' + id));
       Object.keys(out.posts[p.id]).forEach(id => { if ((p.accessoriesOff || {})[id] == null) a.add('support:' + id); });
-      (p.training || new Set()).forEach(id => a.add('training:' + id));   // v7.9.57: courses trigger too
       Object.keys(out.training[p.id]).forEach(id => { if ((p.trainingOff || {})[id] == null) a.add('training:' + id); });
+      Object.keys(out.statutory[p.id]).forEach(code => {
+        const saved = (p.statAllow || {})[+statIdByCode.get(code)];
+        if (!(saved && saved.state === 'off')) a.add('statutory:' + code);
+      });
       postActive.set(p.id, a);
       a.forEach(k => quoteActive.add(k));
     });
+    return { postActive, quoteActive };
+  };
+  for (let i = 0; i < 50; i++) {
+    let grew = false;
+    const { postActive, quoteActive } = settle();
     parts.forEach(({ r, triggers, targets }) => {
       const firesOn = p => triggers.some(t => pbTriggerActive(p, t, postActive.get(p.id)));
       const firesOnQuote = posts.some(firesOn) || triggers.some(t => t.kind !== 'post' && quoteActive.has(t.kind + ':' + t.code));
       targets.forEach(t => {
-        if (t.kind === 'training') {   // v7.9.57: a course ticks per post, never once on the quote
+        if (t.kind === 'statutory') {   // a training course or support item can now imply an allowance
+          if (!statIdByCode.has(t.code)) return;   // no row effective at the quote's date: inert, exactly as before
+          posts.forEach(p => { if (!out.statutory[p.id][t.code] && firesOn(p)) { out.statutory[p.id][t.code] = r.name; grew = true; } });
+          return;
+        }
+        if (t.kind === 'training') {   // a course ticks per post, never once on the quote
           if (!pbTrainingCourseById(t.code)) return;
           posts.forEach(p => { if (!out.training[p.id][+t.code] && firesOn(p)) { out.training[p.id][+t.code] = r.name; grew = true; } });
           return;
@@ -10905,6 +10912,7 @@ function pbSupportEval() {
     });
     if (!grew) break;
   }
+  out.active = settle().postActive;
   return (_pbSupportEval = out);
 }
 // Effective workforce ticks on a post: manual ticks plus items a condition ticked, less overrides.
@@ -10944,224 +10952,47 @@ function pbSupportSqlHint(e, kind) {
   return /state|override_reason|column/i.test((e && e.message) || '') ? sql + ' has not been run on this database' : 'Could not save the override: ' + e.message;
 }
 
-// ── The admin screen: Conditional Criteria → Support Items and Training ──────
-let _supState = { editing: null, _confirmDel: null };   // editing: null | 'new' | rule id
+// ── The admin screen: Conditions & Rules ─────────────────────────────────────
+let _condState = { editing: null, type: null, _confirmDel: null };   // editing: null | 'new' | rule id
 
-async function renderSupportRules() {
-  _ccActive = 'support'; pbActiveSchema = null;
+async function renderCondRules() {
+  pbActiveSchema = null;
   document.getElementById('table-head').innerHTML = '';
-  document.getElementById('page-sub').textContent = 'Support items and training courses that follow from allowances, post conditions, other items or courses';
+  document.getElementById('page-sub').textContent = 'Conditions between allowances, incentives, support items and training courses';
   document.getElementById('table-body').innerHTML = `<tr><td style="padding:0;border:none;">
-    <div id="sup-page" style="padding:0 0 24px;max-width:860px;">
-      <div id="sup-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
+    <div id="cond-page" style="padding:0 0 24px;max-width:900px;">
+      <div id="cond-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
     </div></td></tr>`;
   try {
     const [rules, members, stat, disc, inc, items, courses] = await Promise.all([
-      apiGetAll('quote_support_item_rules', 'select=*'),
-      apiGet('quote_support_item_rule_members', 'select=*&order=rule_id.asc'),
+      apiGetAll('quote_condition_rules', 'select=*'),
+      apiGet('quote_condition_rule_members', 'select=*&order=rule_id.asc'),
       apiGetAll('quote_statutory_allowances', 'select=*'),
       apiGetAll('quote_discretionary_allowances', 'select=*'),
       apiGetAll('quote_discretionary_incentives', 'select=*'),
       apiGet('quote_accessories', 'select=*&order=display_order,id'),
-      apiGet('quote_training_courses', 'select=*&order=display_order,id'),   // v7.9.57
+      apiGet('quote_training_courses', 'select=*&order=display_order,id'),
     ]);
-    allData['quote_support_item_rules'] = rules;
-    allData['quote_support_item_rule_members'] = members;
+    allData['quote_condition_rules'] = rules;
+    allData['quote_condition_rule_members'] = members;
     allData['quote_statutory_allowances'] = stat;
     allData['quote_discretionary_allowances'] = disc;
     allData['quote_discretionary_incentives'] = inc;
     allData['quote_accessories'] = items;
     allData['quote_training_courses'] = courses;
-    _supPaint();
+    _condPaint();
   } catch (e) {
-    document.getElementById('sup-body').innerHTML =
+    document.getElementById('cond-body').innerHTML =
       `<div style="padding:20px;color:var(--red);">Couldn't load the conditions: ${pbEsc(e.message)}${
-        /404|PGRST205/.test(e.message) ? ' — needs sql/support_item_conditions.sql.' : ''}</div>`;
+        /404|PGRST205/.test(e.message) ? ' — needs sql/unify_condition_rules.sql.' : ''}</div>`;
   }
 }
 
-// Support items by category, in use today, as picker groups (kind 'support', code = id).
-function _supItemGroups(titles) {
-  const today = new Date().toISOString().slice(0, 10);
-  const items = (allData['quote_accessories'] || []).filter(i => pbItemInWindow(i, today));
-  const g = (cat, title) => ({ kind: 'support', title, rows: items.filter(i => pbItemCategory(i) === cat).map(i => ({ code: String(i.id), name: i.name })) });
-  return [g('workforce', titles ? titles[0] : 'Workforce Support Items'), g('contract', titles ? titles[1] : 'Contract Support Items'), g('service', titles ? titles[2] : 'Service Support Items')];
-}
-// Training courses in use today as one picker group (kind 'training', code = id). v7.9.57.
-function _supTrainingGroup(title) {
-  const today = new Date().toISOString().slice(0, 10);
-  const rows = (allData['quote_training_courses'] || []).filter(c => pbItemInWindow(c, today)).map(c => ({ code: String(c.id), name: c.name }));
-  return { kind: 'training', title, rows };
-}
-
-function _supPaint() {
-  const out = document.getElementById('sup-body');
-  if (!out) return;
-  const rules = allData['quote_support_item_rules'] || [];
-  const st = _supState;
-
-  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : m.kind === 'support' ? '#F3F0E8' : m.kind === 'training' ? '#EAF3EC' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
-  const word = w => ` <span style="color:var(--text3);font-size:10px;font-weight:700;">${w}</span> `;
-  const chips = r => {
-    const { triggers, targets } = pbRuleParts(r, 'quote_support_item_rule_members');
-    if (!triggers.length && !targets.length) return '';
-    return word('IF') + triggers.map(chip).join(word('OR')) + word('THEN TICK') + targets.map(chip).join(word('AND'));
-  };
-
-  const list = rules.length ? rules.map(r => `
-    <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;${r.active === false ? 'opacity:.55;' : ''}">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-        <strong style="font-size:13px;color:var(--navy);">${pbEsc(r.name)}</strong>
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">auto-includes</span>
-        <span style="flex:1 1 auto;"></span>
-        <button class="btn btn-sm btn-secondary" onclick="_supEdit(${r.id})">Edit</button>
-        <button class="btn btn-sm btn-secondary" onclick="_supToggle(${r.id}, ${r.active === false})">${r.active === false ? 'Enable' : 'Disable'}</button>
-        <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_supDelete(${r.id})">Delete</button>
-      </div>
-      <div style="margin-top:7px;">${chips(r) || '<span style="color:var(--text3);font-size:12px;">no members yet</span>'}</div>
-    </div>`).join('')
-    : `<div style="padding:24px;text-align:center;color:var(--text3);background:var(--bg);border-radius:8px;margin-bottom:10px;">No conditions yet.</div>`;
-
-  let editor = '';
-  if (st.editing != null) {
-    const rule = st.editing === 'new' ? null : rules.find(r => +r.id === +st.editing);
-    const mine = new Set(rule ? (allData['quote_support_item_rule_members'] || []).filter(m => +m.rule_id === +rule.id).map(m => m.role + ':' + m.kind + ':' + m.code) : []);
-    const picker = (role, groups) => `
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;">
-        ${groups.map(g => `
-          <div style="min-width:0;">
-            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:3px;margin-bottom:5px;">${g.title}</div>
-            ${g.rows.map(r => `
-              <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);padding:1px 0;cursor:pointer;">
-                <input type="checkbox" class="sup-member" data-role="${role}" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(role + ':' + g.kind + ':' + r.code) ? 'checked' : ''}>
-                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${pbEsc(r.name || r.description || r.code)}">${pbEsc(r.name || r.description || r.code)}</span>
-              </label>`).join('') || '<div style="font-size:11px;color:var(--text3);">none</div>'}
-          </div>`).join('')}
-      </div>`;
-    const section = (title, inner) => `<div style="font-size:11px;font-weight:700;color:var(--navy);margin:10px 0 6px;">${title}</div>${inner}`;
-    const triggerGroups = _arItems(true).concat(_supItemGroups(['Workforce items ticked', 'Contract items ticked', 'Service items ticked']), [_supTrainingGroup('Training courses ticked')]);
-    const targetGroups = _supItemGroups().concat([_supTrainingGroup('Training Courses')]);
-    editor = `
-    <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
-      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
-        <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
-        <input id="sup-name" class="form-control" placeholder="Name — e.g. Armed post kit" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">When any trigger is active, the support items and training courses below tick themselves — on each post for a workforce item or a course, once on the quote for a contract or service item. They may be overridden off with a reason.</div>
-      ${section('IF any of these is active', picker('trigger', triggerGroups))}
-      ${section('THEN tick these support items and training courses', picker('target', targetGroups))}
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-sm btn-primary" onclick="_supSave(${rule ? rule.id : 'null'})">Save condition</button>
-        <button class="btn btn-sm btn-ghost" onclick="_supState.editing=null;_supPaint()">Cancel</button>
-      </div>
-    </div>`;
-  }
-
-  out.innerHTML = `
-    <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-      <button class="btn btn-sm btn-ghost" onclick="pbBackToCcGrid()">‹ Conditional Criteria</button>
-      <span style="flex:1 1 auto;"></span>
-      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_supState.editing='new';_supPaint()">+ New condition</button>` : ''}
-    </div>
-    ${editor}${list}
-    <div style="font-size:11px;color:var(--text3);margin-top:6px;">
-      A condition fires the moment its trigger holds on a post: an allowance is ticked, an incentive carries an amount,
-      a post condition applies (a shift crossing midnight, weekend staffing, or simply "the post is staffed"), or another
-      support item or a training course is ticked. A workforce item or a course then ticks itself on that post; a contract
-      or service item ticks itself once on the quote when any post has the trigger. Unticking anything a condition ticked
-      asks for a reason. Messages name the rule.
-    </div>`;
-}
-
-function _supEdit(id) { _supState.editing = id; _supPaint(); }
-
-async function _supSave(id) {
-  const name = String((document.getElementById('sup-name') || {}).value || '').trim();
-  if (!name) { showStatus('Give the condition a name', 'error'); return; }
-  const picked = [...document.querySelectorAll('.sup-member:checked')]
-    .map(el => ({ role: el.dataset.role, kind: el.dataset.kind, code: el.dataset.code }));
-  const trig = picked.filter(m => m.role === 'trigger'), targ = picked.filter(m => m.role === 'target');
-  if (!trig.length || !targ.length) { showStatus('Pick at least one trigger (IF) and one support item or training course (THEN)', 'error'); return; }
-  const both = targ.find(t => trig.some(x => x.kind === t.kind && x.code === t.code));
-  if (both) { showStatus(pbAllowLabelFor(both.kind, both.code) + ' cannot be both a trigger and a target', 'error'); return; }
-  const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
-  try {
-    let rid = id;
-    if (rid == null) {
-      const made = await api('quote_support_item_rules', 'POST', { name, created_by: me }, 'select=id');
-      rid = Array.isArray(made) ? made[0].id : made.id;
-    } else {
-      await api('quote_support_item_rules', 'PATCH', { name }, 'id=eq.' + rid);
-      await api('quote_support_item_rule_members', 'DELETE', null, 'rule_id=eq.' + rid);
-    }
-    await api('quote_support_item_rule_members', 'POST', picked.map(m => ({ rule_id: rid, role: m.role, kind: m.kind, code: m.code })), '');
-    showStatus('Condition saved');
-    _supState.editing = null;
-    await renderSupportRules();
-  } catch (e) {
-    showStatus('Could not save the condition: ' + e.message + (/404|PGRST205/.test(e.message) ? ' — has sql/support_item_conditions.sql been run?'
-      : /kind_check|check constraint/i.test(e.message) && picked.some(m => m.kind === 'training') ? ' — has sql/training_conditions.sql been run?' : ''), 'error');
-  }
-}
-
-async function _supToggle(id, on) {
-  try {
-    await api('quote_support_item_rules', 'PATCH', { active: !!on }, 'id=eq.' + id);
-    showStatus(on ? 'Condition enabled' : 'Condition disabled — it no longer ticks anything');
-    await renderSupportRules();
-  } catch (e) { showStatus('Could not update it: ' + e.message, 'error'); }
-}
-
-async function _supDelete(id) {
-  if (_supState._confirmDel !== id) {
-    _supState._confirmDel = id;
-    showStatus('Click Delete again to remove this condition permanently', 'error');
-    return;
-  }
-  _supState._confirmDel = null;
-  try {
-    await api('quote_support_item_rules', 'DELETE', null, 'id=eq.' + id);
-    showStatus('Condition deleted');
-    await renderSupportRules();
-  } catch (e) { showStatus('Could not delete it: ' + e.message, 'error'); }
-}
-
-// ── The admin screen: Conditional Criteria → Incentives and Allowances ──────
-// (Human Resources → Allowance Conditions until v7.9.55.)
-let _arState = { editing: null };   // null | 'new' | rule id
-
-async function renderAllowRules() {
-  _ccActive = 'allowances'; pbActiveSchema = null;
-  const head = document.getElementById('table-head');
-  const body = document.getElementById('table-body');
-  head.innerHTML = '';
-  document.getElementById('page-sub').textContent = 'Conditions between allowances and incentives';
-  body.innerHTML = `<tr><td style="padding:0;border:none;">
-    <div id="ar-page" style="padding:0 0 24px;max-width:860px;">
-      <div id="ar-body"><div style="padding:20px;color:var(--text3);">Loading…</div></div>
-    </div></td></tr>`;
-  try {
-    const [rules, members, stat, disc, inc] = await Promise.all([
-      apiGetAll('quote_allowance_rules', 'select=*'),
-      apiGet('quote_allowance_rule_members', 'select=*&order=rule_id.asc'),
-      apiGetAll('quote_statutory_allowances', 'select=*'),
-      apiGetAll('quote_discretionary_allowances', 'select=*'),
-      apiGetAll('quote_discretionary_incentives', 'select=*'),
-    ]);
-    allData['quote_allowance_rules'] = rules;
-    allData['quote_allowance_rule_members'] = members;
-    allData['quote_statutory_allowances'] = stat;
-    allData['quote_discretionary_allowances'] = disc;
-    allData['quote_discretionary_incentives'] = inc;
-    _arPaint();
-  } catch (e) {
-    document.getElementById('ar-body').innerHTML =
-      `<div style="padding:20px;color:var(--red);">Couldn't load the conditions: ${pbEsc(e.message)}${
-        /404/.test(e.message) ? ' — needs sql/add_allowance_rules.sql.' : ''}</div>`;
-  }
-}
-
-function _arItems(withPost) {
+// Every domain a rule can trigger or target, as picker groups. withPost also offers post
+// conditions (trigger-only — a post condition is never user-toggleable, so it can't be a
+// target). An implies target excludes discretionary/incentive allowances: they carry an amount
+// with no natural default to auto-fill, so implies stays statutory-only there, as it always was.
+function _condItems(withPost) {
   const today = new Date().toISOString().slice(0, 10);
   const out = [
     { kind: 'statutory', title: 'Statutory Allowances', rows: pbCurrentByCode(allData['quote_statutory_allowances'], today) },
@@ -11171,20 +11002,30 @@ function _arItems(withPost) {
   if (withPost) out.push({ kind: 'post', title: 'Post conditions', rows: Object.entries(PB_POST_CONDITIONS).map(([code, name]) => ({ code, name })) });
   return out;
 }
-const AR_TYPES = {
-  exclusive: { badge: 'only one may be active', hint: 'Pick the items that may never be active together — only one of them will be allowed per post.' },
+function _condItemGroups(titles) {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = (allData['quote_accessories'] || []).filter(i => pbItemInWindow(i, today));
+  const g = (cat, title) => ({ kind: 'support', title, rows: items.filter(i => pbItemCategory(i) === cat).map(i => ({ code: String(i.id), name: i.name })) });
+  return [g('workforce', titles ? titles[0] : 'Workforce Support Items'), g('contract', titles ? titles[1] : 'Contract Support Items'), g('service', titles ? titles[2] : 'Service Support Items')];
+}
+function _condTrainingGroup(title) {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = (allData['quote_training_courses'] || []).filter(c => pbItemInWindow(c, today)).map(c => ({ code: String(c.id), name: c.name }));
+  return { kind: 'training', title, rows };
+}
+const COND_TYPES = {
+  exclusive: { badge: 'only one may be active', hint: 'Pick the items that may never be active together on a post — only one of them will be allowed.' },
   requires:  { badge: 'requires', hint: 'When any trigger is active, every target must already be active: the trigger is refused without them, and a target cannot be cleared while a trigger is active.' },
-  implies:   { badge: 'auto-includes', hint: 'When any trigger is active, the statutory targets tick themselves (like the night rule) and may be overridden off with a reason.' }
+  implies:   { badge: 'auto-includes', hint: 'When any trigger is active, the targets tick themselves — a statutory allowance the way the night rule always has, or a support item or training course the way Support Items conditions always have — and may be overridden off with a reason.' }
 };
 
-function _arPaint() {
-  const out = document.getElementById('ar-body');
+function _condPaint() {
+  const out = document.getElementById('cond-body');
   if (!out) return;
-  const rules = allData['quote_allowance_rules'] || [];
-  const members = allData['quote_allowance_rule_members'] || [];
-  const st = _arState;
+  const rules = allData['quote_condition_rules'] || [];
+  const st = _condState;
 
-  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
+  const chip = m => `<span style="display:inline-block;font-size:11px;font-weight:700;background:${m.kind === 'post' ? '#EEF2F7' : m.kind === 'support' ? '#F3F0E8' : m.kind === 'training' ? '#EAF3EC' : 'var(--bg)'};border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin:1px 3px 1px 0;">${pbEsc(pbAllowLabelFor(m.kind, m.code))}</span>`;
   const word = w => ` <span style="color:var(--text3);font-size:10px;font-weight:700;">${w}</span> `;
   const chips = r => {
     const { triggers, targets, members: mem } = pbRuleParts(r);
@@ -11196,11 +11037,11 @@ function _arPaint() {
     <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;${r.active === false ? 'opacity:.55;' : ''}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
         <strong style="font-size:13px;color:var(--navy);">${pbEsc(r.name)}</strong>
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">${(AR_TYPES[r.rule_type] || AR_TYPES.exclusive).badge}</span>
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);border:1px solid var(--border);border-radius:9px;padding:1px 7px;">${(COND_TYPES[r.rule_type] || COND_TYPES.exclusive).badge}</span>
         <span style="flex:1 1 auto;"></span>
-        <button class="btn btn-sm btn-secondary" onclick="_arEdit(${r.id})">Edit</button>
-        <button class="btn btn-sm btn-secondary" onclick="_arToggle(${r.id}, ${r.active === false})">${r.active === false ? 'Enable' : 'Disable'}</button>
-        <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_arDelete(${r.id})">Delete</button>
+        <button class="btn btn-sm btn-secondary" onclick="_condEdit(${r.id})">Edit</button>
+        <button class="btn btn-sm btn-secondary" onclick="_condToggle(${r.id}, ${r.active === false})">${r.active === false ? 'Enable' : 'Disable'}</button>
+        <button class="btn btn-sm btn-ghost" style="color:var(--red);" onclick="_condDelete(${r.id})">Delete</button>
       </div>
       <div style="margin-top:7px;">${chips(r) || '<span style="color:var(--text3);font-size:12px;">no members yet</span>'}</div>
     </div>`).join('')
@@ -11211,67 +11052,71 @@ function _arPaint() {
     const rule = st.editing === 'new' ? null : rules.find(r => +r.id === +st.editing);
     const type = st.type || (rule ? rule.rule_type : 'exclusive') || 'exclusive';
     const roleOf = m => (type === 'exclusive' ? 'member' : (m.role === 'member' ? 'trigger' : m.role));
-    const mine = new Set(rule ? members.filter(m => +m.rule_id === +rule.id).map(m => roleOf(m) + ':' + m.kind + ':' + m.code) : []);
+    const mine = new Set(rule ? (allData['quote_condition_rule_members'] || []).filter(m => +m.rule_id === +rule.id).map(m => roleOf(m) + ':' + m.kind + ':' + m.code) : []);
     const picker = (role, groups) => `
-      <div style="display:grid;grid-template-columns:repeat(${groups.length},minmax(0,1fr));gap:14px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:14px;">
         ${groups.map(g => `
           <div style="min-width:0;">
             <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:3px;margin-bottom:5px;">${g.title}</div>
             ${g.rows.map(r => `
               <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);padding:1px 0;cursor:pointer;">
-                <input type="checkbox" class="ar-member" data-role="${role}" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(role + ':' + g.kind + ':' + r.code) ? 'checked' : ''}>
-                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${pbEsc(r.name || r.description || r.code)}</span>
+                <input type="checkbox" class="cond-member" data-role="${role}" data-kind="${g.kind}" data-code="${pbEsc(r.code)}" ${mine.has(role + ':' + g.kind + ':' + r.code) ? 'checked' : ''}>
+                <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${pbEsc(r.name || r.description || r.code)}">${pbEsc(r.name || r.description || r.code)}</span>
               </label>`).join('') || '<div style="font-size:11px;color:var(--text3);">none</div>'}
           </div>`).join('')}
       </div>`;
     const section = (title, inner) => `<div style="font-size:11px;font-weight:700;color:var(--navy);margin:10px 0 6px;">${title}</div>${inner}`;
+    const extra = () => _condItemGroups(['Workforce Support Items', 'Contract Support Items', 'Service Support Items']).concat([_condTrainingGroup('Training Courses')]);
+    const memberGroups = _condItems(false).concat(extra());
+    const triggerGroups = _condItems(true).concat(extra());
+    const targetGroups = type === 'implies' ? _condItems(false).slice(0, 1).concat(extra()) : _condItems(false).concat(extra());
     const body = type === 'exclusive'
-      ? picker('member', _arItems(false))
-      : section('IF any of these is active on the post', picker('trigger', _arItems(true))) +
-        section(type === 'implies' ? 'THEN tick these statutory allowances automatically' : 'THEN all of these must already be active', picker('target', type === 'implies' ? _arItems(false).slice(0, 1) : _arItems(false)));
+      ? picker('member', memberGroups)
+      : section('IF any of these is active on the post', picker('trigger', triggerGroups)) +
+        section(type === 'implies' ? 'THEN tick these automatically' : 'THEN all of these must already be active', picker('target', targetGroups));
     editor = `
     <div style="background:var(--bg2);border:2px solid var(--navy);border-radius:8px;padding:14px 16px;margin-bottom:12px;">
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px;">
         <span style="font-size:12px;font-weight:700;color:var(--navy);">${rule ? 'Edit condition' : 'New condition'}</span>
-        <input id="ar-name" class="form-control" placeholder="Name — e.g. Armed role" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 200px;font-size:13px;">
-        <select id="ar-type" class="form-control" style="flex:0 0 auto;font-size:12px;" onchange="_arState.type=this.value;_arPaint()">
+        <input id="cond-name" class="form-control" placeholder="Name — e.g. Firearm Competency → Danger Allowance" value="${pbEsc(rule ? rule.name : '')}" style="flex:1 1 220px;font-size:13px;">
+        <select id="cond-type" class="form-control" style="flex:0 0 auto;font-size:12px;" onchange="_condState.type=this.value;_condPaint()">
           <option value="exclusive" ${type === 'exclusive' ? 'selected' : ''}>Only one may be active</option>
           <option value="requires" ${type === 'requires' ? 'selected' : ''}>Requires (if this, then that must be on)</option>
           <option value="implies" ${type === 'implies' ? 'selected' : ''}>Auto-includes (if this, tick that)</option>
         </select>
       </div>
-      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">${AR_TYPES[type].hint}</div>
+      <div style="font-size:11px;color:var(--text3);margin-bottom:6px;">${COND_TYPES[type].hint}</div>
       ${body}
       <div style="display:flex;gap:8px;margin-top:12px;">
-        <button class="btn btn-sm btn-primary" onclick="_arSave(${rule ? rule.id : 'null'})">Save condition</button>
-        <button class="btn btn-sm btn-ghost" onclick="_arState.editing=null;_arState.type=null;_arPaint()">Cancel</button>
+        <button class="btn btn-sm btn-primary" onclick="_condSave(${rule ? rule.id : 'null'})">Save condition</button>
+        <button class="btn btn-sm btn-ghost" onclick="_condState.editing=null;_condState.type=null;_condPaint()">Cancel</button>
       </div>
     </div>`;
   }
 
   out.innerHTML = `
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-      <button class="btn btn-sm btn-ghost" onclick="pbBackToCcGrid()">‹ Conditional Criteria</button>
       <span style="flex:1 1 auto;"></span>
-      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_arState.editing='new';_arState.type='exclusive';_arPaint()">+ New condition</button>` : ''}
+      ${st.editing == null ? `<button class="btn btn-sm btn-primary" onclick="_condState.editing='new';_condState.type='exclusive';_condPaint()">+ New condition</button>` : ''}
     </div>
     ${editor}${list}
     <div style="font-size:11px;color:var(--text3);margin-top:6px;">
-      Conditions apply the moment someone ticks an allowance or types an incentive amount on a post:
-      an exclusive group's second member is refused, a "requires" trigger is refused until its targets are on
-      (and the targets cannot be cleared while it is), and an "auto-includes" target ticks itself when its
-      trigger is active — including post conditions such as a shift crossing midnight, or "the post is staffed",
-      which is always true and so applies the rule to every post. Messages name the rule.
+      A condition fires the moment its trigger holds on a post: an allowance is ticked, an incentive carries an amount,
+      a post condition applies (a shift crossing midnight, weekend staffing, or simply "the post is staffed"), or a
+      support item or training course is ticked. THEN targets a statutory allowance, a support item or a training
+      course — any of them can now drive any other, including a support item or course driving an allowance, which
+      was never possible while these were two separate screens. Unticking anything a condition ticked, or an item
+      that a "requires" rule needs, asks for a reason or is refused. Messages name the rule.
     </div>`;
 }
 
-function _arEdit(id) { _arState.editing = id; _arState.type = null; _arPaint(); }
+function _condEdit(id) { _condState.editing = id; _condState.type = null; _condPaint(); }
 
-async function _arSave(id) {
-  const name = String((document.getElementById('ar-name') || {}).value || '').trim();
+async function _condSave(id) {
+  const name = String((document.getElementById('cond-name') || {}).value || '').trim();
   if (!name) { showStatus('Give the condition a name', 'error'); return; }
-  const type = String((document.getElementById('ar-type') || {}).value || 'exclusive');
-  const picked = [...document.querySelectorAll('.ar-member:checked')]
+  const type = String((document.getElementById('cond-type') || {}).value || 'exclusive');
+  const picked = [...document.querySelectorAll('.cond-member:checked')]
     .map(el => ({ role: el.dataset.role, kind: el.dataset.kind, code: el.dataset.code }));
   if (type === 'exclusive') {
     if (picked.length < 2) { showStatus('Pick at least two items — a condition needs something to be exclusive WITH', 'error'); return; }
@@ -11281,47 +11126,58 @@ async function _arSave(id) {
     const both = targ.find(t => trig.some(x => x.kind === t.kind && x.code === t.code));
     if (both) { showStatus(pbAllowLabelFor(both.kind, both.code) + ' cannot be both a trigger and a target', 'error'); return; }
   }
+  // A type switch hides members the new type can't hold (a post condition is never an exclusive
+  // member; a discretionary/incentive allowance is never an implies target). Saving would drop
+  // them silently — say so and ask first.
+  if (id != null) {
+    const roleOf = m => (type === 'exclusive' ? 'member' : (m.role === 'member' ? 'trigger' : m.role));
+    const hidden = (allData['quote_condition_rule_members'] || []).filter(m => +m.rule_id === +id &&
+      !document.querySelector('.cond-member[data-role="' + roleOf(m) + '"][data-kind="' + CSS.escape(m.kind) + '"][data-code="' + CSS.escape(m.code) + '"]'));
+    if (hidden.length && !await confirmDialog({
+      title: 'Drop these members?',
+      message: 'A "' + (COND_TYPES[type] || COND_TYPES.exclusive).badge + '" condition cannot hold: ' + hidden.map(m => pbAllowLabelFor(m.kind, m.code)).join(', ') + '.\nSaving removes them from this condition.',
+      confirmLabel: 'Save without them', danger: true })) return;
+  }
   const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
   try {
     let rid = id;
     if (rid == null) {
-      const made = await api('quote_allowance_rules', 'POST',
-        { rule_type: type, name, created_by: me }, 'select=id');
+      const made = await api('quote_condition_rules', 'POST', { rule_type: type, name, created_by: me }, 'select=id');
       rid = Array.isArray(made) ? made[0].id : made.id;
     } else {
-      await api('quote_allowance_rules', 'PATCH', { name, rule_type: type }, 'id=eq.' + rid);
-      await api('quote_allowance_rule_members', 'DELETE', null, 'rule_id=eq.' + rid);
+      await api('quote_condition_rules', 'PATCH', { name, rule_type: type }, 'id=eq.' + rid);
+      await api('quote_condition_rule_members', 'DELETE', null, 'rule_id=eq.' + rid);
     }
-    const rows = picked.map(m => type === 'exclusive' ? { rule_id: rid, kind: m.kind, code: m.code } : { rule_id: rid, kind: m.kind, code: m.code, role: m.role });
-    await api('quote_allowance_rule_members', 'POST', rows, '');
+    const rows = picked.map(m => ({ rule_id: rid, kind: m.kind, code: m.code, role: type === 'exclusive' ? 'member' : m.role }));
+    await api('quote_condition_rule_members', 'POST', rows, '');
     showStatus('Condition saved');
-    _arState.editing = null; _arState.type = null;
-    await renderAllowRules();
+    _condState.editing = null; _condState.type = null;
+    await renderCondRules();
   } catch (e) {
-    const hint = /role|rule_type|check constraint|kind/i.test(e.message) ? ' — has sql/allowance_rules_complex.sql been run?' : '';
+    const hint = /404|PGRST205|role|rule_type|check constraint|kind/i.test(e.message) ? ' — has sql/unify_condition_rules.sql been run?' : '';
     showStatus('Could not save the condition: ' + e.message + hint, 'error');
   }
 }
 
-async function _arToggle(id, on) {
+async function _condToggle(id, on) {
   try {
-    await api('quote_allowance_rules', 'PATCH', { active: !!on }, 'id=eq.' + id);
-    showStatus(on ? 'Condition enabled' : 'Condition disabled — it no longer blocks anything');
-    await renderAllowRules();
+    await api('quote_condition_rules', 'PATCH', { active: !!on }, 'id=eq.' + id);
+    showStatus(on ? 'Condition enabled' : 'Condition disabled — it no longer applies');
+    await renderCondRules();
   } catch (e) { showStatus('Could not update it: ' + e.message, 'error'); }
 }
 
-async function _arDelete(id) {
-  if (_arState._confirmDel !== id) {
-    _arState._confirmDel = id;
+async function _condDelete(id) {
+  if (_condState._confirmDel !== id) {
+    _condState._confirmDel = id;
     showStatus('Click Delete again to remove this condition permanently', 'error');
     return;
   }
-  _arState._confirmDel = null;
+  _condState._confirmDel = null;
   try {
-    await api('quote_allowance_rules', 'DELETE', null, 'id=eq.' + id);
+    await api('quote_condition_rules', 'DELETE', null, 'id=eq.' + id);
     showStatus('Condition deleted');
-    await renderAllowRules();
+    await renderCondRules();
   } catch (e) { showStatus('Could not delete it: ' + e.message, 'error'); }
 }
 
@@ -11331,8 +11187,6 @@ async function renderPbEditor(schemaId, opts) {
   if (schemaId === 'salary-rates') { await renderSalaryRateGrid(); return; }
   // Statutory allowances change annually the way salaries do — same treatment.
   if (schemaId === 'statutory-allowances') { await renderStatAllowGrid(); return; }
-  // Conditions between allowances and incentives get their own screen.
-  if (schemaId === 'allowance-rules') { await renderAllowRules(); return; }
   const schema = PB_SCHEMAS[schemaId];
   if (!schema) return;
 
