@@ -709,7 +709,7 @@ td.rev-past { background:#EEF0F3; }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.69 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.70 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -748,7 +748,7 @@ td.rev-past { background:#EEF0F3; }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.69 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.70 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6451,6 +6451,7 @@ async function openQuote(id) {
     pbHeadings = pbGroupPostsByHeading(posts);
     pbEnsureUngrouped();
     pbViewMode = 'editor'; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
+    _wfState.editing = null; _wfState.open = new Set();   // v7.9.70: a quote's expanded/editing workforce rows never carry into the next quote
     renderQuoteEditor();
   } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
 }
@@ -7121,19 +7122,20 @@ function pbAccSummary() {
   return out;
 }
 
-// ── Workforce Support Items tab (v7.9.53) ───────────────────────────────────
-// The per-post ticks and the cost basis set the RULE total of each workforce item. This tab
-// rolls them up per item and lets the quote add to, subtract from or override that total with
-// a recorded reason (quote_workforce_adjustments), after a warning. Colours: green = as per
-// rule, blue = above the rule, amber = below the rule, red = no cost or outside the in-use
-// window. The adjustment prices as its own line; the posts keep their ticks.
+// ── Workforce Support Items tab (v7.9.53; reworked v7.9.70) ─────────────────
+// The per-post ticks and the cost basis set what the POSTS NEED of each workforce item ("from
+// posts"). This tab rolls that up per item and lets the quote add to, subtract from or override
+// it with a recorded reason (quote_workforce_adjustments), after a warning. Status: green = from
+// posts, blue = added here / here only, amber = reduced here, red = no price / retired / not in
+// use, grey = not ticked. The adjustment prices as its own line; the posts keep their ticks.
 let pbWorkforceAdj = new Map();   // accessory_id → { mode, quantity, reason }
-let _wfState = { editing: null, showAll: false };
+let _wfState = { editing: null, showAll: false, open: new Set() };   // open: item ids whose detail row is expanded (v7.9.70)
 const PB_WF_LEVEL = {
   ok:   { bg: '',        badge: '#DCFCE7', fg: '#166534' },
   info: { bg: '#EFF6FF', badge: '#DBEAFE', fg: '#1E40AF' },
   warn: { bg: '#FFFBEB', badge: '#FEF3C7', fg: '#7A5B10' },
-  bad:  { bg: '#FEF2F2', badge: '#FEE2E2', fg: '#991B1B' }
+  bad:  { bg: '#FEF2F2', badge: '#FEE2E2', fg: '#991B1B' },
+  none: { bg: '',        badge: '#EDEFF1', fg: '#41505F' }   // v7.9.70: not ticked anywhere — neutral, claims nothing
 };
 function pbWfFinal(auto, adj) {
   if (!adj) return auto;
@@ -7170,68 +7172,97 @@ function pbWorkforceRollup(includeAll) {
     if (!posts.length && !adj && !(includeAll && live)) return;
     const final = pbWfFinal(auto, adj);
     const rule = pbWfMoney(cost, auto), money = pbWfMoney(cost, final);
+    // v7.9.70 wording: the quantity comes from the posts that tick the item ("from posts"),
+    // never from a "rule" — that word belongs to Conditions & Rules now (Richard, 2026-09-19).
     const warnings = [];
-    let level = 'ok', label = 'as per rule';
-    if (adj && final > auto) { level = 'info'; label = 'above rule'; warnings.push('Above the rule by ' + (final - auto)); }
-    if (adj && final < auto) { level = 'warn'; label = 'below rule'; warnings.push('Below the rule by ' + (auto - final) + ' — officers on the ticked posts may go without'); }
-    if (adj && final === auto) warnings.push('The adjustment leaves the rule total unchanged');
-    if (adj && adj.mode === 'subtract' && adj.quantity > auto) warnings.push('Subtracts more than the rule total — floored at 0');
-    if (adj && !posts.length) warnings.push('No post ticks this item — the whole quantity comes from the adjustment');
+    let level = 'ok', label = 'from posts';
+    if (!posts.length && !adj) { level = 'none'; label = 'not ticked'; }   // only reachable via "show every item"
+    if (adj && posts.length && final > auto) { level = 'info'; label = 'added here'; warnings.push((final - auto) + ' more than the posts need'); }
+    if (adj && final < auto) { level = 'warn'; label = 'reduced here'; warnings.push((auto - final) + ' fewer than the posts need — officers on those posts may go without'); }
+    if (adj && posts.length && final === auto) warnings.push('The adjustment leaves the quantity from the posts unchanged');
+    if (adj && posts.length && adj.mode === 'subtract' && adj.quantity > auto) warnings.push('Subtracts more than the posts need — floored at 0');
+    if (adj && !posts.length) {
+      if (final > 0) { level = 'info'; label = 'here only'; warnings.push('No post ticks this item — the whole quantity was added on this tab'); }
+      else { level = 'none'; label = 'not ticked'; warnings.push('No post ticks this item and the adjustment quotes nothing — remove it or give it a quantity'); }
+    }
     if (!live) { level = 'bad'; label = item.retired_date && String(item.retired_date) < asAt ? 'retired' : 'not in use'; warnings.push((label === 'retired' ? 'Retired before' : 'Not yet in use at') + ' the contract start ' + asAt); }
-    if (!cost) { level = 'bad'; label = 'no cost'; warnings.push('No cost recorded as at ' + asAt + ' — nothing is priced for it'); }
+    if (!cost) { level = 'bad'; label = 'no price'; warnings.push('No price recorded as at ' + asAt + ' — nothing is priced for it'); }
     rows.push({ item, cost, posts, auto, adj, final, unit: cost ? pbAccMonthlyUnit(cost) : 0, rule, money, warnings, level, label, live });
   });
   return rows;
 }
+// v7.9.70 (Richard, 2026-09-19): one monthly total above the table and nothing below it; the
+// static legend is gone; every item is a collapsible row — name, units, monthly, status — that
+// opens to the full detail (posts, from-posts quantity, adjustment, unit price, basis, recovery,
+// once-off, warnings) and the Adjust control. "From posts" replaces "rule" throughout: the
+// quantity is what the ticked posts need by the item's basis, and "rule" is Conditions & Rules'
+// word now. The as-at date stays as a note: it is the contract start, the date the catalogue's
+// in-use windows and effective-dated prices are read at.
+function pbWfToggle(id) {
+  if (_wfState.editing === +id) return;   // the editor is open in this row: a header click must not re-render away typed input
+  const s = _wfState.open; if (s.has(+id)) s.delete(+id); else s.add(+id); renderQuoteEditor();
+}
 function renderWorkforceTab() {
   const asAt = pbQuoteAsAt();
   const rows = pbWorkforceRollup(_wfState.showAll);
-  const tot = rows.reduce((a, r) => { a.ruleM += r.rule.monthly; a.ruleO += r.rule.onceOff; a.m += r.money.monthly; a.o += r.money.onceOff; if (r.level === 'bad') a.bad++; else if (r.level === 'warn') a.warn++; if (r.adj) a.adj++; return a; }, { ruleM: 0, ruleO: 0, m: 0, o: 0, bad: 0, warn: 0, adj: 0 });
+  const tot = rows.reduce((a, r) => { a.m += r.money.monthly; a.o += r.money.onceOff; if (r.level === 'bad') a.bad++; else if (r.level === 'warn') a.warn++; if (r.adj) a.adj++; return a; }, { m: 0, o: 0, bad: 0, warn: 0, adj: 0 });
   const badge = (level, text) => '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:' + PB_WF_LEVEL[level].badge + ';color:' + PB_WF_LEVEL[level].fg + ';">' + pbEsc(text) + '</span>';
-  const adjText = a => !a ? '<span class="pg-muted">—</span>' : pbEsc(a.mode === 'add' ? '+ ' + a.quantity : a.mode === 'subtract' ? '− ' + a.quantity : '= ' + a.quantity) + '<div class="pg-muted" style="font-size:11px;white-space:normal;">' + pbEsc(a.reason) + '</div>';
+  const adjText = a => !a ? '<span class="pg-muted">none</span>' : pbEsc(a.mode === 'add' ? '+ ' + a.quantity : a.mode === 'subtract' ? '− ' + a.quantity : '= ' + a.quantity) + '<div class="pg-muted" style="font-size:11px;white-space:normal;">' + pbEsc(a.reason) + '</div>';
+  const field = (label, value) => '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text3);margin-bottom:2px;">' + label + '</div><div style="color:var(--text);">' + value + '</div></div>';
   const body = rows.map(r => {
-    const L = PB_WF_LEVEL[r.level], ed = _wfState.editing === +r.item.id;
-    let html = '<tr style="' + (L.bg ? 'background:' + L.bg + ';' : '') + (ed ? 'outline:2px solid var(--navy);' : '') + '">' +
-      '<td><strong>' + pbEsc(r.item.name) + '</strong>' + (r.cost ? '<div class="pg-muted" style="font-size:11px;">' + pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) + (r.cost.recovery === 'once_off' ? ' · once-off to client' : r.cost.recovery === 'absorbed' ? ' · absorbed' : '') + '</div>' : '') + '</td>' +
-      '<td style="font-size:11px;color:var(--text2);">' + (r.posts.length ? r.posts.map(x => pbEsc(x.name) + ' ×' + x.qty).join('<br>') : '<span class="pg-muted">none</span>') + '</td>' +
-      '<td style="text-align:right;">' + r.auto + '</td>' +
-      '<td>' + adjText(r.adj) + '</td>' +
-      '<td style="text-align:right;font-weight:700;color:' + (r.final !== r.auto ? L.fg : 'inherit') + ';">' + r.final + '</td>' +
-      '<td style="text-align:right;">' + (r.cost ? pbRand(r.unit) : '<span class="pg-muted">—</span>') + '</td>' +
+    const L = PB_WF_LEVEL[r.level], id = +r.item.id, ed = _wfState.editing === id, open = ed || _wfState.open.has(id);
+    let html = '<tr style="cursor:pointer;' + (L.bg ? 'background:' + L.bg + ';' : '') + '" onclick="pbWfToggle(' + id + ')">' +
+      '<td><span style="display:inline-block;width:16px;color:var(--text3);">' + (open ? '▾' : '▸') + '</span><strong>' + pbEsc(r.item.name) + '</strong></td>' +
+      '<td style="text-align:right;font-weight:700;color:' + (r.adj && r.final !== r.auto ? L.fg : 'inherit') + ';">' + r.final + '</td>' +
       '<td style="text-align:right;">' + (r.cost && r.cost.recovery === 'absorbed' ? '<span class="pg-muted">absorbed</span>' : pbRand(r.money.monthly)) + '</td>' +
-      '<td style="text-align:right;">' + (r.money.onceOff ? pbRand(r.money.onceOff) : '<span class="pg-muted">—</span>') + '</td>' +
-      '<td>' + badge(r.level, r.label) + (r.warnings.length ? '<div style="font-size:11px;color:' + L.fg + ';margin-top:3px;white-space:normal;">' + r.warnings.map(pbEsc).join('<br>') + '</div>' : '') + '</td>' +
-      '<td style="white-space:nowrap;">' + (ed ? '' : '<button class="btn btn-ghost btn-sm" onclick="pbWfAdjustOpen(' + r.item.id + ')">' + (r.adj ? 'Change' : 'Adjust') + '</button>') + '</td></tr>';
-    if (ed) {
-      const a = r.adj || { mode: 'add', quantity: 0, reason: '' };
-      html += '<tr><td colspan="10" style="background:#F7F8FA;padding:10px 14px;">' +
-        '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">' +
-          '<div class="form-group"><label class="form-label">Adjustment</label><select class="form-control" id="wf-mode-' + r.item.id + '" onchange="pbWfPreview(' + r.item.id + ',' + r.auto + ')">' +
-            ['add:Add to the rule total', 'subtract:Subtract from the rule total', 'override:Override the total'].map(o => { const [v, l] = o.split(':'); return '<option value="' + v + '"' + (a.mode === v ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select></div>' +
-          '<div class="form-group"><label class="form-label">Quantity</label><input type="number" min="0" step="1" class="form-control" id="wf-qty-' + r.item.id + '" style="width:90px;" value="' + a.quantity + '" oninput="pbWfPreview(' + r.item.id + ',' + r.auto + ')"></div>' +
-          '<div class="form-group" style="flex:1;min-width:220px;"><label class="form-label">Reason (required, recorded on the quote)</label><input type="text" class="form-control" id="wf-reason-' + r.item.id + '" value="' + pbEsc(a.reason) + '" placeholder="Client supplies its own torches · spares for a remote site · …"></div>' +
-          '<div id="wf-preview-' + r.item.id + '" style="font-size:12px;font-weight:700;min-width:120px;"></div>' +
-          '<button class="btn btn-primary btn-sm" onclick="pbWfAdjustSave(' + r.item.id + ')">Apply</button>' +
-          (r.adj ? '<button class="btn btn-ghost btn-sm" onclick="pbWfAdjustClear(' + r.item.id + ')">Remove adjustment</button>' : '') +
+      '<td>' + badge(r.level, r.label) + '</td></tr>';
+    if (open) {
+      html += '<tr><td colspan="4" style="background:#F7F8FA;padding:10px 14px 12px 30px;" onclick="event.stopPropagation()">' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 18px;font-size:12px;">' +
+          field('Posts', r.posts.length ? r.posts.map(x => pbEsc(x.name) + ' ×' + x.qty).join('<br>') : '<span class="pg-muted">' + (r.adj ? 'none — added on this tab' : 'none') + '</span>') +
+          field('From posts', r.auto) +
+          field('Adjustment', adjText(r.adj)) +
+          field('Quoted', '<strong>' + r.final + '</strong>') +
+          // A once-off item charges only its running cost monthly; the acquisition goes on the setup line.
+          field('Unit / month', !r.cost ? '<span class="pg-muted">no price</span>' : r.cost.recovery === 'once_off' ? pbRand(+r.cost.monthly_cost || 0) : pbRand(r.unit)) +
+          (r.cost && r.cost.recovery === 'once_off' ? field('Unit once-off', pbRand(+r.cost.acquisition_cost || 0)) : '') +
+          field('Basis', r.cost ? pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) : '—') +
+          field('Recovery', r.cost ? pbEsc(PB_ACC_RECOVERY[r.cost.recovery] || r.cost.recovery) : '—') +
+          field('Once-off at setup', r.money.onceOff ? pbRand(r.money.onceOff) : '—') +
+        '</div>' +
+        (r.warnings.length ? '<div style="font-size:11px;color:' + L.fg + ';margin-top:8px;">' + r.warnings.map(pbEsc).join('<br>') + '</div>' : '');
+      if (ed) {
+        const a = r.adj || { mode: 'add', quantity: 0, reason: '' };
+        html += '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          '<div class="form-group"><label class="form-label">Adjustment</label><select class="form-control" id="wf-mode-' + id + '" onchange="pbWfPreview(' + id + ',' + r.auto + ')">' +
+            ['add:Add to what the posts need', 'subtract:Subtract from what the posts need', 'override:Override the quantity'].map(o => { const [v, l] = o.split(':'); return '<option value="' + v + '"' + (a.mode === v ? ' selected' : '') + '>' + l + '</option>'; }).join('') + '</select></div>' +
+          '<div class="form-group"><label class="form-label">Quantity</label><input type="number" min="0" step="1" class="form-control" id="wf-qty-' + id + '" style="width:90px;" value="' + a.quantity + '" oninput="pbWfPreview(' + id + ',' + r.auto + ')"></div>' +
+          '<div class="form-group" style="flex:1;min-width:220px;"><label class="form-label">Reason (required, recorded on the quote)</label><input type="text" class="form-control" id="wf-reason-' + id + '" value="' + pbEsc(a.reason) + '" placeholder="Client supplies its own torches · spares for a remote site · …"></div>' +
+          '<div id="wf-preview-' + id + '" style="font-size:12px;font-weight:700;min-width:120px;"></div>' +
+          '<button class="btn btn-primary btn-sm" onclick="pbWfAdjustSave(' + id + ')">Apply</button>' +
+          (r.adj ? '<button class="btn btn-ghost btn-sm" onclick="pbWfAdjustClear(' + id + ')">Remove adjustment</button>' : '') +
           '<button class="btn btn-ghost btn-sm" onclick="_wfState.editing=null;renderQuoteEditor()">Cancel</button>' +
-        '</div><div class="pg-muted" style="font-size:11px;margin-top:6px;">Rule total ' + r.auto + ' comes from the posts that tick this item and the item\'s basis. An adjustment departs from that rule: you will be asked to confirm, and the difference prices as its own line.</div></td></tr>';
+        '</div><div class="pg-muted" style="font-size:11px;margin-top:6px;">From posts: ' + r.auto + ' — the posts that tick this item, by its basis. An adjustment departs from that: you will be asked to confirm, and the difference prices as its own line on the proposal.</div>';
+      } else {
+        html += '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="pbWfAdjustOpen(' + id + ')">' + (r.adj ? 'Change adjustment' : 'Adjust') + '</button></div>';
+      }
+      html += '</td></tr>';
     }
     return html;
   }).join('');
   return '<div class="pb-qheader">' +
-    '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">' +
-      '<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);">Workforce support items (as at ' + pbEsc(asAt) + ')</div>' +
+    '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:10px;">' +
+      '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);">Monthly total</div>' +
+        '<div style="font-size:20px;font-weight:700;color:var(--navy);line-height:1.2;">' + pbRand(tot.m) + '<span style="font-size:12px;font-weight:400;color:var(--text3);"> /mo</span></div>' +
+        (tot.o ? '<div style="font-size:11px;color:var(--text3);">plus ' + pbRand(tot.o) + ' once-off at setup</div>' : '') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
       '<span style="flex:1;"></span>' +
-      (tot.bad ? badge('bad', tot.bad + ' warning' + (tot.bad === 1 ? '' : 's')) : '') + (tot.warn ? badge('warn', tot.warn + ' below rule') : '') + (tot.adj ? badge('info', tot.adj + ' adjusted') : '') +
-      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;"><input type="checkbox" ' + (_wfState.showAll ? 'checked' : '') + ' onchange="_wfState.showAll=this.checked;renderQuoteEditor()"> show every item in use, ticked or not</label>' +
+      (tot.bad ? badge('bad', tot.bad + ' not priced') : '') + (tot.warn ? badge('warn', tot.warn + ' reduced') : '') + (tot.adj ? badge('info', tot.adj + ' adjusted') : '') +
+      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (_wfState.showAll ? 'checked' : '') + ' onchange="_wfState.showAll=this.checked;renderQuoteEditor()"> show every item in use, ticked or not</label>' +
     '</div>' +
-    '<div style="font-size:11px;color:var(--text3);margin-bottom:8px;">Each row totals the item across the posts that tick it, by the item\'s basis (per officer, per duty position, per post). Adjust adds to, subtracts from or overrides that total for this quote with a recorded reason. ' +
-      badge('ok', 'as per rule') + ' ' + badge('info', 'above rule') + ' ' + badge('warn', 'below rule') + ' ' + badge('bad', 'no cost / retired') + '</div>' +
-    (rows.length ? '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th>Posts</th><th style="text-align:right;">Rule</th><th>Adjustment</th><th style="text-align:right;">Final</th><th style="text-align:right;">Unit /mo</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th><th>Status</th><th></th></tr></thead><tbody>' + body + '</tbody>' +
-      '<tfoot><tr style="font-weight:700;border-top:2px solid var(--navy);"><td colspan="6">Rule total</td><td style="text-align:right;">' + pbRand(tot.ruleM) + '</td><td style="text-align:right;">' + pbRand(tot.ruleO) + '</td><td colspan="2"></td></tr>' +
-      '<tr style="font-weight:700;"><td colspan="6">Priced total (after adjustments)</td><td style="text-align:right;color:' + (tot.m > tot.ruleM ? PB_WF_LEVEL.info.fg : tot.m < tot.ruleM ? PB_WF_LEVEL.warn.fg : 'inherit') + ';">' + pbRand(tot.m) + '/mo</td><td style="text-align:right;color:' + (tot.o > tot.ruleO ? PB_WF_LEVEL.info.fg : tot.o < tot.ruleO ? PB_WF_LEVEL.warn.fg : 'inherit') + ';">' + pbRand(tot.o) + '</td><td colspan="2"></td></tr></tfoot></table></div>'
+    (rows.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th style="text-align:right;">Units</th><th style="text-align:right;">Monthly</th><th>Status</th></tr></thead><tbody>' + body + '</tbody></table>'
       : '<div class="pb-placeholder-text">No workforce support item is ticked on any post yet. Tick them under each post\'s "Workforce Support Items and Training", or show every item above to add one here.</div>') +
-    '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">The posts keep their ticks and their rule-based prices; an adjustment prices as one "Workforce support items" line on the proposal, positive or negative. Once-off amounts join the "Setup and equipment" line.</p>' +
   '</div>';
 }
 function pbWfPreview(id, auto) {
@@ -7240,25 +7271,25 @@ function pbWfPreview(id, auto) {
   const final = pbWfFinal(auto, { mode: g('mode').value, quantity: +g('qty').value || 0 });
   const level = final > auto ? 'info' : final < auto ? 'warn' : 'ok';
   el.style.color = PB_WF_LEVEL[level].fg;
-  el.textContent = 'Rule ' + auto + ' → ' + final;
+  el.textContent = 'From posts ' + auto + ' → ' + final;
 }
-function pbWfAdjustOpen(id) { _wfState.editing = +id; renderQuoteEditor(); setTimeout(() => { const r = pbWorkforceRollup(true).find(x => +x.item.id === +id); if (r) pbWfPreview(id, r.auto); }, 0); }
+function pbWfAdjustOpen(id) { _wfState.editing = +id; _wfState.open.add(+id); renderQuoteEditor(); setTimeout(() => { const r = pbWorkforceRollup(true).find(x => +x.item.id === +id); if (r) pbWfPreview(id, r.auto); }, 0); }
 async function pbWfAdjustSave(id) {
   const g = k => document.getElementById('wf-' + k + '-' + id);
   const mode = g('mode').value, quantity = Math.max(0, Math.round(+g('qty').value || 0)), reason = String(g('reason').value || '').trim();
-  if (!reason) { showStatus('A reason is required — the adjustment departs from the per-post rule', 'error'); g('reason').focus(); return; }
+  if (!reason) { showStatus('A reason is required — the adjustment departs from what the posts need', 'error'); g('reason').focus(); return; }
   const r = pbWorkforceRollup(true).find(x => +x.item.id === +id);
   if (!r) return;
   const final = pbWfFinal(r.auto, { mode, quantity });
   const diff = final - r.auto;
   const lines = [
-    r.item.name + ': the posts that tick it require ' + r.auto + '.',
-    'This quote will provision ' + final + (diff ? ' (' + (diff > 0 ? '+' : '') + diff + ' against the rule).' : ' — the same as the rule.'),
-    diff < 0 ? '\nWARNING: fewer than the posts require. Officers on those posts may go without.' : '',
-    !r.cost ? '\nWARNING: no cost is recorded for this item, so nothing is priced.' : '',
+    r.item.name + ': the posts that tick it need ' + r.auto + '.',
+    'This quote will provision ' + final + (diff ? ' (' + (diff > 0 ? '+' : '') + diff + ' against the posts).' : ' — the same as the posts.'),
+    diff < 0 ? '\nWARNING: fewer than the posts need. Officers on those posts may go without.' : '',
+    !r.cost ? '\nWARNING: no price is recorded for this item, so nothing is priced.' : '',
     '\nReason recorded: ' + reason
   ].filter(Boolean).join('\n');
-  if (!await confirmDialog({ title: 'Depart from the rule?', message: lines, confirmLabel: 'Apply adjustment', danger: diff < 0 })) return;
+  if (!await confirmDialog({ title: 'Adjust the quantity?', message: lines, confirmLabel: 'Apply adjustment', danger: diff < 0 })) return;
   const me = +((typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0) || null;
   try {
     await api('quote_workforce_adjustments', 'POST', { quote_id: pbQ.id, accessory_id: id, mode, quantity, reason, created_by: me, updated_at: new Date().toISOString() },
@@ -7270,7 +7301,7 @@ async function pbWfAdjustSave(id) {
   renderQuoteEditor();
 }
 async function pbWfAdjustClear(id) {
-  if (!await confirmDialog({ title: 'Remove the adjustment?', message: 'The item goes back to its rule total from the posts.', confirmLabel: 'Remove' })) return;
+  if (!await confirmDialog({ title: 'Remove the adjustment?', message: 'The item goes back to the quantity the posts need.', confirmLabel: 'Remove' })) return;
   try {
     await api('quote_workforce_adjustments', 'DELETE', null, 'quote_id=eq.' + pbQ.id + '&accessory_id=eq.' + id);
     pbWorkforceAdj.delete(+id);
