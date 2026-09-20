@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.75 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.76 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.75 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.76 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7040,8 +7040,15 @@ async function renderPbItemCatalogPage(kind, tabs) {
   }
   pbItemAdmin.tabs = tabs || null;
   if (tabs) _pbSupportLastKind = kind;
-  const body = document.getElementById('table-body');
-  document.getElementById('table-head').innerHTML = '';
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  // v7.9.76 (Richard: "moving from one tab to the next creates a short-lasting artifact"): unless the
+  // body already shows THIS kind's rows (a same-kind reload after a save or drop), draw the kind's
+  // strip, toolbar and description at once with an empty body, so the previous tab's rows never sit
+  // under the new head while the fetch runs.
+  if (!(body.firstElementChild && body.firstElementChild.getAttribute('data-pbi-kind') === kind)) {
+    head.innerHTML = pbiHeadHtml(kind);
+    body.innerHTML = '<tr data-pbi-kind="' + kind + '"><td colspan="4" class="pg-muted" style="padding:18px 14px;">Loading…</td></tr>';
+  }
   let items = [], costs = [], subcats = [], costsMissing = false;
   try {
     [items, costs, subcats] = await Promise.all([
@@ -7129,7 +7136,7 @@ function pbiPaint() {
   const nItems = n => n === 1 ? '1 item' : n + ' items';
   const ghost = '<button class="btn btn-ghost btn-sm" style="color:#fff;opacity:.85;" ';
   const groupRow = (n, gi) => { const c = col(pbiGKey(n)), count = n.subs.reduce((a, sn) => a + sn.items.length, 0), leaf = n.single ? n.subs[0].sub : null;
-    return '<tr data-pbi="group" ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')" onclick="pbiCollapse(\'g\', ' + gi + ')" style="cursor:pointer;"><td colspan="' + cols + '" style="background:var(--navy);color:#fff;padding:5px 10px 5px 14px;">' +
+    return '<tr data-pbi="group" data-pbi-kind="' + kind + '" ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')" onclick="pbiCollapse(\'g\', ' + gi + ')" style="cursor:pointer;"><td colspan="' + cols + '" style="background:var(--navy);color:#fff;padding:5px 10px 5px 14px;">' +
       '<div style="display:flex;align-items:center;gap:8px;">' +
         (n.groupName != null ? handle('group', gi, 'Drag to reorder groups', 'color:rgba(255,255,255,.6);') : '<span style="display:inline-block;width:14px;"></span>') +
         caret(!c, true) +
@@ -7151,6 +7158,7 @@ function pbiPaint() {
       '</div></td></tr>'; };
   const emptyRow = (sn, gi) => sn.items.length ? '' : '<tr data-pbi="empty"' + (sn.sub ? ' ondragover="pbiDragOver(event, \'sub\', ' + sn.sub.id + ')" ondrop="pbiDrop(event, \'sub\', ' + sn.sub.id + ')"' : ' ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')"') + '><td colspan="' + cols + '" class="pg-muted" style="font-size:11px;padding:3px 10px 5px ' + (14 + 2 * PBI_IND) + 'px;">no items — drag one here</td></tr>';
   const rows = tree.map((n, gi) => {
+    if (n.groupName == null && !n.subs[0].items.length) return '';   // v7.9.76: an empty Unfiled group is not shown (the editor's Subcategory select can still unfile an item)
     if (col(pbiGKey(n))) return groupRow(n, gi);
     return groupRow(n, gi) + n.subs.map(sn => {
       if (n.single) return sn.items.map(rowOf).join('') + emptyRow(sn, gi);
@@ -7158,13 +7166,8 @@ function pbiPaint() {
       return subRow(sn) + sn.items.map(rowOf).join('') + emptyRow(sn, gi);
     }).join('');
   }).join('');
-  const offered = k.sub === 'uniform' ? 'A uniform type is offered in the post row\'s Uniform dropdown' : (k.sub === 'contract' || k.sub === 'service') ? 'An item is offered once on a quote (Contract Support Items tab)' : 'An item is offered on each post';
-  head.innerHTML = (pbItemAdmin.tabs ? pbAdminTabStrip(pbItemAdmin.tabs.map(t => ({ key: t, label: PB_ITEM_KINDS[t].title })), kind, 'pbiTab', cols) : '') +
-    '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;text-transform:none;letter-spacing:0;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button> <button class="btn btn-secondary btn-sm" onclick="pbiAddGroup()">+ Add group</button> ' +
-      '<button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(false)">Expand all</button> <button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(true)">Collapse all</button>' +
-      '<span class="pg-muted" style="margin-left:12px;">' + (k.hint ? pbEsc(k.hint) + ' ' : '') + 'Click an item to edit it or add a cost. ' + offered + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
-    '<tr><th>Name</th><th style="width:110px;">In use from</th><th style="width:270px;">Current cost</th><th style="width:100px;">State</th></tr>';
-  body.innerHTML = rows || '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
+  head.innerHTML = pbiHeadHtml(kind);
+  body.innerHTML = rows || '<tr data-pbi-kind="' + kind + '"><td colspan="' + cols + '" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
   if (pbItemAdmin.dirty) pbiRestore(pbItemAdmin.draft);
   if (pbItemAdmin.addingCost) pbiRestore(pbItemAdmin.costDraft);
 }
@@ -7172,6 +7175,42 @@ function pbiPaint() {
 function pbAdminTabStrip(tabs, active, fn, colspan) {
   return '<tr><th colspan="' + colspan + '" style="background:#fff;padding:6px 14px 0;border-bottom:2px solid var(--navy);text-transform:none;letter-spacing:0;">' +
     tabs.map(t => '<button class="pb-admin-tab' + (t.key === active ? ' active' : '') + '" onclick="' + fn + '(\'' + t.key + '\')">' + pbEsc(t.label) + '</button>').join('') + '</th></tr>';
+}
+// v7.9.76: the strip, toolbar, description line and column header — drawn at once on a tab or page
+// switch (before the fetch) and again by every paint. The description is the page's own wording,
+// kept in settings as pb_catalog_hint_<kind> and editable in place; blank falls back to the
+// standard wording built from PB_ITEM_KINDS.
+function pbiHeadHtml(kind) {
+  const k = PB_ITEM_KINDS[kind], cols = 4, key = 'pb_catalog_hint_' + kind;
+  const hint = pbItemAdmin.hintEditing
+    ? '<textarea id="pbi-hint" class="form-control" rows="3" style="width:100%;font-size:12px;font-weight:400;" oninput="pbItemAdmin.hintDraft=this.value" placeholder="Blank = the standard wording">' + pbEsc(pbItemAdmin.hintDraft != null ? pbItemAdmin.hintDraft : (appSettings[key] || '')) + '</textarea>' +
+      '<div style="margin-top:6px;"><button class="btn btn-primary btn-sm" onclick="pbiHintSave()">Save</button> <button class="btn btn-ghost btn-sm" onclick="pbiHintCancel()">Cancel</button> <span class="pg-muted">Shown on this page for everyone. Leave it blank to go back to the standard wording.</span></div>'
+    : pbEsc(pbiDescriptor(kind)) + ' <button class="btn btn-ghost btn-sm" style="padding:0 6px;" title="Edit this description" onclick="pbiHintEdit()">Edit</button>';
+  return (pbItemAdmin.tabs ? pbAdminTabStrip(pbItemAdmin.tabs.map(t => ({ key: t, label: PB_ITEM_KINDS[t].title })), kind, 'pbiTab', cols) : '') +
+    '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;text-transform:none;letter-spacing:0;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button> <button class="btn btn-secondary btn-sm" onclick="pbiAddGroup()">+ Add group</button> ' +
+      '<button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(false)">Expand all</button> <button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(true)">Collapse all</button></th></tr>' +
+    '<tr><th colspan="' + cols + '" style="background:#EEF3F8;color:var(--text2);font-weight:400;font-size:12px;line-height:1.5;text-transform:none;letter-spacing:0;padding:8px 14px;border-bottom:1px solid var(--border);">' + hint + '</th></tr>' +
+    '<tr><th>Name</th><th style="width:110px;">In use from</th><th style="width:270px;">Current cost</th><th style="width:100px;">State</th></tr>';
+}
+function pbiDescriptor(kind) {
+  const v = appSettings['pb_catalog_hint_' + kind];
+  if (v != null && String(v).trim()) return String(v);
+  const k = PB_ITEM_KINDS[kind];
+  const offered = k.sub === 'uniform' ? 'A uniform type is offered in the post row\'s Uniform dropdown' : (k.sub === 'contract' || k.sub === 'service') ? 'An item is offered once on a quote (Contract Support Items tab)' : 'An item is offered on each post';
+  return (k.hint ? k.hint + ' ' : '') + 'Click an item to edit it or add a cost. ' + offered + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.';
+}
+function pbiHintEdit() { pbItemAdmin.hintEditing = true; pbItemAdmin.hintDraft = null; pbiPaint(); }
+function pbiHintCancel() { pbItemAdmin.hintEditing = false; pbItemAdmin.hintDraft = null; pbiPaint(); }
+async function pbiHintSave() {
+  const key = 'pb_catalog_hint_' + pbItemAdmin.kind, el = document.getElementById('pbi-hint'); if (!el) return;
+  const text = el.value.trim();
+  try {
+    const res = await api('settings', 'PATCH', { value: text, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
+    if (!res || !res.length) await api('settings', 'POST', { key, value: text }, '');
+    appSettings[key] = text; pbItemAdmin.hintEditing = false; pbItemAdmin.hintDraft = null;
+    showStatus(text ? 'Description saved' : 'Description back to the standard wording', 'success');
+  } catch (e) { showStatus('Could not save the description: ' + e.message, 'error'); return; }
+  pbiPaint();
 }
 function pbiTab(kind) { if (pbiBusy()) return; renderPbItemCatalogPage(kind, pbItemAdmin.tabs); }
 // Anything that would close or move the open item's editor waits for its unsaved input to be saved
