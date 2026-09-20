@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.74 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.74 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6464,6 +6464,7 @@ async function openQuote(id) {
     pbEnsureUngrouped();
     pbViewMode = 'editor'; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
     _wfState.editing = null; _wfState.open = new Set();   // v7.9.70: a quote's expanded/editing workforce rows never carry into the next quote
+    _ctState.editing = null; _ctState.open = new Set(); _pbContractOvrPending = null;   // v7.9.77: the Contract tab's rows and reason row likewise
     renderQuoteEditor();
   } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
 }
@@ -6999,7 +7000,7 @@ function pbItemCostLabel(kind, c) {
 }
 function pbSlug(name) { return String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 60) || ('item_' + Date.now()); }
 
-let pbItemAdmin = { kind: null, open: null, addingCost: false, dirty: false, draft: null, costDirty: false, costDraft: null, collapsed: new Set(), tree: null, drag: null, tabs: null, costsMissing: false };
+let pbItemAdmin = { kind: null, open: null, addingCost: false, dirty: false, draft: null, costDirty: false, costDraft: null, collapsed: new Set(), collapsedInit: false, tree: null, drag: null, tabs: null, costsMissing: false };
 // Unsaved input on the catalogue page lives in two drafts — the open item's editor (pbi-*) and its
 // cost form (pbc-*) — refreshed on every keystroke (pbiTouch / pbiTouchCost, each snapshots the whole
 // form) and written back after every repaint, so a collapse, a reload after a rename, or leaving the
@@ -7014,6 +7015,14 @@ function pbiRestore(d) { if (!d) return; Object.entries(d).forEach(([i, v]) => {
 function pbiClearCostDraft() { pbItemAdmin.costDirty = false; pbItemAdmin.costDraft = null; }
 const _pbItemAdminByKind = {};   // kind → its pbItemAdmin while another kind's page is showing
 let _pbSupportLastKind = 'accessory';   // the Support Items tab last shown, so the page reopens on it after a visit elsewhere
+// v7.9.75: a login starts the catalogue pages afresh — every kind's first paint collapses all its
+// groups and subcategories (pbiPaint's collapsedInit), and whatever the user then opens or closes
+// is remembered per kind until the next login (enterApp calls this).
+function pbiResetSession() {
+  Object.keys(_pbItemAdminByKind).forEach(k => delete _pbItemAdminByKind[k]);
+  pbItemAdmin = { kind: null, open: null, addingCost: false, dirty: false, draft: null, costDirty: false, costDraft: null, collapsed: new Set(), collapsedInit: false, tree: null, drag: null, tabs: null, costsMissing: false };
+  _pbSupportLastKind = 'accessory';
+}
 // v7.9.74 (Richard: "make every item 1 line … when one clicks, it allows edits and adding costs"):
 // an item is ONE line — name · in use from · current cost · state — and clicking it opens the
 // editor and the cost history beneath it. Groups sit at the left edge, subcategories one step in
@@ -7028,12 +7037,19 @@ async function renderPbItemCatalogPage(kind, tabs) {
   pbActiveSchema = null; pbEditingRowId = null; pbCatalogTabs = null;
   if (pbItemAdmin.kind !== kind) {   // each kind keeps its own state for the session, so an unsaved draft survives a visit to another catalogue page
     if (pbItemAdmin.kind) _pbItemAdminByKind[pbItemAdmin.kind] = pbItemAdmin;
-    pbItemAdmin = _pbItemAdminByKind[kind] || { kind, open: null, addingCost: false, dirty: false, draft: null, costDirty: false, costDraft: null, collapsed: new Set(), tree: null, drag: null, tabs: null, costsMissing: false };
+    pbItemAdmin = _pbItemAdminByKind[kind] || { kind, open: null, addingCost: false, dirty: false, draft: null, costDirty: false, costDraft: null, collapsed: new Set(), collapsedInit: false, tree: null, drag: null, tabs: null, costsMissing: false };
   }
   pbItemAdmin.tabs = tabs || null;
   if (tabs) _pbSupportLastKind = kind;
-  const body = document.getElementById('table-body');
-  document.getElementById('table-head').innerHTML = '';
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  // v7.9.76 (Richard: "moving from one tab to the next creates a short-lasting artifact"): unless the
+  // body already shows THIS kind's rows (a same-kind reload after a save or drop), draw the kind's
+  // strip, toolbar and description at once with an empty body, so the previous tab's rows never sit
+  // under the new head while the fetch runs.
+  if (!(body.firstElementChild && body.firstElementChild.getAttribute('data-pbi-kind') === kind)) {
+    head.innerHTML = pbiHeadHtml(kind);
+    body.innerHTML = '<tr data-pbi-kind="' + kind + '"><td colspan="4" class="pg-muted" style="padding:18px 14px;">Loading…</td></tr>';
+  }
   let items = [], costs = [], subcats = [], costsMissing = false;
   try {
     [items, costs, subcats] = await Promise.all([
@@ -7109,11 +7125,19 @@ function pbiPaint() {
   // handle and a drop target; empty subcategories and Unfiled stay visible so items can land there.
   const tree = pbSubcatTree(items, k.sub, true);
   pbItemAdmin.tree = tree;
+  // v7.9.75 (Richard: "after login, open all items under proposal builder collapsed, thereafter
+  // remember state until next login"): the first paint of a kind after login starts every group and
+  // subcategory collapsed; from then on the set is whatever the user left (per kind, until enterApp
+  // clears the stash at the next login).
+  if (!pbItemAdmin.collapsedInit) {
+    pbItemAdmin.collapsedInit = true;
+    tree.forEach(n => { pbItemAdmin.collapsed.add(pbiGKey(n)); n.subs.forEach(sn => { if (sn.sub) pbItemAdmin.collapsed.add('s:' + sn.sub.id); }); });
+  }
   const col = key => pbItemAdmin.collapsed.has(key);
   const nItems = n => n === 1 ? '1 item' : n + ' items';
   const ghost = '<button class="btn btn-ghost btn-sm" style="color:#fff;opacity:.85;" ';
   const groupRow = (n, gi) => { const c = col(pbiGKey(n)), count = n.subs.reduce((a, sn) => a + sn.items.length, 0), leaf = n.single ? n.subs[0].sub : null;
-    return '<tr data-pbi="group" ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')" onclick="pbiCollapse(\'g\', ' + gi + ')" style="cursor:pointer;"><td colspan="' + cols + '" style="background:var(--navy);color:#fff;padding:5px 10px 5px 14px;">' +
+    return '<tr data-pbi="group" data-pbi-kind="' + kind + '" ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')" onclick="pbiCollapse(\'g\', ' + gi + ')" style="cursor:pointer;"><td colspan="' + cols + '" style="background:var(--navy);color:#fff;padding:5px 10px 5px 14px;">' +
       '<div style="display:flex;align-items:center;gap:8px;">' +
         (n.groupName != null ? handle('group', gi, 'Drag to reorder groups', 'color:rgba(255,255,255,.6);') : '<span style="display:inline-block;width:14px;"></span>') +
         caret(!c, true) +
@@ -7135,6 +7159,7 @@ function pbiPaint() {
       '</div></td></tr>'; };
   const emptyRow = (sn, gi) => sn.items.length ? '' : '<tr data-pbi="empty"' + (sn.sub ? ' ondragover="pbiDragOver(event, \'sub\', ' + sn.sub.id + ')" ondrop="pbiDrop(event, \'sub\', ' + sn.sub.id + ')"' : ' ondragover="pbiDragOver(event, \'group\', ' + gi + ')" ondrop="pbiDrop(event, \'group\', ' + gi + ')"') + '><td colspan="' + cols + '" class="pg-muted" style="font-size:11px;padding:3px 10px 5px ' + (14 + 2 * PBI_IND) + 'px;">no items — drag one here</td></tr>';
   const rows = tree.map((n, gi) => {
+    if (n.groupName == null && !n.subs[0].items.length) return '';   // v7.9.76: an empty Unfiled group is not shown (the editor's Subcategory select can still unfile an item)
     if (col(pbiGKey(n))) return groupRow(n, gi);
     return groupRow(n, gi) + n.subs.map(sn => {
       if (n.single) return sn.items.map(rowOf).join('') + emptyRow(sn, gi);
@@ -7142,13 +7167,8 @@ function pbiPaint() {
       return subRow(sn) + sn.items.map(rowOf).join('') + emptyRow(sn, gi);
     }).join('');
   }).join('');
-  const offered = k.sub === 'uniform' ? 'A uniform type is offered in the post row\'s Uniform dropdown' : (k.sub === 'contract' || k.sub === 'service') ? 'An item is offered once on a quote (Contract Support Items tab)' : 'An item is offered on each post';
-  head.innerHTML = (pbItemAdmin.tabs ? pbAdminTabStrip(pbItemAdmin.tabs.map(t => ({ key: t, label: PB_ITEM_KINDS[t].title })), kind, 'pbiTab', cols) : '') +
-    '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;text-transform:none;letter-spacing:0;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button> <button class="btn btn-secondary btn-sm" onclick="pbiAddGroup()">+ Add group</button> ' +
-      '<button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(false)">Expand all</button> <button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(true)">Collapse all</button>' +
-      '<span class="pg-muted" style="margin-left:12px;">' + (k.hint ? pbEsc(k.hint) + ' ' : '') + 'Click an item to edit it or add a cost. ' + offered + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.</span></th></tr>' +
-    '<tr><th>Name</th><th style="width:110px;">In use from</th><th style="width:270px;">Current cost</th><th style="width:100px;">State</th></tr>';
-  body.innerHTML = rows || '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
+  head.innerHTML = pbiHeadHtml(kind);
+  body.innerHTML = rows || '<tr data-pbi-kind="' + kind + '"><td colspan="' + cols + '" style="text-align:center;color:var(--text3);padding:24px;">No items yet.</td></tr>';
   if (pbItemAdmin.dirty) pbiRestore(pbItemAdmin.draft);
   if (pbItemAdmin.addingCost) pbiRestore(pbItemAdmin.costDraft);
 }
@@ -7156,6 +7176,42 @@ function pbiPaint() {
 function pbAdminTabStrip(tabs, active, fn, colspan) {
   return '<tr><th colspan="' + colspan + '" style="background:#fff;padding:6px 14px 0;border-bottom:2px solid var(--navy);text-transform:none;letter-spacing:0;">' +
     tabs.map(t => '<button class="pb-admin-tab' + (t.key === active ? ' active' : '') + '" onclick="' + fn + '(\'' + t.key + '\')">' + pbEsc(t.label) + '</button>').join('') + '</th></tr>';
+}
+// v7.9.76: the strip, toolbar, description line and column header — drawn at once on a tab or page
+// switch (before the fetch) and again by every paint. The description is the page's own wording,
+// kept in settings as pb_catalog_hint_<kind> and editable in place; blank falls back to the
+// standard wording built from PB_ITEM_KINDS.
+function pbiHeadHtml(kind) {
+  const k = PB_ITEM_KINDS[kind], cols = 4, key = 'pb_catalog_hint_' + kind;
+  const hint = pbItemAdmin.hintEditing
+    ? '<textarea id="pbi-hint" class="form-control" rows="3" style="width:100%;font-size:12px;font-weight:400;" oninput="pbItemAdmin.hintDraft=this.value" placeholder="Blank = the standard wording">' + pbEsc(pbItemAdmin.hintDraft != null ? pbItemAdmin.hintDraft : (appSettings[key] || '')) + '</textarea>' +
+      '<div style="margin-top:6px;"><button class="btn btn-primary btn-sm" onclick="pbiHintSave()">Save</button> <button class="btn btn-ghost btn-sm" onclick="pbiHintCancel()">Cancel</button> <span class="pg-muted">Shown on this page for everyone. Leave it blank to go back to the standard wording.</span></div>'
+    : pbEsc(pbiDescriptor(kind)) + ' <button class="btn btn-ghost btn-sm" style="padding:0 6px;" title="Edit this description" onclick="pbiHintEdit()">Edit</button>';
+  return (pbItemAdmin.tabs ? pbAdminTabStrip(pbItemAdmin.tabs.map(t => ({ key: t, label: PB_ITEM_KINDS[t].title })), kind, 'pbiTab', cols) : '') +
+    '<tr><th colspan="' + cols + '" style="background:var(--bg);text-align:left;padding:10px 14px;text-transform:none;letter-spacing:0;"><button class="btn btn-primary btn-sm" onclick="pbItemAdd()">+ Add ' + pbEsc(k.one) + '</button> <button class="btn btn-secondary btn-sm" onclick="pbiAddGroup()">+ Add group</button> ' +
+      '<button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(false)">Expand all</button> <button class="btn btn-ghost btn-sm" onclick="pbiCollapseAll(true)">Collapse all</button></th></tr>' +
+    '<tr><th colspan="' + cols + '" style="background:#EEF3F8;color:var(--text2);font-weight:400;font-size:12px;line-height:1.5;text-transform:none;letter-spacing:0;padding:8px 14px;border-bottom:1px solid var(--border);">' + hint + '</th></tr>' +
+    '<tr><th>Name</th><th style="width:110px;">In use from</th><th style="width:270px;">Current cost</th><th style="width:100px;">State</th></tr>';
+}
+function pbiDescriptor(kind) {
+  const v = appSettings['pb_catalog_hint_' + kind];
+  if (v != null && String(v).trim()) return String(v);
+  const k = PB_ITEM_KINDS[kind];
+  const offered = k.sub === 'uniform' ? 'A uniform type is offered in the post row\'s Uniform dropdown' : (k.sub === 'contract' || k.sub === 'service') ? 'An item is offered once on a quote (Contract Support Items tab)' : 'An item is offered on each post';
+  return (k.hint ? k.hint + ' ' : '') + 'Click an item to edit it or add a cost. ' + offered + ' while the quote\'s start date falls inside its in-use window. Costs are never edited — add a new cost from a date and the old one stays on record.';
+}
+function pbiHintEdit() { pbItemAdmin.hintEditing = true; pbItemAdmin.hintDraft = null; pbiPaint(); }
+function pbiHintCancel() { pbItemAdmin.hintEditing = false; pbItemAdmin.hintDraft = null; pbiPaint(); }
+async function pbiHintSave() {
+  const key = 'pb_catalog_hint_' + pbItemAdmin.kind, el = document.getElementById('pbi-hint'); if (!el) return;
+  const text = el.value.trim();
+  try {
+    const res = await api('settings', 'PATCH', { value: text, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
+    if (!res || !res.length) await api('settings', 'POST', { key, value: text }, '');
+    appSettings[key] = text; pbItemAdmin.hintEditing = false; pbItemAdmin.hintDraft = null;
+    showStatus(text ? 'Description saved' : 'Description back to the standard wording', 'success');
+  } catch (e) { showStatus('Could not save the description: ' + e.message, 'error'); return; }
+  pbiPaint();
 }
 function pbiTab(kind) { if (pbiBusy()) return; renderPbItemCatalogPage(kind, pbItemAdmin.tabs); }
 // Anything that would close or move the open item's editor waits for its unsaved input to be saved
@@ -7669,41 +7725,133 @@ async function pbWfAdjustClear(id) {
   } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
   renderQuoteEditor();
 }
-function renderContractItemsTab() {
+// ── Contract Support Items tab (v7.9.77) — the Workforce tab's shape ─────────────
+// Richard, 2026-09-20: "contract support and service support should look like and operate like
+// workforce support items". Same header (one monthly total, the once-off line, the as-at note, the
+// show-every-item switch), same table (Item · Units · Monthly · Status), rows under each family's
+// GROUP → subcategory tree, each row opening to its detail and its controls. The one difference
+// stays: these items are ticked HERE, once per quote, with a quantity — so the open row carries
+// Tick / quantity / Untick instead of an adjustment, and an item a condition ticked is switched
+// off with a recorded reason (the same override rows as before, pbToggleContractAcc & co.).
+let _ctState = { editing: null, showAll: false, open: new Set() };   // open: item ids whose detail row is expanded
+function pbContractRollup(includeAll) {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
-  const eff = pbContractAccMap(), imp = pbSupportEval().contract;   // v7.9.55: items a condition ticked
-  const items = (allData['quote_accessories'] || []).filter(i => {
-    const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt);
-    return ((pbItemCategory(i) !== 'workforce' || (c && c.cost_basis === 'per_contract')) && pbItemInWindow(i, asAt)) || eff.has(+i.id) || pbContractAccOff.has(+i.id);
+  const eff = pbContractAccMap(), imp = pbSupportEval().contract;
+  const rows = [];
+  (allData['quote_accessories'] || []).forEach(item => {
+    const cost = pbItemCurrentCost(costs, 'accessory_id', item.id, asAt), cat = pbItemCategory(item);
+    const live = pbItemInWindow(item, asAt);
+    const on = eff.has(+item.id), qty = on ? (eff.get(+item.id) || 1) : 0;
+    const auto = !!imp[item.id], overridden = auto && pbContractAccOff.has(+item.id);
+    // A workforce item belongs here only while priced per contract — unless the quote already holds a
+    // contract-level row for it (ticked before a later cost row changed its basis, or the start date
+    // moved): pbAccSummary still prices that row, so it must stay visible here to be unticked.
+    const stray = cat === 'workforce' && !(cost && cost.cost_basis === 'per_contract');
+    if (stray && !on && !overridden) return;
+    if (!on && !overridden && !(includeAll && live)) return;
+    const money = pbWfMoney(cost, qty), warnings = [];
+    let level = 'ok', label = 'ticked';
+    if (on && auto) { level = 'info'; label = 'auto'; }
+    if (overridden) { level = 'warn'; label = 'switched off'; warnings.push('Condition "' + imp[item.id] + '" ticks this item; it was switched off on this quote: ' + (pbContractAccOff.get(+item.id) || '')); }
+    if (!on && !overridden) { level = 'none'; label = 'not ticked'; }
+    if (stray) { level = 'warn'; label = 'not per contract'; warnings.push('No longer priced per contract as at ' + asAt + (cost ? ' (now ' + (PB_ACC_BASES[cost.cost_basis] || cost.cost_basis) + ')' : ' (no price)') + ' — the posts carry it now; untick it here.'); }
+    if (!live) { level = 'bad'; label = item.retired_date && String(item.retired_date) < asAt ? 'retired' : 'not in use'; warnings.push((label === 'retired' ? 'Retired before' : 'Not yet in use at') + ' the contract start ' + asAt); }
+    if (!cost) { level = 'bad'; label = 'no price'; warnings.push('No price recorded as at ' + asAt + ' — nothing is priced for it'); }
+    rows.push({ item, cat, cost, live, on, qty, auto, overridden, rule: imp[item.id] || null, reason: pbContractAccOff.get(+item.id) || null, unit: cost ? pbAccMonthlyUnit(cost) : 0, money, warnings, level, label });
   });
-  const rowOf = i => {
-    const c = pbItemCurrentCost(costs, 'accessory_id', i.id, asAt), on = eff.has(+i.id), qty = eff.get(+i.id) || 1;
-    const auto = !!imp[i.id], overridden = auto && pbContractAccOff.has(+i.id);
-    return '<label class="pb-allow-row" style="display:flex;align-items:center;gap:8px;font-size:13px;">' +
-      '<input type="checkbox" ' + (on ? 'checked' : '') + ' onchange="pbToggleContractAcc(' + i.id + ', this.checked, ' + qty + ')">' +
-      '<span style="flex:1;">' + pbEsc(i.name) + pbSupportChip(auto, overridden, imp[i.id], pbContractAccOff.get(+i.id)) + '</span>' +
-      (on ? '<span style="font-size:12px;color:var(--text3);">qty <input type="number" min="1" value="' + qty + '" style="width:54px;padding:2px 4px;" onchange="pbToggleContractAcc(' + i.id + ', true, +this.value)"></span>' : '') +
-      '<span style="white-space:nowrap;color:var(--text3);font-size:11px;">' + pbEsc(c ? pbItemCostLabel('accessory', c) : '') + '</span></label>' +
-      (overridden ? '<div style="font-size:11px;color:#7A5B10;margin:-1px 0 2px 22px;">' + pbEsc(pbContractAccOff.get(+i.id)) + '</div>' : '') +
-      (_pbContractOvrPending === +i.id ? pbSupportReasonRow('pb-caccovr-' + i.id, 'pbContractAccOverrideConfirm(' + i.id + ')', 'pbContractAccOverrideCancel()') : '');
+  return rows;
+}
+// While a reason row is open anywhere on the tab, every other click that would re-render (and so
+// redraw that row empty) is refused: confirm or cancel the reason first. Nothing else on the tab is
+// ever left unsaved — the quantity saves on change, Tick ticks one.
+function pbCtGuard() {
+  if (_pbContractOvrPending != null) { showStatus('Confirm or cancel the reason first', 'error'); return true; }
+  return false;
+}
+function pbCtToggle(id) {
+  id = +id;
+  if (_pbContractOvrPending === id) return;   // the reason row is open in this row: a header click must not re-render away typed input
+  if (pbCtGuard()) return;
+  const s = _ctState.open; if (s.has(id)) s.delete(id); else s.add(id); renderQuoteEditor();
+}
+function pbCtTick(id, on, qty) { if (pbCtGuard()) return; pbToggleContractAcc(id, on, qty); }
+function pbCtShowAll(cb) { if (pbCtGuard()) { cb.checked = !cb.checked; return; } _ctState.showAll = cb.checked; renderQuoteEditor(); }
+function renderContractItemsTab() {
+  const asAt = pbQuoteAsAt();
+  const rows = pbContractRollup(_ctState.showAll);
+  const tot = rows.reduce((a, r) => { a.m += r.money.monthly; a.o += r.money.onceOff; if (r.level === 'bad') a.bad++; if (r.overridden) a.ovr++; if (r.on && r.auto) a.auto++; return a; }, { m: 0, o: 0, bad: 0, ovr: 0, auto: 0 });
+  const badge = (level, text) => '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:' + PB_WF_LEVEL[level].badge + ';color:' + PB_WF_LEVEL[level].fg + ';">' + pbEsc(text) + '</span>';
+  const field = (label, value) => '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text3);margin-bottom:2px;">' + label + '</div><div style="color:var(--text);">' + value + '</div></div>';
+  const rowOf = (r, indent) => {
+    const L = PB_WF_LEVEL[r.level], id = +r.item.id, open = _ctState.open.has(id) || _pbContractOvrPending === id;
+    let html = '<tr style="cursor:pointer;' + (L.bg ? 'background:' + L.bg + ';' : '') + '" onclick="pbCtToggle(' + id + ')">' +
+      '<td>' + (indent ? '<span style="display:inline-block;width:' + indent + 'px;"></span>' : '') + '<span style="display:inline-block;width:16px;color:var(--text3);">' + (open ? '▾' : '▸') + '</span><strong>' + pbEsc(r.item.name) + '</strong></td>' +
+      '<td style="text-align:right;font-weight:700;">' + (r.on ? r.qty : '<span class="pg-muted">—</span>') + '</td>' +
+      '<td style="text-align:right;">' + (!r.on ? '<span class="pg-muted">—</span>' : r.cost && r.cost.recovery === 'absorbed' ? '<span class="pg-muted">absorbed</span>' : pbRand(r.money.monthly)) + '</td>' +
+      '<td>' + badge(r.level, r.label) + '</td></tr>';
+    if (open) {
+      html += '<tr><td colspan="4" style="background:#F7F8FA;padding:10px 14px 12px 30px;" onclick="event.stopPropagation()">' +
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 18px;font-size:12px;">' +
+          field('Quantity', r.on ? '<strong>' + r.qty + '</strong>' : '<span class="pg-muted">not ticked</span>') +
+          // A once-off item charges only its running cost monthly; the acquisition goes on the setup line.
+          field('Unit / month', !r.cost ? '<span class="pg-muted">no price</span>' : r.cost.recovery === 'once_off' ? pbRand(+r.cost.monthly_cost || 0) : pbRand(r.unit)) +
+          (r.cost && r.cost.recovery === 'once_off' ? field('Unit once-off', pbRand(+r.cost.acquisition_cost || 0)) : '') +
+          field('Basis', r.cost ? pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) : '—') +
+          field('Recovery', r.cost ? pbEsc(PB_ACC_RECOVERY[r.cost.recovery] || r.cost.recovery) : '—') +
+          field('Once-off at setup', r.money.onceOff ? pbRand(r.money.onceOff) : '—') +
+          field('Condition', r.rule ? pbEsc(r.rule) : '<span class="pg-muted">none — ticked by hand</span>') +
+          (r.overridden ? field('Switched off because', pbEsc(r.reason || '')) : '') +
+        '</div>' +
+        (r.warnings.length ? '<div style="font-size:11px;color:' + L.fg + ';margin-top:8px;">' + r.warnings.map(pbEsc).join('<br>') + '</div>' : '');
+      if (_pbContractOvrPending === id) {
+        html += '<div style="margin-top:10px;font-size:12px;">Switching off an item a condition ticked needs a reason, recorded on the quote:</div>' +
+          pbSupportReasonRow('pb-caccovr-' + id, 'pbContractAccOverrideConfirm(' + id + ')', 'pbContractAccOverrideCancel()');
+      } else if (r.overridden) {
+        html += '<div style="margin-top:10px;"><button class="btn btn-ghost btn-sm" onclick="pbCtTick(' + id + ', true, 1)">Tick again</button></div>';
+      } else {
+        html += '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          (r.on
+            ? '<div class="form-group"><label class="form-label">Quantity</label><input type="number" min="1" step="1" class="form-control" id="ct-qty-' + id + '" style="width:90px;" value="' + r.qty + '" onchange="pbCtTick(' + id + ', true, +this.value)"></div>' +
+              '<button class="btn btn-ghost btn-sm" onclick="pbCtTick(' + id + ', false)">' + (r.auto ? 'Switch off (reason)' : 'Untick') + '</button>'
+            : '<button class="btn btn-primary btn-sm" onclick="pbCtTick(' + id + ', true, 1)"' + (r.live ? '' : ' disabled') + '>Tick</button><span class="pg-muted" style="font-size:11px;">Ticks one; set the quantity once it is ticked.</span>') +
+          '</div>';
+      }
+      html += '</td></tr>';
+    }
+    return html;
   };
-  const group = (label, list, kind) => list.length ? '<div style="font-size:11px;font-weight:600;color:var(--text3);margin:6px 0 2px;">' + label + '</div>' + pbChecklistGrouped(kind, list, rowOf) : '';   // v7.9.74: under their subcategories, like the workforce checklist
-  // A legacy workforce item priced per contract keeps its own (workforce) family, so its heading is right and it never reads "Unfiled" here.
-  const rows = group('Contract support items', items.filter(i => pbItemCategory(i) === 'contract'), 'contract') +
-    group('Workforce support items priced per contract', items.filter(i => pbItemCategory(i) === 'workforce'), 'accessory') +
-    group('Service support items', items.filter(i => pbItemCategory(i) === 'service'), 'service');
+  const groupRow = t => '<tr><td colspan="4" style="background:var(--navy);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:5px 12px;">' + pbEsc(t) + '</td></tr>';
+  const subRow = s => '<tr><td colspan="4" style="background:var(--bg);font-size:11px;font-weight:700;color:var(--navy);padding:4px 12px 4px 28px;">' + pbEsc(pbSubName(s)) + '</td></tr>';
+  const sectionRow = t => '<tr><td colspan="4" style="background:#fff;color:var(--navy);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:10px 12px 4px;border-bottom:2px solid var(--navy);">' + t + '</td></tr>';
+  const byId = new Map(rows.map(r => [+r.item.id, r]));
+  const section = (title, list, family) => {
+    if (!list.length) return '';
+    const inner = pbSubcats(family, true).length
+      ? pbSubcatTree(list.map(r => r.item), family).map(n => groupRow(n.group) + n.subs.map(sn => (n.single ? '' : subRow(sn.sub)) + sn.items.map(it => rowOf(byId.get(+it.id), n.single ? 16 : 32)).join('')).join('')).join('')
+      : list.map(r => rowOf(r, 0)).join('');
+    return sectionRow(title) + inner;
+  };
+  const body = section('Contract support items', rows.filter(r => r.cat === 'contract'), 'contract') +
+    section('Workforce support items priced per contract', rows.filter(r => r.cat === 'workforce'), 'workforce') +
+    section('Service support items', rows.filter(r => r.cat === 'service'), 'service');
   const sum = pbAccSummary();
-  return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;">' +
-    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Contract and service support items</div>' +
-      (rows || '<div class="pb-placeholder-text">No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Support Items (Contract / Service tabs).</div>') +
-      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Ticked once per quote regardless of posts. Contract support items are the physical things a contract needs to be delivered; service support items are the service things it needs. Workforce support items (what an officer carries or needs) are ticked on each post. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); unticking it asks for a reason.</p></div>' +
-    '<div class="pb-qheader"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--navy);border-bottom:2px solid var(--navy);padding-bottom:4px;margin-bottom:6px;">Equipment summary (as at ' + pbEsc(asAt) + ')</div>' +
-      (sum.lines.length ? '<table style="width:100%;font-size:12px;"><thead><tr><th>Item</th><th>Where</th><th class="num" style="text-align:right;">Qty</th><th style="text-align:right;">Monthly</th><th style="text-align:right;">Once-off</th></tr></thead><tbody>' +
-        sum.lines.map(l => '<tr><td>' + pbEsc(l.name) + (l.recovery === 'absorbed' ? ' <span class="pg-muted">(absorbed)</span>' : '') + '</td><td>' + pbEsc(l.where) + '</td><td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + pbRand(l.monthly) + '</td><td style="text-align:right;">' + (l.onceOff ? pbRand(l.onceOff) : '—') + '</td></tr>').join('') +
-        '</tbody><tfoot><tr style="font-weight:700;"><td colspan="3">Total</td><td style="text-align:right;">' + pbRand(sum.monthly) + '/mo</td><td style="text-align:right;">' + pbRand(sum.onceOff) + '</td></tr></tfoot></table>' +
-        (sum.absorbed ? '<div class="pg-muted" style="margin-top:6px;font-size:11px;">Absorbed (costed, not itemised): ' + pbRand(sum.absorbed) + '/mo</div>' : '')
-        : '<div class="pb-placeholder-text">Nothing ticked yet, or no costs recorded for the ticked items.</div>') +
-      '<p class="pg-muted" style="margin:10px 0 0;font-size:11px;">Monthly amounts join the post prices; once-off amounts print as one "Setup and equipment" line on the proposal. Recruitment, polygraphs, medicals, accommodation and flights are still to come on this tab.</p></div>' +
+  return '<div class="pb-qheader">' +
+    '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:6px;">' +
+      '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);">Monthly total</div>' +
+        '<div style="font-size:20px;font-weight:700;color:var(--navy);line-height:1.2;">' + pbRand(tot.m) + '<span style="font-size:12px;font-weight:400;color:var(--text3);"> /mo</span></div>' +
+        (tot.o ? '<div style="font-size:11px;color:var(--text3);">plus ' + pbRand(tot.o) + ' once-off at setup</div>' : '') +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
+      '<span style="flex:1;"></span>' +
+      (tot.bad ? badge('bad', tot.bad + (tot.bad === 1 ? ' needs attention' : ' need attention')) : '') + (tot.ovr ? badge('warn', tot.ovr + ' switched off') : '') + (tot.auto ? badge('info', tot.auto + ' auto') : '') +
+      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (_ctState.showAll ? 'checked' : '') + ' onchange="pbCtShowAll(this)"> show every item in use, ticked or not</label>' +
+    '</div>' +
+    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">Ticked once per quote, regardless of posts. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); switching it off asks for a reason. ' +
+      'Whole quote, every support item and uniform: ' + pbRand(sum.monthly) + '/mo and ' + pbRand(sum.onceOff) + ' once-off — the proposal prints the once-off as one "Setup and equipment" line.' + (sum.absorbed ? ' Absorbed, not itemised: ' + pbRand(sum.absorbed) + '/mo.' : '') + '</div>' +
+    (rows.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th style="text-align:right;">Units</th><th style="text-align:right;">Monthly</th><th>Status</th></tr></thead><tbody>' + body + '</tbody></table>'
+      : '<div class="pb-placeholder-text">' + (_ctState.showAll
+          ? 'No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Support Items (Contract / Service tabs).'
+          : 'No contract or service support item is ticked on this quote yet. Show every item above to tick one.') + '</div>') +
   '</div>';
 }
 let _pbContractOvrPending = null;   // accessory id whose inline reason row is open
@@ -14698,6 +14846,7 @@ async function enterApp(userId) {
     return;
   }
   currentUser = ctx;
+  pbiResetSession();   // v7.9.75: the catalogue pages open collapsed after every login
   realUser = null;            // a fresh sign-in is never a masquerade
 
   document.getElementById('login-screen').style.display = 'none';
