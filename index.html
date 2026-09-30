@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -828,6 +828,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <button class="opp-tab" onclick="switchOppTab('commercial', this); loadProposalBuilder();">Proposal Builder</button>
       <button class="opp-tab" onclick="switchOppTab('collaborators', this)">Collaborators</button>
       <button class="opp-tab" onclick="switchOppTab('engagement', this)">Engagement</button>
+      <button class="opp-tab" id="opp-files-tab-btn" onclick="switchOppTab('files', this)">Files</button>
       <button class="opp-tab" id="lost-tab" onclick="switchOppTab('lost', this)" style="display:none;">Lost</button>
     </div>
 
@@ -1029,6 +1030,11 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <div id="engagement-list">
         <div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>
       </div>
+    </div>
+
+    <!-- Files Tab (v7.9.82) -->
+    <div class="opp-tab-content" id="opp-tab-files">
+      <div id="opp-files"></div>
     </div>
 
     <!-- Opportunity Contacts Tab -->
@@ -3446,6 +3452,40 @@ const PAGES = {
     ],
   },
 
+  // File folders (v7.9.83): the STANDARD folders every deal's Files tab offers. A folder with a
+  // Parent is a sub level (one level only — the parent picker lists main folders). The ticks say
+  // where it is offered; "Users may add folders" marks the one main folder a deal may add its own
+  // subfolders under; Auto-filled by names the Focus routine that files into it. Per-deal folders
+  // (deal_id set) are filtered out of this page — they belong to their deal.
+  attachment_folders: {
+    title: 'File Folders',
+    table: 'attachment_folders',
+    filter: 'deal_id=is.null',
+    columns: [
+      { key: 'name',                   label: 'Folder', render: (v, r) => r && r.parent_id ? '<span style="color:var(--text3);">↳</span> ' + escHtml(v || '') : '<strong>' + escHtml(v || '') + '</strong>' },
+      { key: 'parent_id',              label: 'Under', render: v => v ? escHtml(((allData['attachment_folders'] || []).find(x => +x.id === +v) || {}).name || '—') : '' },
+      { key: 'applies_to_opportunity', label: 'Opportunity', render: v => v ? '✓' : '' },
+      { key: 'applies_to_contract',    label: 'Contract',    render: v => v ? '✓' : '' },
+      { key: 'applies_to_project',     label: 'Project',     render: v => v ? '✓' : '' },
+      { key: 'allows_custom',          label: 'Users add folders', render: v => v ? '✓' : '' },
+      { key: 'auto_source',            label: 'Auto-filled by', render: v => v ? escHtml(v) : '' },
+      { key: 'sort_order',             label: 'Order' },
+      { key: 'active',                 label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',                   label: 'Name', required: true },
+      { key: 'parent_id',              label: 'Under (leave blank for a main folder)', type: 'lookup', lookupTable: 'attachment_folders', lookupLabel: r => r.name,
+        lookupFilter: r => r.parent_id == null && r.deal_id == null },
+      { key: 'applies_to_opportunity', label: 'Offer on opportunities', type: 'checkbox', default: true },
+      { key: 'applies_to_contract',    label: 'Offer on contracts',     type: 'checkbox', default: true },
+      { key: 'applies_to_project',     label: 'Offer on projects',      type: 'checkbox', default: true },
+      { key: 'allows_custom',          label: 'Users may add their own folders under this one (main folders only)', type: 'checkbox' },
+      { key: 'auto_source',            label: 'Auto-filled by', type: 'select', options: ['', 'Proposals', 'Invoices'] },
+      { key: 'sort_order',             label: 'Order', type: 'number' },
+      { key: 'active',                 label: 'Active', type: 'checkbox', default: true },
+    ],
+  },
+
   work_projects: {
     title: 'Work Projects',
     table: 'work_projects',
@@ -3917,7 +3957,7 @@ async function loadTable(page) {
     const rowRenderer = (row) => {
       const cells = cfg.columns.map(col => {
         let val = row[col.key];
-        if (col.render) return `<td>${col.render(val)}</td>`;   // render() owns its own markup
+        if (col.render) return `<td>${col.render(val, row)}</td>`;   // render() owns its own markup (v7.9.83: + the row)
         if (col.lookup) {
           const lookup = allData[col.lookup] || [];
           const found = lookup.find(r => +r.id === +val);
@@ -4943,6 +4983,15 @@ async function saveRecord(e) {
   }
 
   // Extra validation for system_users
+  // File folders (v7.9.83): one sub level only.
+  if (currentPage === 'attachment_folders' && body.parent_id != null) {
+    const F = allData['attachment_folders'] || [];
+    const parent = F.find(x => +x.id === +body.parent_id);
+    if (editingId && +body.parent_id === +editingId) { showStatus('A folder cannot sit under itself', 'error'); return; }
+    if (parent && parent.parent_id != null) { showStatus('Only one sub level: choose a main folder', 'error'); return; }
+    if (editingId && F.some(x => +x.parent_id === +editingId)) { showStatus('This folder has subfolders of its own, so it must stay a main folder', 'error'); return; }
+    body.allows_custom = false;
+  }
   if (currentPage === 'system_users' && !editingId) {
     const personId = body.person_id;
     if (!personId) { showStatus('Please select a person', 'error'); return; }
@@ -5310,6 +5359,8 @@ const MENU = [
             icon: '<path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'activity_types',   label: 'Activity Types',   permission: 'manage_lookups',
             icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'attachment_folders', label: 'File Folders',     permission: 'manage_lookups',
+            icon: '<path d="M10.5 4.5l-5 5a1.8 1.8 0 002.5 2.5l5.5-5.5a3 3 0 00-4.2-4.2L3.8 7.8a4.2 4.2 0 006 6l4.2-4.2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'work_projects',    label: 'Work Projects',    permission: 'manage_lookups',
             icon: '<rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 4V2.8h4V4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M8 7v2l1.5 1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'red_flags',        label: 'Red Flags',        permission: 'manage_lookups',
@@ -5529,6 +5580,7 @@ async function openNewOpportunity() {
   await displayOwner();
   await loadCollaborators(null);
   setupOppOwnerReassign();
+  oppFiles = []; _oppFilesDealId = null; _oppFilesPending = [];
   applyOppReadOnly('full'); // creator becomes the owner — always editable
 }
 
@@ -5587,6 +5639,7 @@ async function openOpportunity(id, adminMode = false) {
     document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
     setupOppOwnerReassign();
     applyOppReadOnly(level);
+    oppFilesLoad();   // background: fills the Files tab and its count
     await oppSuspensionOnOpen();
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
@@ -5808,10 +5861,12 @@ function applyOppReadOnly(level) {
   if (!page) return;
 
   const engTab = document.getElementById('opp-tab-engagement');
+  const filesTab = document.getElementById('opp-tab-files');
   // Disable every input/select/textarea. In 'engagement' mode, leave the
-  // Engagement tab's controls enabled so a collaborator can still log activity.
+  // Engagement tab's controls enabled so a collaborator can still log activity
+  // (and, v7.9.82, the Files tab's — a signed contract arrives after securing).
   page.querySelectorAll('input, select, textarea').forEach(el => {
-    const inEng = engTab && engTab.contains(el);
+    const inEng = (engTab && engTab.contains(el)) || (filesTab && filesTab.contains(el));
     el.disabled = oppReadOnly && !(level === 'engagement' && inEng);
     if (el.classList.contains('rev-past')) el.disabled = true;   // v7.9.48: past months stay read-only
   });
@@ -5823,6 +5878,10 @@ function applyOppReadOnly(level) {
   // Revert follows Save, and only exists once there is a saved state to go back to.
   const revertBtn = document.getElementById('opp-revert-btn');
   if (revertBtn) revertBtn.style.display = (level === 'full' && oppData.id) ? '' : 'none';
+
+  // Files follow the same rule as Log Engagement (v7.9.82).
+  oppFilesLevel = level;
+  oppFilesRender();
 
   // Log Engagement: available to full + engagement, hidden for pure viewers.
   const logBtn = document.getElementById('opp-log-engagement-btn');
@@ -6130,6 +6189,324 @@ function switchOppTab(tab, btn) {
   if (btn) btn.classList.add('active');
   const el = document.getElementById('opp-tab-' + tab);
   if (el) el.classList.add('active');
+}
+
+// ── Files on opportunities (v7.9.82–83) ──────────────────────────────────────
+// Richard 2026-09-30: "time to be able to attach files to opportunities" — 50 MB a file, a
+// confirmation over 10 MB; then "standard folders ... in site admin": a sub level, one list with
+// opportunity / contract / project ticks, per-deal folders only under the one main folder marked
+// allows_custom ("Other"), and Proposals / Invoices filled automatically by Focus's own routines
+// with direct attach still open. Bytes never pass through the sb proxy: its /files route signs a
+// one-time upload URL (private bucket 'attachments') and a 5-minute download URL; `attachments`
+// rows carry the metadata and folder_id. Remove is soft (removed_at). Who: anyone who sees the
+// deal downloads; the full and engagement levels upload / move / add folders (a secured deal still
+// takes its signed contract); Remove = the uploader or a deal administrator.
+// Folders offered: standard, active, ticked for this deal's context (a secured deal is a contract),
+// plus any folder already holding a file here, plus this deal's own folders. Auto sources:
+// Proposals lists the deal's issued proposal versions read-only (pgOpenIssued views the frozen
+// document; nothing is copied); Invoices has no routine in Focus yet and says so.
+// SQL: sql/add_attachments.sql. Absent tables → the tab says so and offers nothing.
+const FILE_MAX_BYTES = 50 * 1024 * 1024, FILE_WARN_BYTES = 10 * 1024 * 1024;
+let oppFiles = [], _oppFilesDealId = null, oppFilesLevel = 'view', oppFilesMissing = false;
+let _oppFolders = [], _oppProposalDocs = [], _oppFilesPending = [], _oppFilesBusy = false;
+const _oppFolderClosed = new Set();   // folder ids the user collapsed (kept across deals in the session)
+let _oppFileMoving = null;            // attachment id whose Move select is open
+const _mockFileBlobs = new Map();     // mock mode only: path -> Blob, lost on reload
+function _fmtBytes(n) {
+  n = +n || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+}
+// Which folder ticks apply (Richard 2026-10-01): an unsecured deal is an opportunity; once secured
+// (stage Secured, or a Fulfilment category) it is managed as a CONTRACT when its service sub-type
+// earns annuity revenue and as a PROJECT when it earns project revenue (rsgRevenueType).
+function _oppFilesContext() {
+  const st = (allData['stages'] || []).find(x => +x.id === +(oppData && oppData.stage_id));
+  const cat = st ? (allData['stage_categories'] || []).find(c => +c.id === +st.category_id) : null;
+  const secured = !!st && (String(st.name || '').toLowerCase() === 'secured' || /^fulfilment/i.test((cat && cat.name) || ''));
+  if (!secured) return 'opportunity';
+  const subId = +(oppData && oppData.service_sub_id);
+  const sub = (allData['service_sub_all'] || []).find(x => +x.id === subId) || (allData['service_sub'] || []).find(x => +x.id === subId);
+  return rsgRevenueType(sub) === 'project' ? 'project' : 'contract';
+}
+async function oppFilesLoad() {
+  oppFiles = []; _oppFilesDealId = null; oppFilesMissing = false; _oppFilesPending = []; _oppFileMoving = null;
+  _oppFolders = []; _oppProposalDocs = [];
+  if (!oppData || !oppData.id) { oppFilesRender(); return; }
+  const dealId = +oppData.id;
+  try {
+    const [rows, folders, quotes] = await Promise.all([
+      api('attachments', 'GET', null, 'deal_id=eq.' + dealId + '&removed_at=is.null&select=*&order=uploaded_at.desc', { silent: true }),
+      api('attachment_folders', 'GET', null, 'or=(deal_id.is.null,deal_id.eq.' + dealId + ')&select=*&order=sort_order.asc,name.asc', { silent: true }),
+      api('quote_quotes', 'GET', null, 'deal_id=eq.' + dealId + '&select=id', { silent: true }).catch(() => []),
+    ]);
+    const qIds = (quotes || []).map(q => +q.id);
+    const docs = qIds.length
+      ? await api('proposal_documents', 'GET', null, 'quote_id=in.(' + qIds.join(',') + ')&status=in.(issued,superseded,withdrawn)&select=id,quote_id,version,status,proposal_ref,issued_at,issued_by&order=issued_at.desc', { silent: true }).catch(() => [])
+      : [];
+    if (!oppData || +oppData.id !== dealId) return;   // the user moved to another deal meanwhile
+    oppFiles = rows || []; _oppFolders = folders || []; _oppProposalDocs = docs || [];
+    _oppFilesDealId = dealId;
+  } catch (e) {
+    if (!oppData || +oppData.id !== dealId) return;
+    oppFilesMissing = /PGRST205|404/.test(String(e.message));
+    _oppFilesDealId = dealId;
+    if (!oppFilesMissing) showStatus('Could not load files: ' + e.message, 'error');
+  }
+  oppFilesRender();
+}
+function _oppFilesCanUpload() { return oppFilesLevel !== 'view' && !isReadOnlyUser(); }
+// The folder tree for this deal: [{ f, kids: [folder…] }] in admin order, pruned to what applies.
+function _oppFolderTree() {
+  const ctx = 'applies_to_' + _oppFilesContext();
+  const used = new Set(oppFiles.map(x => +x.folder_id));
+  const own = f => f.deal_id != null;
+  const offered = f => own(f) || used.has(+f.id) || (f.active !== false && f[ctx] !== false);
+  const mains = _oppFolders.filter(f => f.parent_id == null && !own(f));
+  const tree = [];
+  mains.forEach(m => {
+    const kids = _oppFolders.filter(k => +k.parent_id === +m.id && offered(k))
+      .sort((a, b) => (own(a) - own(b)) || ((+a.sort_order || 0) - (+b.sort_order || 0)) || String(a.name).localeCompare(String(b.name)));
+    if (offered(m) || kids.length) tree.push({ f: m, kids });
+  });
+  // Files whose folder vanished (or none): an Unfiled group so nothing is ever hidden.
+  return tree;
+}
+function _oppFolderOptions(selected) {
+  const tree = _oppFolderTree();
+  return tree.map(n => `<option value="${+n.f.id}" ${+selected === +n.f.id ? 'selected' : ''}>${escHtml(n.f.name)}</option>`
+    + n.kids.map(k => `<option value="${+k.id}" ${+selected === +k.id ? 'selected' : ''}>&nbsp;&nbsp;&nbsp;↳ ${escHtml(k.name)}</option>`).join('')).join('');
+}
+function oppFilesRender() {
+  const box = document.getElementById('opp-files');
+  const btn = document.getElementById('opp-files-tab-btn');
+  const current = !!(oppData && oppData.id) && _oppFilesDealId === +oppData.id;   // never show another deal's list
+  const total = oppFiles.length + _oppProposalDocs.length;
+  if (btn) btn.textContent = current && total ? 'Files (' + total + ')' : 'Files';
+  if (!box) return;
+  const msg = t => '<div style="text-align:center;padding:40px;color:var(--text3);">' + t + '</div>';
+  if (!oppData || !oppData.id) { box.innerHTML = msg('Save the opportunity first — files attach to a saved deal.'); return; }
+  if (!current) { box.innerHTML = msg('Loading…'); return; }
+  if (oppFilesMissing) { box.innerHTML = msg('File storage is not set up on this database yet.'); return; }
+  const people = allData['people'] || [];
+  const who = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '—'; };
+  const canUp = _oppFilesCanUpload();
+  const canRemove = f => canUp && (+f.uploaded_by === +(currentUser && currentUser.personId) || can('administer_deals'));
+  const tree = _oppFolderTree();
+  const shownIds = new Set(tree.flatMap(n => [+n.f.id, ...n.kids.map(k => +k.id)]));
+  const unfiled = oppFiles.filter(x => !shownIds.has(+x.folder_id));
+  const fileRow = (x, indent) => `<div style="display:flex;align-items:center;gap:10px;padding:6px 10px 6px ${indent}px;border-bottom:1px solid var(--border);">
+      <div style="flex:1;min-width:0;"><a href="#" onclick="event.preventDefault(); oppFileDownload(${+x.id})" style="color:#003057;font-weight:600;">${escHtml(x.file_name)}</a>${x.note ? `<div style="font-size:11px;color:var(--text3);">${escHtml(x.note)}</div>` : ''}</div>
+      <div style="font-size:12px;color:var(--text2);white-space:nowrap;">${_fmtBytes(x.size_bytes)} · ${escHtml(who(x.uploaded_by))} · ${x.uploaded_at ? new Date(x.uploaded_at).toLocaleDateString('en-ZA') : '—'}</div>
+      ${_oppFileMoving === +x.id
+        ? `<select class="form-control" style="width:200px;" onchange="oppFileMove(${+x.id}, this.value)"><option value="">— move to —</option>${_oppFolderOptions(null)}</select><button type="button" class="btn btn-ghost btn-sm" onclick="_oppFileMoving=null; oppFilesRender();">×</button>`
+        : `<button type="button" class="btn btn-ghost btn-sm" onclick="oppFileDownload(${+x.id})">Download</button>${canUp ? `<button type="button" class="btn btn-ghost btn-sm" onclick="_oppFileMoving=${+x.id}; oppFilesRender();">Move</button>` : ''}${canRemove(x) ? `<button type="button" class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="oppFileRemove(${+x.id})">Remove</button>` : ''}`}
+    </div>`;
+  const autoRows = (f, indent) => {
+    if (f.auto_source === 'Proposals') {
+      if (!_oppProposalDocs.length) return `<div style="padding:6px 10px 6px ${indent}px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">Issued proposals appear here automatically.</div>`;
+      return _oppProposalDocs.map(d => `<div style="display:flex;align-items:center;gap:10px;padding:6px 10px 6px ${indent}px;border-bottom:1px solid var(--border);background:#FBF8F2;">
+          <div style="flex:1;"><a href="#" onclick="event.preventDefault(); pgOpenIssued(${+d.id})" style="color:#003057;font-weight:600;">${escHtml((d.proposal_ref || 'Proposal') + ' v' + d.version)}</a>
+            <span style="font-size:10px;font-weight:700;color:#8A6D3B;margin-left:6px;">FROM PROPOSAL BUILDER</span>${d.status !== 'issued' ? ` <span style="font-size:10px;color:var(--text3);">(${escHtml(d.status)})</span>` : ''}</div>
+          <div style="font-size:12px;color:var(--text2);white-space:nowrap;">${escHtml(who(d.issued_by))} · ${d.issued_at ? new Date(d.issued_at).toLocaleDateString('en-ZA') : '—'}</div>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="pgOpenIssued(${+d.id})">View</button>
+        </div>`).join('');
+    }
+    if (f.auto_source === 'Invoices') return `<div style="padding:6px 10px 6px ${indent}px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">Invoices will be filed here automatically once Focus raises them — until then, attach them here directly.</div>`;
+    return '';
+  };
+  const countIn = f => oppFiles.filter(x => +x.folder_id === +f.id).length + (f.auto_source === 'Proposals' ? _oppProposalDocs.length : 0);
+  const folderBar = (f, depth, count) => {
+    const closed = _oppFolderClosed.has(+f.id);
+    const own = f.deal_id != null;
+    const pad = depth ? 34 : 10;
+    const dropAttrs = canUp ? `ondragover="event.preventDefault(); this.style.outline='2px dashed #C3B091';" ondragleave="this.style.outline='';" ondrop="event.preventDefault(); this.style.outline=''; oppFilesPicked(event.dataTransfer.files, ${+f.id});"` : '';
+    return `<div ${dropAttrs} onclick="oppFolderToggle(${+f.id})" style="display:flex;align-items:center;gap:8px;padding:7px 10px 7px ${pad}px;cursor:pointer;${depth ? 'background:#F4F6F9;' : 'background:#E9EEF4;'}border-bottom:1px solid var(--border);">
+      <span style="display:inline-block;width:12px;color:#003057;">${closed ? '▸' : '▾'}</span>
+      <span style="font-weight:700;color:#003057;${depth ? '' : 'text-transform:uppercase;font-size:12px;letter-spacing:.04em;'}">📁 ${escHtml(f.name)}</span>
+      <span style="font-size:11px;color:var(--text3);">${count || ''}</span>
+      ${own ? '<span style="font-size:10px;color:var(--text3);">this deal only</span>' : ''}
+      <span style="flex:1;"></span>
+      ${canUp ? `<label onclick="event.stopPropagation();" class="btn btn-ghost btn-sm" style="margin:0;cursor:pointer;">Upload here<input type="file" multiple style="display:none;" onchange="oppFilesPicked(this.files, ${+f.id}); this.value='';"></label>` : ''}
+      ${canUp && !depth && f.allows_custom ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); oppFolderAdd(${+f.id})">+ Folder</button>` : ''}
+      ${canUp && own && !count ? `<button type="button" class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="event.stopPropagation(); oppFolderRemove(${+f.id})">Remove folder</button>` : ''}
+    </div>`;
+  };
+  let html = '';
+  tree.forEach(n => {
+    const kidsCount = n.kids.reduce((t, k) => t + countIn(k), 0);
+    html += folderBar(n.f, 0, countIn(n.f) + kidsCount);
+    if (_oppFolderClosed.has(+n.f.id)) return;
+    html += autoRows(n.f, 34);
+    html += oppFiles.filter(x => +x.folder_id === +n.f.id).map(x => fileRow(x, 34)).join('');
+    n.kids.forEach(k => {
+      html += folderBar(k, 1, countIn(k));
+      if (_oppFolderClosed.has(+k.id)) return;
+      html += autoRows(k, 58) + oppFiles.filter(x => +x.folder_id === +k.id).map(x => fileRow(x, 58)).join('');
+      if (!countIn(k) && !k.auto_source) html += `<div style="padding:5px 10px 5px 58px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">Empty</div>`;
+    });
+    if (!countIn(n.f) && !n.f.auto_source && !n.kids.length) html += `<div style="padding:5px 10px 5px 34px;font-size:12px;color:var(--text3);border-bottom:1px solid var(--border);">Empty</div>`;
+  });
+  if (unfiled.length) {
+    html += `<div style="padding:7px 10px;background:#E9EEF4;font-weight:700;color:#003057;text-transform:uppercase;font-size:12px;letter-spacing:.04em;border-bottom:1px solid var(--border);">📁 Unfiled <span style="font-size:11px;color:var(--text3);text-transform:none;">${unfiled.length}</span></div>`
+      + unfiled.map(x => fileRow(x, 34)).join('');
+  }
+  const intro = canUp ? `<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Drop files on a folder, or use <strong>Upload here</strong>. Up to 50 MB a file; anything over 10 MB asks you to confirm first.</div>` : '';
+  box.innerHTML = intro + '<div id="opp-files-queue"></div>'
+    + (html ? `<div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;">${html}</div>` : msg('No folders are set up — Admin → File Folders.'));
+  _oppFilesQueueRender();
+}
+function oppFolderToggle(id) {
+  if (_oppFolderClosed.has(+id)) _oppFolderClosed.delete(+id); else _oppFolderClosed.add(+id);
+  oppFilesRender();
+}
+// A deal's own folder, only under a main folder that allows it.
+async function oppFolderAdd(parentId) {
+  const parent = _oppFolders.find(f => +f.id === +parentId);
+  if (!parent || !parent.allows_custom || !oppData || !oppData.id) return;
+  const name = ((await promptDialog({ title: 'New folder in ' + parent.name, message: 'A folder for this deal only.', placeholder: 'Folder name' })) || '').trim();
+  if (!name) return;
+  if (_oppFolders.some(f => +f.parent_id === +parentId && String(f.name).toLowerCase() === name.toLowerCase())) { showStatus('That folder already exists here', 'error'); return; }
+  try {
+    const rows = await api('attachment_folders', 'POST', { name, parent_id: +parentId, deal_id: +oppData.id, created_by: (currentUser && currentUser.personId) || null, sort_order: 0 });
+    if (rows && rows[0]) _oppFolders.push(rows[0]);
+    _oppFolderClosed.delete(+parentId);
+    oppFilesRender();
+  } catch (e) { showStatus('Could not add the folder: ' + e.message, 'error'); }
+}
+async function oppFolderRemove(id) {
+  const f = _oppFolders.find(x => +x.id === +id);
+  if (!f || f.deal_id == null) return;
+  if (oppFiles.some(x => +x.folder_id === +id)) { showStatus('Move or remove its files first', 'error'); return; }
+  if (!await confirmDialog({ title: 'Remove folder', message: 'Remove the empty folder ' + f.name + '?', confirmLabel: 'Remove', danger: true })) return;
+  try {
+    await api('attachment_folders', 'DELETE', null, 'id=eq.' + (+id) + '&deal_id=eq.' + (+oppData.id));
+    _oppFolders = _oppFolders.filter(x => +x.id !== +id);
+    oppFilesRender();
+  } catch (e) { showStatus('Could not remove the folder: ' + e.message, 'error'); }
+}
+async function oppFileMove(id, folderId) {
+  if (!folderId) return;
+  try {
+    await api('attachments', 'PATCH', { folder_id: +folderId }, 'id=eq.' + (+id));
+    const x = oppFiles.find(r => +r.id === +id); if (x) x.folder_id = +folderId;
+    _oppFileMoving = null;
+    oppFilesRender();
+  } catch (e) { showStatus('Could not move: ' + e.message, 'error'); }
+}
+// Picked or dropped: over 50 MB is refused outright; over 10 MB asks once for the lot.
+async function oppFilesPicked(list, folderId) {
+  if (!_oppFilesCanUpload() || _oppFilesBusy) return;
+  const files = Array.from(list || []);
+  if (!files.length) return;
+  const tooBig = files.filter(x => x.size > FILE_MAX_BYTES);
+  if (tooBig.length) showStatus(tooBig.map(x => x.name).join(', ') + ' — over the 50 MB limit, not added', 'error');
+  let ok = files.filter(x => x.size <= FILE_MAX_BYTES);
+  const large = ok.filter(x => x.size > FILE_WARN_BYTES);
+  if (large.length && !await confirmDialog({ title: 'Large file' + (large.length > 1 ? 's' : ''),
+      message: large.map(x => x.name + ' (' + _fmtBytes(x.size) + ')').join(', ') + (large.length > 1 ? ' are' : ' is') + ' over 10 MB. Large files are slow to upload and download for everyone. Attach anyway?',
+      confirmLabel: 'Attach' })) ok = ok.filter(x => x.size <= FILE_WARN_BYTES);
+  if (!ok.length) return;
+  const other = _oppFolders.find(f => f.parent_id == null && f.deal_id == null && f.allows_custom && f.active !== false);
+  const target = folderId || (other && other.id) || '';
+  ok.forEach(file => _oppFilesPending.push({ file, folder_id: target ? String(target) : '', note: '', pct: null }));
+  _oppFilesQueueRender();
+}
+function _oppFilesQueueRender() {
+  const q = document.getElementById('opp-files-queue');
+  if (!q) return;
+  if (!_oppFilesPending.length) { q.innerHTML = ''; return; }
+  const dis = _oppFilesBusy ? 'disabled' : '';
+  q.innerHTML = `<div style="border:1px solid #C3B091;border-radius:8px;padding:10px 12px;margin-bottom:12px;background:#F7F2E9;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px;">Ready to attach</div>
+    ${_oppFilesPending.map((p, i) => `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;font-size:13px;font-weight:600;color:#003057;">${escHtml(p.file.name)} <span style="font-weight:400;color:var(--text3);">${_fmtBytes(p.file.size)}</span></div>
+      <select class="form-control" style="width:200px;" ${dis} onchange="_oppFilesPending[${i}].folder_id=this.value;"><option value="">— folder —</option>${_oppFolderOptions(p.folder_id)}</select>
+      <input type="text" class="form-control" style="width:220px;" placeholder="Note (optional)" ${dis} value="${escAttr(p.note)}" oninput="_oppFilesPending[${i}].note=this.value;">
+      ${p.pct != null ? `<span style="width:60px;text-align:right;font-size:12px;color:var(--text2);">${p.pct}%</span>` : `<button type="button" class="btn btn-ghost btn-sm" ${dis} onclick="_oppFilesPending.splice(${i},1); _oppFilesQueueRender();">×</button>`}
+    </div>`).join('')}
+    <div style="text-align:right;margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" ${dis} onclick="_oppFilesPending=[]; _oppFilesQueueRender();">Cancel</button> <button type="button" class="btn btn-primary btn-sm" ${dis} onclick="oppFilesUpload()">${_oppFilesBusy ? 'Uploading…' : 'Upload ' + _oppFilesPending.length + ' file' + (_oppFilesPending.length > 1 ? 's' : '')}</button></div>
+  </div>`;
+}
+// PUT with progress (fetch cannot report upload progress).
+function _putWithProgress(url, file, onPct) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    x.setRequestHeader('x-upsert', 'false');
+    x.upload.onprogress = e => { if (e.lengthComputable) onPct(Math.round(e.loaded * 100 / e.total)); };
+    x.onload = () => (x.status >= 200 && x.status < 300) ? resolve() : reject(new Error('Upload failed (' + x.status + ')'));
+    x.onerror = () => reject(new Error('Upload failed — check the connection'));
+    x.send(file);
+  });
+}
+async function _filesSignUpload(dealId, file) {
+  if (MOCK) return { path: 'deal/' + dealId + '/' + Date.now() + '/' + file.name, uploadUrl: null };
+  const r = await api('files', 'POST', { action: 'upload', owner: 'deal', owner_id: dealId, file_name: file.name, size: file.size });
+  if (!r || !r.ok) throw new Error((r && r.error) || 'Could not start the upload');
+  return r;
+}
+async function oppFilesUpload() {
+  if (_oppFilesBusy || !_oppFilesPending.length || !oppData || !oppData.id) return;
+  if (_oppFilesPending.some(p => !p.folder_id)) { showStatus('Choose a folder for every file', 'error'); return; }
+  const dealId = +oppData.id;
+  _oppFilesBusy = true; _oppFilesQueueRender();
+  let done = 0;
+  try {
+    while (_oppFilesPending.length) {
+      const p = _oppFilesPending[0];
+      p.pct = 0; _oppFilesQueueRender();
+      const signed = await _filesSignUpload(dealId, p.file);
+      if (MOCK) _mockFileBlobs.set(signed.path, p.file);
+      else await _putWithProgress(signed.uploadUrl, p.file, pct => { p.pct = pct; _oppFilesQueueRender(); });
+      await api('attachments', 'POST', {
+        deal_id: dealId, folder_id: +p.folder_id,
+        file_name: p.file.name, mime_type: p.file.type || null, size_bytes: p.file.size,
+        storage_path: signed.path, note: (p.note || '').trim() || null,
+        uploaded_by: (currentUser && currentUser.personId) || null,
+      });
+      _oppFilesPending.shift(); done++;
+    }
+    showStatus(done + ' file' + (done > 1 ? 's' : '') + ' attached');
+  } catch (e) {
+    showStatus('Upload stopped: ' + e.message + (done ? ' (' + done + ' attached before it)' : ''), 'error');
+    if (_oppFilesPending[0]) _oppFilesPending[0].pct = null;
+  } finally {
+    _oppFilesBusy = false;
+  }
+  const keep = _oppFilesPending;
+  if (oppData && +oppData.id === dealId) { await oppFilesLoad(); _oppFilesPending = keep; _oppFilesQueueRender(); }
+}
+async function oppFileDownload(id) {
+  const f = oppFiles.find(x => +x.id === +id);
+  try {
+    let url;
+    if (MOCK) {
+      const blob = f && _mockFileBlobs.get(f.storage_path);
+      if (!blob) { showStatus('Mock mode keeps files only until a reload', 'error'); return; }
+      url = URL.createObjectURL(blob);
+    } else {
+      const r = await apiGet('files', 'download=' + (+id));
+      if (!r || !r.ok || !r.url) throw new Error((r && r.error) || 'Could not fetch the file');
+      url = r.url;
+    }
+    const a = document.createElement('a');
+    a.href = url; a.download = (f && f.file_name) || '';
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { showStatus('Download failed: ' + e.message, 'error'); }
+}
+async function oppFileRemove(id) {
+  const f = oppFiles.find(x => +x.id === +id);
+  if (!f) return;
+  if (!await confirmDialog({ title: 'Remove file', message: 'Remove ' + f.file_name + ' from this opportunity? It disappears from the list; the file itself is kept and a deal administrator can have it restored.', confirmLabel: 'Remove', danger: true })) return;
+  try {
+    await api('attachments', 'PATCH', { removed_at: new Date().toISOString(), removed_by: (currentUser && currentUser.personId) || null }, 'id=eq.' + (+id));
+    oppFiles = oppFiles.filter(x => +x.id !== +id);
+    oppFilesRender();
+    showStatus('File removed');
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
 }
 
 // ── Proposal Builder (full prototype port — runs as a tab on the Opportunity page) ──

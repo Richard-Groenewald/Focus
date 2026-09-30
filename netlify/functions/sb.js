@@ -193,6 +193,81 @@ const authReply = (statusCode, obj) => ({
   statusCode, headers: { 'Content-Type': 'application/json', ...CORS }, body: JSON.stringify(obj),
 });
 
+// ── Files (v7.9.82) ──────────────────────────────────────────────────────────
+// Attachments live in the PRIVATE Supabase Storage bucket 'attachments'
+// (sql/add_attachments.sql). This route never carries a file's bytes — a Netlify
+// function body tops out near 6 MB and files may be 50 MB. It signs instead:
+//   POST /files { action:'upload', owner:'deal', owner_id, file_name, size }
+//        -> { ok, path, uploadUrl }  a one-time URL the browser PUTs the file to
+//   GET  /files?download=<attachments.id>
+//        -> { ok, url }              a 5-minute URL that downloads under the file's name
+// Both sit behind the session gate like every other route. The bucket's own
+// 50 MB limit is what actually binds; the size check here only fails early.
+const FILE_BUCKET = 'attachments';
+const FILE_MAX_BYTES = 50 * 1024 * 1024;
+const FILE_OWNERS = { deal: 'deals' };   // a contract or project is the same deals row once secured
+const encPath = (p) => String(p).split('/').map(encodeURIComponent).join('/');
+
+function sbStorage(key, method, path, body) {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body || {});
+    const req = https.request({
+      hostname: SB, port: 443, path: '/storage/v1' + path, method, agent: sbAgent,
+      headers: { 'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key },
+    }, res => {
+      let d = ''; res.on('data', c => d += c);
+      res.on('end', () => {
+        if (res.statusCode >= 400) return reject(new Error(`HTTP ${res.statusCode}: ${d.slice(0, 200)}`));
+        try { resolve(d ? JSON.parse(d) : null); } catch (e) { reject(e); }
+      });
+    });
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
+}
+
+async function handleFiles(event, key) {
+  if (event.httpMethod === 'GET') {
+    const id = parseInt((event.queryStringParameters || {}).download, 10);
+    if (!id) return authReply(400, { ok: false, error: 'Bad request' });
+    let rows;
+    try { rows = await sbRest(key, 'GET', `/attachments?id=eq.${id}&removed_at=is.null&select=storage_path,file_name`); }
+    catch (e) { return authReply(500, { ok: false, error: 'Files are unavailable right now' }); }
+    const f = rows && rows[0];
+    if (!f) return authReply(404, { ok: false, error: 'File not found' });
+    let signed;
+    try { signed = await sbStorage(key, 'POST', `/object/sign/${FILE_BUCKET}/${encPath(f.storage_path)}`, { expiresIn: 300 }); }
+    catch (e) { return authReply(502, { ok: false, error: 'File storage is unavailable right now' }); }
+    const rel = signed && (signed.signedURL || signed.signedUrl);
+    if (!rel) return authReply(502, { ok: false, error: 'File storage is unavailable right now' });
+    return authReply(200, { ok: true, url: 'https://' + SB + '/storage/v1' + rel + '&download=' + encodeURIComponent(f.file_name) });
+  }
+  if (event.httpMethod !== 'POST') return authReply(405, { ok: false, error: 'Bad request' });
+  let body;
+  try { body = JSON.parse(event.body || '{}'); } catch (e) { return authReply(400, { ok: false, error: 'Bad request' }); }
+  if (body.action !== 'upload') return authReply(400, { ok: false, error: 'Bad request' });
+  const table = FILE_OWNERS[body.owner];
+  const ownerId = parseInt(body.owner_id, 10);
+  const size = Number(body.size);
+  if (!table || !ownerId) return authReply(400, { ok: false, error: 'Bad request' });
+  if (!(size >= 0) || size > FILE_MAX_BYTES) return authReply(400, { ok: false, error: 'Files are limited to 50 MB' });
+  try {
+    const owner = await sbRest(key, 'GET', `/${table}?id=eq.${ownerId}&select=id`);
+    if (!owner || !owner.length) return authReply(404, { ok: false, error: 'Record not found' });
+  } catch (e) { return authReply(500, { ok: false, error: 'Files are unavailable right now' }); }
+  // The stored name is only a path segment; the real name lives on the row.
+  const safe = String(body.file_name || 'file').normalize('NFKD')
+    .replace(/[^\w.\- ]+/g, '_').replace(/\s+/g, '_').slice(-120) || 'file';
+  const path = `${body.owner}/${ownerId}/${crypto.randomUUID()}/${safe}`;
+  let signed;
+  try { signed = await sbStorage(key, 'POST', `/object/upload/sign/${FILE_BUCKET}/${encPath(path)}`, {}); }
+  catch (e) { return authReply(502, { ok: false, error: 'File storage is unavailable right now' }); }
+  const rel = signed && (signed.url || (signed.token ? `/object/upload/sign/${FILE_BUCKET}/${encPath(path)}?token=${signed.token}` : null));
+  if (!rel) return authReply(502, { ok: false, error: 'File storage is unavailable right now' });
+  return authReply(200, { ok: true, path, uploadUrl: 'https://' + SB + '/storage/v1' + rel });
+}
+
 // POST /.netlify/functions/sb/auth
 //   { action: 'env' }                                    -> the environment label
 //   { action: 'check', username|userId }                 -> does this user still need to choose one?
@@ -358,6 +433,9 @@ exports.handler = async (event) => {
   const realActor = (claimedActor && tokenPerson && claimedActor !== tokenPerson)
     ? tokenPerson
     : (event.headers['x-real-actor-id'] || '');
+
+  // File signing (v7.9.82) — after the gate, never proxied to PostgREST.
+  if (/\/rest\/v1\/files\/?$/.test(path)) return handleFiles(event, KEY);
 
   const qs = event.rawQuery ? '?' + event.rawQuery : '';
   const isSystemUsers = /\/rest\/v1\/system_users\b/.test(path);
