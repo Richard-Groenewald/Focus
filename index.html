@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.82 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.82 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -828,6 +828,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <button class="opp-tab" onclick="switchOppTab('commercial', this); loadProposalBuilder();">Proposal Builder</button>
       <button class="opp-tab" onclick="switchOppTab('collaborators', this)">Collaborators</button>
       <button class="opp-tab" onclick="switchOppTab('engagement', this)">Engagement</button>
+      <button class="opp-tab" id="opp-files-tab-btn" onclick="switchOppTab('files', this)">Files</button>
       <button class="opp-tab" id="lost-tab" onclick="switchOppTab('lost', this)" style="display:none;">Lost</button>
     </div>
 
@@ -1029,6 +1030,11 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <div id="engagement-list">
         <div style="text-align:center;padding:40px;color:var(--text3);">No engagements logged yet</div>
       </div>
+    </div>
+
+    <!-- Files Tab (v7.9.82) -->
+    <div class="opp-tab-content" id="opp-tab-files">
+      <div id="opp-files"></div>
     </div>
 
     <!-- Opportunity Contacts Tab -->
@@ -3446,6 +3452,22 @@ const PAGES = {
     ],
   },
 
+  // Attachment categories (v7.9.82): the Files tab's category list.
+  attachment_categories: {
+    title: 'Attachment Categories',
+    table: 'attachment_categories',
+    columns: [
+      { key: 'name',       label: 'Name' },
+      { key: 'sort_order', label: 'Sort Order' },
+      { key: 'active',     label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'name',       label: 'Name', required: true },
+      { key: 'sort_order', label: 'Sort Order', type: 'number' },
+      { key: 'active',     label: 'Active', type: 'checkbox', default: true },
+    ],
+  },
+
   work_projects: {
     title: 'Work Projects',
     table: 'work_projects',
@@ -5310,6 +5332,8 @@ const MENU = [
             icon: '<path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'activity_types',   label: 'Activity Types',   permission: 'manage_lookups',
             icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'attachment_categories', label: 'Attachment Categories', permission: 'manage_lookups',
+            icon: '<path d="M10.5 4.5l-5 5a1.8 1.8 0 002.5 2.5l5.5-5.5a3 3 0 00-4.2-4.2L3.8 7.8a4.2 4.2 0 006 6l4.2-4.2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'work_projects',    label: 'Work Projects',    permission: 'manage_lookups',
             icon: '<rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 4V2.8h4V4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M8 7v2l1.5 1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'red_flags',        label: 'Red Flags',        permission: 'manage_lookups',
@@ -5529,6 +5553,7 @@ async function openNewOpportunity() {
   await displayOwner();
   await loadCollaborators(null);
   setupOppOwnerReassign();
+  oppFiles = []; _oppFilesDealId = null; _oppFilesPending = [];
   applyOppReadOnly('full'); // creator becomes the owner — always editable
 }
 
@@ -5587,6 +5612,7 @@ async function openOpportunity(id, adminMode = false) {
     document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
     setupOppOwnerReassign();
     applyOppReadOnly(level);
+    oppFilesLoad();   // background: fills the Files tab and its count
     await oppSuspensionOnOpen();
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
@@ -5808,10 +5834,12 @@ function applyOppReadOnly(level) {
   if (!page) return;
 
   const engTab = document.getElementById('opp-tab-engagement');
+  const filesTab = document.getElementById('opp-tab-files');
   // Disable every input/select/textarea. In 'engagement' mode, leave the
-  // Engagement tab's controls enabled so a collaborator can still log activity.
+  // Engagement tab's controls enabled so a collaborator can still log activity
+  // (and, v7.9.82, the Files tab's — a signed contract arrives after securing).
   page.querySelectorAll('input, select, textarea').forEach(el => {
-    const inEng = engTab && engTab.contains(el);
+    const inEng = (engTab && engTab.contains(el)) || (filesTab && filesTab.contains(el));
     el.disabled = oppReadOnly && !(level === 'engagement' && inEng);
     if (el.classList.contains('rev-past')) el.disabled = true;   // v7.9.48: past months stay read-only
   });
@@ -5823,6 +5851,10 @@ function applyOppReadOnly(level) {
   // Revert follows Save, and only exists once there is a saved state to go back to.
   const revertBtn = document.getElementById('opp-revert-btn');
   if (revertBtn) revertBtn.style.display = (level === 'full' && oppData.id) ? '' : 'none';
+
+  // Files follow the same rule as Log Engagement (v7.9.82).
+  oppFilesLevel = level;
+  oppFilesRender();
 
   // Log Engagement: available to full + engagement, hidden for pure viewers.
   const logBtn = document.getElementById('opp-log-engagement-btn');
@@ -6130,6 +6162,197 @@ function switchOppTab(tab, btn) {
   if (btn) btn.classList.add('active');
   const el = document.getElementById('opp-tab-' + tab);
   if (el) el.classList.add('active');
+}
+
+// ── Files on opportunities (v7.9.82) ─────────────────────────────────────────
+// Richard 2026-09-30: "time to be able to attach files to opportunities" — 50 MB a file, a
+// confirmation over 10 MB; contracts are the same deal after securing, and the table carries
+// work_project_id so projects join later. Bytes never pass through the sb proxy: its /files
+// route signs a one-time upload URL the browser PUTs to (private bucket 'attachments') and a
+// 5-minute download URL; the attachments row holds the metadata. Remove is soft (removed_at).
+// Who: anyone who sees the deal downloads; full + engagement levels upload (so a secured deal
+// still takes its signed contract); Remove = the uploader or a deal administrator.
+// SQL: sql/add_attachments.sql. Absent table → the tab says so and offers nothing.
+const FILE_MAX_BYTES = 50 * 1024 * 1024, FILE_WARN_BYTES = 10 * 1024 * 1024;
+let oppFiles = [], _oppFilesDealId = null, oppFilesLevel = 'view', oppFilesMissing = false, _oppFilesPending = [], _oppFilesCat = '', _oppFilesBusy = false;
+const _mockFileBlobs = new Map();   // mock mode only: path -> Blob, lost on reload
+function _fmtBytes(n) {
+  n = +n || 0;
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
+}
+async function oppFilesLoad() {
+  oppFiles = []; _oppFilesDealId = null; oppFilesMissing = false; _oppFilesPending = []; _oppFilesCat = '';
+  if (!oppData || !oppData.id) { oppFilesRender(); return; }
+  const dealId = +oppData.id;
+  try {
+    const [rows, cats] = await Promise.all([
+      api('attachments', 'GET', null, 'deal_id=eq.' + dealId + '&removed_at=is.null&select=*&order=uploaded_at.desc', { silent: true }),
+      allData['attachment_categories'] ? Promise.resolve(allData['attachment_categories'])
+        : api('attachment_categories', 'GET', null, 'select=*&order=sort_order.asc', { silent: true }),
+    ]);
+    if (!oppData || +oppData.id !== dealId) return;   // the user moved to another deal meanwhile
+    allData['attachment_categories'] = cats || [];
+    oppFiles = rows || [];
+    _oppFilesDealId = dealId;
+  } catch (e) {
+    if (!oppData || +oppData.id !== dealId) return;
+    oppFilesMissing = /PGRST205|404/.test(String(e.message));
+    _oppFilesDealId = dealId;
+    if (!oppFilesMissing) showStatus('Could not load files: ' + e.message, 'error');
+  }
+  oppFilesRender();
+}
+function _oppFilesCanUpload() { return oppFilesLevel !== 'view' && !isReadOnlyUser(); }
+function oppFilesRender() {
+  const box = document.getElementById('opp-files');
+  const btn = document.getElementById('opp-files-tab-btn');
+  const current = !!(oppData && oppData.id) && _oppFilesDealId === +oppData.id;   // never show another deal's list
+  if (btn) btn.textContent = current && oppFiles.length ? 'Files (' + oppFiles.length + ')' : 'Files';
+  if (!box) return;
+  const msg = t => '<div style="text-align:center;padding:40px;color:var(--text3);">' + t + '</div>';
+  if (!oppData || !oppData.id) { box.innerHTML = msg('Save the opportunity first — files attach to a saved deal.'); return; }
+  if (!current) { box.innerHTML = msg('Loading…'); return; }
+  if (oppFilesMissing) { box.innerHTML = msg('File storage is not set up on this database yet.'); return; }
+  const cats = allData['attachment_categories'] || [];
+  const catName = id => (cats.find(c => +c.id === +id) || {}).name || '—';
+  const people = allData['people'] || [];
+  const who = id => { const p = people.find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '—'; };
+  const canUp = _oppFilesCanUpload();
+  const canRemove = f => canUp && (+f.uploaded_by === +(currentUser && currentUser.personId) || can('administer_deals'));
+  const drop = canUp ? `<div ondragover="event.preventDefault(); this.style.background='#F3ECDD';" ondragleave="this.style.background='#FBF8F2';" ondrop="event.preventDefault(); this.style.background='#FBF8F2'; oppFilesPicked(event.dataTransfer.files);"
+      style="border:2px dashed #C3B091;border-radius:8px;padding:18px;text-align:center;color:var(--text2);margin-bottom:12px;background:#FBF8F2;">
+      Drag files here or <label style="color:#003057;font-weight:700;cursor:pointer;text-decoration:underline;">browse<input type="file" multiple style="display:none;" onchange="oppFilesPicked(this.files); this.value='';"></label>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;">Up to 50 MB a file · anything over 10 MB asks you to confirm first</div>
+    </div>` : '';
+  const used = [...new Set(oppFiles.map(f => f.category_id == null ? '' : String(f.category_id)))];
+  if (_oppFilesCat && !used.includes(_oppFilesCat)) _oppFilesCat = '';
+  const filter = used.length > 1 ? `<div style="display:flex;justify-content:flex-end;margin-bottom:8px;"><select class="form-control" style="width:220px;" onchange="_oppFilesCat=this.value; oppFilesRender();">
+      <option value="">All categories</option>${used.map(id => `<option value="${escAttr(id)}" ${_oppFilesCat === id ? 'selected' : ''}>${escHtml(id ? catName(id) : 'No category')}</option>`).join('')}</select></div>` : '';
+  const shown = oppFiles.filter(f => !_oppFilesCat || String(f.category_id == null ? '' : f.category_id) === _oppFilesCat);
+  const table = shown.length ? `<table style="width:100%;border-collapse:collapse;"><thead><tr><th>File</th><th>Category</th><th style="text-align:right;">Size</th><th>By</th><th>Date</th><th></th></tr></thead><tbody>${shown.map(f => `<tr>
+      <td><a href="#" onclick="event.preventDefault(); oppFileDownload(${+f.id})" style="color:#003057;font-weight:600;">${escHtml(f.file_name)}</a>${f.note ? `<div style="font-size:11px;color:var(--text3);">${escHtml(f.note)}</div>` : ''}</td>
+      <td>${escHtml(catName(f.category_id))}</td>
+      <td style="text-align:right;white-space:nowrap;">${_fmtBytes(f.size_bytes)}</td>
+      <td style="white-space:nowrap;">${escHtml(who(f.uploaded_by))}</td>
+      <td style="white-space:nowrap;">${f.uploaded_at ? new Date(f.uploaded_at).toLocaleDateString('en-ZA') : '—'}</td>
+      <td style="text-align:right;white-space:nowrap;"><button type="button" class="btn btn-ghost btn-sm" onclick="oppFileDownload(${+f.id})">Download</button>${canRemove(f) ? ` <button type="button" class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="oppFileRemove(${+f.id})">Remove</button>` : ''}</td>
+    </tr>`).join('')}</tbody></table>` : msg(oppFiles.length ? 'No files in this category' : 'No files attached yet');
+  box.innerHTML = drop + '<div id="opp-files-queue"></div>' + filter + table;
+  _oppFilesQueueRender();
+}
+// Picked or dropped: over 50 MB is refused outright; over 10 MB asks once for the lot.
+async function oppFilesPicked(list) {
+  if (!_oppFilesCanUpload() || _oppFilesBusy) return;
+  const files = Array.from(list || []);
+  if (!files.length) return;
+  const tooBig = files.filter(x => x.size > FILE_MAX_BYTES);
+  if (tooBig.length) showStatus(tooBig.map(x => x.name).join(', ') + ' — over the 50 MB limit, not added', 'error');
+  let ok = files.filter(x => x.size <= FILE_MAX_BYTES);
+  const large = ok.filter(x => x.size > FILE_WARN_BYTES);
+  if (large.length && !await confirmDialog({ title: 'Large file' + (large.length > 1 ? 's' : ''),
+      message: large.map(x => x.name + ' (' + _fmtBytes(x.size) + ')').join(', ') + (large.length > 1 ? ' are' : ' is') + ' over 10 MB. Large files are slow to upload and download for everyone. Attach anyway?',
+      confirmLabel: 'Attach' })) ok = ok.filter(x => x.size <= FILE_WARN_BYTES);
+  if (!ok.length) return;
+  const other = (allData['attachment_categories'] || []).find(c => c.active !== false && /^other$/i.test(c.name || ''));
+  ok.forEach(file => _oppFilesPending.push({ file, category_id: other ? String(other.id) : '', note: '', pct: null }));
+  _oppFilesQueueRender();
+}
+function _oppFilesQueueRender() {
+  const q = document.getElementById('opp-files-queue');
+  if (!q) return;
+  if (!_oppFilesPending.length) { q.innerHTML = ''; return; }
+  const cats = (allData['attachment_categories'] || []).filter(c => c.active !== false);
+  const dis = _oppFilesBusy ? 'disabled' : '';
+  q.innerHTML = `<div style="border:1px solid #C3B091;border-radius:8px;padding:10px 12px;margin-bottom:12px;background:#F7F2E9;">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px;">Ready to attach</div>
+    ${_oppFilesPending.map((p, i) => `<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:200px;font-size:13px;font-weight:600;color:#003057;">${escHtml(p.file.name)} <span style="font-weight:400;color:var(--text3);">${_fmtBytes(p.file.size)}</span></div>
+      <select class="form-control" style="width:180px;" ${dis} onchange="_oppFilesPending[${i}].category_id=this.value;"><option value="">— category —</option>${cats.map(c => `<option value="${+c.id}" ${String(c.id) === p.category_id ? 'selected' : ''}>${escHtml(c.name)}</option>`).join('')}</select>
+      <input type="text" class="form-control" style="width:220px;" placeholder="Note (optional)" ${dis} value="${escAttr(p.note)}" oninput="_oppFilesPending[${i}].note=this.value;">
+      ${p.pct != null ? `<span style="width:60px;text-align:right;font-size:12px;color:var(--text2);">${p.pct}%</span>` : `<button type="button" class="btn btn-ghost btn-sm" ${dis} onclick="_oppFilesPending.splice(${i},1); _oppFilesQueueRender();">×</button>`}
+    </div>`).join('')}
+    <div style="text-align:right;margin-top:6px;"><button type="button" class="btn btn-secondary btn-sm" ${dis} onclick="_oppFilesPending=[]; _oppFilesQueueRender();">Cancel</button> <button type="button" class="btn btn-primary btn-sm" ${dis} onclick="oppFilesUpload()">${_oppFilesBusy ? 'Uploading…' : 'Upload ' + _oppFilesPending.length + ' file' + (_oppFilesPending.length > 1 ? 's' : '')}</button></div>
+  </div>`;
+}
+// PUT with progress (fetch cannot report upload progress).
+function _putWithProgress(url, file, onPct) {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('PUT', url);
+    x.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    x.setRequestHeader('x-upsert', 'false');
+    x.upload.onprogress = e => { if (e.lengthComputable) onPct(Math.round(e.loaded * 100 / e.total)); };
+    x.onload = () => (x.status >= 200 && x.status < 300) ? resolve() : reject(new Error('Upload failed (' + x.status + ')'));
+    x.onerror = () => reject(new Error('Upload failed — check the connection'));
+    x.send(file);
+  });
+}
+async function _filesSignUpload(dealId, file) {
+  if (MOCK) return { path: 'deal/' + dealId + '/' + Date.now() + '/' + file.name, uploadUrl: null };
+  const r = await api('files', 'POST', { action: 'upload', owner: 'deal', owner_id: dealId, file_name: file.name, size: file.size });
+  if (!r || !r.ok) throw new Error((r && r.error) || 'Could not start the upload');
+  return r;
+}
+async function oppFilesUpload() {
+  if (_oppFilesBusy || !_oppFilesPending.length || !oppData || !oppData.id) return;
+  const dealId = +oppData.id;
+  _oppFilesBusy = true; _oppFilesQueueRender();
+  let done = 0;
+  try {
+    while (_oppFilesPending.length) {
+      const p = _oppFilesPending[0];
+      p.pct = 0; _oppFilesQueueRender();
+      const signed = await _filesSignUpload(dealId, p.file);
+      if (MOCK) _mockFileBlobs.set(signed.path, p.file);
+      else await _putWithProgress(signed.uploadUrl, p.file, pct => { p.pct = pct; _oppFilesQueueRender(); });
+      await api('attachments', 'POST', {
+        deal_id: dealId, category_id: p.category_id ? +p.category_id : null,
+        file_name: p.file.name, mime_type: p.file.type || null, size_bytes: p.file.size,
+        storage_path: signed.path, note: (p.note || '').trim() || null,
+        uploaded_by: (currentUser && currentUser.personId) || null,
+      });
+      _oppFilesPending.shift(); done++;
+    }
+    showStatus(done + ' file' + (done > 1 ? 's' : '') + ' attached');
+  } catch (e) {
+    showStatus('Upload stopped: ' + e.message + (done ? ' (' + done + ' attached before it)' : ''), 'error');
+    if (_oppFilesPending[0]) _oppFilesPending[0].pct = null;
+  } finally {
+    _oppFilesBusy = false;
+  }
+  const keep = _oppFilesPending;
+  if (oppData && +oppData.id === dealId) { await oppFilesLoad(); _oppFilesPending = keep; _oppFilesQueueRender(); }
+}
+async function oppFileDownload(id) {
+  const f = oppFiles.find(x => +x.id === +id);
+  try {
+    let url;
+    if (MOCK) {
+      const blob = f && _mockFileBlobs.get(f.storage_path);
+      if (!blob) { showStatus('Mock mode keeps files only until a reload', 'error'); return; }
+      url = URL.createObjectURL(blob);
+    } else {
+      const r = await apiGet('files', 'download=' + (+id));
+      if (!r || !r.ok || !r.url) throw new Error((r && r.error) || 'Could not fetch the file');
+      url = r.url;
+    }
+    const a = document.createElement('a');
+    a.href = url; a.download = (f && f.file_name) || '';
+    document.body.appendChild(a); a.click(); a.remove();
+  } catch (e) { showStatus('Download failed: ' + e.message, 'error'); }
+}
+async function oppFileRemove(id) {
+  const f = oppFiles.find(x => +x.id === +id);
+  if (!f) return;
+  if (!await confirmDialog({ title: 'Remove file', message: 'Remove ' + f.file_name + ' from this opportunity? It disappears from the list; the file itself is kept and a deal administrator can have it restored.', confirmLabel: 'Remove', danger: true })) return;
+  try {
+    await api('attachments', 'PATCH', { removed_at: new Date().toISOString(), removed_by: (currentUser && currentUser.personId) || null }, 'id=eq.' + (+id));
+    oppFiles = oppFiles.filter(x => +x.id !== +id);
+    oppFilesRender();
+    showStatus('File removed');
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
 }
 
 // ── Proposal Builder (full prototype port — runs as a tab on the Opportunity page) ──
