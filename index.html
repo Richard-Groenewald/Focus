@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.77 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.77 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -4705,21 +4705,40 @@ const HELP_CONTENT = {
       ],
     };
   },
-  leads: () => ({
+  leads: () => {
+    // v7.9.78: rewritten against the code (audit 2026-09-20). The facts a reader can check live —
+    // the source list, the Working grace window, the aging limits — are read from the app at
+    // open time rather than typed here, so the guide cannot drift on those again.
+    const srcNames = (typeof allData !== 'undefined' && Array.isArray(allData['lead_sources']) ? allData['lead_sources'] : []).filter(s => s.active !== false).map(s => s.name);
+    const srcList = srcNames.length ? srcNames.map(n => helpChip(escHtml(n))).join(' ') + ' (Admin → Lookups → Lead Sources)' : 'every source listed under Admin → Lookups → Lead Sources';
+    const grace = typeof leadWaitingMinutes === 'function' ? leadWaitingMinutes() : 0;
+    const me = (typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || 0;
+    const agingNew = typeof agingDaysFor === 'function' ? agingDaysFor(me, 'new') : 0, agingWorking = typeof agingDaysFor === 'function' ? agingDaysFor(me, 'working') : 0;
+    const limit = d => d > 0 ? d + ' days' : '<em>not set</em>';
+    return {
     eyebrow: 'FOCUS · LEADS',
     title: 'Leads Register Guide',
-    sub: 'Every potential piece of business, from first capture to promotion. Work the register left to right: Raw → Working → Review → Promoted.',
+    sub: 'Every potential piece of business, from first capture to promotion. Work the register left to right: Raw → Working → Review → Promoted. The stages move off the data; promotion is the one approval.',
     sections: [
-      { note: '<strong>What this register is.</strong> A lead is a provisional opportunity — nothing becomes “real” (people, organisations, the deal) until it is <strong>Promoted</strong>. This page is the full book of leads you can see, split into one tab per lifecycle stage.' },
-      { h: 'The lifecycle map', body: `Every move a lead can make is on this map — the stage columns, the gates between them, and the Oversight checks. Nothing moves on opinion alone: stages move automatically off the data (with entry bars gating Hold and Nurture); promotion is the one transition that passes an approval, with Oversight arriving post-hoc on deaths and red flags.<div onclick="openLeadLifecycleZoom()" title="Click to enlarge" style="cursor:zoom-in;border:1px solid #d9dee3;border-radius:8px;background:#fff;padding:6px;margin-top:8px;"><img src="${LEAD_LIFECYCLE_IMG}" alt="Lead lifecycle map" style="width:100%;height:auto;display:block;" loading="lazy"></div><div style="font-size:11.5px;color:var(--text3,#889);margin-top:5px;">🔍 Click the map to open it full-size.</div>` },
-      { h: 'Reading the map', body: `<ul><li><strong>Eight sources</strong> — Events/Conferences, Research, Referral, Client Expansion, Campaign, Tender, Network Leverage and Cold Calling — all land in <strong>Raw</strong>.</li><li><strong>Raw → Working</strong> takes a first logged <strong>engagement</strong> (plus the required fields). A lead nobody has touched stays Raw.</li><li>In Working the lead walks the four gates — <strong>Fit → Access → Capacity → Trigger</strong> — and only <strong>Strong</strong> passes a gate.</li><li><strong>All four Strong</strong> (with a primary service interest and an organisation) flips the lead to <strong>Review</strong> automatically. Review is the approval queue: promotion passes oversight — <em>the only approval in the lifecycle</em> — then ${helpChip('Promoted')} opens the opportunity.</li><li><strong>No Trigger yet, but Fit/Access/Capacity Strong?</strong> The owner or a manager puts the lead on <strong>Hold</strong> directly, and its <strong>Awake</strong> timer (the wake date) returns it to play automatically. A green Trigger drops to Weak on entry — holding a lead means its moment is not now.</li><li><strong>Fit and Access Strong, but strategically worth the long game?</strong> The owner or a manager moves it to <strong>Nurture</strong> directly, and its <strong>Remind</strong> timer (the touch cadence) keeps the relationship alive.</li><li><strong>Red Flag</strong> — raised at any time. The lead keeps being worked but cannot be promoted until an <strong>Executive</strong> rules Kill or Ignore.</li><li><strong>Dead is a decision, not an accident</strong> — every kill route passes a final Oversight, and a confirmed Dead can be reopened (gates reset).</li></ul><em>Note: the map image still shows the pre-2026-08-12 approval steps on Hold and Nurture entry — those are now direct actions.</em>` },
-      { h: 'The two bands', body: `The stages roll up into two umbrella bands, shown as headings directly over their own tabs, each carrying the band's total. <strong>In Qualification</strong> (${helpChip('Raw')} ${helpChip('Working')}) — the lead's fate is still being established. <strong>Qualified</strong> (${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')}) — a deliberate decision has been made: parked on purpose, awaiting promotion review, or promoted. The per-stage counts live on the tabs themselves, so a band total can't hide thin leads parked in Nurture. Dead belongs to neither band.` },
-      { h: 'The stage tabs', body: `The tabs mirror the map's columns, each with a live count, grouped so each band's stages sit together: ${helpChip('Raw')} ${helpChip('Working')} · ${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')} · ${helpChip('Dead')}. Tab colours match the stage badge colours used across Focus. <strong>Hold</strong> only appears while leads are actually held; <strong>Dead</strong> sits apart on the far right — it is the off-pipeline bucket, not a stage you work. (Raw is the stage formerly labelled New; Review the stage formerly labelled Qualified — the word Qualified now names the band.)` },
-      { h: 'Whose leads you see', body: 'The view bar switches scope: <strong>Own</strong> (default) shows leads you own; <strong>Team</strong> (managers) adds your region/branch; <strong>All</strong> needs the view-all-leads right. The subtitle under the page title shows the count in the current view.' },
-      { h: 'Working the list', body: 'Click any row to open the lead. Column headers <strong>sort and filter</strong> (admin sets the default sort under Admin → Settings). <strong>+ New Lead</strong> (top right) captures a new one. Opening the register also does the housekeeping: eligible Raw leads flip to Working, and held leads whose wake date has arrived come back into play.' },
-      { h: 'Nothing sleeps forgotten', body: 'Aging Raw/Working leads and freshly-woken holds surface in the <strong>Leads needing attention</strong> banner on the dashboard, and the full list is workable on the <strong>Attention Workbench</strong> page under Sales Management; approvers get an <strong>Approvals Outstanding</strong> card collecting everything awaiting a decision. For the full stage-by-stage workflow, open any lead and press the green <strong>?</strong> there — the Lead Workflow Guide picks up where this page leaves off.' },
+      { note: `<strong>What this register is.</strong> A lead is a <strong>provisional opportunity</strong> — a possible piece of business we are still qualifying. It lives on this page until it is <strong>Promoted</strong> into an opportunity, parked on purpose (<strong>Hold</strong> or <strong>Nurture</strong>), or closed (<strong>Dead</strong>). Two things become real before promotion: a typed organisation name becomes a <strong>Prospect organisation</strong> the moment the lead is saved, so the same client is recognised across leads, and the people you name are matched against people we already know. Everything else — the deal and its revenue stream — exists only from promotion.` },
+      { h: 'The four rules behind the process', body: `<ol><li><strong>Stages move off the data, not on opinion.</strong> Raw → Working and Working → Review happen by themselves the moment the facts are in place. Nobody is asked to approve progress.</li><li><strong>One approval in the whole lifecycle: promotion.</strong> Sales management accepts or rejects a promotion request. Every other move — Hold, Nurture, coming back, Decline — is a direct action by the owner or a manager, recorded on the lead's audit trail.</li><li><strong>Oversight arrives after the fact where a lead leaves the pipeline.</strong> A death is confirmed by sales management afterwards; a red flag is ruled on by an Executive while work continues.</li><li><strong>Nothing sleeps forgotten — provided the limits are set.</strong> Hold carries a wake date; Raw and Working age against limits Admin sets; Nurture relies on you logging the next touch.</li></ol>` },
+      { h: 'The lifecycle map', body: `Every move a lead can make is on this map — the stage columns, the gates between them, and the oversight checks.<div onclick="openLeadLifecycleZoom()" title="Click to enlarge" style="cursor:zoom-in;border:1px solid #d9dee3;border-radius:8px;background:#fff;padding:6px;margin-top:8px;"><img src="${LEAD_LIFECYCLE_IMG}" alt="Lead lifecycle map" style="width:100%;height:auto;display:block;" loading="lazy"></div><div style="font-size:11.5px;color:var(--text3,#889);margin-top:5px;">🔍 Click the map to open it full-size.</div><em>Note: the map image predates the 2026-08-12 revision — it still shows approval steps on Hold and Nurture entry, which are now direct actions, and its source list is illustrative. The text below is what Focus actually does.</em>` },
+      { h: 'Raw — capture', body: `Every lead lands here, from any source: ${srcList}. To leave Raw a lead needs four things, and Focus checks them for you:<ul><li>a <strong>source and its detail</strong> — who referred it, which client it expands, which campaign or study it came from, or a note for the rest;</li><li>a <strong>description</strong> of what is being pursued;</li><li>one <strong>contact</strong> — a person we already know, or a first and last name with an email address or phone number;</li><li>a <strong>first engagement</strong>, logged with a <strong>next action and its date</strong>. An engagement without a next step does not count.</li></ul>An organisation is <em>not</em> required yet — you may work a lead before you know whose site it is. Name it as soon as you can: it is needed to reach Review.` },
+      { h: 'Working — qualification', body: `The flip from Raw is automatic and immediate once the four items above are complete. ${grace > 0 ? 'For the first <strong>' + grace + ' minute' + (grace === 1 ? '' : 's') + '</strong> after reaching Working an edit that breaks one of them drops the lead back to Raw; after that Working is sticky.' : 'Working is sticky once reached.'} Leads of the same client group move to Working together.<br><br>In Working you rate the <strong>four gates</strong> on the Qualification tab:<ul><li><strong>Fit</strong> — the prospect matches our ideal client profile (sector, size, footprint).</li><li><strong>Access</strong> — we can reach the economic decision-maker.</li><li><strong>Capacity</strong> — they have the budget and the authority to buy.</li><li><strong>Trigger</strong> — a compelling event is driving them to act now.</li></ul>Each gate is <strong>Weak</strong> or <strong>Strong</strong>, and <strong>only Strong passes</strong> — Weak never counts and there is no admin threshold that changes that. Rate them in any order; the sequence Fit → Access → Capacity → Trigger is how the parked stages' entry bars build up (Nurture needs Fit and Access; Hold adds Capacity; Review needs all four), not a sequence you must follow.` },
+      { h: 'Review — the approval queue', body: `A lead reaches Review by itself when <strong>all four gates are Strong</strong>, a <strong>primary service interest</strong> is set and an <strong>organisation</strong> is named (linked or typed). Once the gates are green, whatever still blocks Review is highlighted on the lead.<ul><li><strong>The owner</strong> presses <strong>Request promotion</strong> and assembles the deal package — organisation, contact, service, value, dates and the first action on the opportunity. An open next action already on the lead can serve as that first commitment.</li><li><strong>Sales management</strong> (the promote-lead right) sees the request in <strong>Approvals Outstanding</strong> and either <strong>accepts</strong> it — the opportunity is created and the lead becomes ${helpChip('Promoted')} — or <strong>rejects</strong> it with a reason; the package is kept for a re-request and the lead's stage follows its data again.</li><li>A manager who holds the right promotes directly with <strong>Promote →</strong>; no request is needed.</li></ul>This is the only approval in the lifecycle.` },
+      { h: 'Hold — right profile, wrong moment', body: `From <strong>Working or Review</strong>, by the owner or a manager, as a direct action. The bar is <strong>Fit, Access and Capacity Strong</strong>; a <strong>wake date</strong> is mandatory. On entry a Strong Trigger is turned <strong>Weak</strong> — holding a lead says its moment is not now. It comes back to play in three ways: on the first register, dashboard or workbench load after the wake date (landing on Working, or straight on Review if every gate is Strong with a service interest and an organisation); early, the moment its Trigger goes Strong again with those two in place; or by hand, with <strong>Take lead off Hold</strong> on the Lead Progression tab. Hold applies to the one lead, not its client group.` },
+      { h: 'Nurture — the long game', body: `From <strong>Raw, Working or Review</strong>, by the owner or a manager, as a direct action. The bar is <strong>Fit and Access Strong</strong>; a <strong>touch cadence</strong> in days is mandatory (30 by default). Each time you log an engagement, the next-touch date is pre-filled one cadence out. Nothing reminds you on its own: the dashboard's aging nags cover Raw and Working only, so keep a next action set on every Nurture lead. <strong>Exit Nurture →</strong> puts it back in play, landing on Review or Working off its data. Nurture is group-cohesive — the other leads in the same client group move with it and inherit the cadence.` },
+      { h: 'Red flags', body: `Raise a flag the moment a disqualifying concern appears — payment risk, ethics, a conflict, capacity — from the Lead Progression tab or the promote wizard's first question. The lead <strong>keeps being worked</strong> in its stage, but <strong>cannot be promoted</strong> while a flag is unresolved. An <strong>Executive</strong> (or Admin) rules <strong>Kill</strong> — the lead goes to Dead with the flag on its record — or <strong>Ignore</strong>, and open flags appear in their Approvals Outstanding. Anyone who can edit the lead may also remove a flag, which lifts the block.` },
+      { h: 'Dead — a decision, with a record', body: `<strong>Decline…</strong> closes a lead from any stage with a category and a reason. It moves to Dead at once and its open next actions are closed automatically with a note. If the person declining is not sales management, the death then waits for oversight: a manager can <strong>Confirm dead</strong>, or <strong>Reject — back to Working</strong> (the gates are left as they were). A manager's own Decline, or an Executive's Kill, is final as it is made. A confirmed Dead can be <strong>reopened</strong> by sales management or an Executive, with a reason: the four gates reset and the lead lands on Working (or Raw, if it had never reached Working).` },
+      { h: 'The two bands', body: `The stages roll up into two umbrella bands, shown as headings over their own tabs, each carrying the band's total. <strong>In Qualification</strong> (${helpChip('Raw')} ${helpChip('Working')}) — the lead's fate is still being established. <strong>Qualified</strong> (${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')}) — a deliberate decision has been made: parked on purpose, awaiting promotion review, or promoted. The per-stage counts stay on the tabs, so a band total cannot hide thin leads parked in Nurture. Dead belongs to neither band.` },
+      { h: 'The stage tabs', body: `The tabs mirror the map's columns, each with a live count, grouped so each band's stages sit together: ${helpChip('Raw')} ${helpChip('Working')} · ${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')} · ${helpChip('Dead')}. Tab colours match the stage badges used across Focus. <strong>Hold</strong> only appears while leads are actually held; <strong>Dead</strong> sits apart on the far right — the off-pipeline bucket, not a stage you work. (Raw is the stage formerly labelled New; Review the stage formerly labelled Qualified — the word Qualified now names the band.)` },
+      { h: 'Whose leads you see', body: `<strong>Show Own</strong> is the default: the leads you own. If you have more to see, a view bar offers <strong>Show All</strong> (needs the view-all-leads right) and <strong>Team</strong> (managers holding the edit-all-records right: your own leads plus those in your regions or branches). With only your own leads to see, no bar is shown. View-only users who hold the view-all right land on Show All. The subtitle under the page title shows two figures — the leads on the tab you are looking at, and the total in your scope across all tabs.` },
+      { h: 'Working the list', body: `<ul><li><strong>Client groups.</strong> Leads sharing a client sit under a client heading row that shows the group's best gate dots, its soonest next action and the shared site. Clicking the heading opens or closes the group (open by default; <strong>Expand all / Collapse all</strong> above the table does them all). One-lead clients and clientless leads are plain rows.</li><li><strong>Click a lead's row</strong> to open it. A Promoted lead's row asks whether to view the lead read-only or open its opportunity.</li><li><strong>Column headers sort and filter</strong> — the ▾ opens a value picker — separately on each tab; an active filter shows a FILTERED banner with its own count and a clear button. Admin sets the default sort under Admin → Settings.</li><li><strong>Last Touch</strong> is the newest engagement on the lead. On Raw and Working it turns orange at half your aging limit and red at the limit; an engagement on the client group counts too ("· grp").</li><li><strong>+ New Lead</strong> (top right) captures one. Each field saves as you leave it; a typed organisation becomes a Prospect organisation; the estimates you enter under Primary Service Interest set the lead's estimated value.</li><li>Opening the register also does the housekeeping: eligible Raw leads flip to Working and held leads whose wake date has passed come back into play.</li></ul>` },
+      { h: 'Nothing sleeps forgotten', body: `Three things surface without anyone looking for them:<ul><li><strong>Raw leads untouched</strong> for longer than the Raw limit, and <strong>Working leads with no touch</strong> for longer than the Working limit. A Working lead with a next action due today or later is left alone until that action falls overdue. The limits live under Admin → Settings → Lead Lifecycle and a sales manager may override them per person; where a limit is not set, nothing ages. Yours today: Raw ${limit(agingNew)}, Working ${limit(agingWorking)}.</li><li><strong>Leads back from Hold</strong>, until they are picked up.</li><li><strong>Approvals owed</strong> — promotion requests and dead reviews for sales management, red flags for Executives, plus proposed milestones — in the <strong>Approvals Outstanding</strong> card, a per-role dashboard widget.</li></ul>The first two appear in the <strong>Leads needing attention</strong> banner on the dashboard — your own leads, or everyone's for sales management — and the full list is workable on the <strong>Attention Workbench</strong> under Sales Management. Nurture leads are deliberately not nagged: the cadence is yours to keep.` },
+      { h: 'Guidelines for working leads', body: `<ul><li><strong>Log every touch</strong> as an engagement with a next action and date. That is what moves a lead, what stops it aging, and what Last Touch reads.</li><li><strong>Rate the gates honestly.</strong> Strong means true today, not hoped for. Weak is information, not failure.</li><li><strong>Park on purpose.</strong> Hold when the profile is right but the moment is not — with a wake date you believe. Nurture when the relationship is worth the long game — with a cadence you will keep.</li><li><strong>Name the organisation early.</strong> It is needed to reach Review, and Focus keeps the same client together across leads.</li><li><strong>Raise a red flag at once.</strong> It does not stop the work; it stops a promotion nobody should make.</li><li><strong>Never abandon a lead.</strong> Decline it with a reason rather than let it age; a Dead lead with a record can always be reopened.</li><li><strong>Managers:</strong> read the Qualified band by its composition — the tab counts show whether "qualified" means Review or parked.</li></ul>For the stage-by-stage detail on one lead, open it and press the green <strong>?</strong> — the Lead Workflow Guide picks up where this page leaves off.` },
     ],
-  }),
+    };
+  },
 
   internal_activity: () => ({
     eyebrow: 'FOCUS \u00b7 INTERNAL ACTIVITY',
@@ -4780,7 +4799,7 @@ function openHelpDrawer(key) {
   // section under a red-ruled navy heading (numbering matches the setup guide).
   let n = 0;
   const sectionsHtml = content.sections.filter(s => s.body || s.note).map(s =>
-    s.note ? `<div class="help-note"${s.colour ? ` style="background:${escAttr(s.colour)};"` : ''}>${escHtml(s.note)}</div>`
+    s.note ? `<div class="help-note"${s.colour ? ` style="background:${escAttr(s.colour)};"` : ''}>${s.note}</div>`   /* v7.9.78: the note is guide markup curated in this file (never database text) — v7.9.59's sweep escaped it, so every guide's callout showed literal <strong> tags */
            : `<h4>${++n}. ${s.h}</h4><div>${s.body}</div>`).join('');
   drawer.innerHTML = `
     <div class="help-drawer-header">
@@ -17845,7 +17864,7 @@ async function applyGroupJoinStage(newLead) {
 // to the PARENT itself highlighted, sortable + searchable. Engagements stay
 // lead-XOR-deal — this is pure read; org-attachable engagements deliberately
 // deferred (the visual parent tier is already reserved for them).
-let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '';
+let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '', _phOrg = null;
 async function openParentHistory(parentId) {
   try {
     if (!allData['organisations'] || !allData['organisations'].length) allData['organisations'] = await apiGet('organisations', 'select=*');
@@ -17862,7 +17881,7 @@ async function openParentHistory(parentId) {
       ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
       : 'target_org_id=in.(' + idList + ')';
     const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status,created_at,source_id');
-    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,created_at');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,stage_id,created_at');
     const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
     const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
     const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
@@ -17899,6 +17918,7 @@ async function openParentHistory(parentId) {
       rows.push({
         date:  en.engagement_date || '',
         client: entityOrg != null ? orgName(entityOrg) : '—',
+        orgId: entityOrg,
         isGroup: kind === 'Group',
         rec: recLabel, open, kind,
         type: en.engagement_type || '',
@@ -17907,7 +17927,41 @@ async function openParentHistory(parentId) {
       });
     });
     _phData = { rows, parentId: +parentId, parentName: parent.name || '' };
-    _phSort = { key: 'date', dir: -1 }; _phQ = '';
+    _phSort = { key: 'date', dir: -1 }; _phQ = ''; _phOrg = null;
+    // Members strip (v7.9.79, Richard 2026-09-30: "it says group 4 orgs... how do i see the orgs"):
+    // one card per family organisation — parent first, then by name — with its open leads,
+    // open opportunities and active contracts; a card click filters the history to that org.
+    const [_stRows, _stCats] = await Promise.all([
+      apiGet('stages', 'select=id,name,category_id').catch(() => []),
+      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*').catch(() => []),
+    ]);
+    const _catOf = new Map(_stRows.map(st => [+st.id, ((_stCats || []).find(c => +c.id === +st.category_id) || {}).name || '']));
+    // A contract is a Secured deal (category Opportunity-Closed on prod) or one in fulfilment.
+    const _isContract = d => { const st = _stRows.find(x => +x.id === +d.stage_id); return !!st && (String(st.name).toLowerCase() === 'secured' || _catOf.get(+st.id) === 'Fulfilment-Active'); };
+    const _leadOrg = l => l.target_org_id ? +l.target_org_id : (l.site_id ? (siteOrg.get(+l.site_id) || null) : null);
+    const _members = famIds.map(id => {
+      const o = O.find(x => +x.id === +id) || {};
+      const ds = deals.filter(d => +d.org_id === +id);
+      return {
+        id: +id, name: o.name || '—', isParent: +id === +parentId, active: o.active !== false,
+        leads: leads.filter(l => _leadOrg(l) === +id && l.status !== 'Dead' && l.status !== 'Promoted').length,
+        opps: ds.filter(d => _catOf.get(+d.stage_id) === 'Opportunity-Open').length,
+        contracts: ds.filter(_isContract).length,
+        engs: rows.filter(r => r.orgId === +id).length,
+      };
+    }).sort((a, b) => (b.isParent - a.isParent) || a.name.localeCompare(b.name));
+    const _plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const _membersHtml = famIds.length < 2 ? '' : `
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px;">Members <span style="font-weight:500;text-transform:none;letter-spacing:0;">· click one to show only its engagements</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">${_members.map(m => `
+                <div class="ph-member" data-org="${m.id}" onclick="_phPickOrg(${m.id})" title="Show only ${escAttr(m.name)}'s engagements" style="cursor:pointer;padding:7px 10px;border-radius:8px;border:1px solid ${m.isParent ? '#C3B091' : 'var(--border)'};background:${m.isParent ? '#F7F2E9' : 'var(--card, #fff)'};min-width:170px;">
+                  <div style="font-weight:700;font-size:13px;color:#003057;">${cEsc(m.name)}${m.isParent ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">PARENT</span>' : ''}${m.active ? '' : ' <span style="font-size:9px;font-weight:700;color:var(--text3);vertical-align:middle;">INACTIVE</span>'}</div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:2px;">${[_plural(m.leads, 'open lead'), _plural(m.opps, 'opportunity').replace('opportunitys', 'opportunities'), _plural(m.contracts, 'contract')].join(' · ')}</div>
+                  <div style="font-size:11px;color:var(--text3);">${_plural(m.engs, 'engagement')}</div>
+                </div>`).join('')}
+              </div>
+            </div>`;
     // Origin: the group's how-it-started = the EARLIEST pursuit's source (v7.9.09).
     if (!allData['lead_sources']) { try { allData['lead_sources'] = await apiGet('lead_sources', 'select=*'); } catch (e) { allData['lead_sources'] = []; } }
     const _pursuits = leads.map(l => ({ t: l.created_at, kind: 'lead', src: l.source_id }))
@@ -17966,6 +18020,7 @@ async function openParentHistory(parentId) {
                 <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="_phSaveGroupEngagement()">Save</button>
               </div>
             </div>
+            ${_membersHtml}
             <input type="text" id="ph-search" class="form-control" placeholder="Search type, client, record, notes, owner…" style="margin-bottom:10px;" oninput="_phQ=this.value; _phRenderRows();">
             <table style="width:100%;border-collapse:collapse;">
               <thead><tr>${[['date','Date'],['client','Client'],['rec','Record'],['type','Type'],['owner','By'],['notes','Notes']].map(c => `<th style="cursor:pointer;white-space:nowrap;" onclick="_phSetSort('${c[0]}')">${c[1]}<span id="ph-arr-${c[0]}"></span></th>`).join('')}</tr></thead>
@@ -17986,7 +18041,7 @@ function _phRenderRows() {
   const tb = document.getElementById('ph-tbody');
   if (!tb || !_phData) return;
   const q = (_phQ || '').trim().toLowerCase();
-  let rows = _phData.rows.filter(r => !q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q));
+  let rows = _phData.rows.filter(r => (_phOrg == null || r.orgId === _phOrg) && (!q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q)));
   const k = _phSort.key, dir = _phSort.dir;
   rows = rows.slice().sort((a, b) => {
     const av = String(a[k] || '').toLowerCase(), bv = String(b[k] || '').toLowerCase();
@@ -18005,7 +18060,13 @@ function _phRenderRows() {
       <td style="white-space:nowrap;">${cEsc(r.owner || '—')}</td>
       <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
     </tr>`).join('')
-  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this collective yet'}</td></tr>`;
+  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : _phOrg != null ? ' recorded for this organisation yet' : ' recorded for this collective yet'}</td></tr>`;
+}
+// Members strip click: show only that organisation's rows; the same card again shows all.
+function _phPickOrg(id) {
+  _phOrg = _phOrg === +id ? null : +id;
+  document.querySelectorAll('.ph-member').forEach(el => { el.style.boxShadow = +el.dataset.org === _phOrg ? '0 0 0 2px #003057' : ''; });
+  _phRenderRows();
 }
 
 // Group description: seeded from the first pursuit at birth, editable HERE at
