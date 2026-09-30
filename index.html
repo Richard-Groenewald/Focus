@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.80 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.80 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3050,7 +3050,7 @@ const PAGES = {
       { key: 'allows_system_users', label: 'System Users', render: v => v ? '<span class="badge badge-green">Eligible</span>' : '<span class="badge badge-gray">No</span>' },
       // The collective's PERMANENT doorway (v7.9.08): band badges vanish when a
       // tab holds no leads for the org — this one can't. Same view, same log button.
-      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
+      { key: 'id', label: 'Group', render: v => _orgFamilyCellHtml(+v) },
     ],
     // Same tabbed form as Clients, plus an Admin tab for the home/system flags.
     fields: [
@@ -3110,7 +3110,7 @@ const PAGES = {
           return v ? `<span class="badge ${cls}">${v}</span>` : '<span style="color:var(--text3);">—</span>';
         } },
       // The collective's permanent doorway (v7.9.08) — see organisations config.
-      { key: 'id', label: 'Group', render: v => _groupChipHtml('o' + (+v)) },
+      { key: 'id', label: 'Group', render: v => _orgFamilyCellHtml(+v) },
     ],
     // Tabbed client form (see renderTabbedForm). is_client / home_organisation /
     // allows_system_users are forced on save (clients can't be home/system orgs).
@@ -4012,6 +4012,7 @@ function renderTabbedForm(data) {
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
+          ${data && data.id ? _orgFamilyBannerHtml(+data.id) : ''}
           <div class="opp-tabs">${btns}</div>
           <form id="modal-form" onsubmit="saveRecord(event)"><div id="tabform-panels">${panels}</div></form>
         </div>
@@ -5915,7 +5916,7 @@ async function initOppForm() {
   // Populate organisation dropdown
   const orgSel = document.getElementById('opp-org-id');
   orgSel.innerHTML = '<option value="">— select client —</option>' +
-    orgs.map(o => `<option value="${o.id}" ${oppData.org_id==o.id?'selected':''}>${escHtml(o.name)}</option>`).join('');
+    orgs.map(o => `<option value="${o.id}" ${oppData.org_id==o.id?'selected':''}>${escHtml(o.name + _orgFamilyTagText(o.id))}</option>`).join('');
 
   // If editing an existing deal, lock the client field
   const editEl = document.getElementById('opp-org-edit');
@@ -15151,7 +15152,7 @@ async function renderOpportunitiesPage() {
       const stage = stages.find(s => +s.id === +d.stage_id);
       const nameCls = opts.child ? ' class="lin-name"' : '';
       return `<tr class="${opts.child ? 'lineage-child' : ''}${opts.grouped ? ' client-band-child' : ''}" onclick="openOpportunity(${d.id})" style="cursor:pointer;${opts.child && !opts.open ? 'display:none;' : ''}">
-        <td style="font-weight:600;">${opts.child ? '' : col1Of(d, opts.grouped)}</td>
+        <td style="font-weight:600;">${opts.child ? '' : col1Of(d, opts.grouped) + _childHookHtml(d.org_id)}</td>
         <td>${opts.child ? '' : (_orgSectorName(d.org_id) || '—')}</td>
         <td${nameCls}>${d.name}${(opts.child || opts.tag) ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
@@ -15166,7 +15167,7 @@ async function renderOpportunitiesPage() {
     const masterRow = (d, members, open, mid, grouped) => {
       const n = members.length;
       return `<tr class="lineage-master${grouped ? ' client-band-child' : ''}" onclick="toggleLineage(${mid})" style="cursor:pointer;">
-        <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${col1Of(d, grouped)}</td>
+        <td><span class="lin-toggle ${open ? 'open' : ''}">›</span>${col1Of(d, grouped)}${_childHookHtml(d.org_id)}</td>
         <td>${_orgSectorName(d.org_id) || '—'}</td>
         <td style="color:#003057;font-weight:700;">${d.name}</td>
         <td style="color:var(--text3);">${n} linked deals</td>
@@ -17692,6 +17693,61 @@ function _childHookHtml(orgId) {
   if (+top.id === +org.id) return '';
   return `<div style="font-size:11px;color:var(--text3);margin-top:2px;white-space:nowrap;">↳ <span style="font-weight:600;color:var(--text2);">${cEsc(top.name || '')}</span></div>`;
 }
+// Family marks everywhere (v7.9.80, Richard 2026-09-30: "when an organisation is part of a group
+// we should always indicate this somewhere, and when an organisation is the parent similarly").
+// An org in a linked family is either the PARENT (top of the chain, with members) or a CHILD
+// (↳ its top parent). Standalone orgs return null and stay inkless.
+function _orgFamilyRole(orgId) {
+  const O = allData['organisations'] || [];
+  const org = orgId != null ? O.find(o => +o.id === +orgId) : null;
+  if (!org) return null;
+  const top = _ultimateParentOrg(org, O);
+  if (top && +top.id !== +org.id) return { role: 'child', org, top };
+  const n = _familyOrgIds(+org.id).length;
+  return n > 1 ? { role: 'parent', org, top: org, n } : null;
+}
+// Plain text for <option> labels.
+function _orgFamilyTagText(orgId) {
+  const r = _orgFamilyRole(orgId);
+  if (!r) return '';
+  return r.role === 'child' ? '  ↳ ' + (r.top.name || '') : '  · group of ' + r.n;
+}
+// Inline mark for pickers and the chosen-organisation chip.
+function _orgFamilyTagHtml(orgId) {
+  const r = _orgFamilyRole(orgId);
+  if (!r) return '';
+  if (r.role === 'child') return ` <span style="font-size:11px;font-weight:400;color:var(--text3);white-space:nowrap;">↳ <span style="font-weight:600;color:var(--text2);">${cEsc(r.top.name || '')}</span></span>`;
+  return ` <span style="display:inline-block;padding:1px 7px;border-radius:9px;font-size:9px;font-weight:700;letter-spacing:.04em;vertical-align:middle;white-space:nowrap;background:#F0E9DC;border:1px solid #C3B091;color:#003057;">GROUP · ${r.n} ORGS</span>`;
+}
+// Organisation list Group column: the parent keeps its GROUP chip, a child names its parent
+// (click → the family's group window filtered to this org), anything else as before.
+function _orgFamilyCellHtml(orgId) {
+  const r = _orgFamilyRole(orgId);
+  if (r && r.role === 'child') return `<span onclick="event.stopPropagation(); openParentHistory(${+r.top.id}, ${+r.org.id})" title="Part of the ${escAttr(r.top.name || '')} group — open the group" style="cursor:pointer;font-size:11px;color:var(--text3);white-space:nowrap;">↳ <span style="font-weight:600;color:#003057;text-decoration:underline dotted;">${cEsc(r.top.name || '')}</span></span>`;
+  return _groupChipHtml('o' + (+orgId));
+}
+// Organisation form banner: a parent lists its members, a child names its group. Every link
+// closes the form (unsaved edits are dropped, as with Cancel) and opens the group window.
+function _orgFamilyBannerHtml(orgId) {
+  const r = _orgFamilyRole(orgId);
+  if (!r) return '';
+  const O = allData['organisations'] || [];
+  const link = (id, label) => `<a href="#" onclick="event.preventDefault(); closeModal(); openParentHistory(${+r.top.id}${id != null ? ', ' + (+id) : ''})" style="color:#003057;font-weight:600;">${cEsc(label)}</a>`;
+  let body;
+  if (r.role === 'parent') {
+    const kids = _familyOrgIds(+r.org.id).filter(id => +id !== +r.org.id)
+      .map(id => O.find(o => +o.id === +id)).filter(Boolean)
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+    body = `<strong>Group parent</strong> of ${kids.map(k => link(k.id, k.name || '—')).join(', ')}`;
+  } else {
+    const via = +r.org.parent_org_id !== +r.top.id ? (O.find(o => +o.id === +r.org.parent_org_id) || {}).name : null;
+    body = `<strong>Part of the group</strong> ${link(null, r.top.name || '—')}${via ? ` <span style="color:var(--text3);">(via ${cEsc(via)})</span>` : ''}`;
+  }
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;background:#F7F2E9;border:1px solid #C3B091;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:13px;color:var(--text);">
+    <div>${body}</div>
+    <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal(); openParentHistory(${+r.top.id})" title="Opening the group closes this form without saving">Open group</button>
+  </div>`;
+}
 
 // ── Group touches & aging (v7.9.07) ───────────────────────────────────────────
 // A collective engagement soothes every member lead's aging clock by default
@@ -17865,7 +17921,7 @@ async function applyGroupJoinStage(newLead) {
 // lead-XOR-deal — this is pure read; org-attachable engagements deliberately
 // deferred (the visual parent tier is already reserved for them).
 let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '', _phOrg = null;
-async function openParentHistory(parentId) {
+async function openParentHistory(parentId, pickOrgId) {
   try {
     if (!allData['organisations'] || !allData['organisations'].length) allData['organisations'] = await apiGet('organisations', 'select=*');
     const O = allData['organisations'];
@@ -18030,6 +18086,7 @@ async function openParentHistory(parentId) {
         </div>
       </div>`);
     _phRenderRows();
+    if (pickOrgId != null && famIds.includes(+pickOrgId)) _phPickOrg(+pickOrgId);
   } catch (e) { showStatus('Could not load group history: ' + e.message, 'error'); }
 }
 function _phSetSort(k) {
@@ -21543,7 +21600,7 @@ async function initLeadForm() {
   // Source-org picker: all active orgs
   const srcOrgSel = document.getElementById('lead-source-org-id');
   srcOrgSel.innerHTML = '<option value="">— select client —</option>' +
-    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name)}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name + _orgFamilyTagText(o.id))}</option>`).join('');
 
   // Research campaign picker
   const campaignSel = document.getElementById('lead-research-campaign-id');
@@ -21558,7 +21615,7 @@ async function initLeadForm() {
   // Organisation sub-picker (shown only when adding a new site): all active orgs
   const tgtOrgSel = document.getElementById('lead-target-org-id');
   tgtOrgSel.innerHTML = '<option value="">Pick a known organisation or create a new one below</option>' +
-    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name)}</option>`).join('');
+    pickerOrgs.map(o => `<option value="${o.id}">${escHtml(o.name + _orgFamilyTagText(o.id))}</option>`).join('');
 
   // Primary Site typeahead starts empty (search is live against allData['sites']).
   // Under the populating flag: this re-enters onLeadTargetOrgChange with a blank
@@ -22221,7 +22278,8 @@ function onLeadTargetOrgChange() {
   const hintEl    = document.getElementById('lead-target-org-hint');
   if (orgId) {
     // Existing org locked in — swap the dropdown for a static name + Change button.
-    if (chosenNm) chosenNm.textContent = dd.options[dd.selectedIndex]?.text || '(selected organisation)';
+    { const _o = (allData['organisations'] || []).find(x => +x.id === +orgId);
+      if (chosenNm) chosenNm.innerHTML = _o ? cEsc(_o.name || '') + _orgFamilyTagHtml(_o.id) : cEsc(dd.options[dd.selectedIndex]?.text || '(selected organisation)'); }
     if (picker)   picker.style.display = 'none';
     if (chosen)   chosen.style.display = 'flex';
     if (nameField) { nameField.value = ''; nameField.style.display = 'none'; }
@@ -22889,7 +22947,7 @@ function onLeadTargetOrgNameInput() {
     html += `<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:4px 0 4px;">Possible matches</div>`;
     html += matches.map(o => `
       <div style="padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:white;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:4px;">
-        <div style="font-size:12px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
+        <div style="font-size:12px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}${_orgFamilyTagHtml(o.id)}</div>
         <button type="button" class="btn btn-secondary btn-sm" onclick="useLeadTargetOrgMatch(${o.id})">Use</button>
       </div>`).join('');
     // None of these is the right one → confirm it's a brand-new org and dismiss the strip.
@@ -24425,7 +24483,7 @@ function applyLeadTargetOrgLock(locked) {
     } else {
       label = `${String(leadData.target_org_name).replace(/</g, '&lt;')} <span style="font-weight:400;color:var(--text3);font-size:11px;">(new organisation)</span>`;
     }
-    if (chosenNm) chosenNm.innerHTML = label;
+    if (chosenNm) chosenNm.innerHTML = label + (hasExisting ? _orgFamilyTagHtml(leadData.target_org_id) : '');
     if (picker)    picker.style.display = 'none';
     if (chosen)    chosen.style.display = 'flex';
     if (nameField) nameField.style.display = 'none';
@@ -25131,7 +25189,7 @@ function _promoteOrgMatchStripHtml() {
     if (exact && +exact.id === linkedId) exact = null;
     shortlist = shortlist.filter(o => +o.id !== linkedId);
   }
-  const namePair = o => `${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);font-weight:400;">(${o.legal_name})</span>` : ''}`;
+  const namePair = o => `${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);font-weight:400;">(${o.legal_name})</span>` : ''}${_orgFamilyTagHtml(o.id)}`;
   let html = '';
   if (linked) {
     html += `
@@ -25157,7 +25215,7 @@ function _promoteOrgMatchStripHtml() {
     html += `<div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:10px 0 6px;">Possible matches</div>`;
     html += shortlist.map(o => `
       <div style="padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);background:white;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:10px;">
-        <div style="font-size:13px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}</div>
+        <div style="font-size:13px;">${o.name}${o.legal_name && o.legal_name !== o.name ? ` <span style="color:var(--text3);">(${o.legal_name})</span>` : ''}${_orgFamilyTagHtml(o.id)}</div>
         <button class="btn btn-secondary btn-sm" onclick="promoteOrgPickExisting(${o.id})">Use</button>
       </div>`).join('');
   }
