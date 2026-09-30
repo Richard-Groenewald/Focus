@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.80 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.80 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.81 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17115,7 +17115,7 @@ async function renderDealAdminPage() {
     return;
   }
 
-  body.innerHTML = '<tr class="empty-row"><td colspan="6">Loading...</td></tr>';
+  body.innerHTML = '<tr class="empty-row"><td colspan="7">Loading...</td></tr>';
 
   try {
     const [deals, orgs, stages, people, streams] = await Promise.all([
@@ -17135,13 +17135,15 @@ async function renderDealAdminPage() {
     document.getElementById('page-sub').textContent = deals.length + ' deal' + (deals.length !== 1 ? 's' : '');
 
     if (!deals.length) {
-      head.innerHTML = '<tr><th>Organisation</th><th>Deal Name</th><th>Stage</th><th style="text-align:right">Probability</th><th>Status</th><th>Actions</th></tr>';
-      body.innerHTML = '<tr class="empty-row"><td colspan="6">No deals.</td></tr>';
+      head.innerHTML = '<tr><th>Organisation</th><th>Group</th><th>Deal Name</th><th>Stage</th><th style="text-align:right">Probability</th><th>Status</th><th>Actions</th></tr>';
+      body.innerHTML = '<tr class="empty-row"><td colspan="7">No deals.</td></tr>';
       return;
     }
 
     const columns = [
       { key: 'org',        label: 'Organisation', get: d => (orgs.find(o => +o.id === +d.org_id)?.name) || '' },
+      // Group (v7.9.81): the linked family's parent, so a family filters as one; blank when standalone.
+      { key: 'group',      label: 'Group',        get: d => { const r = _orgFamilyRole(d.org_id); return r ? (r.top.name || '') : ''; } },
       { key: 'name',       label: 'Deal Name',    get: d => d.name || '' },
       { key: 'stage',      label: 'Stage',        get: d => (stages.find(s => +s.id === +d.stage_id)?.name) || '' },
       { key: 'probability',label: 'Probability',  get: d => d.probability != null ? +d.probability : null, align: 'right' },
@@ -17154,7 +17156,8 @@ async function renderDealAdminPage() {
       const org = orgs.find(o => +o.id === +d.org_id);
       const sec = securedOf(d);
       return `<tr>
-        <td style="font-weight:600;">${org?.name || '—'}</td>
+        <td style="font-weight:600;">${org?.name ? cEsc(org.name) : '—'}</td>
+        <td>${_orgFamilyCellHtml(d.org_id)}</td>
         <td>${d.name || '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
         <td style="text-align:right;">${d.probability != null ? d.probability + '%' : '—'}</td>
@@ -17176,7 +17179,7 @@ async function renderDealAdminPage() {
       emptyMessage: 'No deals match the current filters',
     });
   } catch(e) {
-    body.innerHTML = `<tr class="empty-row"><td colspan="6">Error: ${e.message}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="7">Error: ${e.message}</td></tr>`;
   }
 }
 
