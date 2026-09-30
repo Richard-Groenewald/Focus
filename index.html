@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.78 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.78 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.79 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17864,7 +17864,7 @@ async function applyGroupJoinStage(newLead) {
 // to the PARENT itself highlighted, sortable + searchable. Engagements stay
 // lead-XOR-deal — this is pure read; org-attachable engagements deliberately
 // deferred (the visual parent tier is already reserved for them).
-let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '';
+let _phData = null, _phSort = { key: 'date', dir: -1 }, _phQ = '', _phOrg = null;
 async function openParentHistory(parentId) {
   try {
     if (!allData['organisations'] || !allData['organisations'].length) allData['organisations'] = await apiGet('organisations', 'select=*');
@@ -17881,7 +17881,7 @@ async function openParentHistory(parentId) {
       ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
       : 'target_org_id=in.(' + idList + ')';
     const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status,created_at,source_id');
-    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,created_at');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,stage_id,created_at');
     const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
     const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
     const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
@@ -17918,6 +17918,7 @@ async function openParentHistory(parentId) {
       rows.push({
         date:  en.engagement_date || '',
         client: entityOrg != null ? orgName(entityOrg) : '—',
+        orgId: entityOrg,
         isGroup: kind === 'Group',
         rec: recLabel, open, kind,
         type: en.engagement_type || '',
@@ -17926,7 +17927,41 @@ async function openParentHistory(parentId) {
       });
     });
     _phData = { rows, parentId: +parentId, parentName: parent.name || '' };
-    _phSort = { key: 'date', dir: -1 }; _phQ = '';
+    _phSort = { key: 'date', dir: -1 }; _phQ = ''; _phOrg = null;
+    // Members strip (v7.9.79, Richard 2026-09-30: "it says group 4 orgs... how do i see the orgs"):
+    // one card per family organisation — parent first, then by name — with its open leads,
+    // open opportunities and active contracts; a card click filters the history to that org.
+    const [_stRows, _stCats] = await Promise.all([
+      apiGet('stages', 'select=id,name,category_id').catch(() => []),
+      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*').catch(() => []),
+    ]);
+    const _catOf = new Map(_stRows.map(st => [+st.id, ((_stCats || []).find(c => +c.id === +st.category_id) || {}).name || '']));
+    // A contract is a Secured deal (category Opportunity-Closed on prod) or one in fulfilment.
+    const _isContract = d => { const st = _stRows.find(x => +x.id === +d.stage_id); return !!st && (String(st.name).toLowerCase() === 'secured' || _catOf.get(+st.id) === 'Fulfilment-Active'); };
+    const _leadOrg = l => l.target_org_id ? +l.target_org_id : (l.site_id ? (siteOrg.get(+l.site_id) || null) : null);
+    const _members = famIds.map(id => {
+      const o = O.find(x => +x.id === +id) || {};
+      const ds = deals.filter(d => +d.org_id === +id);
+      return {
+        id: +id, name: o.name || '—', isParent: +id === +parentId, active: o.active !== false,
+        leads: leads.filter(l => _leadOrg(l) === +id && l.status !== 'Dead' && l.status !== 'Promoted').length,
+        opps: ds.filter(d => _catOf.get(+d.stage_id) === 'Opportunity-Open').length,
+        contracts: ds.filter(_isContract).length,
+        engs: rows.filter(r => r.orgId === +id).length,
+      };
+    }).sort((a, b) => (b.isParent - a.isParent) || a.name.localeCompare(b.name));
+    const _plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+    const _membersHtml = famIds.length < 2 ? '' : `
+            <div style="margin-bottom:10px;">
+              <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px;">Members <span style="font-weight:500;text-transform:none;letter-spacing:0;">· click one to show only its engagements</span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">${_members.map(m => `
+                <div class="ph-member" data-org="${m.id}" onclick="_phPickOrg(${m.id})" title="Show only ${escAttr(m.name)}'s engagements" style="cursor:pointer;padding:7px 10px;border-radius:8px;border:1px solid ${m.isParent ? '#C3B091' : 'var(--border)'};background:${m.isParent ? '#F7F2E9' : 'var(--card, #fff)'};min-width:170px;">
+                  <div style="font-weight:700;font-size:13px;color:#003057;">${cEsc(m.name)}${m.isParent ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">PARENT</span>' : ''}${m.active ? '' : ' <span style="font-size:9px;font-weight:700;color:var(--text3);vertical-align:middle;">INACTIVE</span>'}</div>
+                  <div style="font-size:11px;color:var(--text2);margin-top:2px;">${[_plural(m.leads, 'open lead'), _plural(m.opps, 'opportunity').replace('opportunitys', 'opportunities'), _plural(m.contracts, 'contract')].join(' · ')}</div>
+                  <div style="font-size:11px;color:var(--text3);">${_plural(m.engs, 'engagement')}</div>
+                </div>`).join('')}
+              </div>
+            </div>`;
     // Origin: the group's how-it-started = the EARLIEST pursuit's source (v7.9.09).
     if (!allData['lead_sources']) { try { allData['lead_sources'] = await apiGet('lead_sources', 'select=*'); } catch (e) { allData['lead_sources'] = []; } }
     const _pursuits = leads.map(l => ({ t: l.created_at, kind: 'lead', src: l.source_id }))
@@ -17985,6 +18020,7 @@ async function openParentHistory(parentId) {
                 <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="_phSaveGroupEngagement()">Save</button>
               </div>
             </div>
+            ${_membersHtml}
             <input type="text" id="ph-search" class="form-control" placeholder="Search type, client, record, notes, owner…" style="margin-bottom:10px;" oninput="_phQ=this.value; _phRenderRows();">
             <table style="width:100%;border-collapse:collapse;">
               <thead><tr>${[['date','Date'],['client','Client'],['rec','Record'],['type','Type'],['owner','By'],['notes','Notes']].map(c => `<th style="cursor:pointer;white-space:nowrap;" onclick="_phSetSort('${c[0]}')">${c[1]}<span id="ph-arr-${c[0]}"></span></th>`).join('')}</tr></thead>
@@ -18005,7 +18041,7 @@ function _phRenderRows() {
   const tb = document.getElementById('ph-tbody');
   if (!tb || !_phData) return;
   const q = (_phQ || '').trim().toLowerCase();
-  let rows = _phData.rows.filter(r => !q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q));
+  let rows = _phData.rows.filter(r => (_phOrg == null || r.orgId === _phOrg) && (!q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q)));
   const k = _phSort.key, dir = _phSort.dir;
   rows = rows.slice().sort((a, b) => {
     const av = String(a[k] || '').toLowerCase(), bv = String(b[k] || '').toLowerCase();
@@ -18024,7 +18060,13 @@ function _phRenderRows() {
       <td style="white-space:nowrap;">${cEsc(r.owner || '—')}</td>
       <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
     </tr>`).join('')
-  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : ' recorded for this collective yet'}</td></tr>`;
+  : `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No engagements${q ? ' match the search' : _phOrg != null ? ' recorded for this organisation yet' : ' recorded for this collective yet'}</td></tr>`;
+}
+// Members strip click: show only that organisation's rows; the same card again shows all.
+function _phPickOrg(id) {
+  _phOrg = _phOrg === +id ? null : +id;
+  document.querySelectorAll('.ph-member').forEach(el => { el.style.boxShadow = +el.dataset.org === _phOrg ? '0 0 0 2px #003057' : ''; });
+  _phRenderRows();
 }
 
 // Group description: seeded from the first pursuit at birth, editable HERE at
