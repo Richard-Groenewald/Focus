@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.83 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.83 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3460,7 +3460,7 @@ const PAGES = {
   attachment_folders: {
     title: 'File Folders',
     table: 'attachment_folders',
-    filter: 'deal_id=is.null&work_project_id=is.null',
+    filter: 'deal_id=is.null',
     columns: [
       { key: 'name',                   label: 'Folder', render: (v, r) => r && r.parent_id ? '<span style="color:var(--text3);">↳</span> ' + escHtml(v || '') : '<strong>' + escHtml(v || '') + '</strong>' },
       { key: 'parent_id',              label: 'Under', render: v => v ? escHtml(((allData['attachment_folders'] || []).find(x => +x.id === +v) || {}).name || '—') : '' },
@@ -3475,7 +3475,7 @@ const PAGES = {
     fields: [
       { key: 'name',                   label: 'Name', required: true },
       { key: 'parent_id',              label: 'Under (leave blank for a main folder)', type: 'lookup', lookupTable: 'attachment_folders', lookupLabel: r => r.name,
-        lookupFilter: r => r.parent_id == null && r.deal_id == null && r.work_project_id == null },
+        lookupFilter: r => r.parent_id == null && r.deal_id == null },
       { key: 'applies_to_opportunity', label: 'Offer on opportunities', type: 'checkbox', default: true },
       { key: 'applies_to_contract',    label: 'Offer on contracts',     type: 'checkbox', default: true },
       { key: 'applies_to_project',     label: 'Offer on projects',      type: 'checkbox', default: true },
@@ -6218,12 +6218,17 @@ function _fmtBytes(n) {
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
   return (n / 1024 / 1024).toFixed(n < 10 * 1024 * 1024 ? 1 : 0) + ' MB';
 }
-// A secured deal is a contract: its stage is Secured or sits in a Fulfilment category.
-function _oppIsContract() {
+// Which folder ticks apply (Richard 2026-10-01): an unsecured deal is an opportunity; once secured
+// (stage Secured, or a Fulfilment category) it is managed as a CONTRACT when its service sub-type
+// earns annuity revenue and as a PROJECT when it earns project revenue (rsgRevenueType).
+function _oppFilesContext() {
   const st = (allData['stages'] || []).find(x => +x.id === +(oppData && oppData.stage_id));
-  if (!st) return false;
-  const cat = (allData['stage_categories'] || []).find(c => +c.id === +st.category_id);
-  return String(st.name || '').toLowerCase() === 'secured' || /^fulfilment/i.test((cat && cat.name) || '');
+  const cat = st ? (allData['stage_categories'] || []).find(c => +c.id === +st.category_id) : null;
+  const secured = !!st && (String(st.name || '').toLowerCase() === 'secured' || /^fulfilment/i.test((cat && cat.name) || ''));
+  if (!secured) return 'opportunity';
+  const subId = +(oppData && oppData.service_sub_id);
+  const sub = (allData['service_sub_all'] || []).find(x => +x.id === subId) || (allData['service_sub'] || []).find(x => +x.id === subId);
+  return rsgRevenueType(sub) === 'project' ? 'project' : 'contract';
 }
 async function oppFilesLoad() {
   oppFiles = []; _oppFilesDealId = null; oppFilesMissing = false; _oppFilesPending = []; _oppFileMoving = null;
@@ -6233,7 +6238,7 @@ async function oppFilesLoad() {
   try {
     const [rows, folders, quotes] = await Promise.all([
       api('attachments', 'GET', null, 'deal_id=eq.' + dealId + '&removed_at=is.null&select=*&order=uploaded_at.desc', { silent: true }),
-      api('attachment_folders', 'GET', null, 'or=(and(deal_id.is.null,work_project_id.is.null),deal_id.eq.' + dealId + ')&select=*&order=sort_order.asc,name.asc', { silent: true }),
+      api('attachment_folders', 'GET', null, 'or=(deal_id.is.null,deal_id.eq.' + dealId + ')&select=*&order=sort_order.asc,name.asc', { silent: true }),
       api('quote_quotes', 'GET', null, 'deal_id=eq.' + dealId + '&select=id', { silent: true }).catch(() => []),
     ]);
     const qIds = (quotes || []).map(q => +q.id);
@@ -6254,7 +6259,7 @@ async function oppFilesLoad() {
 function _oppFilesCanUpload() { return oppFilesLevel !== 'view' && !isReadOnlyUser(); }
 // The folder tree for this deal: [{ f, kids: [folder…] }] in admin order, pruned to what applies.
 function _oppFolderTree() {
-  const ctx = _oppIsContract() ? 'applies_to_contract' : 'applies_to_opportunity';
+  const ctx = 'applies_to_' + _oppFilesContext();
   const used = new Set(oppFiles.map(x => +x.folder_id));
   const own = f => f.deal_id != null;
   const offered = f => own(f) || used.has(+f.id) || (f.active !== false && f[ctx] !== false);

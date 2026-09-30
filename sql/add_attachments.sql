@@ -1,19 +1,22 @@
 -- Files on opportunities, contracts and projects (v7.9.82–83), Richard 2026-09-30:
 --   "time to be able to attach files to opportunities" — 50 MB a file, a warning over 10 MB;
---   "functionality will extend to contracts and project too";
+--   "functionality will extend to contracts and project too" — a secured deal is managed as a contract
+--   (annuity revenue) or a project (project revenue), but it stays the same deals row, so every file
+--   and every per-record folder hangs off deal_id (2026-10-01: the work_project_id columns of the
+--   first drafts were a misreading — work_projects are internal time buckets — and are removed);
 --   "set up standard folders for attached files in site admin" — a sub level; one list with
 --   opportunity / contract / project ticks; extra per-record folders only under one main
 --   non-standard folder; Proposals and Invoices "auto attach based on other routines in focus
 --   with option to direct attach".
 --
---   attachment_folders  STANDARD folders (deal_id and work_project_id NULL): a main folder or,
+--   attachment_folders  STANDARD folders (deal_id NULL): a main folder or,
 --                       via parent_id, one sub level beneath it; applies_to_* ticks say where a
 --                       folder is offered (a folder holding files always shows); allows_custom
 --                       marks the main folder users may add their own subfolders under;
 --                       auto_source names the routine that files into it (Proposals: issued
 --                       proposal versions, shown read-only, never copied; Invoices: reserved).
---                       CUSTOM folders carry deal_id (or work_project_id) and a parent_id.
---   attachments         one row per file, exactly one home (deal | work project), folder_id,
+--                       CUSTOM folders carry deal_id and a parent_id.
+--   attachments         one row per file on one deal, folder_id,
 --                       soft removal (removed_at / removed_by — the stored object is kept).
 --   storage bucket      'attachments', PRIVATE, 50 MB per object; the sb proxy signs a one-time
 --                       upload URL and 5-minute download URLs with the service key.
@@ -63,17 +66,21 @@ ALTER TABLE attachment_folders
   ADD COLUMN IF NOT EXISTS allows_custom          BOOLEAN NOT NULL DEFAULT false,
   ADD COLUMN IF NOT EXISTS auto_source            TEXT CHECK (auto_source IN ('Proposals', 'Invoices')),
   ADD COLUMN IF NOT EXISTS deal_id                BIGINT REFERENCES deals(id) ON DELETE CASCADE,
-  ADD COLUMN IF NOT EXISTS work_project_id        BIGINT REFERENCES work_projects(id) ON DELETE CASCADE,
   ADD COLUMN IF NOT EXISTS created_by             BIGINT REFERENCES people(id);
+-- The work_project_id columns of the earlier drafts go (2026-10-01); dropping a column drops the
+-- checks built on it, which are re-made below on deal_id alone. Both columns were never used.
+ALTER TABLE attachment_folders DROP COLUMN IF EXISTS work_project_id;
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachment_folders_one_home') THEN
-    ALTER TABLE attachment_folders ADD CONSTRAINT attachment_folders_one_home
-      CHECK (num_nonnulls(deal_id, work_project_id) <= 1);
+  IF to_regclass('public.attachments') IS NOT NULL THEN
+    ALTER TABLE attachments DROP COLUMN IF EXISTS work_project_id;
+    IF NOT EXISTS (SELECT 1 FROM attachments WHERE deal_id IS NULL) THEN
+      ALTER TABLE attachments ALTER COLUMN deal_id SET NOT NULL;
+    END IF;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachment_folders_custom_sub') THEN
     ALTER TABLE attachment_folders ADD CONSTRAINT attachment_folders_custom_sub
-      CHECK (num_nonnulls(deal_id, work_project_id) = 0 OR parent_id IS NOT NULL);
+      CHECK (deal_id IS NULL OR parent_id IS NOT NULL);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'attachment_folders_not_self') THEN
     ALTER TABLE attachment_folders ADD CONSTRAINT attachment_folders_not_self
@@ -90,7 +97,7 @@ SELECT v.name, v.ord
   FROM (VALUES ('Proposals', 1), ('Correspondence', 2), ('Site Survey', 3),
                ('Contracts', 4), ('Invoices', 5), ('Other', 6)) AS v(name, ord)
  WHERE NOT EXISTS (SELECT 1 FROM attachment_folders f
-                    WHERE f.deal_id IS NULL AND f.work_project_id IS NULL AND lower(f.name) = lower(v.name));
+                    WHERE f.deal_id IS NULL AND lower(f.name) = lower(v.name));
 UPDATE attachment_folders f
    SET applies_to_opportunity = v.opp, applies_to_contract = v.con, applies_to_project = v.prj,
        allows_custom = v.cus, auto_source = v.auto, sort_order = v.ord
@@ -101,13 +108,12 @@ UPDATE attachment_folders f
                ('Invoices',       5, false, true,  true,  false, 'Invoices'),
                ('Other',          6, true,  true,  true,  true,  NULL))
        AS v(name, ord, opp, con, prj, cus, auto)
- WHERE f.name = v.name AND f.deal_id IS NULL AND f.work_project_id IS NULL
+ WHERE f.name = v.name AND f.deal_id IS NULL
    AND NOT EXISTS (SELECT 1 FROM attachment_folders x WHERE x.auto_source IS NOT NULL);
 
 CREATE TABLE IF NOT EXISTS attachments (
   id               BIGSERIAL PRIMARY KEY,
-  deal_id          BIGINT REFERENCES deals(id) ON DELETE CASCADE,
-  work_project_id  BIGINT REFERENCES work_projects(id) ON DELETE CASCADE,
+  deal_id          BIGINT NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
   folder_id        BIGINT REFERENCES attachment_folders(id),
   file_name        TEXT NOT NULL,
   mime_type        TEXT,
@@ -117,11 +123,9 @@ CREATE TABLE IF NOT EXISTS attachments (
   uploaded_by      BIGINT REFERENCES people(id),
   uploaded_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   removed_at       TIMESTAMPTZ,
-  removed_by       BIGINT REFERENCES people(id),
-  CONSTRAINT attachments_one_home CHECK (num_nonnulls(deal_id, work_project_id) = 1)
+  removed_by       BIGINT REFERENCES people(id)
 );
-CREATE INDEX IF NOT EXISTS attachments_deal_idx         ON attachments (deal_id)         WHERE deal_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS attachments_work_project_idx ON attachments (work_project_id) WHERE work_project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS attachments_deal_idx         ON attachments (deal_id);
 CREATE INDEX IF NOT EXISTS attachments_folder_idx       ON attachments (folder_id);
 
 ALTER TABLE attachment_folders ENABLE ROW LEVEL SECURITY;
@@ -157,5 +161,5 @@ NOTIFY pgrst, 'reload schema';
 -- Verify
 SELECT id, name, parent_id, applies_to_opportunity AS opp, applies_to_contract AS con,
        applies_to_project AS prj, allows_custom, auto_source, sort_order, active
-  FROM attachment_folders WHERE deal_id IS NULL AND work_project_id IS NULL ORDER BY sort_order, id;
+  FROM attachment_folders WHERE deal_id IS NULL ORDER BY sort_order, id;
 SELECT public, file_size_limit FROM storage.buckets WHERE id = 'attachments';

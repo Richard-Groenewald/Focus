@@ -197,7 +197,7 @@ const authReply = (statusCode, obj) => ({
 // Attachments live in the PRIVATE Supabase Storage bucket 'attachments'
 // (sql/add_attachments.sql). This route never carries a file's bytes — a Netlify
 // function body tops out near 6 MB and files may be 50 MB. It signs instead:
-//   POST /files { action:'upload', owner:'deal'|'work_project', owner_id, file_name, size }
+//   POST /files { action:'upload', owner:'deal', owner_id, file_name, size }
 //        -> { ok, path, uploadUrl }  a one-time URL the browser PUTs the file to
 //   GET  /files?download=<attachments.id>
 //        -> { ok, url }              a 5-minute URL that downloads under the file's name
@@ -205,7 +205,7 @@ const authReply = (statusCode, obj) => ({
 // 50 MB limit is what actually binds; the size check here only fails early.
 const FILE_BUCKET = 'attachments';
 const FILE_MAX_BYTES = 50 * 1024 * 1024;
-const FILE_OWNERS = { deal: 'deals', work_project: 'work_projects' };
+const FILE_OWNERS = { deal: 'deals' };   // a contract or project is the same deals row once secured
 const encPath = (p) => String(p).split('/').map(encodeURIComponent).join('/');
 
 function sbStorage(key, method, path, body) {
