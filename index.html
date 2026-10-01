@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1772,6 +1772,25 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) broa
 function setEnvLabel() {
   const name = (typeof appSettings !== 'undefined' && appSettings['environment']) ? appSettings['environment'] : '';
   document.querySelectorAll('.env-label').forEach(el => el.textContent = name);
+  _envBar(name);
+}
+// Any environment other than Production wears an orange stripe across the top of every screen,
+// login included, and a [DEV] prefix on the browser tab (v7.9.86, Richard 2026-10-01: he secured a
+// deal on Dev believing it was production). The stripe never takes clicks.
+function _envBar(name) {
+  const nonProd = !!name && !/^prod/i.test(name);
+  let bar = document.getElementById('env-bar');
+  if (!nonProd) { if (bar) bar.remove(); document.title = document.title.replace(/^\[[A-Z]+\] /, ''); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'env-bar';
+    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;height:5px;background:#F59E0B;z-index:100000;pointer-events:none;';
+    bar.innerHTML = '<div style="position:absolute;top:0;left:50%;transform:translateX(-50%);background:#F59E0B;color:#000;font:700 11px Arial,sans-serif;letter-spacing:.06em;padding:3px 14px 4px;border-radius:0 0 8px 8px;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,.2);"></div>';
+    document.body.appendChild(bar);
+  }
+  bar.firstChild.textContent = name.toUpperCase() + ' SITE — TEST DATA, NOT PRODUCTION';
+  const tag = '[' + (/^dev/i.test(name) ? 'DEV' : name.slice(0, 4).toUpperCase()) + '] ';
+  if (!document.title.startsWith(tag)) document.title = tag + document.title.replace(/^\[[A-Z]+\] /, '');
 }
 async function loadEnvironment() {
   try {
@@ -6137,8 +6156,9 @@ function onOppStageChange(userTriggered) {
   const stage = stages.find(s => +s.id === +stageId);
   const cat = stage ? stageCats.find(c => +c.id === +stage.category_id) : null;
 
-  // Show/hide lost tab
-  const isLost = cat && cat.name === 'Opportunity-Closed';
+  // Show/hide lost tab — the Lost stage only. Secured shares the Opportunity-Closed category,
+  // which used to open the Lost tab on every secured deal (v7.9.86, Richard 2026-10-01).
+  const isLost = !!stage && String(stage.name || '').trim().toLowerCase() === 'lost';
   const lostTab = document.getElementById('lost-tab');
   if (lostTab) lostTab.style.display = isLost ? '' : 'none';
 
