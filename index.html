@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.86 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.87 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.86 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.87 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5583,6 +5583,17 @@ function getFYLabel(fy) {
   return `FY${fy}/${String(fy+1).slice(2)}`;
 }
 
+// Empty every deal form box. The open path fills a box only when the deal has a value, so without
+// this a deal with no notes showed — and a full Save wrote — the previous deal's notes (v7.9.87).
+function _oppClearFields() {
+  ['opp-name','opp-notes','opp-ext-notes','opp-margin-pct',
+    'opp-order-date','opp-start-date','opp-base-amount','opp-num-months',
+    'opp-escalation','opp-lost-date','opp-lost-to','opp-lost-notes',
+    'opp-probability','opp-order-date-general'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; if (el.dataset) delete el.dataset.userSet; }
+  });
+}
 async function openNewOpportunity() {
   // Fully reset all state
   resetOppDirty();
@@ -5596,14 +5607,7 @@ async function openNewOpportunity() {
   if (window._liPeople) window._liPeople = [];
 
   // Reset all form fields
-  const fields = ['opp-name','opp-notes','opp-ext-notes','opp-margin-pct',
-    'opp-order-date','opp-start-date','opp-base-amount','opp-num-months',
-    'opp-escalation','opp-lost-date','opp-lost-to','opp-lost-notes',
-    'opp-probability','opp-order-date-general'];
-  fields.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) { el.value = ''; if (el.dataset) delete el.dataset.userSet; }
-  });
+  _oppClearFields();
 
   // Reset engagement list
   const engList = document.getElementById('engagement-list');
@@ -5656,6 +5660,7 @@ async function openOpportunity(id, adminMode = false) {
     ]);
     oppData = deals[0] || { id };
     oppMonths = {};
+    _oppClearFields();   // nothing from the previous deal may linger in a box this deal leaves empty
     // Revert baseline: the autosave columns exactly as the database holds them now.
     _oppAsOpened = {};
     for (const f of Object.values(OPP_AUTOSAVE_FIELDS)) _oppAsOpened[f.col] = oppData[f.col] ?? null;
@@ -5697,7 +5702,7 @@ async function openOpportunity(id, adminMode = false) {
     else if (isCurrentUserOppCollaborator()) level = 'engagement';
     document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
     setupOppOwnerReassign();
-    applyOppReadOnly(level);
+    applyOppReadOnly(level, { secured });
     oppFilesLoad();   // background: fills the Files tab and its count
     await oppSuspensionOnOpen();
   } catch(e) {
@@ -5914,7 +5919,7 @@ let oppReadOnly = false;
 //                  usable so they can log engagements/interactions.
 //   'view'       — everyone else: fully view-only.
 // New deals always pass 'full' (the creator is the owner-to-be).
-function applyOppReadOnly(level) {
+function applyOppReadOnly(level, why) {
   oppReadOnly = level !== 'full';
   const page = document.getElementById('opp-page');
   if (!page) return;
@@ -5949,7 +5954,12 @@ function applyOppReadOnly(level) {
   // Banner.
   const banner = document.getElementById('opp-readonly-banner');
   if (banner) {
-    if (level === 'engagement') {
+    // v7.9.87: a secured deal caps its owner at 'engagement' too — say why rather than calling
+    // the owner a collaborator (Richard 2026-10-01, Beatrix).
+    if (level === 'engagement' && why && why.secured) {
+      banner.textContent = '🔒 This deal is secured, so its details are locked. You can still log engagements and attach files; ' + (can('administer_deals') ? 'changes to the deal itself are made in Deal Administration.' : 'for changes to the deal itself, ask a deal administrator.');
+      banner.style.display = '';
+    } else if (level === 'engagement') {
       banner.textContent = '🔒 You are a collaborator on this deal. You can log engagements, but only the owner or a manager can edit deal details.';
       banner.style.display = '';
     } else if (level === 'view') {
