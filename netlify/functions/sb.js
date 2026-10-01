@@ -133,7 +133,7 @@ function sbRest(key, method, path, body) {
       hostname: SB, port: 443, path: '/rest/v1' + path, method, agent: sbAgent,
       headers: {
         'Content-Type': 'application/json', 'apikey': key, 'Authorization': 'Bearer ' + key,
-        'Prefer': method === 'PATCH' ? 'return=representation' : '',
+        'Prefer': (method === 'PATCH' || method === 'POST') ? 'return=representation' : '',
       },
     }, res => {
       let d = ''; res.on('data', c => d += c);
@@ -187,6 +187,23 @@ function scrubAuditCredentials(bodyText) {
   };
   const out = Array.isArray(parsed) ? parsed.map(strip) : strip(parsed);
   return JSON.stringify(out);
+}
+
+// ── Sign-in log (v7.9.85) ──
+// Every sign-in attempt against a real account becomes a user_sessions row
+// (sql/add_session_log.sql): 'ok' opens the session the app then keeps alive
+// through log_activity(); 'failed' / 'locked' record refused attempts. Unknown
+// usernames are not logged. Best effort — an absent table never blocks a sign-in.
+async function logSignIn(key, event, user, outcome) {
+  try {
+    const h = (event && event.headers) || {};
+    const ip = h['x-nf-client-connection-ip'] || String(h['x-forwarded-for'] || '').split(',')[0].trim() || null;
+    const rows = await sbRest(key, 'POST', '/user_sessions', {
+      system_user_id: +user.id, person_id: user.person_id == null ? null : +user.person_id, outcome,
+      user_agent: String(h['user-agent'] || '').slice(0, 400) || null, ip,
+    });
+    return rows && rows[0] ? +rows[0].id : null;
+  } catch (e) { return null; }
 }
 
 const authReply = (statusCode, obj) => ({
@@ -324,6 +341,7 @@ async function handleAuth(event, key) {
       ? { failed_login_count: 0, locked_until: new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() }
       : { failed_login_count: fails };
     try { await sbRest(key, 'PATCH', `/system_users?id=eq.${userId}`, patch); } catch (e) {}
+    await logSignIn(key, event, user, fails >= MAX_LOGIN_FAILURES ? 'locked' : 'failed');
   };
   const clearFailures = async () => {
     if (!(+user.failed_login_count || 0) && !user.locked_until) return;
@@ -367,12 +385,14 @@ async function handleAuth(event, key) {
       ? +updated[0].session_version : (+user.session_version || 1) + 1;
     sessionCache.delete(userId);
     // Setting a password IS proving you hold it — sign the session straight away.
+    // From the login screen (username) that is a sign-in; an in-app change keeps its session.
+    const sessionId = String(body.username || '').trim() ? await logSignIn(key, event, user, 'ok') : null;
     return authReply(200, { ok: true, set: true,
-      token: issueToken(key, userId, user.person_id, fresh), userId, personId: user.person_id });
+      token: issueToken(key, userId, user.person_id, fresh), userId, personId: user.person_id, sessionId });
   }
 
   if (body.action === 'login') {
-    if (locked) return authReply(200, { ok: false, error: LOCK_MSG });
+    if (locked) { await logSignIn(key, event, user, 'locked'); return authReply(200, { ok: false, error: LOCK_MSG }); }
     if (mustSet && !hasPw) return authReply(200, { ok: false, mustSet: true, error: 'Choose a password to continue' });
     const ok = passwordMatches(String(body.password || ''), user.password_salt, user.password_hash);
     if (!ok) { await registerFailure(); return authReply(200, { ok: false, error: 'Sign-in failed' }); }
@@ -383,7 +403,8 @@ async function handleAuth(event, key) {
       return authReply(200, { ok: false, mustSet: true, error: 'Choose your own password to continue' });
     }
     await clearFailures();
-    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id, user.session_version), userId, personId: user.person_id });
+    const sessionId = await logSignIn(key, event, user, 'ok');
+    return authReply(200, { ok: true, token: issueToken(key, userId, user.person_id, user.session_version), userId, personId: user.person_id, sessionId });
   }
 
   return authReply(400, { ok: false, error: 'Bad request' });

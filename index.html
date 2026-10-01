@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.85 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -753,11 +753,11 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
         <button class="btn btn-sm" onclick="openChangePasswordModal()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Password</button>
         <button class="btn btn-sm" id="masquerade-btn" onclick="openMasqueradeModal()" style="display:none;background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Work as…</button>
-        <button class="btn btn-sm" onclick="doLogout()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
+        <button class="btn btn-sm" onclick="signOutClicked()" style="background:rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);border:none;font-size:11px;">Sign out</button>
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.84 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.85 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1709,6 +1709,7 @@ async function broadcastTick(force) {
   if (!force && document.hidden) return;
   if (!force && Date.now() - _bcastLastTick < BCAST_MIN_GAP_MS) return;
   _bcastLastTick = Date.now();
+  _logActivity(null);   // v7.9.85: time online
   const quiet = { silent: true };   // background traffic never drives the busy bar
   // v7.9.37: heartbeat() (sql/perf_tier1_sweeps_heartbeat.sql) upserts presence
   // and returns the live broadcasts in ONE call. Where the function is absent
@@ -1787,19 +1788,52 @@ const FN_URL = '/.netlify/functions/sb';
 // localStorage so the PWA resumes without re-typing a password until it expires (24h) — or
 // until the server revokes it (v7.9.56: password changed/reset, account deactivated).
 let focusToken = null;
-function _saveSession(token, userId) {
+// v7.9.85: the sign-in log's session id (user_sessions.id) rides beside the token. A save that
+// passes no session id (an in-app password change) keeps the current one.
+let focusSessionId = null;
+function _saveSession(token, userId, sessionId) {
   focusToken = token || null;
+  if (!token) focusSessionId = null;
+  else if (sessionId !== undefined) focusSessionId = sessionId ? +sessionId : null;
   try {
-    if (token) localStorage.setItem('focus_session', JSON.stringify({ t: token, u: +userId }));
+    if (token) localStorage.setItem('focus_session', JSON.stringify({ t: token, u: +userId, s: focusSessionId }));
     else localStorage.removeItem('focus_session');
   } catch (e) {}
 }
 function _loadSession() {
   try {
     const s = JSON.parse(localStorage.getItem('focus_session') || 'null');
-    if (s && s.t) { focusToken = s.t; return s; }
+    if (s && s.t) { focusToken = s.t; focusSessionId = s.s ? +s.s : null; return s; }
   } catch (e) {}
   return null;
+}
+// ── Sign-in / usage log (v7.9.85) ──
+// Richard 2026-10-01: "keep a basic log on sign ins and the pages visited, and time on line". The
+// proxy records the sign-in (user_sessions); every page shown, record opened and presence beat goes
+// through log_activity(), which adds time online (gaps of at most 6 minutes between beats) and
+// records the visit. Calls are chained so two never race for a session id; a session the server
+// no longer accepts (ended, or a token from before the log) is replaced by a 'resumed' one.
+// Silent everywhere: an absent function (404 / PGRST202) switches the log off for the page's life.
+let _activityChain = Promise.resolve(), _activityMissing = false;
+function _logActivity(page, recordId, end) {
+  if (MOCK || _activityMissing || !currentUser || !currentUser.personId || !focusToken) return Promise.resolve();
+  const acting = (typeof realUser !== 'undefined' && realUser) ? +currentUser.personId : null;
+  const person = (typeof realUser !== 'undefined' && realUser && realUser.personId) ? +realUser.personId : +currentUser.personId;
+  _activityChain = _activityChain.then(async () => {
+    const call = sid => api('rpc/log_activity', 'POST', {
+      p_session_id: sid, p_person_id: person, p_page: page || null, p_record_id: recordId != null ? +recordId : null,
+      p_acting_person_id: acting, p_end: !!end, p_version: _bcastAppVersion() || null,
+    }, '', { silent: true, prefer: '' });
+    try {
+      let sid = await call(focusSessionId);
+      if (sid == null && !end && focusSessionId != null) sid = await call(null);   // ended or unknown → reopen
+      if (end) focusSessionId = null;
+      else if (sid != null && +sid !== focusSessionId) _saveSession(focusToken, currentUser.id, +sid);
+    } catch (e) {
+      if (/^404\b|PGRST202/.test((e && e.message) || '')) _activityMissing = true;
+    }
+  });
+  return _activityChain;
 }
 function _sessionExpired(reason) {
   _saveSession(null);
@@ -2901,6 +2935,7 @@ const PAGES = {
   },
 
   // ── Proposal Builder admin pages ──────────────────────────
+  session_log:              { title: 'Sign-in Log',                        custom: true, readOnly: true, columns: [], fields: [] },
   cm_overview:              { title: 'Contract Management — Overview',     custom: true, columns: [], fields: [] },
   pm_overview:              { title: 'Project Management — Overview',      custom: true, columns: [], fields: [] },
 
@@ -3699,6 +3734,7 @@ function showPage(page) {
   currentPage = page;
   const cfg = PAGES[page];
   if (!cfg) return;
+  _logActivity(page);   // v7.9.85: pages visited
   applyViewerScopeDefaults();
 
   // Update nav highlight
@@ -3845,6 +3881,7 @@ async function loadTable(page) {
     if (page === 'broadcast_admin') { await renderBroadcastAdmin(); return; }
     if (page === 'milestone_admin') { await renderMilestoneAdmin(); return; }
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
+    if (page === 'session_log')               { await renderSessionLogPage(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
     if (page === 'eng_hist_outreach') { await renderEngagementHistory('Outreach'); return; }
@@ -5238,6 +5275,8 @@ const MENU = [
     // Direct items render above the subgroups — the Audit Log is the whole
     // section's paper trail, so it sits at section level, not inside Settings.
     items: [
+      { page: 'session_log', label: 'Sign-in Log', permission: 'manage_settings',
+        icon: '<circle cx="6" cy="5" r="3" stroke="white" stroke-width="1.4" fill="none"/><path d="M1 14c0-2.8 2.2-4.5 5-4.5" stroke="white" stroke-width="1.4" fill="none" stroke-linecap="round"/><circle cx="11.5" cy="11" r="3.5" stroke="white" stroke-width="1.3" fill="none"/><path d="M11.5 9.3V11l1.2.8" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
       { page: 'audit_log', label: 'Audit Log', permission: 'manage_settings',
         icon: '<rect x="2" y="1" width="12" height="14" rx="2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
     ],
@@ -5585,6 +5624,7 @@ async function openNewOpportunity() {
 }
 
 async function openOpportunity(id, adminMode = false) {
+  _logActivity('opportunity', id);
   try {
     resetOppDirty();
     dealAdminMode = !!adminMode && can('administer_deals');
@@ -6191,6 +6231,115 @@ function switchOppTab(tab, btn) {
   if (el) el.classList.add('active');
 }
 
+// ── Sign-in Log page (v7.9.85) ──────────────────────────────────────────────
+// Admin → Sign-in Log: per user — sign-ins, refused attempts, last sign-in, time online, pages —
+// then every session newest first; a session row opens its trail of pages and records. Reads
+// user_sessions + user_page_visits (sql/add_session_log.sql); nothing before the log existed.
+let _slState = { days: 30, person: '', open: null, data: null };
+function _slDuration(sec) {
+  sec = +sec || 0;
+  if (sec < 60) return sec ? '<1 min' : '—';
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h ? h + ' h ' + String(m).padStart(2, '0') + ' min' : m + ' min';
+}
+function _slDevice(ua) {
+  ua = String(ua || '');
+  if (!ua) return '—';
+  const os = /iPhone|iPad/.test(ua) ? 'iPhone/iPad' : /Android/.test(ua) ? 'Android' : /Windows/.test(ua) ? 'Windows' : /Mac OS X|Macintosh/.test(ua) ? 'Mac' : /Linux/.test(ua) ? 'Linux' : 'Other';
+  const br = /Edg\//.test(ua) ? 'Edge' : /OPR\//.test(ua) ? 'Opera' : /Chrome\//.test(ua) ? 'Chrome' : /Firefox\//.test(ua) ? 'Firefox' : /Safari\//.test(ua) ? 'Safari' : '';
+  return br ? br + ' · ' + os : os;
+}
+function _slWhen(t) { return t ? new Date(t).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'; }
+function _slPageLabel(v) {
+  if (v.page === 'opportunity') return 'Opportunity #' + v.record_id;
+  if (v.page === 'lead') return 'Lead #' + v.record_id;
+  if (v.page === 'quote') return 'Quote #' + v.record_id;
+  return (PAGES[v.page] && PAGES[v.page].title) || v.page;
+}
+async function renderSessionLogPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  const from = new Date(Date.now() - _slState.days * 86400000).toISOString();
+  try {
+    const [sessions, visits, users] = await Promise.all([
+      apiGetAll('user_sessions', 'started_at=gte.' + encodeURIComponent(from) + '&select=*&order=started_at.desc'),
+      apiGetAll('user_page_visits', 'visited_at=gte.' + encodeURIComponent(from) + '&select=session_id,person_id,acting_person_id,page,record_id,visited_at&order=visited_at.asc'),
+      apiGet('system_users', 'select=id,person_id,username,active'),
+    ]);
+    if (!allData['people']) allData['people'] = await apiGet('people', 'select=id,first_name,last_name');
+    _slState.data = { sessions, visits, users };
+  } catch (e) {
+    const missing = /PGRST205|404/.test(String(e.message));
+    body.innerHTML = '<tr class="empty-row"><td>' + (missing ? 'The sign-in log is not set up on this database yet.' : 'Could not load the log: ' + escHtml(e.message)) + '</td></tr>';
+    return;
+  }
+  _slPaint();
+}
+function _slPaint() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  const D = _slState.data; if (!D || !body) return;
+  const people = allData['people'] || [];
+  const nameOf = pid => { const p = people.find(x => +x.id === +pid); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '#' + pid; };
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = 'Last ' + _slState.days + ' days · recorded since the log was switched on';
+  const visitsBy = new Map();
+  D.visits.forEach(v => { if (!visitsBy.has(+v.session_id)) visitsBy.set(+v.session_id, []); visitsBy.get(+v.session_id).push(v); });
+  const sess = D.sessions.filter(x => !_slState.person || +x.person_id === +_slState.person);
+  // per-user summary
+  const persons = [...new Set(D.users.filter(u => u.person_id).map(u => +u.person_id))];
+  const summary = persons.map(pid => {
+    const mine = D.sessions.filter(x => +x.person_id === pid);
+    const ok = mine.filter(x => x.outcome === 'ok' || x.outcome === 'resumed');
+    const pv = D.visits.filter(v => +v.person_id === pid);
+    const counts = {};
+    pv.forEach(v => { const k = _slPageLabel({ page: v.page }); counts[k] = (counts[k] || 0) + 1; });
+    const top = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => k + ' (' + n + ')').join(', ');
+    const lastSign = ok.reduce((m, x) => !m || x.started_at > m ? x.started_at : m, null);
+    const lastSeen = ok.reduce((m, x) => !m || x.last_seen_at > m ? x.last_seen_at : m, null);
+    return { pid, name: nameOf(pid), signins: mine.filter(x => x.outcome === 'ok').length, resumed: mine.filter(x => x.outcome === 'resumed').length,
+      refused: mine.filter(x => x.outcome === 'failed' || x.outcome === 'locked').length, lastSign, lastSeen,
+      online: ok.reduce((t, x) => t + (+x.active_seconds || 0), 0), pages: pv.length, top };
+  }).sort((a, b) => (b.lastSeen || '').localeCompare(a.lastSeen || ''));
+  const userOpts = summary.map(u => `<option value="${u.pid}" ${+_slState.person === u.pid ? 'selected' : ''}>${escHtml(u.name)}</option>`).join('');
+  const controls = `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:4px 0 12px;">
+      <select class="form-control" style="width:150px;" onchange="_slState.days=+this.value; _slState.open=null; renderSessionLogPage();">${[7, 30, 90].map(d => `<option value="${d}" ${_slState.days === d ? 'selected' : ''}>Last ${d} days</option>`).join('')}</select>
+      <select class="form-control" style="width:220px;" onchange="_slState.person=this.value; _slState.open=null; _slPaint();"><option value="">Every user</option>${userOpts}</select>
+      <span style="font-size:12px;color:var(--text3);">Time online counts while Focus is open and visible; a hidden tab or a closed laptop stops the clock.</span></div>`;
+  const sumRows = summary.filter(u => !_slState.person || +_slState.person === u.pid).map(u => `<tr>
+      <td style="font-weight:700;color:#003057;">${escHtml(u.name)}</td>
+      <td style="text-align:right;">${u.signins}${u.resumed ? ` <span style="color:var(--text3);font-size:11px;">+${u.resumed} resumed</span>` : ''}</td>
+      <td style="text-align:right;${u.refused ? 'color:var(--red);font-weight:700;' : ''}">${u.refused || ''}</td>
+      <td>${_slWhen(u.lastSign)}</td><td>${_slWhen(u.lastSeen)}</td>
+      <td style="text-align:right;">${_slDuration(u.online)}</td><td style="text-align:right;">${u.pages || ''}</td>
+      <td style="font-size:12px;color:var(--text2);">${escHtml(u.top || '')}</td></tr>`).join('');
+  const now = Date.now();
+  const sessRows = sess.slice(0, 300).map(x => {
+    const v = visitsBy.get(+x.id) || [];
+    const refused = x.outcome === 'failed' || x.outcome === 'locked';
+    const status = refused ? `<span style="color:var(--red);font-weight:700;">${x.outcome === 'locked' ? 'Locked out' : 'Wrong password'}</span>`
+      : x.ended_at ? 'Signed out' : (now - new Date(x.last_seen_at).getTime() < 12 * 60000 ? '<span style="color:#166534;font-weight:700;">Online now</span>' : '<span style="color:var(--text3);">Left without signing out</span>');
+    const open = _slState.open === +x.id;
+    const trail = open ? `<tr><td colspan="7" style="background:#F7F9FB;padding:8px 14px 12px 34px;">${v.length ? v.map(p => `<div style="font-size:12px;padding:2px 0;"><span style="color:var(--text3);display:inline-block;width:60px;">${new Date(p.visited_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}</span>${
+        p.record_id && ['opportunity', 'lead', 'quote'].includes(p.page) ? `<a href="#" onclick="event.preventDefault(); ${p.page === 'opportunity' ? 'openOpportunity' : p.page === 'lead' ? 'openLead' : 'openQuote'}(${+p.record_id})" style="color:#003057;">${escHtml(_slPageLabel(p))}</a>` : escHtml(_slPageLabel(p))}${p.acting_person_id ? ` <span style="color:#8A6D3B;font-size:11px;">as ${escHtml(nameOf(p.acting_person_id))}</span>` : ''}</div>`).join('') : '<span style="font-size:12px;color:var(--text3);">No pages recorded</span>'}</td></tr>` : '';
+    return `<tr onclick="${refused ? '' : `_slState.open=${open ? 'null' : +x.id}; _slPaint();`}" style="${refused ? '' : 'cursor:pointer;'}">
+      <td style="font-weight:600;">${refused ? '' : `<span style="display:inline-block;width:12px;color:#003057;">${open ? '▾' : '▸'}</span>`}${escHtml(nameOf(x.person_id))}</td>
+      <td>${_slWhen(x.started_at)}${x.outcome === 'resumed' ? ' <span style="font-size:10px;color:var(--text3);">resumed</span>' : ''}</td>
+      <td style="font-size:12px;">${escHtml(_slDevice(x.user_agent))}</td>
+      <td>${refused ? '' : _slWhen(x.last_seen_at)}</td>
+      <td style="text-align:right;">${refused ? '' : _slDuration(x.active_seconds)}</td>
+      <td style="text-align:right;">${refused ? '' : v.length}</td>
+      <td>${status}</td></tr>${trail}`;
+  }).join('');
+  head.innerHTML = '';
+  body.innerHTML = `<tr><td style="border:none;padding:0;">${controls}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin:4px 0 6px;">By user</div>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:18px;"><thead><tr><th>User</th><th style="text-align:right;">Sign-ins</th><th style="text-align:right;">Refused</th><th>Last sign-in</th><th>Last active</th><th style="text-align:right;">Time online</th><th style="text-align:right;">Pages</th><th>Most visited</th></tr></thead><tbody>${sumRows || '<tr><td colspan="8" style="color:var(--text3);">Nothing recorded yet</td></tr>'}</tbody></table>
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin:4px 0 6px;">Sessions${sess.length > 300 ? ' (newest 300)' : ''}</div>
+    <table style="width:100%;border-collapse:collapse;"><thead><tr><th>User</th><th>Signed in</th><th>Device</th><th>Last active</th><th style="text-align:right;">Time online</th><th style="text-align:right;">Pages</th><th>Status</th></tr></thead><tbody>${sessRows || '<tr><td colspan="7" style="color:var(--text3);">No sessions in this period</td></tr>'}</tbody></table>
+  </td></tr>`;
+}
+
 // ── Files on opportunities (v7.9.82–83) ──────────────────────────────────────
 // Richard 2026-09-30: "time to be able to attach files to opportunities" — 50 MB a file, a
 // confirmation over 10 MB; then "standard folders ... in site admin": a sub level, one list with
@@ -6751,6 +6900,7 @@ async function createNewQuote() {
 }
 
 async function openQuote(id) {
+  _logActivity('quote', id);
   try {
     // v7.9.36: two rounds instead of fifteen dependent GETs. Round 1 — the quote,
     // its posts and every catalogue/lookup (all independent); round 2 — the four
@@ -14644,7 +14794,7 @@ async function submitNewPassword() {
     window._loginTempPw = null;
     if (r.token) {
       // Setting the password proved it — the server signed the session, walk in.
-      _saveSession(r.token, +r.userId);
+      _saveSession(r.token, +r.userId, r.sessionId || null);
       showLoginSetPassword(false);
       _loginMsg('');
       try { await enterApp(+r.userId); } catch (e) { _loginMsg('Signed in, but loading failed: ' + e.message); }
@@ -14819,7 +14969,7 @@ async function doLogin() {
       return;
     }
     userId = +auth.userId;
-    _saveSession(auth.token, userId);
+    _saveSession(auth.token, userId, auth.sessionId || null);
   } catch (e) { _loginMsg('Could not reach the server — try again'); return; }
   _loginMsg('');
 
@@ -14850,7 +15000,7 @@ async function doLogin() {
 // Two tables stay writable: the presence heartbeat (or they would look offline
 // to everyone else) and bug reports (a viewer who spots a problem should still
 // be able to say so).
-const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat'];   // rpc: system jobs, not user data entry
+const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat', 'rpc/log_activity'];   // rpc: system jobs, not user data entry
 
 function isReadOnlyUser() {
   if (typeof currentUser === 'undefined' || !currentUser) return false;
@@ -15270,6 +15420,11 @@ async function enterApp(userId) {
   setTimeout(() => broadcastTick(true), 4000);
 }
 
+// The Sign out button: close the session in the log first, then sign out (v7.9.85).
+async function signOutClicked() {
+  try { await Promise.race([_logActivity(null, null, true), new Promise(r => setTimeout(r, 2500))]); } catch (e) {}
+  doLogout();
+}
 function doLogout() {
   _saveSession(null);
   currentUser = null;
@@ -20966,6 +21121,7 @@ async function openNewLead() {
 }
 
 async function openLeadForm(id) {
+  if (id) _logActivity('lead', id);
   try {
     const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
     leadData = rows[0] || { id };
