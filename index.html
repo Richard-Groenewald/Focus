@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2957,6 +2957,7 @@ const PAGES = {
   session_log:              { title: 'Sign-in Log',                        custom: true, readOnly: true, columns: [], fields: [] },
   cm_overview:              { title: 'Contract Management — Overview',     custom: true, columns: [], fields: [] },
   cm_contracts:             { title: 'Contracts',                          custom: true, readOnly: true, columns: [], fields: [] },
+  cm_billing_schedules:     { title: 'Billing Schedules',                  custom: true, readOnly: true, columns: [], fields: [] },
   pm_overview:              { title: 'Project Management — Overview',      custom: true, columns: [], fields: [] },
 
   // ── Engagement History (read-only) — one view, four category-preset doorways ──
@@ -3904,6 +3905,7 @@ async function loadTable(page) {
     if (page === 'session_log')               { await renderSessionLogPage(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'cm_contracts')              { await renderContractsPage(); return; }
+    if (page === 'cm_billing_schedules')      { await renderBillingSchedulesPage(); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
     if (page === 'eng_hist_outreach') { await renderEngagementHistory('Outreach'); return; }
     if (page === 'eng_hist_sales')    { await renderEngagementHistory('Sales');    return; }
@@ -5268,6 +5270,8 @@ const MENU = [
         icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
       { page: 'cm_contracts',    label: 'Contracts',    permission: 'manage_opportunities',
         icon: '<rect x="3" y="1.5" width="10" height="13" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3" stroke="white" stroke-width="1.3" stroke-linecap="round"/>' },
+      { page: 'cm_billing_schedules', label: 'Billing Schedules', permission: 'manage_opportunities',
+        icon: '<rect x="2" y="2" width="12" height="12" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/><path d="M5 6h6M5 9h6M5 12h3" stroke="white" stroke-width="1.3" stroke-linecap="round"/><path d="M11 11.5l1 1 2-2" stroke="white" stroke-width="1.3" fill="none" stroke-linecap="round"/>' },
       { page: 'eng_hist_contract', label: 'Engagement History', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M8 5v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
     ]
@@ -6387,6 +6391,152 @@ async function renderContractsPage() {
   } catch (e) {
     body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// ── Contract Management → Billing Schedules (v7.9.89, billing step 1) ─────────────────────
+// Richard 2026-10-01. Each schedule is one recurring invoice imported from finance's workbooks
+// (sql/add_billing_schedules.sql; scripts/parse_billing_workbooks.py + build_billing_seed.py): what
+// the client document prints, what Pastel needs, and the itemised lines. This page lists them with
+// the contract each bills, opens one as the invoice it produces (lines outside the sheet's own total
+// show greyed as information), and lets a deal administrator choose the contract where the import
+// could not tell. Totals: Σ in_total amounts + total_adjust; VAT from settings.proposal_vat_pct.
+let _bsState = { rows: null, lines: new Map(), deals: [], filter: '' };
+function _bsTotal(s) {
+  const ls = _bsState.lines.get(+s.id) || [];
+  return ls.reduce((t, l) => t + (l.in_total ? (+l.amount || 0) : 0), 0) + (+s.total_adjust || 0);
+}
+function _bsVat() { const v = parseFloat(appSettings && appSettings['proposal_vat_pct']); return (v >= 0 ? v : 15) / 100; }
+async function renderBillingSchedulesPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  try {
+    const [rows, lines, stages] = await Promise.all([
+      apiGetAll('billing_schedules', 'select=*&order=sort_order.asc'),
+      apiGetAll('billing_schedule_lines', 'select=id,schedule_id,sort_order,kind,item_no,qty,description,unit_price,amount,in_total&order=schedule_id.asc,sort_order.asc'),
+      allData['stages'] ? Promise.resolve(allData['stages']) : apiGet('stages', 'select=*'),
+    ]);
+    allData['stages'] = stages;
+    if (!allData['stage_categories']) allData['stage_categories'] = await apiGet('stage_categories', 'select=*');
+    const securedIds = stages.filter(s => dealIsSecuredStage(s.id)).map(s => +s.id);
+    const deals = securedIds.length ? await apiGetAll('deals', 'stage_id=in.(' + securedIds.join(',') + ')&select=id,name,org_id&order=name.asc') : [];
+    _bsState.rows = rows;
+    _bsState.deals = deals;
+    _bsState.lines = new Map();
+    lines.forEach(l => { if (!_bsState.lines.has(+l.schedule_id)) _bsState.lines.set(+l.schedule_id, []); _bsState.lines.get(+l.schedule_id).push(l); });
+  } catch (e) {
+    const missing = /PGRST205|404/.test(String(e.message));
+    body.innerHTML = '<tr class="empty-row"><td>' + (missing ? 'Billing schedules are not set up on this database yet.' : 'Could not load billing schedules: ' + escHtml(e.message)) + '</td></tr>';
+    return;
+  }
+  _bsPaint();
+}
+function _bsPaint() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  const rows = _bsState.rows || [];
+  const dealName = id => (_bsState.deals.find(d => +d.id === +id) || {}).name || ('Deal #' + id);
+  const unmatched = rows.filter(r => r.deal_id == null).length;
+  const toConfirm = rows.filter(r => r.deal_id != null && /please confirm/i.test(r.match_note || '')).length;
+  const total = rows.filter(r => r.active !== false).reduce((t, r) => t + _bsTotal(r), 0);
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = rows.length + ' schedules · ' + pgMoney(total) + ' a month before VAT' + (unmatched ? ' · ' + unmatched + ' without a contract' : '') + (toConfirm ? ' · ' + toConfirm + ' to confirm' : '');
+  makeSortableFilterableTable({
+    tableId: 'cm_billing_schedules',
+    headRoot: head,
+    bodyRoot: body,
+    columns: [
+      { key: 'name',     label: 'Schedule',       get: r => r.name || '' },
+      { key: 'contract', label: 'Contract',       get: r => r.deal_id == null ? '— choose a contract —' : dealName(r.deal_id) },
+      { key: 'customer', label: 'Pastel customer', get: r => r.pastel_customer_code || '' },
+      { key: 'billto',   label: 'Bill to',        get: r => r.bill_to_name || '' },
+      { key: 'branch',   label: 'Branch',         get: r => r.pastel_branch || '' },
+      { key: 'date',     label: 'Dated',          get: r => r.date_rule === 'last_of_previous' ? 'Last day of previous month' : '1st of the month' },
+      { key: 'total',    label: 'Monthly excl VAT', get: r => _bsTotal(r), align: 'right' },
+    ],
+    rows: rows.slice(),
+    rowRenderer: r => {
+      const confirm = r.deal_id != null && /please confirm/i.test(r.match_note || '');
+      return `<tr onclick="openBillingSchedule(${+r.id})" style="cursor:pointer;">
+        <td style="font-weight:600;color:#003057;">${escHtml(r.name || '')}</td>
+        <td>${r.deal_id == null ? '<span style="color:#9A3412;font-weight:700;">Choose a contract</span>' : escHtml(dealName(r.deal_id)) + (confirm ? ' <span style="font-size:10px;font-weight:700;color:#9A3412;">CONFIRM</span>' : '')}</td>
+        <td>${escHtml(r.pastel_customer_code || '')}</td>
+        <td>${escHtml(r.bill_to_name || '')}</td>
+        <td>${escHtml(r.pastel_branch || '')}</td>
+        <td style="white-space:nowrap;">${r.date_rule === 'last_of_previous' ? 'Last day of previous month' : '1st of the month'}</td>
+        <td style="text-align:right;white-space:nowrap;">${pgMoney(_bsTotal(r))}</td>
+      </tr>`;
+    },
+    emptyMessage: 'No billing schedules match the current filters',
+  });
+}
+// One schedule as the invoice it produces, plus the contract it bills.
+function openBillingSchedule(id) {
+  const s = (_bsState.rows || []).find(r => +r.id === +id);
+  if (!s) return;
+  const ls = _bsState.lines.get(+s.id) || [];
+  const excl = _bsTotal(s), vat = excl * _bsVat();
+  const canMatch = can('administer_deals');
+  const amt = n => n == null || n === '' ? '' : pgMoney(+n);
+  const lineRow = l => {
+    const grey = (l.kind === 'item' || l.kind === 'amount') && !l.in_total;
+    const st = grey ? 'color:var(--text3);' : '';
+    if (l.kind === 'heading') return `<tr><td></td><td></td><td colspan="3" style="font-style:italic;text-decoration:underline;font-weight:600;padding-top:6px;">${escHtml(l.description || '')}</td></tr>`;
+    if (l.kind === 'text') return `<tr><td></td><td></td><td colspan="3" style="font-size:12px;color:var(--text2);">${escHtml(l.description || '')}</td></tr>`;
+    if (l.kind === 'subtotal') return `<tr style="color:var(--text3);"><td></td><td></td><td>${escHtml(l.description || 'Subtotal')}</td><td></td><td style="text-align:right;border-top:1px solid var(--border);">${amt(l.amount)}</td></tr>`;
+    return `<tr style="${st}"><td style="text-align:center;">${l.item_no ?? ''}</td><td style="text-align:center;">${l.qty != null ? +l.qty : ''}</td>
+      <td>${escHtml(l.description || '')}${grey ? ' <span style="font-size:10px;">(information — not in the total)</span>' : ''}</td>
+      <td style="text-align:right;white-space:nowrap;">${l.unit_price != null ? amt(l.unit_price) : ''}</td>
+      <td style="text-align:right;white-space:nowrap;">${amt(l.amount)}</td></tr>`;
+  };
+  const dealOpts = _bsState.deals.map(d => `<option value="${+d.id}" ${+d.id === +s.deal_id ? 'selected' : ''}>${escHtml(d.name || ('Deal #' + d.id))}</option>`).join('');
+  const field = (k, v) => v ? `<div><span style="color:var(--text3);">${escHtml(k)}:</span> ${escHtml(v)}</div>` : '';
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:900px;max-width:96vw;">
+        <div class="modal-header"><div class="modal-title">${escHtml(s.name || '')}</div><button class="modal-close" onclick="closeModal()">×</button></div>
+        <div class="modal-body" style="max-height:75vh;overflow-y:auto;">
+          <div style="background:${s.deal_id == null ? '#FFF7ED' : '#F7F9FB'};border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);margin-bottom:6px;">Contract billed</div>
+            ${canMatch ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <select id="bs-deal" class="form-control" style="flex:1;min-width:300px;"><option value="">— no contract —</option>${dealOpts}</select>
+              <button class="btn btn-primary btn-sm" onclick="billingScheduleSetDeal(${+s.id})">Save</button></div>`
+              : `<div style="font-weight:600;">${s.deal_id == null ? 'Not matched yet' : escHtml((_bsState.deals.find(d => +d.id === +s.deal_id) || {}).name || '')}</div>`}
+            ${s.match_note ? `<div style="font-size:12px;color:var(--text2);margin-top:6px;">${escHtml(s.match_note)}</div>` : ''}
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:13px;margin-bottom:12px;">
+            <div><div style="font-weight:700;">${escHtml(s.bill_to_name || '')}</div><div style="white-space:pre-line;color:var(--text2);">${escHtml(s.bill_to_address || '')}</div>${field('VAT registration', s.client_vat_no)}</div>
+            <div>${field('Customer No', s.pastel_customer_code)}${field('Project No', s.project_no)}${field(s.ref_label || 'Proposal No', s.ref_value)}${field('Order No', s.order_no)}${field('Client cost code', s.client_cost_code)}
+              ${field('Pastel', [s.pastel_gl_code, s.pastel_cost_centre, s.pastel_branch, s.pastel_desc_stem ? s.pastel_desc_stem + '<Mon><YY>' : ''].filter(Boolean).join(' · '))}
+              ${field('Dated', s.date_rule === 'last_of_previous' ? 'last day of the previous month' : '1st of the month')}
+              ${field('Escalation', [s.escalation_psira_pct != null ? 'PSIRA ' + (+s.escalation_psira_pct * 100).toFixed(2) + '%' : '', s.escalation_cpi_pct != null ? 'CPI ' + (+s.escalation_cpi_pct * 100).toFixed(2) + '%' : '', s.escalation_month].filter(Boolean).join(' · '))}
+              ${field('Note', s.notes)}${field('Imported from', (s.source_sheet || '') + ' · INV' + (s.source_invoice_no || ''))}</div>
+          </div>
+          <div style="background:#FA0A11;color:#fff;text-align:center;font-weight:700;padding:6px;">${escHtml(s.title || '')}<br><span style="font-weight:600;">&lt;month&gt;</span></div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <thead><tr style="background:#003057;color:#fff;"><th style="width:44px;">Item</th><th style="width:44px;">Qty</th><th>Description</th><th style="text-align:right;">Unit Price</th><th style="text-align:right;">Total</th></tr></thead>
+            <tbody>${ls.map(lineRow).join('')}</tbody>
+          </table>
+          <div style="display:flex;justify-content:flex-end;margin-top:10px;"><table style="font-size:13px;">
+            ${+s.total_adjust ? `<tr style="color:var(--text3);"><td style="padding-right:14px;">Rounding carried from the sheet</td><td style="text-align:right;">${pgMoney(+s.total_adjust)}</td></tr>` : ''}
+            <tr><td style="padding-right:14px;">Total Excluding VAT</td><td style="text-align:right;font-weight:700;">${pgMoney(excl)}</td></tr>
+            <tr><td style="padding-right:14px;">VAT</td><td style="text-align:right;">${pgMoney(vat)}</td></tr>
+            <tr style="background:#003057;color:#fff;"><td style="padding:2px 14px 2px 6px;">Total Including VAT</td><td style="text-align:right;font-weight:700;padding:2px 6px;">${pgMoney(excl + vat)}</td></tr>
+          </table></div>
+        </div>
+      </div>
+    </div>`);
+}
+async function billingScheduleSetDeal(id) {
+  if (!can('administer_deals')) return;
+  const v = document.getElementById('bs-deal')?.value;
+  try {
+    const rows = await api('billing_schedules', 'PATCH', { deal_id: v ? +v : null, match_note: v ? 'Contract chosen by hand' : null, updated_at: new Date().toISOString() }, 'id=eq.' + (+id));
+    const s = (_bsState.rows || []).find(r => +r.id === +id);
+    if (s && rows && rows[0]) Object.assign(s, rows[0]);
+    closeModal();
+    _bsPaint();
+    showStatus('Contract saved');
+  } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
 }
 
 // ── Sign-in Log page (v7.9.85) ──────────────────────────────────────────────
