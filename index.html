@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.89 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.90 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.89 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.90 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -4959,8 +4959,9 @@ function confirmDialog(opts) {
          </div>
        </div>`;
     const ov = wrap.querySelector('.modal-overlay');
+    const born = Date.now();   // a backdrop click in the first 400 ms is the second half of a double-click on the button that opened us, not a dismissal
     ov.addEventListener('mousedown', e => { if (e.target === ov) ov._md = Date.now(); });
-    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - (ov._md || 0) < 300) done(false); });
+    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - born > 400 && Date.now() - (ov._md || 0) < 300) done(false); });
     wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.onclick = () => done(false));
     wrap.querySelector('[data-act="ok"]').onclick = () => done(true);
     document.addEventListener('keydown', onKey);
@@ -4992,8 +4993,9 @@ function promptDialog(opts) {
        </div>`;
     const ov = wrap.querySelector('.modal-overlay');
     const inp = wrap.querySelector('[data-act="input"]');
+    const born = Date.now();   // same double-click guard as confirmDialog
     ov.addEventListener('mousedown', e => { if (e.target === ov) ov._md = Date.now(); });
-    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - (ov._md || 0) < 300) done(null); });
+    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - born > 400 && Date.now() - (ov._md || 0) < 300) done(null); });
     wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.onclick = () => done(null));
     wrap.querySelector('[data-act="ok"]').onclick = () => done(inp.value);
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') done(inp.value); else if (e.key === 'Escape') done(null); });
@@ -5743,6 +5745,7 @@ let _oppEventDirty = false;         // structural edits pending — need explici
 let _oppAutoSaveTimer = null;
 let _oppAutoSavePromise = null;     // in-flight PATCH, awaited by flush/revert
 let _oppAsOpened = null;            // as-opened values of the autosave columns (revert baseline)
+let _oppAutoSavedAny = false;       // a register-visible column (name, order date, probability, stage) changed on the server while this deal was open — autosave, suspend-on-open or restore
 
 function setOppSaveIndicator(state) {
   const el = document.getElementById('opp-save-indicator');
@@ -5757,6 +5760,7 @@ function resetOppDirty() {
   clearTimeout(_oppAutoSaveTimer);
   _oppDirtyFields.clear();
   _oppEventDirty = false;
+  _oppAutoSavedAny = false;
   setOppSaveIndicator('');
   if (window._oppGuardsAttached) return;
   const page = document.getElementById('opp-page');
@@ -5836,6 +5840,8 @@ async function oppAutoSaveNow(opts) {
   try { await doSave; } catch (e) { ok = false; if (opts.flush) showStatus('Autosave failed: ' + e.message, 'error'); }
   _oppAutoSavePromise = null;
   if (ok) {
+    // A column the registers draw changed on the server: the row beneath the page is stale (bug #78).
+    if (['name', 'order_date', 'probability'].some(c => c in payload)) _oppAutoSavedAny = true;
     for (const [id, v] of Object.entries(sent)) {
       const f = OPP_AUTOSAVE_FIELDS[id], el = document.getElementById(id);
       // Clear only if the user hasn't typed further while the PATCH was on the wire.
@@ -5904,6 +5910,26 @@ async function closeOppPage(opts) {
   setOppSaveIndicator('');
   document.getElementById('opp-page').classList.remove('active');
   _bugFabAvoidRevGrid();   // FAB returns to its corner once the pinned grid is gone
+  // An autosave landed while the deal was open, so the register row beneath still shows the
+  // as-opened values (bug #78's "went out again and it remained on 75%"). Save re-renders for
+  // itself (force); a plain Back/Close redraws the register the way closeLeadPage does.
+  const redraw = !opts.force && _oppAutoSavedAny;
+  _oppAutoSavedAny = false;
+  if (redraw && (currentPage === 'opportunities' || currentPage === 'deal_administration')) {
+    // Client-only repaint, the way toggleLineage and the column sorts already redraw this
+    // register: patch the cached row the table was drawn from and call _renderTable, which
+    // replaces the body in ONE innerHTML assignment with no Loading row — the list keeps
+    // its scroll position and there is no fetch window for a sidebar click to race. The
+    // band row recomputes its mean from the patched members. A full re-fetch only when the
+    // register holds no entry for this deal (never drawn, or drawn empty).
+    const s = _tableState[currentPage];
+    const r = s && Array.isArray(s.rows) ? s.rows.find(d => +d.id === +oppData.id) : null;
+    if (r) {
+      for (const c of ['name', 'order_date', 'probability', 'stage_id']) r[c] = oppData[c];
+      _renderTable(currentPage);
+    } else if (currentPage === 'opportunities') renderOpportunitiesPage().catch(() => {});
+    else renderDealAdminPage().catch(() => {});
+  }
   return true;
 }
 
@@ -6159,11 +6185,14 @@ function onOppServiceChange() {
   const majorId = selected.dataset.majorId;
   document.getElementById('opp-service-major-id').value = majorId;
 
-  // Apply defaults from service sub
+  // Apply defaults from service sub. The margin follows the service type through
+  // rsgDefaultMargin — the ONE default the generator and lead promotion also use —
+  // so it can never land outside the margin rule (bug #83: Guarding Services' 18%
+  // sat under the annuity rule's 20% floor and the generator then refused it).
   const subs = allData['service_sub_all'] || [];
   const sub = subs.find(s => +s.id === +selected.value);
   if (sub) {
-    if (sub.default_margin) document.getElementById('opp-margin-pct').value = sub.default_margin;
+    document.getElementById('opp-margin-pct').value = rsgDefaultMargin(sub);
     if (sub.default_duration) document.getElementById('opp-num-months').value = sub.default_duration;
     recalcGrid();
   }
@@ -7530,7 +7559,7 @@ async function restoreSuspendedDeal(deal, o) {
     await api('engagements', 'POST', { deal_id: deal.id, engagement_date: _today(), engagement_type: 'Restored', notes: 'Restored from suspension by ' + (currentUser.name || 'the owner') + ': start date ' + o.start + (o.order ? ', order date ' + o.order : '') + '; stage and probability (' + patch.probability + '%) reinstated' + (o.shift ? '; revenue stream shifted to ' + o.start.slice(0, 7) : '') + '.', next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
   } catch (e) {}
   Object.assign(deal, patch);
-  if (oppData && +oppData.id === +deal.id) { Object.assign(oppData, patch); try { await openOpportunity(deal.id, dealAdminMode); } catch (e) {} }
+  if (oppData && +oppData.id === +deal.id) { Object.assign(oppData, patch); try { await openOpportunity(deal.id, dealAdminMode); } catch (e) {} _oppAutoSavedAny = true; }   // stage and probability changed under the register row; the reopen's resetOppDirty cleared the flag, so raise it after (bug #78)
   showStatus('Restored — ' + (deal.name || 'opportunity') + ' back at ' + patch.probability + '%', 'success');
 }
 // Move every month of the opportunity stream so the first revenue month becomes
@@ -7562,6 +7591,7 @@ async function oppSuspensionOnOpen() {
     const sel = document.getElementById('opp-stage-id'); if (sel) sel.value = oppData.stage_id;
     const prob = document.getElementById('opp-probability'); if (prob) { prob.value = 0; prob.dataset.userSet = '1'; }
     if (typeof _oppAsOpened === 'object' && _oppAsOpened) { _oppAsOpened.stage_id = oppData.stage_id; _oppAsOpened.probability = 0; }
+    _oppAutoSavedAny = true;   // stage → Suspended and probability → 0 landed on the server: the register row beneath is stale until Back redraws it (bug #78)
     showStatus('Start date has passed — opportunity suspended', 'error');
   }
   if (dealIsSuspended(oppData)) {
@@ -7576,8 +7606,10 @@ async function oppSuspensionOnOpen() {
 // The top block of the Proposal Builder tab. Builds the opportunity stream
 // BEFORE a proposal exists: the General tab's service type decides annuity
 // (monthly base × months with annual escalation) or project (in development);
-// the margin comes from the opportunity margin rules; the probability is
-// capped (settings.rsg_probability_cap). SQL: sql/revenue_stream_generator.sql.
+// the margin comes from rsgDefaultMargin (the service type's own default while it
+// sits inside its margin rule, else the rule's default); a blank or untouched
+// probability takes the cap (settings.rsg_probability_cap) and one the user set is
+// offered it (bug #84). SQL: sql/revenue_stream_generator.sql.
 function rsgServiceSub() {
   const sel = document.getElementById('opp-service-sub-id');
   const id = sel ? +sel.value : 0;
@@ -7606,6 +7638,20 @@ function rsgMarginRule(sub) {
   const rules = (allData['quote_opportunity_margin_rules'] || []).filter(r => r.active !== false && r.revenue_type === rt && String(r.effective_date || '') <= today);
   const pick = list => list.sort((a, b) => String(b.effective_date).localeCompare(String(a.effective_date)))[0] || null;
   return (sub && pick(rules.filter(r => +r.service_sub_id === +sub.id))) || pick(rules.filter(r => r.service_sub_id == null)) || null;
+}
+// The ONE default margin for a service type, wherever it is applied — the General
+// tab's service change, the generator's blank margin box, lead promotion. Bug #83
+// (Lesley-Anne 2026-10-01): the General tab wrote service_sub.default_margin
+// unchecked (18% for Guarding Services on prod, under the annuity rule's 20% floor)
+// while the generator wrote the rule's default — two answers, and the first one the
+// generator then refused. The service type's own default stands while it sits
+// inside the rule that governs it; outside it, or when the type has none, the
+// rule's default; with no rule, 25.
+function rsgDefaultMargin(sub) {
+  const rule = rsgMarginRule(sub);
+  const own = sub && sub.default_margin != null ? +sub.default_margin : 0;
+  if (own > 0 && (!rule || (own >= +rule.min_margin_pct && own <= +rule.max_margin_pct))) return own;
+  return rule ? +rule.default_margin_pct : 25;
 }
 function rsgOpen() {
   const gen = document.getElementById('opp-service-sub-id'), mine = document.getElementById('rsg-service-sub');
@@ -7645,7 +7691,8 @@ async function rsgServiceChanged(v) {
     if (!ok) { document.getElementById('rsg-service-sub').value = before; return; }
   }
   if (gen) { gen.value = v; onOppServiceChange(); }
-  document.getElementById('opp-margin-pct').value = '';   // the new type's rule sets the margin
+  _oppEventDirty = true;   // a programmatic select change fires no event; the new service type commits only through Save
+  document.getElementById('opp-margin-pct').value = rsgDefaultMargin(rsgServiceSub());   // the new type's one default (rsgDefaultMargin) — onOppServiceChange set it already; restated for the modal path
   document.getElementById('opp-escalation').value = '';
   rsgRefresh();
   showStatus(hasStream ? 'Revenue stream cleared — service type changed to ' + toName : 'Service type changed to ' + toName, 'success');
@@ -7661,7 +7708,7 @@ function rsgRefresh() {
   const mine = document.getElementById('rsg-service-sub'); if (mine && sub && mine.value !== String(sub.id)) mine.value = sub.id;
   const rt = rsgRevenueType(sub);
   const intro = document.getElementById('rsg-intro');
-  if (intro) intro.textContent = 'This allows you to generate a revenue stream pipeline for this opportunity, to be used before a proposal (or preliminary proposal) is developed. The maximum probability is capped at ' + rsgProbabilityCap() + '%.';
+  if (intro) intro.textContent = 'This allows you to generate a revenue stream pipeline for this opportunity, to be used before a proposal (or preliminary proposal) is developed. A generated stream is an early estimate, so the generator sets a blank or untouched probability to ' + rsgProbabilityCap() + '% and asks before reducing one you set.';
   const typeEl = document.getElementById('rsg-type');
   if (typeEl) typeEl.innerHTML = sub
     ? 'Service type <strong>' + pbEsc(sub.name) + '</strong> → revenue type <strong>' + pbEsc(rt === 'project' ? 'Project' : 'Annuity') + '</strong>' + (sub.revenue_type ? '' : ' <span class="pg-muted">(from the Recurring flag — set Revenue Type under Admin → Service Sub Categories)</span>')
@@ -7673,7 +7720,7 @@ function rsgRefresh() {
   if (esc && esc.value === '') { const d = rsgDefaultEscalation(document.getElementById('opp-start-date')?.value, sub); if (d != null) esc.value = d; }
   const rule = rsgMarginRule(sub);
   const ruleEl = document.getElementById('rsg-margin-rule');
-  if (ruleEl) ruleEl.textContent = rule ? 'Margin rule: ' + (+rule.min_margin_pct) + '% – ' + (+rule.max_margin_pct) + '%, default ' + (+rule.default_margin_pct) + '%' + (rule.service_sub_id ? ' (this service type)' : ' (' + (rt === 'project' ? 'projects' : 'annuities') + ')') : 'No margin rule yet — set one under Admin → Proposal Builder → Opportunity Margin Rules.';
+  if (ruleEl) ruleEl.textContent = rule ? 'Margin rule: ' + (+rule.min_margin_pct) + '% – ' + (+rule.max_margin_pct) + '%' + (rule.service_sub_id ? ' (this service type)' : ' (' + (rt === 'project' ? 'projects' : 'annuities') + ')') + ' · default ' + rsgDefaultMargin(sub) + '%' + (sub && +sub.default_margin > 0 && +sub.default_margin !== rsgDefaultMargin(sub) ? ' (the service type\'s own ' + (+sub.default_margin) + '% is outside the rule)' : '') : 'No margin rule yet — set one under Admin → Proposal Builder → Opportunity Margin Rules.';
   rsgSyncOrderDate('gen');
   rsgSummary();
 }
@@ -7696,19 +7743,40 @@ async function rsgAutoPopulate() {
   // Margin is a field on the modal; the rule sets the default and the bounds.
   const rule = rsgMarginRule(sub);
   const marginEl = document.getElementById('opp-margin-pct');
-  if (marginEl.value === '') marginEl.value = rule ? +rule.default_margin_pct : (+sub.default_margin || 25);
+  if (marginEl.value === '') marginEl.value = rsgDefaultMargin(sub);
   const margin = +marginEl.value;
   if (!(margin >= 0)) { showStatus('Enter the margin as a percentage', 'error'); return; }
   if (rule && (margin < +rule.min_margin_pct || margin > +rule.max_margin_pct)) { showStatus('Margin ' + margin + '% is outside the rule (' + (+rule.min_margin_pct) + '–' + (+rule.max_margin_pct) + '%)', 'error'); return; }
   marginEl.value = margin;
   autoPopulateGrid();
-  // Cap the probability: a generated stream is an early estimate, never a forecast.
+  // The generated months and the probability decided below commit only through Save.
+  // Nothing in this modal reaches _oppMarkDirty (it sits inside a .modal-overlay) and the
+  // grid/probability writes are programmatic, so mark the structural-edit flag here: Back
+  // or Close then asks "Discard & close / Keep editing" instead of dropping the stream silently.
+  _oppEventDirty = true;
+  // The cap (settings.rsg_probability_cap): a generated stream is an early estimate,
+  // never a forecast. A blank probability, or an untouched stage default (no userSet),
+  // takes the cap outright as v7.9.45 intended. A probability the user typed or the
+  // deal already carries (userSet) is never overwritten silently (bug #84, Lesley-Anne
+  // 2026-10-01: a saved 45% was knocked to 20% on every Auto-Populate and only noticed
+  // after the Save) — the user is asked, with the cap as the offered default. The
+  // value still commits through Save, like everything else the generator writes.
   const cap = rsgProbabilityCap();
   const probEl = document.getElementById('opp-probability');
-  if (probEl && (probEl.value === '' || +probEl.value > cap)) { probEl.value = cap; probEl.dataset.userSet = '1'; }
+  let probNote = '';
+  if (probEl && (probEl.value === '' || (+probEl.value > cap && probEl.dataset.userSet !== '1'))) {
+    probEl.value = cap; probEl.dataset.userSet = '1';
+    probNote = ', probability set to the ' + cap + '% cap';
+  } else if (probEl && +probEl.value > cap) {
+    const cur = +probEl.value;
+    const reduce = await confirmDialog({ title: 'Probability above the generator cap', confirmLabel: 'Reduce to ' + cap + '%', cancelLabel: 'Keep ' + cur + '%',
+      message: 'The probability on this opportunity is ' + cur + '%. A generated stream is an early estimate, not a forecast, so the generator caps probability at ' + cap + '%. Reduce it to ' + cap + '%, or keep ' + cur + '%?' });
+    if (reduce) { probEl.value = cap; probEl.dataset.userSet = '1'; probNote = ', probability reduced to ' + cap + '%'; }
+    else probNote = ', probability kept at ' + cur + '%';
+  }
   updateRevTotals();
   const tcv = document.getElementById('rev-tcv')?.textContent || '';
-  showStatus('Stream generated at ' + margin + '% margin — TCV ' + tcv + ', probability capped at ' + cap + '%', 'success');
+  showStatus('Stream generated at ' + margin + '% margin — TCV ' + tcv + probNote, 'success');
   rsgClose();
 }
 async function rsgClear() {
@@ -15997,7 +16065,7 @@ async function renderOpportunitiesPage() {
         <td${nameCls}>${d.name}${(opts.child || opts.tag) ? typeTag(d) : ''}</td>
         <td>${d.order_date ? new Date(d.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td><span class="badge badge-blue">${stage?.name || '—'}</span></td>
-        <td style="text-align:right;">${d.probability ? d.probability + '%' : '—'}</td>
+        <td style="text-align:right;">${d.probability != null ? d.probability + '%' : '—'}</td>
       </tr>`;
     };
 
@@ -16054,14 +16122,22 @@ async function renderOpportunitiesPage() {
     // collapses. Deal Name carries the roll-up (count + TCV from streams — the
     // only source of financials); Order Date is the FIRST-LOADED (earliest-
     // created) deal's, current value; Stage = the most advanced in the band
-    // (Lost counts only if everything is lost); Probability = the highest.
+    // (Lost counts only if everything is lost); Probability = the plain MEAN
+    // of the members that have one (bug #85, Lesley-Anne 2026-10-01; was the
+    // highest in v7.8.96).
     const dealBandRow = (k, open, label, members) => {
       const first = [...members].sort((x, y) => new Date(x.created_at || 0) - new Date(y.created_at || 0))[0];
       const tcv = members.reduce((a, d) => a + (dealTcv[d.id] || 0), 0);
       const rank = d => +d.stage_id === 6 ? -1 : (+d.stage_id || 0);
       const adv = members.reduce((a, d) => rank(d) > rank(a) ? d : a, members[0]);
       const advStage = stages.find(s => +s.id === +adv.stage_id);
-      const prob = members.reduce((a, d) => Math.max(a, +d.probability || 0), 0);
+      // Mean probability over the members that HAVE one (null = unknown, left
+      // out; a real 0 — Suspended, Lost — counts), rounded to a whole percent;
+      // null when no member has one. Deliberately not TCV-weighted: a deal with
+      // no stream yet would carry no weight, and the figure must be checkable by
+      // eye against the rows beneath the band (which show a real 0 as 0%).
+      const withProb = members.filter(d => d.probability != null);
+      const prob = withProb.length ? Math.round(withProb.reduce((a, d) => a + +d.probability, 0) / withProb.length) : null;
       const enc = encodeURIComponent(k).replace(/'/g, '%27');
       return `<tr onclick="toggleClientBand('opps','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
         <td style="font-weight:700;color:#003057;white-space:nowrap;"><span class="lin-toggle ${open ? 'open' : ''}">›</span>${cEsc(label)} <span style="font-weight:500;color:var(--text2);">(${members.length})</span>${_groupChipHtml(k)}</td>
@@ -16069,7 +16145,7 @@ async function renderOpportunitiesPage() {
         <td>${members.length} deals · ${pbFmtRand(Math.round(tcv))} TCV</td>
         <td>${first.order_date ? new Date(first.order_date).toLocaleDateString('en-ZA') : '—'}</td>
         <td>${advStage ? `<span class="badge badge-blue">${advStage.name}</span>` : '—'}</td>
-        <td style="text-align:right;">${prob ? prob + '%' : '—'}</td>
+        <td style="text-align:right;"${prob != null ? ` title="Average probability over ${withProb.length} of ${members.length} deals"` : ''}>${prob != null ? prob + '%' : '—'}</td>
       </tr>`;
     };
 
@@ -26624,14 +26700,16 @@ function _promotePrimaryEstRow() {
 async function openPromoteQ4Screen2() {
   const s = window._promoteOrgState;
 
-  // service_sub filtered to the lead's service_major
-  if (!allData['service_sub_all']) {
-    try {
-      allData['service_sub_all'] = await apiGet('service_sub', 'active=eq.true&select=*&order=name.asc');
-    } catch (e) {
-      allData['service_sub_all'] = [];
-      console.warn('Could not load service sub:', e.message);
-    }
+  // service_sub filtered to the lead's service_major — and the margin rules, so
+  // rsgDefaultMargin judges the service type's default here as the deal form does
+  // (bug #83). One round: the two lookups are independent.
+  if (!allData['service_sub_all'] || !allData['quote_opportunity_margin_rules']) {
+    const [subs, rules] = await Promise.all([
+      allData['service_sub_all'] || apiGet('service_sub', 'active=eq.true&select=*&order=name.asc').catch(e => { console.warn('Could not load service sub:', e.message); return []; }),
+      allData['quote_opportunity_margin_rules'] || apiGet('quote_opportunity_margin_rules', 'active=eq.true&select=*').catch(() => []),
+    ]);
+    allData['service_sub_all'] = subs;
+    allData['quote_opportunity_margin_rules'] = rules;
   }
   // Pre-fill the wizard's service sub from the lead, if set. The user can
   // still change it in this screen — Q4 wins. This keeps both lead form and
@@ -26866,7 +26944,7 @@ function buildAndValidateQ4Screen2(s) {
   const subRow = (allData['service_sub_all'] || []).find(x => +x.id === subId);
   if (!subRow) { showStatus('Service type not found — refresh and try again', 'error'); return false; }
   const isRec  = !!subRow.is_recurring;
-  const margin = +subRow.default_margin || 25;
+  const margin = rsgDefaultMargin(subRow);   // the same default the deal form applies on a service change (bug #83)
   let durationMonths, monthValues; // monthValues = array of revenue values per month
   // Seeded path (v7.9.26): the month series comes from the lead's combined
   // service-estimate schedule — the manual value fields are hidden and skipped.
