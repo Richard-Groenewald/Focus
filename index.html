@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.87 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.88 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.87 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.88 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2956,6 +2956,7 @@ const PAGES = {
   // ── Proposal Builder admin pages ──────────────────────────
   session_log:              { title: 'Sign-in Log',                        custom: true, readOnly: true, columns: [], fields: [] },
   cm_overview:              { title: 'Contract Management — Overview',     custom: true, columns: [], fields: [] },
+  cm_contracts:             { title: 'Contracts',                          custom: true, readOnly: true, columns: [], fields: [] },
   pm_overview:              { title: 'Project Management — Overview',      custom: true, columns: [], fields: [] },
 
   // ── Engagement History (read-only) — one view, four category-preset doorways ──
@@ -3902,6 +3903,7 @@ async function loadTable(page) {
     if (page === 'home_org_members') { await renderHomeOrgMembers(); return; }
     if (page === 'session_log')               { await renderSessionLogPage(); return; }
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
+    if (page === 'cm_contracts')              { await renderContractsPage(); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
     if (page === 'eng_hist_outreach') { await renderEngagementHistory('Outreach'); return; }
     if (page === 'eng_hist_sales')    { await renderEngagementHistory('Sales');    return; }
@@ -5264,6 +5266,8 @@ const MENU = [
     items: [
       { page: 'cm_overview',     label: 'Overview',     permission: 'manage_opportunities',
         icon: '<rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 7h6M5 10h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
+      { page: 'cm_contracts',    label: 'Contracts',    permission: 'manage_opportunities',
+        icon: '<rect x="3" y="1.5" width="10" height="13" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/><path d="M5.5 5h5M5.5 8h5M5.5 11h3" stroke="white" stroke-width="1.3" stroke-linecap="round"/>' },
       { page: 'eng_hist_contract', label: 'Engagement History', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M8 5v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
     ]
@@ -5700,7 +5704,10 @@ async function openOpportunity(id, adminMode = false) {
     else if (secured) level = (canEditRecord(oppData) || isCurrentUserOppCollaborator()) ? 'engagement' : 'view';
     else if (canEditRecord(oppData)) level = 'full';
     else if (isCurrentUserOppCollaborator()) level = 'engagement';
-    document.getElementById('opp-page-title').textContent = level === 'full' ? 'Edit Opportunity' : 'View Opportunity';
+    // v7.9.88: a secured deal is no longer an opportunity — it is a Contract (annuity) or a Project.
+    document.getElementById('opp-page-title').textContent = secured
+      ? (dealRevenueType(oppData) === 'project' ? 'Project' : 'Contract')
+      : (level === 'full' ? 'Edit Opportunity' : 'View Opportunity');
     setupOppOwnerReassign();
     applyOppReadOnly(level, { secured });
     oppFilesLoad();   // background: fills the Files tab and its count
@@ -6259,6 +6266,127 @@ function switchOppTab(tab, btn) {
   if (btn) btn.classList.add('active');
   const el = document.getElementById('opp-tab-' + tab);
   if (el) el.classList.add('active');
+}
+
+// ── Contract Management → Contracts (v7.9.88) ────────────────────────────────
+// Richard 2026-10-01: "lets begin the contracting process by making the secured beatrix opportunity
+// available under contracts". A secured deal leaves the sales side and is managed as a CONTRACT when
+// its service earns annuity revenue (a project-revenue deal belongs to Project Management). Same deals
+// row; nothing is copied. The register lists every secured deal whose revenue type is annuity — or
+// cannot be told (the 73 imported contracts carry no service sub-type: a service family with only one
+// revenue type decides it, a mixed family such as Technology Works or Control Room is flagged "service
+// type not set" so it can be classified). Monthly value = this month's value of the deal's revenue
+// stream (the imports keep theirs on a 'fulfilment' stream, deals secured in Focus on 'opportunity').
+// A row opens the deal page, titled Contract.
+function dealRevenueType(d, subs) {
+  subs = subs || allData['service_sub_all'] || allData['service_sub'] || [];
+  if (d && d.service_sub_id) {
+    const s = subs.find(x => +x.id === +d.service_sub_id);
+    if (s) return rsgRevenueType(s);
+  }
+  const kinds = new Set(subs.filter(x => d && +x.major_id === +d.service_major_id && x.active !== false).map(x => rsgRevenueType(x)));
+  return kinds.size === 1 ? [...kinds][0] : null;
+}
+function dealIsSecuredStage(stageId) {
+  const st = (allData['stages'] || []).find(x => +x.id === +stageId);
+  if (!st) return false;
+  const cat = (allData['stage_categories'] || []).find(c => +c.id === +st.category_id);
+  return String(st.name || '').toLowerCase() === 'secured' || /^fulfilment/i.test((cat && cat.name) || '');
+}
+async function renderContractsPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  try {
+    const [stages, cats, subs, majors, orgs, sites, people] = await Promise.all([
+      apiGet('stages', 'select=*'),
+      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*'),
+      apiGet('service_sub', 'select=*'),
+      apiGet('service_major', 'select=*'),
+      allData['organisations'] ? Promise.resolve(allData['organisations']) : apiGetAll('organisations', 'select=*'),
+      allData['sites'] ? Promise.resolve(allData['sites']) : apiGetAll('sites', 'select=id,name,organisation_id'),
+      allData['people'] ? Promise.resolve(allData['people']) : apiGet('people', 'select=id,first_name,last_name'),
+    ]);
+    allData['stages'] = stages; allData['stage_categories'] = cats; allData['organisations'] = orgs; allData['sites'] = sites; allData['people'] = people;
+    const securedIds = stages.filter(s => dealIsSecuredStage(s.id)).map(s => +s.id);
+    const deals = securedIds.length ? await apiGetAll('deals', 'stage_id=in.(' + securedIds.join(',') + ')&select=*') : [];
+    const ids = deals.map(d => +d.id);
+    const ym = new Date().toISOString().slice(0, 7);
+    const [streams, exts] = await Promise.all([
+      ids.length ? apiGetAll('revenue_streams', 'deal_id=in.(' + ids.join(',') + ')&select=id,deal_id,stream_type') : [],
+      ids.length ? apiGetAll('deals', 'parent_deal_id=in.(' + ids.join(',') + ')&opportunity_type=eq.extension&select=id,parent_deal_id,stage_id,probability') : [],
+    ]);
+    const months = streams.length ? await apiGetAll('revenue_stream_months', 'stream_id=in.(' + streams.map(s => +s.id).join(',') + ')&month=eq.' + ym + '&select=stream_id,opportunity_revenue,actual_revenue,is_actual_revenue') : [];
+    const monthByStream = new Map(months.map(m => [+m.stream_id, m]));
+    const valueOf = d => {
+      const mine = streams.filter(s => +s.deal_id === +d.id);
+      const st = mine.find(s => s.stream_type === 'fulfilment') || mine.find(s => s.stream_type === 'opportunity');
+      const m = st && monthByStream.get(+st.id);
+      return m ? +(m.is_actual_revenue ? m.actual_revenue : m.opportunity_revenue) || 0 : 0;
+    };
+    const rows = deals.map(d => {
+      const rt = dealRevenueType(d, subs);
+      const org = orgs.find(o => +o.id === +d.org_id) || {};
+      const sub = subs.find(x => +x.id === +d.service_sub_id);
+      const maj = majors.find(x => +x.id === +d.service_major_id);
+      const ext = exts.find(e => +e.parent_deal_id === +d.id);
+      const extStage = ext ? (stages.find(s => +s.id === +ext.stage_id) || {}).name : '';
+      const own = people.find(p => +p.id === +d.owner_id);
+      return {
+        d, rt, org,
+        client: org.name || '—',
+        name: d.name || '—',
+        site: (sites.find(s => +s.id === +d.site_id) || {}).name || '',
+        service: sub ? sub.name : (maj ? maj.name : ''),
+        start: d.start_date || '', end: d.contract_end_date || '',
+        monthly: valueOf(d),
+        account: String(org.account_no || '').trim(),
+        owner: own ? [own.first_name, own.last_name].filter(Boolean).join(' ') : '',
+        extension: ext ? (extStage || 'Open') + (ext.probability != null ? ' · ' + ext.probability + '%' : '') : '',
+        inFocus: !streams.some(s => +s.deal_id === +d.id && s.stream_type === 'fulfilment'),
+      };
+    }).filter(r => r.rt !== 'project');
+    const total = rows.reduce((t, r) => t + r.monthly, 0);
+    const unset = rows.filter(r => !r.rt).length;
+    const sub = document.getElementById('page-sub');
+    if (sub) sub.textContent = rows.length + ' contract' + (rows.length === 1 ? '' : 's') + ' · ' + pgMoney(total) + ' in ' + new Date().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' })
+      + (unset ? ' · ' + unset + ' with the service type not set' : '');
+    const money = n => n ? pgMoney(n) : '—';
+    const date = s => s ? new Date(s).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+    makeSortableFilterableTable({
+      tableId: 'cm_contracts',
+      headRoot: head,
+      bodyRoot: body,
+      columns: [
+        { key: 'client',    label: 'Client',            get: r => r.client },
+        { key: 'name',      label: 'Contract',          get: r => r.name },
+        { key: 'site',      label: 'Site',              get: r => r.site },
+        { key: 'service',   label: 'Service',           get: r => r.rt ? r.service : 'Service type not set' },
+        { key: 'start',     label: 'Start',             get: r => r.start },
+        { key: 'end',       label: 'Ends',              get: r => r.end },
+        { key: 'monthly',   label: 'This month',        get: r => r.monthly, align: 'right' },
+        { key: 'account',   label: 'Pastel account',    get: r => r.account },
+        { key: 'owner',     label: 'Owner',             get: r => r.owner },
+        { key: 'extension', label: 'Extension',         get: r => r.extension },
+      ],
+      rows: rows.sort((a, b) => a.client.localeCompare(b.client) || a.name.localeCompare(b.name)),
+      rowRenderer: r => `<tr onclick="openOpportunity(${+r.d.id})" style="cursor:pointer;">
+        <td style="font-weight:600;color:#003057;">${escHtml(r.client)}${_childHookHtml(r.d.org_id)}</td>
+        <td>${escHtml(r.name)}${r.inFocus ? ' <span style="font-size:10px;font-weight:700;color:#166534;background:#DCFCE7;border-radius:8px;padding:1px 6px;vertical-align:middle;">SECURED IN FOCUS</span>' : ''}</td>
+        <td>${escHtml(r.site || '—')}</td>
+        <td>${r.rt ? escHtml(r.service || '—') : `<span style="color:#9A3412;font-weight:600;" title="${escAttr((r.service || 'No service family') + ' has both annuity and project services — set the sub-type on the deal')}">Service type not set</span>`}</td>
+        <td style="white-space:nowrap;">${date(r.start)}</td>
+        <td style="white-space:nowrap;">${date(r.end)}</td>
+        <td style="text-align:right;white-space:nowrap;">${money(r.monthly)}</td>
+        <td>${r.account ? escHtml(r.account) : '<span style="color:#9A3412;">none</span>'}</td>
+        <td style="white-space:nowrap;">${escHtml(r.owner || '—')}</td>
+        <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${escHtml(r.extension || '—')}</td>
+      </tr>`,
+      emptyMessage: 'No contracts match the current filters',
+    });
+  } catch (e) {
+    body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
+  }
 }
 
 // ── Sign-in Log page (v7.9.85) ──────────────────────────────────────────────
