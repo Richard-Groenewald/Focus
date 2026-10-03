@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.92 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.93 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.92 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.93 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7104,12 +7104,18 @@ function pbNoPerShift(p) {
   for (let s = 1; s <= pbQ.shifts_per_day; s++) nums.push(+((p.shifts[pbKey(s, 'monday')] || {}).num) || 0);
   return nums.every(n => n === nums[0]) ? String(nums[0]) : nums.join(' / ');
 }
+// Only the shifts this quote shows (1..shifts_per_day). A cell above that is the leftover of an
+// interrupted shifts/day change: no screen shows or edits it, so it must not price either (v7.9.93).
+function pbShiftCells(p) {
+  const N = (pbQ && +pbQ.shifts_per_day) || 4;
+  return Object.entries(p.shifts || {}).filter(([k]) => +k.split('|')[0] <= N);
+}
 function pbPeakHeadcount(p) {
-  let mx = 0; Object.values(p.shifts || {}).forEach(v => { mx = Math.max(mx, +v.num || 0); }); return mx;
+  let mx = 0; pbShiftCells(p).forEach(([, v]) => { mx = Math.max(mx, +v.num || 0); }); return mx;
 }
 function pbTotalMonthlyOfficerHours(p) {
   let weekly = 0;
-  Object.entries(p.shifts || {}).forEach(([k, v]) => {
+  pbShiftCells(p).forEach(([k, v]) => {
     const dt = k.split('|')[1];
     if (dt === 'public_holiday') return;
     weekly += (+v.num || 0) * pbHoursBetween(v.start, v.end);
@@ -7118,7 +7124,7 @@ function pbTotalMonthlyOfficerHours(p) {
 }
 function pbSundayHoursPerMonth(p) {
   let h = 0;
-  Object.entries(p.shifts || {}).forEach(([k, v]) => {
+  pbShiftCells(p).forEach(([k, v]) => {
     if (k.split('|')[1] !== 'sunday') return;
     h += (+v.num || 0) * pbHoursBetween(v.start, v.end) * PB_WEEKDAY_MULT;
   });
@@ -7142,6 +7148,89 @@ function pbTotals() {
     needed += pbOfficersNeeded(p); cost += pbPostSummaryCost(p);
   }));
   return { posts, peak, needed, hours, cost };
+}
+// ── Per-shift price basis (v7.9.93, Richard 2026-10-03: "a lot of companies in South Africa quote
+// guarding services on a per shift basis") ─────────────────────────────────────────────────────
+// The post's monthly amount stays the ONLY price. A shift rate is that amount spread over the
+// post's officer-shifts in proportion to their hours, so the shift rows always add back to the
+// post's monthly figure to the cent. A shift = one officer on duty for the hours shown; shifts per
+// month = officers × days a week × 52 ÷ 12 (the factor the hours engine uses); a public holiday
+// neither adds nor removes a shift. quote_quotes.price_basis (monthly | per_shift | both,
+// sql/add_quote_price_basis.sql) picks what the proposal prints; an absent column reads as monthly.
+const PB_SHIFT_DAYS = PB_DAY_TYPES.filter(d => d !== 'public_holiday');
+const PB_DAY_SHORT = { monday:'Mon', tuesday:'Tue', wednesday:'Wed', thursday:'Thu', friday:'Fri', saturday:'Sat', sunday:'Sun' };
+function pbRound2(x) { const c = (+x || 0) * 100; return Math.round(c + (c < 0 ? -1e-6 : 1e-6)) / 100; }
+function pbPriceBasis() { const b = pbQ && pbQ.price_basis; return b === 'per_shift' || b === 'both' ? b : 'monthly'; }
+function pbPriceBasisReady() { return !!MOCK || !!(pbQ && 'price_basis' in pbQ); }   // false = the column is not on this database yet
+function pbPostMonthly(p, acc) { return pbRound2(pbPostSummaryCost(p) + (acc.byPost[p.id] || 0)); }
+function pbDaysLabel(days) {
+  const idx = days.map(d => PB_SHIFT_DAYS.indexOf(d)).filter(i => i >= 0).sort((a, b) => a - b);
+  if (!idx.length) return '';
+  const nm = i => PB_DAY_SHORT[PB_SHIFT_DAYS[i]];
+  if (idx.length === 1) return nm(idx[0]);
+  return idx.every((v, i) => i === 0 || v === idx[i - 1] + 1) ? nm(idx[0]) + '–' + nm(idx[idx.length - 1]) : idx.map(nm).join(', ');
+}
+// One row per distinct (shift, officers, start, end) over the seven week days, in shift then
+// first-day order — so every row can be checked by hand: officers × days × 52 ÷ 12.
+function pbPostShiftRows(p) {
+  const N = pbQ.shifts_per_day || 1, rows = [];
+  for (let s = 1; s <= N; s++) {
+    const by = {};
+    const pc = p.shifts[pbKey(s, 'public_holiday')] || {}, phN = +pc.num || 0;
+    PB_SHIFT_DAYS.forEach(d => {
+      const v = p.shifts[pbKey(s, d)] || {}, n = +v.num || 0;
+      if (!n || !v.start || !v.end) return;
+      const sig = n + '|' + v.start + '|' + v.end;
+      if (!by[sig]) {
+        let minutes = pbParseHHMMToMin(v.end) - pbParseHHMMToMin(v.start);
+        if (minutes <= 0) minutes += 1440;   // same rule as pbHoursBetween
+        // ph: the public-holiday cell is staffed exactly as this row; phText: it is staffed, but differently.
+        const same = phN === n && pc.start === v.start && pc.end === v.end;
+        by[sig] = { s, label: pbShiftLabel(s, N), start: v.start, end: v.end, minutes, hours: minutes / 60, officers: n, days: [], ph: same,
+          phText: phN > 0 && !same ? 'public holidays: ' + phN + ' officer' + (phN === 1 ? '' : 's') + ' ' + (pc.start || '') + '–' + (pc.end || '') : '' };
+        rows.push(by[sig]);
+      }
+      by[sig].days.push(d);
+    });
+  }
+  rows.forEach(r => { r.perWeek = r.officers * r.days.length; r.perMonth = r.perWeek * PB_WEEKDAY_MULT; });
+  return rows;
+}
+// Shifts staffed in the public-holiday cell but on no week day: the model gives them no row, no shifts and no officer cost.
+function pbPhOnlyShifts(p) {
+  const N = pbQ.shifts_per_day || 1, out = [];
+  for (let s = 1; s <= N; s++) {
+    if (!((+((p.shifts[pbKey(s, 'public_holiday')] || {}).num) || 0) > 0)) continue;
+    if (!PB_SHIFT_DAYS.some(d => { const v = p.shifts[pbKey(s, d)] || {}; return (+v.num || 0) > 0 && v.start && v.end; })) out.push(pbShiftLabel(s, N));
+  }
+  return out;
+}
+// Spreads a post's monthly amount over its shift rows by hours. The rate is kept unrounded (equal
+// length shifts always print the same rate); the row amounts are whole cents shared out by largest
+// remainder, so they sum to the monthly amount exactly.
+function pbShiftAllocate(monthly, rows) {
+  const W = rows.reduce((a, r) => a + r.perWeek * r.minutes, 0);
+  if (!W) return [];
+  const hourly = monthly / (W / 60 * PB_WEEKDAY_MULT);
+  const M = Math.round(monthly * 100);
+  let left = M;
+  rows.forEach(r => { const exact = M * (r.perWeek * r.minutes) / W; r._c = Math.floor(exact); r._f = exact - r._c; r.rate = hourly * r.hours; left -= r._c; });
+  rows.slice().sort((a, b) => b._f - a._f).slice(0, Math.max(0, left)).forEach(r => { r._c++; });
+  rows.forEach(r => { r.monthly = r._c / 100; delete r._c; delete r._f; });
+  return rows;
+}
+// The tie-out the Pricing tab shows: shift rows + monthly-only lines = the monthly total, and what a
+// client gets by multiplying the figures as printed (rate to the cent × shifts to two decimals), row by row.
+function pgShiftReconcile(pr) {
+  let shift = 0, other = 0, printed = 0, shifts = 0;
+  pr.groups.forEach(g => g.posts.forEach(p => {
+    const rows = Array.isArray(p.shiftRows) ? p.shiftRows : [];
+    if (!rows.length) { other += +p.monthly || 0; return; }
+    rows.forEach(r => { const n = pbRound2(+r.perMonth || 0); shift += +r.monthly || 0; printed += pbRound2(pbRound2(r.rate) * n); shifts += n; });
+  }));
+  shift = pbRound2(shift); other = pbRound2(other); printed = pbRound2(printed);
+  const total = pbRound2(shift + other);
+  return { ok: Math.round(total * 100) === Math.round(pr.monthly * 100), shift, other, total, printed, roundingDiff: pbRound2(printed - shift), shifts };
 }
 function pbMakeDefaultShifts(N) {
   const out = {};
@@ -7187,6 +7276,7 @@ const PB_EDITOR_TABS = [
   { id: 'contract',  label: 'Contract Support Items' },
   { id: 'service',   label: 'Service Support Items' },
   { id: 'mobility',  label: 'Site Mobility' },
+  { id: 'pricing',   label: 'Pricing' },
   { id: 'proposal',  label: 'Proposal' }
 ];
 function pbSwitchTab(tabId) { pbActiveTab = tabId; renderQuoteEditor(); }
@@ -7420,6 +7510,7 @@ function renderQuoteEditorTabContent() {
     case 'contract':  return renderContractItemsTab();
     case 'service':   return renderPbPlaceholderTab('Service Support Items',   'Service overhead and operational support items.');
     case 'mobility':  return renderPbPlaceholderTab('Site Mobility',           'Vehicles, fuel, tracking, vehicle extras (lease + km + fuel surcharges).');
+    case 'pricing':   return renderPricingTab();
     case 'proposal':  return renderProposalTab();
     default: return '';
   }
@@ -9049,7 +9140,7 @@ function pgFields(ctx, pricing) {
     'proposal.valid_until': pgFmtDate(pgValidUntil()),
     'pricing.monthly_total': pgMoney(pricing.monthly),
     'pricing.contract_total': pgMoney(pricing.contract),
-    'pricing.monthly_total_incl_vat': pgMoney(pricing.monthly * (1 + pricing.vatPct / 100)),
+    'pricing.monthly_total_incl_vat': pgMoney(pricing.inclVat),
     'owner.name': own ? [own.first_name, own.last_name].filter(Boolean).join(' ') : '',
     'owner.title': own ? (own.title || '') : '',
     'owner.email': own ? (own.email || '') : '',
@@ -9086,27 +9177,42 @@ function pgPricing() {
   let monthly = 0, setupOnceOff = +(snap && snap.setup_once_off) || 0;
   if (snap && Array.isArray(snap.groups)) {
     snap.groups.forEach(g => {
-      const posts = (g.posts || []).map(p => ({ name: p.name, officers: +p.officers || 0, monthly: +p.monthly || 0 }));
+      // A calculation may carry its own per-shift rows (shift_rows, each with rate and monthly); none is recomputed here.
+      const posts = (g.posts || []).map(p => ({ name: p.name, officers: +p.officers || 0, monthly: +p.monthly || 0, grade: p.grade || '',
+        shiftRows: Array.isArray(p.shift_rows) && p.shift_rows.every(r => r && r.rate != null && r.monthly != null) ? p.shift_rows : null }));
       const sub = posts.reduce((a, p) => a + p.monthly, 0); monthly += sub;
-      groups.push({ name: g.name, posts, sub });
+      groups.push({ name: g.name, posts, sub, other: !!g.other });
     });
   } else {
+    // v7.9.93: every amount is a whole-cent figure at source, so a total always equals the sum of
+    // its printed rows, and each post carries its shift rows for the per-shift basis.
     const acc = pbAccSummary();
+    const grades = allData['quote_grades'] || [];
     pbHeadings.forEach(h => {
       if (!h.posts.length) return;
-      const posts = h.posts.map(p => ({ name: p.name, officers: pbOfficersForPost(p), monthly: pbPostSummaryCost(p) + (acc.byPost[p.id] || 0) }));
-      const sub = posts.reduce((a, p) => a + p.monthly, 0); monthly += sub;
+      const posts = h.posts.map(p => {
+        const m = pbPostMonthly(p, acc);
+        return { name: p.name, officers: pbOfficersForPost(p), monthly: m, postId: p.id, grade: (grades.find(g => +g.id === +p.grade_id) || {}).code || '',
+          needed: pbOfficersNeeded(p), general: pbGeneralOfficersNeeded(p), shiftRows: pbShiftAllocate(m, pbPostShiftRows(p)), phOnly: pbPhOnlyShifts(p) };
+      });
+      const sub = pbRound2(posts.reduce((a, p) => a + p.monthly, 0)); monthly += sub;
       groups.push({ name: h.isUngrouped ? 'General' : h.name, posts, sub });
     });
     // Contract-level amortised items ride as their own group; once-off setup is one line.
-    const wfAdjMonthly = acc.lines.filter(l => l.where === 'Workforce adjustment').reduce((a, l) => a + l.monthly, 0);
-    if (wfAdjMonthly) { groups.push({ name: 'Workforce support items', posts: [{ name: 'Adjustment to the per-post provision', officers: '', monthly: wfAdjMonthly }], sub: wfAdjMonthly }); monthly += wfAdjMonthly; }
-    const contractMonthly = acc.lines.filter(l => l.where === 'Contract').reduce((a, l) => a + l.monthly, 0);
-    if (contractMonthly) { groups.push({ name: 'Contract equipment', posts: [{ name: 'Site equipment (amortised)', officers: '', monthly: contractMonthly }], sub: contractMonthly }); monthly += contractMonthly; }
+    const wfAdjMonthly = pbRound2(acc.lines.filter(l => l.where === 'Workforce adjustment').reduce((a, l) => a + l.monthly, 0));
+    if (wfAdjMonthly) { groups.push({ name: 'Workforce support items', other: true, posts: [{ name: 'Adjustment to the per-post provision', officers: '', monthly: wfAdjMonthly }], sub: wfAdjMonthly }); monthly += wfAdjMonthly; }
+    const contractMonthly = pbRound2(acc.lines.filter(l => l.where === 'Contract').reduce((a, l) => a + l.monthly, 0));
+    if (contractMonthly) { groups.push({ name: 'Contract equipment', other: true, posts: [{ name: 'Site equipment (amortised)', officers: '', monthly: contractMonthly }], sub: contractMonthly }); monthly += contractMonthly; }
+    monthly = pbRound2(monthly);
     setupOnceOff = acc.onceOff;
   }
   const months = +pbQ.contract_duration_months || 0;
-  return { groups, monthly, contract: monthly * months, months, vatPct, indicative: !snap, asOf: snap ? pgState.snapshot.as_of_date : null, setupOnceOff };
+  // perShift: every post line carries shift rows (always so on the indicative path; a calculation without them prints monthly).
+  const perShift = groups.filter(g => !g.other).every(g => g.posts.every(p => Array.isArray(p.shiftRows)));
+  // VAT and the incl. total are whole-cent figures built from the excl. total, so the three lines always foot.
+  const exVat = pbRound2(monthly), vat = pbRound2(exVat * vatPct / 100), inclVat = pbRound2(exVat + vat);
+  return { groups, monthly, contract: monthly * months, months, vatPct, indicative: !snap, asOf: snap ? pgState.snapshot.as_of_date : null, setupOnceOff,
+    basis: pbPriceBasis(), perShift, vat, inclVat };
 }
 
 // Generated sections
@@ -9141,52 +9247,162 @@ function pgShiftPattern(p) {
 // Shift schedule (v7.9.92, Richard 2026-10-03): one grid for the whole quote — a block per heading, a
 // row per post and shift, columns Nº / Start / End per day group. The same HTML is the Shift Schedule
 // tab and the proposal's "Shift schedule" section. Weekdays print as one group while every post's
-// Monday-Friday agree, else as five.
+// Monday-Friday agree; when any post differs the schedule prints as two grids (Monday to Friday, then
+// Saturdays / Sundays / Public Holidays) — eight day groups side by side do not fit an A4 page.
 function pbShiftScheduleHtml(title) {
   const N = pbQ.shifts_per_day || 1;
   const grades = allData['quote_grades'] || [];
   const posts = pbHeadings.reduce((a, h) => a.concat(h.posts), []);
   const same = p => { for (let s = 1; s <= N; s++) { const m = p.shifts[pbKey(s, 'monday')] || {};
-    for (const d of PB_WEEKDAYS) { const v = p.shifts[pbKey(s, d)] || {}; if (+v.num !== +m.num || v.start !== m.start || v.end !== m.end) return false; } } return true; };
+    for (const d of PB_WEEKDAYS) { const v = p.shifts[pbKey(s, d)] || {}; if ((+v.num || 0) !== (+m.num || 0) || v.start !== m.start || v.end !== m.end) return false; } } return true; };
   const split = !posts.every(same);
-  const groups = (split ? PB_WEEKDAYS : ['weekdays']).concat(['saturday', 'sunday', 'public_holiday']);
+  const chunks = split ? [PB_WEEKDAYS, ['saturday', 'sunday', 'public_holiday']] : [['weekdays', 'saturday', 'sunday', 'public_holiday']];
   const gLabel = g => g === 'weekdays' ? 'Weekdays' : g === 'public_holiday' ? 'Public Holidays' : PB_DAY_LABELS[g];
   const cell = (p, s, g) => p.shifts[pbKey(s, g === 'weekdays' ? 'monday' : g)] || {};
-  const ncols = 3 + groups.length * 3;
-  let html = '<style>.pb-ss{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:' + (split ? '7.5pt' : '9pt') + ';}' +
-    '.pb-ss th,.pb-ss td{border:1px solid #FA0A11;padding:3px 5px;text-align:center;white-space:nowrap;}' +
+  const style = '<style>.pb-ss{width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:' + (split ? '8pt' : '9pt') + ';margin:0 0 10px;}' +
+    '.pb-ss th,.pb-ss td{border:1px solid #FA0A11;padding:3px 5px;text-align:center;white-space:nowrap;font-size:inherit;}' +
+    '.pb-ss th{text-transform:none;letter-spacing:0;} .pb-ss tr:last-child td{border-bottom:1px solid #FA0A11;}' +
     '.pb-ss th.r{background:#FA0A11;color:#fff;font-weight:700;} .pb-ss th.n{background:#003057;color:#fff;font-weight:700;}' +
     '.pb-ss td.band{background:#b8b8b8;font-weight:700;text-align:left;font-size:1.1em;} .pb-ss td.post{background:#f2f2f2;text-align:left;white-space:normal;}' +
-    '.pb-ss td.sh{background:#595959;color:#fff;font-weight:700;} .pb-ss td.off{background:repeating-linear-gradient(45deg,#f4f4f4,#f4f4f4 2px,#e2e2e2 2px,#e2e2e2 4px);}' +
-    '</style>' +
-    '<table class="pb-ss"><thead><tr><th class="r" colspan="3" style="text-align:left;">Post Description</th>' +
-    groups.map(g => '<th class="r" colspan="3">' + gLabel(g) + '</th>').join('') + '</tr>' +
-    '<tr><th class="n" colspan="3" style="text-align:right;">Grade</th>' + groups.map(() => '<th class="n">N&ordm;</th><th class="n">Start</th><th class="n">End</th>').join('') + '</tr></thead><tbody>';
-  pbHeadings.forEach(h => {
-    if (!h.posts.length) return;
-    html += '<tr><td class="band" colspan="' + ncols + '">' + pbEsc(h.isUngrouped ? 'General' : h.name) + '</td></tr>';
-    h.posts.forEach(p => {
-      const grade = (grades.find(g => +g.id === +p.grade_id) || {}).code || '';
-      for (let s = 1; s <= N; s++) {
-        html += '<tr>' + (s === 1 ? '<td class="post" rowspan="' + N + '">' + pbEsc(p.name) + '</td><td class="post" rowspan="' + N + '">' + pbEsc(grade) + '</td>' : '') +
-          '<td class="sh">' + pbEsc(pbShiftLabel(s, N)) + '</td>' +
-          groups.map(g => { const v = cell(p, s, g);
-            return +v.num > 0 ? '<td>' + (+v.num) + '</td><td>' + pbEsc(v.start || '') + '</td><td>' + pbEsc(v.end || '') + '</td>'
-              : '<td class="off"></td><td class="off"></td><td class="off"></td>'; }).join('') + '</tr>';
-      }
+    '.pb-ss td.sh{background:#595959;color:#fff;font-weight:700;} .pb-ss td.off{background:#e9e9e9;} @media screen{.pb-ss td.off{background:repeating-linear-gradient(45deg,#f4f4f4,#f4f4f4 2px,#e2e2e2 2px,#e2e2e2 4px);}}' +
+    '.pb-ss tbody{page-break-inside:avoid;}</style>';
+  const table = groups => {
+    const ncols = 3 + groups.length * 3;
+    let t = '<table class="pb-ss"><thead><tr><th class="r" colspan="3" style="text-align:left;">Post Description</th>' +
+      groups.map(g => '<th class="r" colspan="3">' + gLabel(g) + '</th>').join('') + '</tr>' +
+      '<tr><th class="n" colspan="3" style="text-align:right;">Grade</th>' + groups.map(() => '<th class="n">N&ordm;</th><th class="n">Start</th><th class="n">End</th>').join('') + '</tr></thead>';
+    pbHeadings.forEach(h => {
+      if (!h.posts.length) return;
+      let band = '<tr><td class="band" colspan="' + ncols + '">' + pbEsc(h.isUngrouped ? 'General' : h.name) + '</td></tr>';   // rides in the first post's body, so a page never ends on it
+      h.posts.forEach(p => {
+        const grade = (grades.find(g => +g.id === +p.grade_id) || {}).code || '';
+        t += '<tbody>' + band; band = '';
+        for (let s = 1; s <= N; s++) {
+          t += '<tr>' + (s === 1 ? '<td class="post" rowspan="' + N + '">' + pbEsc(p.name) + '</td><td class="post" rowspan="' + N + '">' + pbEsc(grade) + '</td>' : '') +
+            '<td class="sh">' + pbEsc(pbShiftLabel(s, N)) + '</td>' +
+            groups.map(g => { const v = cell(p, s, g);
+              return +v.num > 0 ? '<td>' + (+v.num) + '</td><td>' + pbEsc(v.start || '') + '</td><td>' + pbEsc(v.end || '') + '</td>'
+                : '<td class="off"></td><td class="off"></td><td class="off"></td>'; }).join('') + '</tr>';
+        }
+        t += '</tbody>';
+      });
     });
-  });
-  return (title ? '<div style="font-weight:700;margin:4px 0 6px;">' + pbEsc(title) + '</div>' : '') + html + '</tbody></table>';
+    return t + '</table>';
+  };
+  return (title ? '<div style="font-weight:700;margin:4px 0 6px;">' + pbEsc(title) + '</div>' : '') + style + chunks.map(table).join('');
 }
 function pgRenderShiftSchedule(f) {
   if (!pbHeadings.some(h => h.posts.length)) return '<p class="pg-muted">No posts on this quote yet.</p>';
   return pbShiftScheduleHtml(f && f['site.name'] ? f['site.name'] : '');
 }
 function renderShiftScheduleTab() {
-  if (!pbHeadings.some(h => h.posts.length)) return renderPbPlaceholderTab('Shift Schedule', 'Add posts on the Posts tab; their shifts appear here as the schedule printed in the proposal.');
+  if (!pbHeadings.some(h => h.posts.length)) return '<div class="pb-qheader" style="display:block;color:var(--text3);font-size:13px;">Add posts on the Posts tab; their shifts appear here as the schedule printed in the proposal.</div>';
   return '<div class="pb-qheader" style="display:block;overflow-x:auto;">' +
-    '<div class="pg-muted" style="font-size:12px;margin-bottom:8px;">Read-only summary of every post\'s shifts, drawn from the Posts tab. It prints in the proposal under "Shift schedule". Shaded cells are not staffed.</div>' +
+    '<div style="font-size:12px;margin-bottom:8px;color:var(--text3);">Read-only summary of every post\'s shifts, drawn from the Posts tab. It prints in the proposal under "Shift schedule". Shaded cells are not staffed.</div>' +
     pbShiftScheduleHtml(pbQ.contract_name) + '</div>';
+}
+// ── Per-shift rates table (v7.9.93) ─────────────────────────────────────
+// Drawn from pgPricing()'s post rows (shiftRows). Carries its own inline style, like the shift
+// schedule, so it reads the same on the Pricing tab, in the preview and in a frozen issued document.
+// opts.full = the five-line totals footer (the per-shift basis, where this is the only price table);
+// opts.editor = the extra 'Officers priced' column of the Pricing tab.
+const PB_SHIFT_RATE_NOTE = 'A shift is one officer on duty for the hours shown. Shifts per month are for an average month: officers per shift × days per week × 52 ÷ 12, so one officer on every day of the week is 30.33 shifts. Shifts per month follow the normal weekly pattern: a public holiday neither adds nor removes a shift, whether or not the post is staffed on that day. Each rate is all-inclusive: Sundays and public holidays carry no surcharge. Rates are shown to the nearest cent and shifts per month to two decimals, so rate × shifts will not reproduce the monthly amount exactly; the monthly amount is the contract price and the amount invoiced.';
+function pbShiftRatesHtml(pr, opts) {
+  opts = opts || {};
+  const cols = opts.editor ? 9 : 8, tail = opts.editor ? '<td></td>' : '';
+  let unequal = false, rateless = false, phDiffers = false;
+  let html = '<style>.pb-sr{width:100%;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;font-size:9pt;margin:4px 0 6px;}' +
+    '.pb-sr th{background:#003057;color:#fff;text-align:left;padding:4px 6px;font-weight:700;vertical-align:bottom;text-transform:none;letter-spacing:0;font-size:inherit;}' +
+    '.pb-sr td,.pb-sr tr:last-child td{padding:4px 6px;border-bottom:1px solid #d9dee5;vertical-align:top;font-size:inherit;}' +
+    '.pb-sr th.num{text-align:right;} .pb-sr td.num{text-align:right;white-space:nowrap;}' +
+    '.pb-sr tr.band td{background:#eef2f6;font-weight:700;color:#003057;} .pb-sr tr.sub td{font-weight:600;background:#f7f8fa;}' +
+    '.pb-sr tbody.tot td{font-weight:600;} .pb-sr tr.total td{background:#003057;color:#fff;}' +
+    '.pb-sr td.nr{color:#666;font-style:italic;} .pb-sr .mu{color:#666;font-size:.9em;font-weight:400;}' +
+    '.pb-sr tbody{page-break-inside:avoid;}</style>' +
+    '<table class="pb-sr"><thead><tr><th>Post</th><th>Grade</th><th>Shift</th><th>Days</th><th class="num">Officers per shift</th><th class="num">Shifts per month</th>' +
+    '<th class="num">Rate per officer per shift (excl. VAT)</th><th class="num">Monthly (excl. VAT)</th>' + (opts.editor ? '<th class="num">Officers priced</th>' : '') + '</tr></thead>';
+  pr.groups.forEach(g => {
+    let band = '<tr class="band"><td colspan="' + cols + '">' + pbEsc(g.name) + '</td></tr>';   // rides in the group's first post body, so a page never ends on it
+    g.posts.forEach(p => {
+      const rows = !g.other && Array.isArray(p.shiftRows) ? p.shiftRows : [];
+      const priced = !opts.editor ? '' : '<td class="num">' + (g.other ? '' : pbEsc(p.officers) + (p.needed != null ? ' <span class="mu">(needs ' + (+p.needed).toFixed(2) + ')</span>' : '')) + '</td>';
+      html += '<tbody>' + band; band = '';
+      if (!rows.length) {
+        rateless = true;
+        html += g.other
+          ? '<tr><td>' + pbEsc(p.name) + '</td><td class="nr" colspan="6">Monthly charge, not per shift</td><td class="num">' + pgMoney(p.monthly) + '</td>' + priced + '</tr>'
+          : '<tr><td>' + pbEsc(p.name) + '</td><td>' + pbEsc(p.grade || '') + '</td><td class="nr" colspan="5">' + ((p.phOnly || []).length ? 'Staffed on public holidays only' : 'No shifts scheduled') + ' – monthly charge</td><td class="num">' + pgMoney(p.monthly) + '</td>' + priced + '</tr>';
+      } else {
+        if (rows.some(r => r.minutes !== rows[0].minutes)) unequal = true;
+        if (rows.some(r => r.phText)) phDiffers = true;
+        rows.forEach((r, i) => {
+          html += '<tr><td>' + (i ? '' : pbEsc(p.name)) + '</td><td>' + (i ? '' : pbEsc(p.grade || '')) + '</td>' +
+            '<td>' + pbEsc((r.label || '') + ' ' + (r.start || '') + '–' + (r.end || '')) + (r.hours != null ? ' <span class="mu">(' + pbFormatHrs(+r.hours) + ')</span>' : '') + '</td>' +
+            '<td>' + pbEsc(pbDaysLabel(r.days || [])) + (typeof r.ph !== 'boolean' ? '' : '<br><span class="mu">' + (r.phText ? pbEsc(r.phText) : r.ph ? 'also staffed on public holidays' : 'not staffed on public holidays') + '</span>') + '</td>' +
+            '<td class="num">' + pbEsc(r.officers) + '</td><td class="num">' + (+r.perMonth || 0).toFixed(2) + '</td>' +
+            '<td class="num">' + pgMoney(pbRound2(r.rate)) + '</td><td class="num">' + pgMoney(r.monthly) + '</td>' + (i ? tail : priced) + '</tr>';
+        });
+      }
+      html += '</tbody>';
+    });
+    if (pr.groups.length > 1) html += '<tbody><tr class="sub"><td colspan="7">Sub-total — ' + pbEsc(g.name) + '</td><td class="num">' + pgMoney(g.sub) + '</td>' + tail + '</tr></tbody>';
+  });
+  const line = (label, amt, cls) => '<tr' + (cls ? ' class="' + cls + '"' : '') + '><td colspan="7">' + label + '</td><td class="num">' + pgMoney(amt) + '</td>' + tail + '</tr>';
+  // A last body, not a tfoot: a tfoot repeats on every printed page of a long table.
+  html += '<tbody class="tot">' + (opts.full
+    ? line('Monthly total (excl. VAT)', pr.monthly) + line('VAT @ ' + pbEsc(pr.vatPct) + '%', pr.vat) + line('Monthly total (incl. VAT)', pr.inclVat, 'total') +
+      line('Contract value over ' + pbEsc(pr.months) + ' months (excl. VAT)', pr.contract) + (pr.setupOnceOff ? line('Setup and equipment, once-off (excl. VAT)', pr.setupOnceOff) : '')
+    : line('Monthly total (excl. VAT), as above', pr.monthly)) + '</tbody></table>';
+  return html + '<p style="color:#666;font-size:8.5pt;line-height:1.35;margin:0 0 8px;">' + pbEsc(PB_SHIFT_RATE_NOTE) +
+    (unequal ? ' Where a post\'s shifts differ in length, each rate is in proportion to its hours.' : '') +
+    (phDiffers ? ' Where the staffing on a public holiday differs from the normal day, it is shown under Days and in the shift schedule.' : '') +
+    (rateless ? ' Charges shown without a rate are monthly amounts that do not depend on shifts.' : '') + '</p>';
+}
+// The select that picks what the proposal's pricing section prints. Disabled until the column exists.
+function pbPriceBasisField(label) {
+  const ready = pbPriceBasisReady(), b = pbPriceBasis();
+  return '<label class="form-label">' + pbEsc(label) + '</label>' +
+    '<select class="form-control pb-basis-sel" ' + (ready ? '' : 'disabled title="Needs sql/add_quote_price_basis.sql on this database" ') + 'onchange="pbSetPriceBasis(this.value, this)">' +
+    [['monthly', 'Monthly per post'], ['per_shift', 'Per shift'], ['both', 'Monthly and per shift']].map(o => '<option value="' + o[0] + '"' + (o[0] === b ? ' selected' : '') + '>' + o[1] + '</option>').join('') + '</select>';
+}
+// Pricing tab: both views of the same prices, always (so it works before the SQL has run), the
+// basis select, a tie-out of the shift rows against the monthly total, and warnings.
+function renderPricingTab() {
+  if (!pbHeadings.some(h => h.posts.length)) return '<div class="pb-qheader" style="display:block;color:var(--text3);font-size:13px;">Add posts on the Posts tab; their prices appear here per month and per shift.</div>';
+  const pr = pgPricing(), rec = pgShiftReconcile(pr), warn = [];
+  pr.groups.forEach(g => { if (g.other) return; g.posts.forEach(p => {
+    if (!Array.isArray(p.shiftRows)) return;   // a calculation without per-shift rows: the 'not available' line already says so
+    const rows = p.shiftRows, nm = pbEsc(p.name || 'An unnamed post');
+    const phOnly = Array.isArray(p.phOnly) ? p.phOnly : [];
+    if (!rows.length) {
+      warn.push(nm + (phOnly.length ? ' is staffed on public holidays only: that staffing adds no shifts and no officer cost in the current model, so the post has no shift rate.' : ' has no shifts scheduled, so it has no shift rate.'));
+      return;
+    }
+    if (phOnly.length) warn.push(nm + ': the ' + pbEsc(phOnly.join(' and ')) + ' shift is staffed on public holidays only. That staffing has no rate row and no officer cost in the current model; it shows in the shift schedule only.');
+    if (rows.some(r => r.phText)) warn.push(nm + ' is staffed differently on public holidays than on the normal day. The price follows the normal week; the difference is printed under Days.');
+    // Judged against the officers the HOURS need: the Sunday limit can set the officer count and hide the under-use.
+    const byHours = +p.general > 0 ? +p.general : +p.needed;
+    if (byHours > 0 && p.officers / byHours >= 1.25) {
+      warn.push(nm + ' is priced as ' + pbEsc(p.officers) + ' officer' + (+p.officers === 1 ? '' : 's') + ' for ' + byHours.toFixed(2) + ' needed by hours' +
+        (+p.needed > byHours + 1e-9 ? ' (the Sunday limit sets the number)' : '') + ', so its rate per shift is high.');
+    }
+  }); });
+  return '<div class="pb-qheader" style="display:block;overflow-x:auto;">' +
+    '<div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">' +
+      '<div style="min-width:240px;">' + pbPriceBasisField('The proposal shows prices') + '</div>' +
+      '<div style="flex:1;min-width:260px;color:var(--text3);font-size:12px;">Each post\'s monthly price, and the same price spread over its shifts by hours. Both views are always shown here; the proposal prints the one chosen.' +
+        (pbPriceBasisReady() ? '' : ' <strong>The choice needs sql/add_quote_price_basis.sql on this database; until then the proposal prints monthly prices.</strong>') + '</div>' +
+    '</div>' +
+    '<style>' + PG_DOC_CSS + '</style><div class="pg-doc" style="max-width:none;padding:0;margin:0;">' +
+      pgPricingBannerHtml(pr) + pgPricingMonthlyHtml(pr) + '<h3>Rates per shift</h3>' +
+      (pr.perShift ? pbShiftRatesHtml(pr, { full: false, editor: true }) : '<p class="pg-unknown">Per-shift rates are not available from this calculation.</p>') +
+    '</div>' +
+    (pr.perShift ? '<div style="margin-top:10px;padding:8px 10px;border-radius:4px;font-size:12px;border:1px solid ' + (rec.ok ? '#9bd3ae' : '#FA0A11') + ';background:' + (rec.ok ? '#eef9f1' : '#fff0f0') + ';">' +
+      '<strong>Check:</strong> shift rows ' + pgMoney(rec.shift) + ' + monthly-only charges ' + pgMoney(rec.other) + ' = ' + pgMoney(rec.total) +
+      (rec.ok ? ' — agrees with the monthly total.' : ' — <strong style="color:#FA0A11;">does not agree with the monthly total ' + pgMoney(pr.monthly) + '.</strong>') +
+      '<br>Multiplying the figures as printed (rate × shifts per month, row by row, ' + rec.shifts.toFixed(2) + ' shifts) gives ' + pgMoney(rec.printed) + ' for the shift rows: a rounding difference of ' + pgMoney(rec.roundingDiff) + '. The note under the table tells the client the monthly amount is the price.</div>' : '') +
+    (warn.length ? '<div style="margin-top:8px;padding:8px 10px;border-radius:4px;font-size:12px;border:1px solid #E0B252;background:#FFF8E6;">' + warn.map(w => '<div>⚠ ' + w + '</div>').join('') + '</div>' : '') +
+  '</div>';
 }
 // Performance incentives (Richard, 2026-09-13): the proposal names them per post and carries
 // this descriptor once, so the client never reads them as guaranteed pay.
@@ -9222,21 +9438,32 @@ function pgRenderScope() {
   if (anyInc) html += '<p class="pg-muted"><em>' + pbEsc(PB_PERF_INCENTIVE_NOTE) + '</em></p>';
   return html || '<p class="pg-muted">No posts on this quote yet.</p>';
 }
+function pgPricingBannerHtml(pr) {
+  return pr.indicative ? '<div class="pg-indicative">INDICATIVE — no calculation snapshot on this quote yet. Figures below are the builder’s working estimate and must not be issued.</div>'
+    : '<p class="pg-muted">Rates as at ' + pbEsc(pgFmtDate(pr.asOf)) + '.</p>';
+}
+// The pricing section prints by the quote's price basis (v7.9.93): the monthly table, the
+// per-shift table (same totals), or the monthly table followed by the rates behind it.
 function pgRenderPricing(pr) {
+  const basis = pr.basis || 'monthly';
+  let html = pgPricingBannerHtml(pr);
+  if (basis === 'monthly') return html + pgPricingMonthlyHtml(pr);
+  if (!pr.perShift) return html + pgPricingMonthlyHtml(pr) + '<p class="pg-unknown">Per-shift rates are not available from this calculation; monthly prices are shown.</p>';
+  if (basis === 'per_shift') return html + pbShiftRatesHtml(pr, { full: true });
+  return html + pgPricingMonthlyHtml(pr) + '<h3>Rates per shift</h3>' + pbShiftRatesHtml(pr, { full: false });
+}
+function pgPricingMonthlyHtml(pr) {
   let html = '';
-  if (pr.indicative) html += '<div class="pg-indicative">INDICATIVE — no calculation snapshot on this quote yet. Figures below are the builder’s working estimate and must not be issued.</div>';
-  else html += '<p class="pg-muted">Rates as at ' + pbEsc(pgFmtDate(pr.asOf)) + '.</p>';
   html += '<table class="pg-table"><thead><tr><th>Post</th><th class="num">Officers</th><th class="num">Monthly (excl. VAT)</th></tr></thead><tbody>';
   pr.groups.forEach(g => {
     html += '<tr class="pg-group"><td colspan="3">' + pbEsc(g.name) + '</td></tr>';
     g.posts.forEach(p => { html += '<tr><td>' + pbEsc(p.name) + '</td><td class="num">' + p.officers + '</td><td class="num">' + pgMoney(p.monthly) + '</td></tr>'; });
     if (pr.groups.length > 1) html += '<tr class="pg-sub"><td colspan="2">Sub-total — ' + pbEsc(g.name) + '</td><td class="num">' + pgMoney(g.sub) + '</td></tr>';
   });
-  const vat = pr.monthly * pr.vatPct / 100;
   html += '</tbody><tfoot>' +
     '<tr><td colspan="2">Monthly total (excl. VAT)</td><td class="num">' + pgMoney(pr.monthly) + '</td></tr>' +
-    '<tr><td colspan="2">VAT @ ' + pr.vatPct + '%</td><td class="num">' + pgMoney(vat) + '</td></tr>' +
-    '<tr class="pg-total"><td colspan="2">Monthly total (incl. VAT)</td><td class="num">' + pgMoney(pr.monthly + vat) + '</td></tr>' +
+    '<tr><td colspan="2">VAT @ ' + pr.vatPct + '%</td><td class="num">' + pgMoney(pr.vat) + '</td></tr>' +
+    '<tr class="pg-total"><td colspan="2">Monthly total (incl. VAT)</td><td class="num">' + pgMoney(pr.inclVat) + '</td></tr>' +
     '<tr><td colspan="2">Contract value over ' + pr.months + ' months (excl. VAT)</td><td class="num">' + pgMoney(pr.contract) + '</td></tr>' +
     (pr.setupOnceOff ? '<tr><td colspan="2">Setup and equipment, once-off (excl. VAT)</td><td class="num">' + pgMoney(pr.setupOnceOff) + '</td></tr>' : '') +
     '</tfoot></table>';
@@ -9302,6 +9529,7 @@ function renderProposalTab() {
   return '<style>' + PG_DOC_CSS + '</style><div class="pg-wrap">' +
     '<div class="pg-side">' +
       '<div class="pg-side-head"><label class="form-label">Template</label><select class="form-control" onchange="pgSetTemplate(+this.value)">' + tplOpts + '</select>' +
+        '<div style="margin-top:8px;">' + pbPriceBasisField('Prices shown as') + '</div>' +
         '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft — edits create v' + pgNextVersion()) +
           (pgCurrentIssued() ? ' · <strong>' + pbEsc(pgCurrentIssued().proposal_ref) + ' v' + pbEsc(pgCurrentIssued().version) + '</strong> issued ' + pbEsc(String(pgCurrentIssued().issued_at || '').slice(0, 10)) : '') + '</div></div>' +
       '<div class="pg-sec-list">' + list + '</div>' +
@@ -9407,11 +9635,12 @@ const PG_DOC_CSS = `
   .pg-doc .pg-table{width:100%;border-collapse:collapse;margin:4px 0 10px;font-size:10pt;}
   .pg-doc .pg-table th{background:#003057;color:#fff;text-align:left;padding:5px 7px;font-weight:700;} .pg-doc .pg-table td{padding:5px 7px;border-bottom:1px solid #d9dee5;vertical-align:top;}
   .pg-doc .pg-table .num{text-align:right;white-space:nowrap;} .pg-doc .pg-table tr.pg-group td{background:#eef2f6;font-weight:700;color:#003057;}
-  .pg-doc .pg-table tr.pg-sub td{font-weight:600;background:#f7f8fa;} .pg-doc .pg-table tfoot td{font-weight:600;} .pg-doc .pg-table tr.pg-total td{background:#003057;color:#fff;}
+  .pg-doc .pg-table tr.pg-sub td{font-weight:600;background:#f7f8fa;} .pg-doc .pg-table tfoot td{font-weight:600;} .pg-doc .pg-table tfoot{display:table-row-group;page-break-inside:avoid;} .pg-doc .pg-table tr.pg-total td{background:#003057;color:#fff;}
   .pg-doc .pg-muted{color:#666;font-size:9.5pt;} .pg-doc .pg-unknown{color:#FA0A11;font-weight:700;}
   .pg-doc .pg-indicative{border:2px dashed #FA0A11;color:#FA0A11;font-weight:700;padding:8px 10px;margin-bottom:10px;font-size:10pt;}
   .pg-doc .pg-sign-row{display:flex;gap:14mm;margin-top:16mm;} .pg-doc .pg-sign{flex:1;} .pg-doc .pg-sign-who{font-weight:700;color:#003057;margin-bottom:16mm;} .pg-doc .pg-sign-line{border-bottom:1px solid #000;margin-bottom:4px;}
   .pg-doc[data-watermark]::before{content:attr(data-watermark);position:absolute;top:35%;left:50%;transform:translate(-50%,-50%) rotate(-30deg);font-size:110pt;font-weight:900;color:rgba(250,10,17,0.08);pointer-events:none;letter-spacing:.1em;}
+  .pg-doc[data-watermark="INDICATIVE"]::before{font-size:64pt;} .pg-doc[data-watermark="SANDBOX"]::before{font-size:78pt;}
   @media print{ @page{size:A4;margin:18mm;} .pg-doc{max-width:none;padding:0;} .pg-doc .pg-break{page-break-before:always;} .pg-doc .pg-table tr{page-break-inside:avoid;} }
 `;
 // Print: a standalone window carrying only the document and its stylesheet,
@@ -9440,6 +9669,7 @@ function pgIssueBlockers() {
   if (!can('issue_proposal')) why.push('you do not have the issue_proposal permission');
   if (_pgRpcMissing) why.push('sql/proposal_generator_inc2.sql is not installed on this database');
   if (!pgState.snapshot) why.push('the quote has no calculation snapshot yet');
+  else if (pbPriceBasis() !== 'monthly' && !pgPricing().perShift) why.push('per-shift pricing is selected but the calculation carries no per-shift rates');
   if ((pgState.lastUnknown || []).length) why.push('the text still has unknown merge fields');
   const secs = pgSections();
   secs.filter(s => s.mandatory && s.kind !== 'generated' && !(s.body_effective || '').trim()).forEach(s => why.push('"' + s.title + '" is empty'));
@@ -9896,7 +10126,7 @@ function pbQuoteAsAt() {
 // crosses midnight - its end time is on the following day. An 18:00-23:00 evening shift does
 // not; 22:00-06:00 and 18:00-06:00 do. Only staffed shifts (officers > 0) count.
 function pbPostHasMidnightShift(p) {
-  return Object.values((p && p.shifts) || {}).some(s =>
+  return !!p && pbShiftCells(p).some(([, s]) =>
     s && +s.num > 0 && s.start && s.end && s.end <= s.start);
 }
 
@@ -10280,14 +10510,42 @@ async function pbSaveQuoteField(field, value) {
   try { await apiPatch('quote_quotes', pbQ.id, { [field]: value }); pbQ[field] = value; showStatus('Saved', 'success'); }
   catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
 }
+// Price basis (v7.9.93). Its own handler. Only the PATCH sits in the try, against the quote that was
+// open when the choice was made; the basis selects are locked while it is in flight (a second change
+// could otherwise be dropped) and re-synced from the saved value afterwards. A refused save (an
+// un-migrated database, a view-only user) puts the select back. On the Proposal tab only the preview
+// and the Issue button are redrawn, so a section being edited keeps its typed text; no other tab is
+// redrawn (the Pricing tab shows both views whatever the basis). An issued version keeps the basis it
+// was frozen with.
+async function pbSetPriceBasis(v, el) {
+  const q = pbQ, old = pbPriceBasis();
+  if (!q || !['monthly', 'per_shift', 'both'].includes(v) || v === old) return;
+  const sels = () => document.querySelectorAll('select.pb-basis-sel');
+  sels().forEach(s => { s.disabled = true; });
+  let err = null;
+  try { await apiPatch('quote_quotes', q.id, { price_basis: v }); } catch (e) { err = e; }
+  if (!err) q.price_basis = v;                      // the quote that was saved, never whichever is open by now
+  const here = !!pbQ && +pbQ.id === +q.id;          // false = the quote was left (or another opened) during the save
+  if (here && !err) pbQ.price_basis = v;            // the same quote, possibly re-opened as a new row object
+  if (here) sels().forEach(s => { s.disabled = !pbPriceBasisReady(); s.value = pbPriceBasis(); });
+  if (err) { showStatus('Price basis not saved: ' + (/PGRST204|42703/.test(err.message || '') ? 'this database needs sql/add_quote_price_basis.sql' : err.message), 'error'); return; }
+  if (!here) return;
+  const issued = pgCurrentIssued();
+  showStatus('Saved' + (issued ? ' — ' + issued.proposal_ref + ' keeps its pricing as issued; this applies to the next version' : ''), 'success');
+  if (document.getElementById('pg-preview')) {
+    const btn = document.getElementById('pg-issue-btn'); if (btn) btn.outerHTML = pgIssueButton();
+    pgFillPreview();
+  }
+}
 
 async function pbUpdateShiftsPerDay(N) {
   N = Math.max(1, Math.min(4, +N || 2));
   if (N === pbQ.shifts_per_day) return;
   if (!await confirmDialog({title:'Reset shifts?', message:'Changing shifts/day resets ALL post shifts to defaults. Continue?', confirmLabel:'Continue', danger:true})) { renderQuoteEditor(); return; }
-  pbQ.shifts_per_day = N;
+  const q = pbQ;
   try {
-    await apiPatch('quote_quotes', pbQ.id, { shifts_per_day: N });
+    await apiPatch('quote_quotes', q.id, { shifts_per_day: N });
+    q.shifts_per_day = N;   // only once saved: the hours engine counts shifts 1..N (pbShiftCells), so an unsaved N would re-price the quote
     // For each post: delete existing shift rows + insert defaults
     for (const h of pbHeadings) {
       for (const p of h.posts) {
@@ -10300,7 +10558,7 @@ async function pbUpdateShiftsPerDay(N) {
       }
     }
     renderQuoteEditor();
-  } catch (e) { showStatus('Update failed: ' + e.message, 'error'); }
+  } catch (e) { showStatus('Update failed: ' + e.message, 'error'); renderQuoteEditor(); }
 }
 
 async function pbAddHeading() {
@@ -12284,7 +12542,7 @@ const PB_POST_CONDITIONS = {
   weekend: 'staffed on weekends'
 };
 function pbPostCondition(p, code) {
-  const staffed = dt => Object.entries((p && p.shifts) || {}).some(([k, s]) => s && +s.num > 0 && k.endsWith('|' + dt));
+  const staffed = dt => !!p && pbShiftCells(p).some(([k, s]) => s && +s.num > 0 && k.endsWith('|' + dt));
   switch (code) {
     case 'staffed': return true;
     case 'midnight_shift': return pbPostHasMidnightShift(p);
