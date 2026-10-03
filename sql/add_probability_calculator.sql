@@ -17,8 +17,10 @@
 -- when its probability is next edited.
 --
 -- A question or answer that a deal has used cannot be deleted (the foreign keys refuse it); the admin
--- page switches it off instead. Additive and re-runnable. Run on DEV and PROD before or with the
--- code; without it the Score button stays hidden and the probability box works as before.
+-- page switches it off instead. Additive and re-runnable: the six questions and the gates are written
+-- ONLY by the run that creates the tables, so a re-run never brings back a question an admin deleted
+-- and never re-gates a stage that was changed on the Stages page since. Run on DEV and PROD before
+-- or with the code; without it the Score button stays hidden and the probability box works as before.
 -- The stage update is attributed to Claude Code acting for Richard.
 
 \set ON_ERROR_STOP on
@@ -27,6 +29,10 @@ BEGIN;
 SELECT set_config('request.headers', json_build_object(
   'x-actor-id', (SELECT id::text FROM people WHERE first_name = 'Claude' AND last_name = 'Code' ORDER BY id LIMIT 1),
   'x-real-actor-id', '1')::text, true);
+
+-- True only in the run that creates the tables: the seed and the gates below key on it.
+CREATE TEMP TABLE _pc_run ON COMMIT DROP AS
+  SELECT to_regclass('public.probability_criteria') IS NULL AS first_run;
 
 -- 1. Tables ------------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS probability_criteria (
@@ -76,15 +82,18 @@ CREATE INDEX IF NOT EXISTS deal_probability_answers_answer_idx
 CREATE INDEX IF NOT EXISTS deal_probability_answers_criterion_idx
   ON deal_probability_answers (criterion_id);
 
--- 2. Seed: the six questions of the calculator, keyed on a stable code so a re-run never
---    resurrects a row an admin renamed, re-weighted or removed -----------------------------------
-INSERT INTO probability_criteria (code, name, question, weight, sort_order) VALUES
+-- 2. Seed: the six questions of the calculator - first run only (see _pc_run), keyed on a stable
+--    code ---------------------------------------------------------------------------------------
+INSERT INTO probability_criteria (code, name, question, weight, sort_order)
+SELECT v.* FROM (VALUES
   ('budget_approved',   'Budget Approved',   'Is the budget already approved?',                                  15, 1),
   ('technical_fit',     'Technical Fit',     'How well does your solution fit their technical requirements?',    15, 2),
   ('champion_quality',  'Champion Quality',  'How strong is your internal champion?',                            20, 3),
   ('decision_timeline', 'Decision Timeline', 'When will they decide?',                                           15, 4),
   ('incumbent_threat',  'Incumbent Threat',  'Are you displacing an incumbent?',                                 15, 5),
   ('problem_urgency',   'Problem Urgency',   'How urgent is their problem?',                                     20, 6)
+) AS v(code, name, question, weight, sort_order)
+WHERE (SELECT first_run FROM _pc_run)
 ON CONFLICT (code) WHERE code IS NOT NULL DO NOTHING;
 
 INSERT INTO probability_criterion_answers (criterion_id, code, label, score, sort_order)
@@ -110,6 +119,7 @@ FROM (VALUES
   ('problem_urgency',   'urgency_critical',   'Critical / exposed',       100, 3)
 ) AS v(criterion_code, code, label, score, sort_order)
 JOIN probability_criteria c ON c.code = v.criterion_code
+WHERE (SELECT first_run FROM _pc_run)
 ON CONFLICT (code) WHERE code IS NOT NULL DO NOTHING;
 
 -- 3. Row level security, grants, audit --------------------------------------------------------
@@ -137,15 +147,16 @@ BEGIN
   END LOOP;
 END $$;
 
--- 4. The gates: each open stage's maximum probability. Only a stage still at the old maximum of
---    100 is changed, so a re-run never overwrites a value set on the Stages page afterwards -------
+-- 4. The gates: each open stage's maximum probability. First run only, and only a stage still at
+--    the old maximum of 100 ---------------------------------------------------------------------
 UPDATE stages s
 SET max_probability = v.gate,
     probability     = LEAST(COALESCE(s.probability, v.gate), v.gate)
 FROM (VALUES ('Prospect', 20), ('Proposal', 60), ('Negotiation', 80)) AS v(name, gate),
      stage_categories c
 WHERE c.id = s.category_id AND c.name = 'Opportunity-Open'
-  AND s.name = v.name AND s.max_probability = 100;
+  AND s.name = v.name AND s.max_probability = 100
+  AND (SELECT first_run FROM _pc_run);
 
 COMMIT;
 

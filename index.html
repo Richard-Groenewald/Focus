@@ -718,7 +718,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.94 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.95 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -757,7 +757,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.94 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.95 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2518,7 +2518,7 @@ const LOOKUP_CONFIG = [
   { key: 'service_major', params: 'select=*', persist: true  },
   { key: 'service_sub',   params: 'select=*', persist: true  },
   { key: 'lead_sources',  params: 'select=*', persist: true  },
-  { key: 'stages',        params: 'select=*', persist: true  },
+  { key: 'stages',        params: 'select=*', persist: false },   // v7.9.95: the stage maximums gate the probability score — a 24 h browser copy could run it un-gated
   { key: 'people',        params: 'select=*', persist: false },
   { key: 'organisations', params: 'select=*', persist: false },
   { key: 'sites',         params: 'select=*', persist: false },
@@ -2542,7 +2542,8 @@ function _lkInvalidate(key) {
 // up to LOOKUP_TTL. A browser holding another revision drops its copies once; preloadLookups
 // then refetches. v7.9.91: stage limits (Lost max 0, In Progress / Complete min 100).
 // v7.9.94: the stage maximums become the probability score's gates (Prospect 20, Proposal 60, Negotiation 80).
-const LOOKUP_REV = '7.9.94';
+// v7.9.95: stages are no longer persisted at all; the bump drops the copies browsers already hold.
+const LOOKUP_REV = '7.9.95';
 // Pull non-stale lookups from localStorage into allData (called at login).
 function hydrateLookupCache() {
   const now = Date.now();
@@ -5712,7 +5713,7 @@ async function openNewOpportunity() {
   setupOppOwnerReassign();
   oppFiles = []; _oppFilesDealId = null; _oppFilesPending = [];
   applyOppReadOnly('full'); // creator becomes the owner — always editable
-  oppScoreLoad(null);       // background: the score questions (a new deal's answers wait in memory for its first Save)
+  oppScoreLoad(null).then(oppScoreFreshStages);   // background: the score questions (a new deal's answers wait in memory for its first Save)
 }
 
 async function openOpportunity(id, adminMode = false) {
@@ -5751,6 +5752,7 @@ async function openOpportunity(id, adminMode = false) {
       ? apiGet('revenue_stream_months', 'stream_id=eq.' + streams[0].id + '&select=*')
       : Promise.resolve([]);
     const [months] = await Promise.all([monthsP, initOppForm(), loadCollaborators(id), loadOppContacts(id), loadEngagements(id), oppScoreLoad(id)]);
+    oppScoreFreshStages();   // background, once per page load (after initOppForm, which re-applies the cached stage rows)
     months.forEach(m => {
       oppMonths[m.month] = { revenue: m.opportunity_revenue, margin: m.opportunity_margin };
     });
@@ -5940,10 +5942,14 @@ async function revertOpp() {
       }
     }
     if (Object.keys(payload).length) await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id);
-    await oppScoreRevert();   // the score answers go back to their opening state with the probability
+    // The score answers go back with the probability. The deal row is already reverted, so a failure
+    // here must not skip the reload: the form is re-read from what the database holds either way.
+    let scoreErr = null;
+    try { await oppScoreRevert(); } catch (e) { scoreErr = e; }
     const id = oppData.id, admin = dealAdminMode;
     await openOpportunity(id, admin);
-    showStatus('Reverted to opening state');
+    if (scoreErr) showStatus('Reverted, but the answers behind the score could not be put back: ' + scoreErr.message, 'error');
+    else showStatus('Reverted to opening state');
   } catch (e) { showStatus('Revert failed: ' + e.message, 'error'); }
   finally { stopBusy(); }
 }
@@ -6349,6 +6355,7 @@ let _probCalcMissing = false;
 let _oppScore = { dealId: null, answers: {}, rows: {}, asOpened: {}, loaded: false };
 let _oppScoreDraft = null;     // the open calculator's working copy {criterionId: answerId}
 let _oppScoreBusy = false;
+let _probStagesFresh = false;
 
 async function probCriteriaLoad() {
   const [crit, ans] = await Promise.all([
@@ -6392,7 +6399,7 @@ function oppScoreReset() {
   oppScoreRefresh();
 }
 // Loads the questions and, for a saved deal, its chosen answers. Never fails the deal's opening.
-async function oppScoreLoad(dealId) {
+async function oppScoreLoad(dealId, keepBaseline) {
   try {
     const [, rows] = await Promise.all([
       probCriteriaLoad(),
@@ -6401,13 +6408,23 @@ async function oppScoreLoad(dealId) {
     if ((+oppData.id || null) !== (+dealId || null)) return;   // the user has moved to another deal
     const st = { dealId: +dealId || null, answers: {}, rows: {}, asOpened: {}, loaded: true };
     (rows || []).forEach(r => { st.answers[r.criterion_id] = +r.answer_id; st.rows[r.criterion_id] = r; });
-    st.asOpened = Object.assign({}, st.answers);
+    st.asOpened = (keepBaseline && _oppScore.loaded && _oppScore.dealId === st.dealId) ? _oppScore.asOpened : Object.assign({}, st.answers);
     _oppScore = st;
   } catch (e) {
     if (/^404\b|PGRST205/.test(e.message || '')) _probCalcMissing = true;
     else console.warn('Probability score not loaded:', e);
   }
   oppScoreRefresh();
+}
+// Once per page load, the first time the score tables answer: re-read the stage rows, so the gates
+// are the database's and not a copy this tab loaded before the SQL ran or before a maximum changed.
+async function oppScoreFreshStages() {
+  if (_probStagesFresh || _probCalcMissing || !_oppScore.loaded) return;
+  _probStagesFresh = true;
+  try {
+    const st = await apiGet('stages', 'select=*');
+    if (Array.isArray(st) && st.length) { allData['stages'] = st; onOppStageChange(); }   // limits, hint and the score line follow the fresh rows
+  } catch (e) { _probStagesFresh = false; }
 }
 // The Score button and the line under the box. Offered where there is something to decide: the
 // questions exist and the stage leaves a range (not Suspended / Secured / Lost).
@@ -6492,7 +6509,7 @@ function oppScorePick(criterionId, answerId) {
 // Writes only what changed against the rows the deal holds: PATCH a changed answer, POST a new one,
 // DELETE a cleared one.
 async function oppScoreSaveAnswers(dealId, answers) {
-  const rows = _oppScore.rows || {}, next = {}, jobs = [];
+  const st = _oppScore, rows = st.rows || {}, next = {}, jobs = [];
   const me = (currentUser && currentUser.personId) || null, now = new Date().toISOString();
   Object.keys(rows).forEach(cid => {
     const r = rows[cid];
@@ -6503,8 +6520,10 @@ async function oppScoreSaveAnswers(dealId, answers) {
   });
   const add = Object.keys(answers).filter(cid => !rows[cid]).map(cid => ({ deal_id: +dealId, criterion_id: +cid, answer_id: +answers[cid], answered_by: me }));
   if (add.length) jobs.push(apiPost('deal_probability_answers', add).then(x => (x || []).forEach(r => { next[r.criterion_id] = r; })));
-  await Promise.all(jobs);
-  _oppScore.rows = next;
+  const res = await Promise.allSettled(jobs), bad = res.find(r => r.status === 'rejected');
+  if (bad) throw bad.reason;
+  st.rows = next;
+  if (_oppScore !== st && _oppScore.dealId === +dealId) _oppScore.rows = next;   // the same deal was reopened during the save
 }
 // "Use N%": the answers are saved (a new deal keeps them in memory until its first Save), then the
 // figure goes into the box exactly as if typed — userSet, the stage clamp, autosave or dirty.
@@ -6519,20 +6538,30 @@ async function oppScoreApply() {
   } catch (e) {
     _oppScoreBusy = false;
     showStatus('The answers were not saved: ' + (/^404\b|PGRST205/.test(e.message || '') ? 'this database needs sql/add_probability_calculator.sql' : e.message), 'error');
-    if ((+oppData.id || null) === dealId) { await oppScoreLoad(dealId); if (_oppScoreDraft) oppScorePaint(); }   // some writes may have landed: read back what the deal holds
+    if ((+oppData.id || null) === dealId) { await oppScoreLoad(dealId, true); if (_oppScoreDraft) oppScorePaint(); }   // some writes may have landed: read back what the deal holds (the Revert baseline stays)
     return;
   }
   _oppScoreBusy = false;
   if ((+oppData.id || null) !== dealId) return;   // the deal was left during the save; its answers are saved
+  if (dealId) _oppScore.dealId = dealId;          // they are on the server: the first-Save flush must not POST them again
   _oppScore.answers = draft;
   _oppScoreDraft = null; closeModal();
   const el = document.getElementById('opp-probability');
   if (has && el && !el.disabled) {
     el.value = String(sc.final);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
+    const stage = oppScoreStage();
+    if (oppData.id && stage && +stage.id !== +oppData.stage_id) {
+      // The stage on the form is not saved yet: the figure was scored against it, so it commits WITH
+      // it, on Save — never autosaved on its own against the stage the database still holds.
+      onProbabilityInput();
+      _oppEventDirty = true;
+      showStatus('Probability set to ' + el.value + '% from the score — it saves with the new stage');
+    } else {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      if (oppData.id) oppAutoSaveNow({ flush: true });
+      showStatus('Probability set to ' + el.value + '% from the score');
+    }
     try { updateRevTotals(); } catch (e) {}
-    if (oppData.id) oppAutoSaveNow({ flush: true });
-    showStatus('Probability set to ' + el.value + '% from the score');
   } else showStatus(has ? 'Answers saved' : 'Score removed — the probability is left as it is');
   oppScoreRefresh();
 }
@@ -6540,7 +6569,8 @@ async function oppScoreApply() {
 async function oppScoreFlushPending(dealId) {
   if (_probCalcMissing || !_oppScore.loaded || _oppScore.dealId || !dealId) return;
   if (!Object.keys(_oppScore.answers || {}).length) return;
-  try { _oppScore.rows = {}; await oppScoreSaveAnswers(dealId, _oppScore.answers); _oppScore.dealId = +dealId; }
+  const st = _oppScore;
+  try { st.rows = {}; await oppScoreSaveAnswers(dealId, st.answers); st.dealId = +dealId; }
   catch (e) { showStatus('The deal was saved, but the answers behind its score were not: ' + e.message, 'error'); }
 }
 // Revert: the answers go back to what the deal held when it was opened, like the probability itself.
@@ -6549,15 +6579,16 @@ async function oppScoreRevert() {
   const a = _oppScore.asOpened || {}, b = _oppScore.answers || {};
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length === kb.length && ka.every(k => +a[k] === +b[k])) return;
-  await oppScoreSaveAnswers(_oppScore.dealId, a);
-  _oppScore.answers = Object.assign({}, a);
+  const st = _oppScore;
+  await oppScoreSaveAnswers(st.dealId, a);
+  st.answers = Object.assign({}, a);
 }
 
 // ── Site Admin → Lookups → Probability Criteria (v7.9.94) ───────────────────────────────────────
 // The questions, their weights and their scored answers. The cap per stage is not here: it is the
 // stage's Maximum Probability on the Stages page. A question or answer a deal has used cannot be
 // deleted (the database refuses) — it is switched off instead, so the deal keeps its history.
-let _pcState = { editing: null, draft: null, stages: [] };
+let _pcState = { editing: null, draft: null, stages: [], saving: false };
 async function renderProbCriteria() {
   document.getElementById('table-head').innerHTML = '';
   document.getElementById('page-sub').textContent = 'The weighted questions behind the Score button beside Probability % on an opportunity';
@@ -6648,42 +6679,54 @@ function _pcAnsAdd() { if (!_pcState.draft) return; _pcState.draft.answers.push(
 function _pcAnsDel(i) { if (!_pcState.draft) return; _pcState.draft.answers.splice(i, 1); _pcPaint(); }
 const _pcInUse = e => /23503|foreign key/i.test((e && e.message) || '');
 async function _pcSave() {
-  const d = _pcState.draft, id = _pcState.editing; if (!d || id == null) return;
+  const d = _pcState.draft, id = _pcState.editing; if (!d || id == null || _pcState.saving) return;
   const num = v => (v === '' || v == null) ? NaN : +v;
   const name = String(d.name || '').trim(), question = String(d.question || '').trim(), weight = num(d.weight);
   if (!name) return showStatus('Give the question a name', 'error');
   if (!isFinite(weight) || weight < 0 || weight > 100) return showStatus('The weight must be a number from 0 to 100', 'error');
-  const answers = d.answers.map(a => ({ id: a.id || null, label: String(a.label || '').trim(), score: num(a.score) })).filter(a => a.label || a.id);
+  const answers = d.answers.map(a => ({ src: a, id: a.id || null, label: String(a.label || '').trim(), score: num(a.score) })).filter(a => a.label || a.id);
   if (answers.length < 2) return showStatus('Give at least two answers', 'error');
   if (answers.some(a => !a.label)) return showStatus('Every answer needs its text', 'error');
   if (answers.some(a => !isFinite(a.score) || a.score < 0 || a.score > 100 || Math.round(a.score) !== a.score)) return showStatus('Each score must be a whole number from 0 to 100', 'error');
   const order = num(d.sort_order);
   const body = { name, question: question || null, weight, sort_order: isFinite(order) ? Math.round(order) : 0, active: d.active !== false };
+  _pcState.saving = true;
   try {
     let rid = id;
     if (id === 'new') {
       const made = await api('probability_criteria', 'POST', Object.assign({ created_by: (currentUser && currentUser.personId) || null }, body), 'select=*');
       rid = made[0].id;
+      // Remembered at once, so a retry after a later failure PATCHes this row instead of creating a second question.
+      (allData['probability_criteria'] = allData['probability_criteria'] || []).push(made[0]);
+      _pcState.editing = rid;
     } else await api('probability_criteria', 'PATCH', Object.assign({ updated_at: new Date().toISOString() }, body), 'id=eq.' + (+id));
     // Answers by difference, so the ids deals refer to never change: PATCH kept, POST new, DELETE removed.
     const old = (allData['probability_criterion_answers'] || []).filter(a => +a.criterion_id === +rid);
     const kept = new Set(answers.filter(a => a.id).map(a => +a.id));
-    await Promise.all(answers.map((a, i) => {
+    // Every answer write settles before an error is reported, and each created answer is recorded on
+    // the draft, so a retry never POSTs it a second time.
+    const res = await Promise.allSettled(answers.map((a, i) => {
       const row = { label: a.label, score: a.score, sort_order: i + 1, active: true };
       return a.id ? api('probability_criterion_answers', 'PATCH', row, 'id=eq.' + (+a.id))
-        : api('probability_criterion_answers', 'POST', Object.assign({ criterion_id: +rid }, row), 'select=id');
+        : api('probability_criterion_answers', 'POST', Object.assign({ criterion_id: +rid }, row), 'select=*').then(m => {
+            a.src.id = m[0].id;
+            (allData['probability_criterion_answers'] = allData['probability_criterion_answers'] || []).push(m[0]);
+          });
     }));
+    const bad = res.find(r => r.status === 'rejected'); if (bad) throw bad.reason;
+    // Only answers removed in THIS edit: one already switched off (a deal chose it) is left alone.
     let inUse = 0;
-    for (const o of old.filter(o => !kept.has(+o.id))) {
+    for (const o of old.filter(o => !kept.has(+o.id) && o.active !== false)) {
       try { await api('probability_criterion_answers', 'DELETE', null, 'id=eq.' + (+o.id)); }
-      catch (e) { if (!_pcInUse(e)) throw e; if (o.active !== false) await api('probability_criterion_answers', 'PATCH', { active: false }, 'id=eq.' + (+o.id)); inUse++; }
+      catch (e) { if (!_pcInUse(e)) throw e; await api('probability_criterion_answers', 'PATCH', { active: false }, 'id=eq.' + (+o.id)); inUse++; }
     }
     showStatus('Question saved' + (inUse ? ' — ' + inUse + ' removed answer' + (inUse === 1 ? ' is' : 's are') + ' chosen on deals, so ' + (inUse === 1 ? 'it was' : 'they were') + ' switched off rather than deleted' : ''));
     _pcState.editing = null; _pcState.draft = null;
     await renderProbCriteria();
   } catch (e) {
     showStatus('Could not save: ' + (/^404\b|PGRST205/.test(e.message || '') ? 'this database needs sql/add_probability_calculator.sql' : e.message), 'error');
-  }
+    if (_pcState.draft) _pcPaint();   // a question created in this attempt now shows as the one being edited
+  } finally { _pcState.saving = false; }
 }
 async function _pcToggle(id, on) {
   try { await api('probability_criteria', 'PATCH', { active: !!on, updated_at: new Date().toISOString() }, 'id=eq.' + (+id)); await renderProbCriteria(); }
@@ -6693,11 +6736,13 @@ async function _pcDelete(id) {
   const c = probCriteria(true).find(x => +x.id === +id); if (!c) return;
   if (!await confirmDialog({ title: 'Delete this question?', message: 'Delete "' + c.name + '" and its answers? A question that deals have answered cannot be deleted; it is switched off instead, and those deals keep their history.', confirmLabel: 'Delete', danger: true })) return;
   try {
-    await api('probability_criterion_answers', 'DELETE', null, 'criterion_id=eq.' + (+id));
+    // One statement on the database: the answers go with the question (ON DELETE CASCADE), and a
+    // question or answer a deal has used refuses the whole delete (23503) → switched off below.
     await api('probability_criteria', 'DELETE', null, 'id=eq.' + (+id));
+    if (MOCK) await api('probability_criterion_answers', 'DELETE', null, 'criterion_id=eq.' + (+id));   // mock mode has no cascade
     showStatus('Question deleted');
   } catch (e) {
-    if (!_pcInUse(e)) { showStatus('Could not delete: ' + e.message, 'error'); return; }
+    if (!_pcInUse(e)) { showStatus('Could not delete: ' + e.message, 'error'); await renderProbCriteria(); return; }
     try { await api('probability_criteria', 'PATCH', { active: false }, 'id=eq.' + (+id)); showStatus('Deals have answered this question, so it was switched off rather than deleted'); }
     catch (e2) { showStatus('Could not switch it off: ' + e2.message, 'error'); return; }
   }
@@ -8324,6 +8369,7 @@ async function rsgAutoPopulate() {
     if (reduce) { probEl.value = cap; probEl.dataset.userSet = '1'; probNote = ', probability reduced to ' + cap + '%'; }
     else probNote = ', probability kept at ' + cur + '%';
   }
+  oppScoreRefresh();   // the cap may have rewritten the box: the Scored / Typed line is derived from it
   updateRevTotals();
   const tcv = document.getElementById('rev-tcv')?.textContent || '';
   showStatus('Stream generated at ' + margin + '% margin — TCV ' + tcv + probNote, 'success');
@@ -17141,7 +17187,6 @@ async function _dashFetchBundle() {
 // (_milLookups, _milTypeName, red flags, sectors, stages, group touches) need
 // no round trip of their own.
 function _dashSeedLookups(B) {
-  if (!allData['stages'] || !allData['stages'].length) allData['stages'] = B.stages || [];
   if (Array.isArray(B.milestone_groups)) allData['milestone_groups'] = B.milestone_groups;
   if (Array.isArray(B.milestone_types))  allData['milestone_types']  = B.milestone_types;
   if (Array.isArray(B.red_flags)) allData['red_flags'] = B.red_flags;
@@ -17269,7 +17314,8 @@ async function renderDashboard(opts) {
   const B = reuse ? window._dashBundle : await _dashFetchBundle();
   window._dashBundle = B;
   // Make sure shared lookups the widgets read are present.
-  if (!allData['stages']) { try { allData['stages'] = await apiGet('stages', 'select=id,name'); } catch(e) { allData['stages'] = []; } }
+  // Full rows, the shape preloadLookups caches: id+name rows here left the deal form with no stages for the session (v7.9.95).
+  if (!allData['stages'] || !allData['stages'].length) { try { allData['stages'] = await apiGet('stages', 'select=*'); } catch(e) {} }
   // Lifecycle reminders (woke-from-Hold + aging escalations) — top of dashboard.
   const remindersHtml = await _dashRemindersHtml(B, sweepP);
   const customised = !!localStorage.getItem(_dashOrderKey());
