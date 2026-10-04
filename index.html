@@ -727,7 +727,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.96 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -766,7 +766,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.96 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -929,6 +929,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
               <div style="display:flex;gap:4px;">
                 <input type="number" id="opp-probability" class="form-control" style="flex:1 1 0;width:100%;min-width:0;" min="0" max="100" value=""
                   oninput="onProbabilityInput()"
+                  onchange="onProbabilityInput(true)"
                   onfocus="showProbHint()"
                   onblur="hideProbHint()">
                 <button type="button" id="opp-score-btn" class="btn btn-sm" style="display:none;flex-shrink:0;padding:0 8px;background:var(--navy);color:white;" title="Work the probability out from the qualifying questions" onclick="oppScoreOpen()">Score</button>
@@ -3741,6 +3742,11 @@ const PAGES = {
       { key: 'probability',  label: 'Default %', render: v => v + '%' },
       { key: 'min_probability', label: 'Min %', render: v => v != null ? v + '%' : '—' },
       { key: 'max_probability', label: 'Max %', render: v => v != null ? v + '%' : '—' },
+      // v7.9.97: the extension scale — blank = the same as the standard figure beside it.
+      { key: 'ext_probability', label: 'Extension: default · min · max',
+        get: r => { const a = [r.ext_probability, r.ext_min_probability, r.ext_max_probability]; return a.some(x => x != null) ? a.map(x => x != null ? x + '%' : 'std').join(' · ') : ''; },
+        render: (v, r) => [r.ext_probability, r.ext_min_probability, r.ext_max_probability].some(x => x != null)
+          ? [r.ext_probability, r.ext_min_probability, r.ext_max_probability].map(x => x != null ? escHtml(x) + '%' : 'std').join(' · ') : '<span style="color:var(--text3);">as standard</span>' },
       { key: 'probability_hint', label: 'Hint' },
       { key: 'active',       label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
     ],
@@ -3750,6 +3756,10 @@ const PAGES = {
       { key: 'probability',     label: 'Default Probability (%)', type: 'number' },
       { key: 'min_probability', label: 'Minimum Probability (%)', type: 'number' },
       { key: 'max_probability', label: 'Maximum Probability (%) — also the cap on the probability score', type: 'number' },
+      { type: 'section', label: 'Extension deals — leave a box blank to use the figure above' },
+      { key: 'ext_probability',     label: 'Extension: Default Probability (%)', type: 'number' },
+      { key: 'ext_min_probability', label: 'Extension: Minimum Probability (%)', type: 'number' },
+      { key: 'ext_max_probability', label: 'Extension: Maximum Probability (%) — the cap on an extension\'s probability score', type: 'number' },
       { key: 'probability_hint',label: 'Probability Hint (shown to user)' },
       { key: 'sort_order',      label: 'Sort Order', type: 'number' },
       { key: 'active',          label: 'Active', type: 'checkbox' },
@@ -4065,6 +4075,7 @@ async function loadTable(page) {
       key: col.key,
       label: col.label,
       get: (row) => {
+        if (col.get) return col.get(row);   // a column may say what it sorts and filters on (v7.9.97)
         let val = row[col.key];
         if (col.lookup) {
           const lookup = allData[col.lookup] || [];
@@ -5124,6 +5135,27 @@ async function saveRecord(e) {
       delete body.max_margin;
     }
     delete allData['service_sub_all'];
+  }
+
+  // Stages (v7.9.97): both probability scales must be percentages in order — min ≤ default ≤ max —
+  // judged on the EFFECTIVE extension figures (a blank one is the standard figure).
+  if (currentPage === 'stages') {
+    const pct = v => v == null || (v >= 0 && v <= 100 && Math.round(v) === v);
+    const keys = ['probability', 'min_probability', 'max_probability', 'ext_probability', 'ext_min_probability', 'ext_max_probability'];
+    if (keys.some(k => !pct(body[k]))) { showStatus('Probabilities are whole percentages between 0 and 100', 'error'); return; }
+    const ordered = (lo, mid, hi) => (lo == null || hi == null || lo <= hi) && (mid == null || ((lo == null || mid >= lo) && (hi == null || mid <= hi)));
+    if (!ordered(body.min_probability, body.probability, body.max_probability)) { showStatus('The default probability must sit between the minimum and the maximum', 'error'); return; }
+    const eff = (e, s) => body[e] != null ? body[e] : body[s];
+    if (!ordered(eff('ext_min_probability', 'min_probability'), eff('ext_probability', 'probability'), eff('ext_max_probability', 'max_probability'))) {
+      showStatus('Extension scale: the default must sit between the minimum and the maximum (a blank box takes the standard figure)', 'error'); return;
+    }
+    // A database without sql/add_stage_extension_scale.sql has no ext_ columns, and PostgREST refuses
+    // the whole write for one unknown key: leave blank ones out, refuse a typed one with the reason.
+    if (!MOCK && currentData.length && !currentData.some(r => 'ext_probability' in r)) {
+      const extKeys = ['ext_probability', 'ext_min_probability', 'ext_max_probability'];
+      if (extKeys.some(k => body[k] != null)) { showStatus('The extension scale needs sql/add_stage_extension_scale.sql on this database', 'error'); return; }
+      extKeys.forEach(k => delete body[k]);
+    }
   }
 
   // Extra validation for system_users
@@ -6300,6 +6332,24 @@ function onOppServiceChange() {
   rsgRefresh();
 }
 
+// ── Probability scale per stage and deal type (v7.9.97) ─────────────────────────────────────────
+// Richard 2026-10-04: "extensions should have their own probability min/average/max scales". A stage
+// row holds the standard scale (probability on entry, min_probability, max_probability) and, for
+// EXTENSION deals, ext_probability / ext_min_probability / ext_max_probability
+// (sql/add_stage_extension_scale.sql). Each extension figure is optional: blank, or a database
+// without the columns, reads as the standard one. Everything that takes a stage's entry figure or
+// limits for a deal goes through stageScale — the form's box, the typed clamp, the probability
+// score's gate, and the starting probability of a new extension prospect.
+function stageScale(stage, type) {
+  if (!stage) return { entry: null, min: 0, max: 100, ext: false };
+  const ext = type === 'extension';
+  const pick = (e, s, d) => ext && stage[e] != null && stage[e] !== '' ? +stage[e] : (stage[s] != null && stage[s] !== '' ? +stage[s] : d);
+  return { entry: pick('ext_probability', 'probability', null), min: pick('ext_min_probability', 'min_probability', 0), max: pick('ext_max_probability', 'max_probability', 100),
+    ext: ext && ['ext_probability', 'ext_min_probability', 'ext_max_probability'].some(k => stage[k] != null && stage[k] !== '') };
+}
+// The type of the deal on the form (a new, unsaved deal is new business).
+function oppDealType() { return (typeof oppData !== 'undefined' && oppData && oppData.opportunity_type) || 'new_business'; }
+
 function onOppStageChange(userTriggered) {
   const stageId = document.getElementById('opp-stage-id').value;
   const stages = allData['stages'] || [];
@@ -6319,12 +6369,13 @@ function onOppStageChange(userTriggered) {
     if (probEl) delete probEl.dataset.userSet;
   }
 
-  // Set probability defaults from stage
+  // Set probability defaults from stage — the scale of the deal's type (v7.9.97: an extension has its own)
   if (stage) {
     const probEl = document.getElementById('opp-probability');
     if (probEl) {
+      const scale = stageScale(stage, oppDealType());
       if (!probEl.dataset.userSet || probEl.dataset.userSet === '0') {
-        probEl.value = stage.probability != null ? stage.probability : '';
+        probEl.value = scale.entry != null ? scale.entry : '';
         // v7.9.94: a deal with score answers keeps following its score under the new stage's limits.
         const scored = userTriggered ? oppScoreForStage(stage) : null;
         if (scored != null) {
@@ -6332,8 +6383,8 @@ function onOppStageChange(userTriggered) {
           showStatus('Probability follows the score: ' + scored + '% at ' + stage.name);
         }
       }
-      probEl.min = stage.min_probability ?? 0;
-      probEl.max = stage.max_probability ?? 100;
+      probEl.min = scale.min;
+      probEl.max = scale.max;
       // Store hint on the element for popup
       probEl.dataset.hint = stage.probability_hint || '';
     }
@@ -6359,7 +6410,11 @@ function hideProbHint() {
   if (hintEl) hintEl.style.display = 'none';
 }
 
-function onProbabilityInput() {
+// commit = the edit is finished (the box's change event). While the box is being typed in, only the
+// maximum is enforced: with a minimum of 40, the "4" of "45" was turned into 40 and the "5" then made
+// 405, clamped to the maximum (v7.9.97 — an extension scale is the first editable non-zero minimum).
+// The minimum is applied on change, or at once when the box is set from code (it is not focused then).
+function onProbabilityInput(commit) {
   const probEl = document.getElementById('opp-probability');
   if (probEl) {
     probEl.dataset.userSet = '1';
@@ -6367,7 +6422,7 @@ function onProbabilityInput() {
     // turned it into 100, so a probability could be typed on a suspended deal (v7.9.91).
     const min = probEl.min !== '' ? +probEl.min : 0;
     const max = probEl.max !== '' ? +probEl.max : 100;
-    if (+probEl.value < min) probEl.value = min;
+    if ((commit || document.activeElement !== probEl) && +probEl.value < min) probEl.value = min;
     if (+probEl.value > max) probEl.value = max;
   }
   oppScoreRefresh();
@@ -6417,10 +6472,9 @@ function probScoreCompute(answers, stage) {
   });
   if (!(total > 0)) return null;
   const raw = Math.round(sum / total);
-  const min = stage && stage.min_probability != null ? +stage.min_probability : 0;
-  const max = stage && stage.max_probability != null ? +stage.max_probability : 100;
+  const scale = stageScale(stage, oppDealType()), min = scale.min, max = scale.max;   // v7.9.97: an extension's own limits
   return { raw, final: Math.max(min, Math.min(max, raw)), min, max, capped: raw > max, raised: raw < min,
-    answered, count: crit.length, fixed: min >= max };
+    answered, count: crit.length, fixed: min >= max, ext: scale.ext };
 }
 function oppScoreStage() {
   const id = (document.getElementById('opp-stage-id') || {}).value;
@@ -6508,7 +6562,7 @@ function oppScorePaint() {
   const sc = probScoreCompute(draft, stage);
   const stageName = stage ? stage.name : '';
   body.innerHTML = '<div style="font-size:12px;color:var(--text2);margin-bottom:12px;line-height:1.45;">Stage <strong>' + escHtml(stageName) + '</strong>: the score is held between the stage\'s minimum ' +
-      (sc ? sc.min : 0) + '% and its maximum ' + (sc ? sc.max : 100) + '%. A question left unanswered counts as zero. Click a chosen answer again to clear it.</div>' +
+      (sc ? sc.min : 0) + '% and its maximum ' + (sc ? sc.max : 100) + '%' + (sc && sc.ext ? ' for an extension' : '') + '. A question left unanswered counts as zero. Click a chosen answer again to clear it.</div>' +
     crit.map(c => {
       const chosen = draft[c.id] != null ? +draft[c.id] : null;
       const offered = c.answers.filter(a => a.active !== false || +a.id === chosen);
@@ -6646,7 +6700,8 @@ function _pcPaint() {
   const total = crit.filter(c => c.active !== false).reduce((a, c) => a + (+c.weight || 0), 0);
   const openCat = (allData['stage_categories'] || []).find(c => c.name === 'Opportunity-Open');
   const gates = (_pcState.stages || []).filter(s => openCat && +s.category_id === +openCat.id && s.active !== false && +(s.max_probability ?? 100) > +(s.min_probability ?? 0))
-    .map(s => '<strong>' + escHtml(s.name) + '</strong> ' + escHtml(s.max_probability ?? 100) + '%').join(' · ');
+    .map(s => '<strong>' + escHtml(s.name) + '</strong> ' + escHtml(s.max_probability ?? 100) + '%' +
+      (s.ext_max_probability != null && s.ext_max_probability !== '' ? ' (extensions ' + escHtml(s.ext_max_probability) + '%)' : '')).join(' · ');
   const share = c => total > 0 && c.active !== false ? Math.round((+c.weight || 0) / total * 100) + '%' : '—';
   let html = '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:14px;">' +
     '<div style="font-size:12px;color:var(--text2);line-height:1.55;">The score is the weighted average of the chosen answers\' scores (a question left unanswered counts 0), held inside the stage\'s minimum and maximum probability.' +
@@ -8204,6 +8259,7 @@ async function oppSuspensionOnOpen() {
     Object.assign(oppData, row);
     const sel = document.getElementById('opp-stage-id'); if (sel) sel.value = oppData.stage_id;
     const prob = document.getElementById('opp-probability'); if (prob) { prob.value = 0; prob.dataset.userSet = '1'; }
+    onOppStageChange();   // limits, hint and score line follow Suspended (0 / 0), not the stage the deal came from (v7.9.97)
     if (typeof _oppAsOpened === 'object' && _oppAsOpened) { _oppAsOpened.stage_id = oppData.stage_id; _oppAsOpened.probability = 0; }
     _oppAutoSavedAny = true;   // stage → Suspended and probability → 0 landed on the server: the register row beneath is stale until Back redraws it (bug #78)
     showStatus('Start date has passed — opportunity suspended', 'error');
@@ -8235,13 +8291,24 @@ function rsgRevenueType(sub) {
   return sub.is_recurring === false ? 'project' : 'annuity';   // pre-migration fallback
 }
 function rsgProbabilityCap() { const v = +(appSettings['rsg_probability_cap'] || 20); return v > 0 ? v : 20; }
-// v7.9.96 (Richard 2026-10-04: "separate early estimate probability from extension probability"): a new
-// extension prospect starts at its OWN setting (settings.extension_initial_probability); until that is
-// set it keeps following the early-estimate value, as it did since v7.9.91.
-function extensionProbability() {
-  const raw = appSettings['extension_initial_probability'];
-  const v = raw === '' || raw == null ? NaN : +raw;
-  return isFinite(v) && v >= 0 ? Math.min(100, Math.round(v)) : rsgProbabilityCap();
+// The same figure held inside the open deal's stage scale (v7.9.97): the generator never takes an
+// extension below its own minimum, nor any deal above its maximum.
+function rsgCapForDeal() { const sc = stageScale(oppScoreStage(), oppDealType()); return Math.min(sc.max, Math.max(sc.min, rsgProbabilityCap())); }
+// The starting probability of a new extension prospect at the stage it is created on (v7.9.97): that
+// stage's extension figure (stageScale). One home per rule — the stage row. The Settings value of
+// v7.9.96 (extension_initial_probability) is read only on a database that has not run
+// sql/add_stage_extension_scale.sql yet, which carries it onto the stage and removes the key.
+function extensionProbability(stageId) {
+  const stage = (allData['stages'] || []).find(s => +s.id === +stageId) || null;
+  if (!stage || !('ext_probability' in stage)) {   // no columns yet (or no stage row): the v7.9.96 key still speaks
+    const raw = appSettings['extension_initial_probability'];
+    const legacy = raw === '' || raw == null ? NaN : +raw;
+    if (isFinite(legacy) && legacy >= 0) return Math.min(100, Math.round(legacy));
+  }
+  // Columns present: the stage row is the one home — a blank extension figure is the standard one, and
+  // a key re-created by a stale v7.9.96 tab's Settings save is ignored.
+  const entry = stageScale(stage, 'extension').entry;
+  return entry != null ? entry : rsgProbabilityCap();
 }
 function rsgDefaultEscalation(startDate, sub) {
   const rows = rsgEscalationRowsFor(sub === undefined ? rsgServiceSub() : sub);
@@ -8342,7 +8409,7 @@ function rsgRefresh() {
   const mine = document.getElementById('rsg-service-sub'); if (mine && sub && mine.value !== String(sub.id)) mine.value = sub.id;
   const rt = rsgRevenueType(sub);
   const intro = document.getElementById('rsg-intro');
-  if (intro) intro.textContent = 'This allows you to generate a revenue stream pipeline for this opportunity, to be used before a proposal (or preliminary proposal) is developed. A generated stream is an early estimate, so the generator sets a blank or untouched probability to ' + rsgProbabilityCap() + '% and asks before reducing one you set.';
+  if (intro) intro.textContent = 'This allows you to generate a revenue stream pipeline for this opportunity, to be used before a proposal (or preliminary proposal) is developed. A generated stream is an early estimate, so the generator sets a blank or untouched probability to ' + rsgCapForDeal() + '% and asks before reducing one you set.';
   const typeEl = document.getElementById('rsg-type');
   if (typeEl) typeEl.innerHTML = sub
     ? 'Service type <strong>' + pbEsc(sub.name) + '</strong> → revenue type <strong>' + pbEsc(rt === 'project' ? 'Project' : 'Annuity') + '</strong>' + (sub.revenue_type ? '' : ' <span class="pg-muted">(from the Recurring flag — set Revenue Type under Admin → Service Sub Categories)</span>')
@@ -8398,7 +8465,7 @@ async function rsgAutoPopulate() {
   // 2026-10-01: a saved 45% was knocked to 20% on every Auto-Populate and only noticed
   // after the Save) — the user is asked, with the cap as the offered default. The
   // value still commits through Save, like everything else the generator writes.
-  const cap = rsgProbabilityCap();
+  const cap = rsgCapForDeal();
   const probEl = document.getElementById('opp-probability');
   let probNote = '';
   if (probEl && (probEl.value === '' || (+probEl.value > cap && probEl.dataset.userSet !== '1'))) {
@@ -14541,7 +14608,7 @@ async function maybeOfferExtensionProspect(deal, prevStageId) {
     if (!await confirmDialog({title:'Create extension prospect?', confirmLabel:'Create extension', message:`Deal secured. Create an extension prospect for "${deal.name}"?\n\n` +
                  `New ${termMonths}-month term from ${startLbl}, seeded at the final-month run-rate.`})) return;
 
-    const prob = extensionProbability();   // v7.9.96: its own setting, separate from the generator's early-estimate probability
+    const prob = extensionProbability(PROSPECT_STAGE_ID);   // v7.9.97: the stage's own extension figure (Lookups → Stages)
     const ext = (await api('deals', 'POST', {
       name: `${deal.name} - Extension ${startLbl}`,
       org_id: deal.org_id,
@@ -32968,18 +33035,14 @@ async function renderSettingsPage() {
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Commercial Defaults</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">One home per rule: each service type's margin default, limits and default term are set under Lookups → Service Sub, and each stage's probability under Lookups → Stages. The values here apply where those say nothing.</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:10px;">One home per rule: each service type's margin default, limits and default term are set under Lookups → Service Sub, and each stage's probability scales (the standard one, and the extension one) under Lookups → Stages. The values here apply where those say nothing.</div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Early-estimate Probability (%)</label>
             <input type="number" id="setting-early-prob" class="form-control" min="1" max="100" value="${sv('rsg_probability_cap', '20')}">
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">What the Revenue Stream Generator sets on a blank or untouched probability</div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Extension Probability (%)</label>
-            <input type="number" id="setting-ext-prob" class="form-control" min="0" max="100" value="${sv('extension_initial_probability', sv('rsg_probability_cap', '20'))}">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The starting probability of a new extension prospect, created when a contract is secured. An extension starts at the first open stage: a value above that stage's maximum is pulled down when the probability is next edited</div>
-          </div>
+
           <div class="form-group">
             <label class="form-label">Margin Without a Service Type (%)</label>
             <input type="number" id="setting-fallback-margin" class="form-control" min="0" max="100" value="${sv('default_margin_no_service', '25')}">
@@ -33297,7 +33360,6 @@ async function saveSettings() {
     const numSetting = (id, lo, hi, dflt, whole) => { const v = parseFloat(document.getElementById(id)?.value); const n = isFinite(v) ? Math.min(hi, Math.max(lo, v)) : dflt; return String(whole ? Math.round(n) : n); };
     const commercial = {
       rsg_probability_cap:            numSetting('setting-early-prob', 1, 100, 20, true),
-      extension_initial_probability:  numSetting('setting-ext-prob', 0, 100, 20, true),
       default_margin_no_service:      numSetting('setting-fallback-margin', 0, 100, 25, false),
       default_term_annuity:           numSetting('setting-term-annuity', 1, 120, 12, true),
       default_term_project:           numSetting('setting-term-project', 1, 120, 3, true),
@@ -33331,7 +33393,7 @@ async function saveSettings() {
 
     Object.assign(appSettings, commercial);
     // Show what was stored: numSetting clamps, rounds and fills a blank box, so the typed value may differ.
-    const commercialInputs = { rsg_probability_cap: 'setting-early-prob', extension_initial_probability: 'setting-ext-prob', default_margin_no_service: 'setting-fallback-margin', default_term_annuity: 'setting-term-annuity', default_term_project: 'setting-term-project', proposal_vat_pct: 'setting-vat-pct', proposal_default_validity_days: 'setting-validity-days', proposal_xone_psira_no: 'setting-psira-no' };
+    const commercialInputs = { rsg_probability_cap: 'setting-early-prob', default_margin_no_service: 'setting-fallback-margin', default_term_annuity: 'setting-term-annuity', default_term_project: 'setting-term-project', proposal_vat_pct: 'setting-vat-pct', proposal_default_validity_days: 'setting-validity-days', proposal_xone_psira_no: 'setting-psira-no' };
     Object.entries(commercialInputs).forEach(([k, id]) => { const el = document.getElementById(id); if (el) el.value = commercial[k]; });
     appSettings['fy_start_month'] = fyStart;
     appSettings['escalation_month'] = escMonth;
