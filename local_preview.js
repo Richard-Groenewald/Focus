@@ -141,6 +141,8 @@ http.createServer((req, res) => {
   }
   if (u.pathname === '/' || u.pathname === '/index.html') return serveFile(res, 'index.html');
   if (u.pathname === '/manifest.webmanifest') return serveFile(res, 'manifest.webmanifest');
+  if (u.pathname === '/time' || u.pathname === '/time.html') return serveFile(res, 'time.html');
+  if (u.pathname === '/time.webmanifest') return serveFile(res, 'time.webmanifest');
   if (/^\/(icons|assets)\/[\w .\-']+$/.test(u.pathname)) return serveFile(res, decodeURIComponent(u.pathname.slice(1)));
   res.writeHead(404); res.end('Not found');
 }).listen(PORT, () => console.log(`Focus local preview on http://localhost:${PORT} (form-only: /form) -> API to ${DEV_HOST}`));

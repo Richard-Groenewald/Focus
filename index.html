@@ -727,7 +727,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -766,7 +766,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3012,6 +3012,9 @@ const PAGES = {
   cm_overview:              { title: 'Contract Management — Overview',     custom: true, columns: [], fields: [] },
   cm_contracts:             { title: 'Contracts',                          custom: true, readOnly: true, columns: [], fields: [] },
   cm_billing_schedules:     { title: 'Billing Schedules',                  custom: true, readOnly: true, columns: [], fields: [] },
+  ts_approvals:             { title: 'Timesheet Approvals',                custom: true, readOnly: true, columns: [], fields: [] },
+  ts_report:                { title: 'Work Labour Report',                 custom: true, readOnly: true, columns: [], fields: [] },
+  ts_jobs:                  { title: 'Job Numbers',                        custom: true, readOnly: true, columns: [], fields: [] },
   pm_overview:              { title: 'Project Management — Overview',      custom: true, columns: [], fields: [] },
 
   // ── Engagement History (read-only) — one view, four category-preset doorways ──
@@ -3621,6 +3624,42 @@ const PAGES = {
     ],
   },
 
+  labour_rates: {
+    title: 'Labour Rates',
+    table: 'labour_rates',
+    columns: [
+      { key: 'person_id',      label: 'Person', lookup: 'people', lookupLabel: r => [r.first_name, r.last_name].filter(Boolean).join(' ') },
+      { key: 'effective_from', label: 'Effective From' },
+      { key: 'normal_rate',    label: 'Normal Rate / hour' },
+      { key: 'after_hours_multiplier', label: 'After Hours ×' },
+      { key: 'holiday_multiplier',     label: 'Public Holiday ×' },
+      { key: 'notes',          label: 'Notes' },
+    ],
+    fields: [
+      { key: 'person_id',      label: 'Person (leave blank for the company default rate)', type: 'lookup', lookupTable: 'people', lookupLabel: r => [r.first_name, r.last_name].filter(Boolean).join(' ') },
+      { key: 'effective_from', label: 'Effective From', type: 'date', required: true },
+      { key: 'normal_rate',    label: 'Normal Rate per hour (cost, excl. VAT)', type: 'number', required: true },
+      { key: 'after_hours_multiplier', label: 'After Hours multiplier (1.5 = time and a half)', type: 'number' },
+      { key: 'holiday_multiplier',     label: 'Public Holiday multiplier', type: 'number' },
+      { key: 'notes',          label: 'Notes', type: 'textarea' },
+    ],
+  },
+
+  public_holidays: {
+    title: 'Public Holidays',
+    table: 'public_holidays',
+    columns: [
+      { key: 'holiday_date', label: 'Date' },
+      { key: 'name',         label: 'Holiday' },
+      { key: 'active',       label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
+    ],
+    fields: [
+      { key: 'holiday_date', label: 'Date', type: 'date', required: true },
+      { key: 'name',         label: 'Holiday', required: true },
+      { key: 'active',       label: 'Active', type: 'checkbox', default: true },
+    ],
+  },
+
   red_flags: {
     title: 'Red Flags',
     table: 'red_flags',
@@ -3980,6 +4019,9 @@ async function loadTable(page) {
     if (page === 'cm_overview')               { await renderPbPlaceholderPage('Contract Management'); return; }
     if (page === 'cm_contracts')              { await renderContractsPage(); return; }
     if (page === 'cm_billing_schedules')      { await renderBillingSchedulesPage(); return; }
+    if (page === 'ts_approvals')              { await renderTsApprovalsPage(); return; }
+    if (page === 'ts_report')                 { await renderTsReportPage(); return; }
+    if (page === 'ts_jobs')                   { await renderTsJobsPage(); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
     if (page === 'eng_hist_outreach') { await renderEngagementHistory('Outreach'); return; }
     if (page === 'eng_hist_sales')    { await renderEngagementHistory('Sales');    return; }
@@ -5399,6 +5441,12 @@ const MENU = [
     items: [
       { page: 'pm_overview',     label: 'Overview',     permission: 'manage_opportunities',
         icon: '<path d="M2 4h12M2 8h12M2 12h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      { page: 'ts_approvals', label: 'Timesheet Approvals', permission: 'approve_timesheets',
+        icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M5.2 8.2l2 2 3.6-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
+      { page: 'ts_report', label: 'Work Labour Report', permission: 'view_labour_report',
+        icon: '<path d="M2 14V2" stroke="white" stroke-width="1.5" stroke-linecap="round"/><rect x="4" y="9" width="2.5" height="4"/><rect x="8" y="6" width="2.5" height="7"/><rect x="12" y="3" width="2.5" height="10"/>' },
+      { page: 'ts_jobs', label: 'Job Numbers', permission: 'manage_labour_rates',
+        icon: '<path d="M3 5h10M3 8h10M3 11h6" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
       { page: 'eng_hist_project', label: 'Engagement History', permission: 'manage_opportunities',
         icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M8 5v3l2 1" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
     ]
@@ -5548,6 +5596,10 @@ const MENU = [
             icon: '<path d="M10.5 4.5l-5 5a1.8 1.8 0 002.5 2.5l5.5-5.5a3 3 0 00-4.2-4.2L3.8 7.8a4.2 4.2 0 006 6l4.2-4.2" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
           { page: 'work_projects',    label: 'Work Projects',    permission: 'manage_lookups',
             icon: '<rect x="2" y="4" width="12" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M6 4V2.8h4V4" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><path d="M8 7v2l1.5 1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/>' },
+          { page: 'labour_rates',    label: 'Labour Rates',     permission: 'manage_labour_rates',
+            icon: '<circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 4.5v7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>' },
+          { page: 'public_holidays', label: 'Public Holidays',  permission: 'manage_labour_rates',
+            icon: '<rect x="2" y="3" width="12" height="11" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M2 7h12M5 1.5v3M11 1.5v3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'red_flags',        label: 'Red Flags',        permission: 'manage_lookups',
             icon: '<path d="M3 2v12M3 2h9l-2 3 2 3H3" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'strategic_decisions', label: 'Strategic Decisions', permission: 'manage_lookups',
@@ -6996,6 +7048,313 @@ async function renderContractsPage() {
   } catch (e) {
     body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// ── Timesheets (v7.9.98) ───────────────────────────────────────────────────────────────────────
+// Richard 2026-10-05: people on projects and maintenance capture their time against the individual
+// job (the PA / CA numbers on the Work Labour Report) from a phone. Capture lives on its own lean
+// page, /time (time.html); this is the office side: Job Numbers (which deals can take time),
+// Approvals (submitted weeks), and the Work Labour Report. Rates and public holidays are ordinary
+// admin pages (labour_rates, public_holidays). SQL: sql/add_timesheets.sql. The hour classes are
+// worked out by the database (timesheet_classify) — nothing here recomputes them.
+const TS_MISSING_MSG = 'Timesheets are not set up on this database yet (run sql/add_timesheets.sql).';
+const tsNum = n => (+n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const tsHrs = min => tsNum((+min || 0) / 60);
+function tsPersonName(id) {
+  const p = (allData['people'] || []).find(x => +x.id === +id);
+  return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ('Person #' + id);
+}
+async function tsEnsurePeople() {
+  if (!allData['people']) allData['people'] = await apiGet('people', 'select=id,first_name,last_name');
+}
+// Resolve the jobs a set of entries point at: key 'd<dealId>' / 'w<workProjectId>' → { number, client, title, section }.
+async function tsJobIndex(rows) {
+  const dealIds = [...new Set(rows.filter(r => r.deal_id).map(r => +r.deal_id))];
+  const workIds = [...new Set(rows.filter(r => r.work_project_id).map(r => +r.work_project_id))];
+  const [deals, works, subs] = await Promise.all([
+    dealIds.length ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,job_number,org_id,service_sub_id,service_major_id') : [],
+    workIds.length ? apiGet('work_projects', 'id=in.(' + workIds.join(',') + ')&select=id,name') : [],
+    dealIds.length ? apiGet('service_sub', 'select=*') : [],
+  ]);
+  const orgIds = [...new Set(deals.map(d => +d.org_id).filter(Boolean))];
+  const orgs = orgIds.length ? await apiGet('organisations', 'id=in.(' + orgIds.join(',') + ')&select=id,name') : [];
+  const idx = new Map();
+  deals.forEach(d => {
+    const num = String(d.job_number || '').trim();
+    const rt = dealRevenueType(d, subs);
+    const section = /^PA/i.test(num) ? 'Projects' : /^CA/i.test(num) ? 'Contracts' : rt === 'project' ? 'Projects' : rt === 'annuity' ? 'Contracts' : 'Other jobs';
+    idx.set('d' + d.id, { number: num || ('Deal #' + d.id), client: (orgs.find(o => +o.id === +d.org_id) || {}).name || '', title: d.name || '', section });
+  });
+  works.forEach(w => idx.set('w' + w.id, { number: '', client: 'Internal', title: w.name || '', section: 'Internal' }));
+  return idx;
+}
+const tsJobKey = r => r.deal_id ? 'd' + r.deal_id : 'w' + r.work_project_id;
+
+// ── Job Numbers: which deals can take time ──
+let _tsJobs = { rows: [], onlyBlank: false };
+async function renderTsJobsPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  try {
+    const [stages, cats, subs, orgs] = await Promise.all([
+      apiGet('stages', 'select=*'),
+      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*'),
+      apiGet('service_sub', 'select=*'),
+      allData['organisations'] ? Promise.resolve(allData['organisations']) : apiGetAll('organisations', 'select=*'),
+    ]);
+    allData['stages'] = stages; allData['stage_categories'] = cats; allData['organisations'] = orgs;
+    const securedIds = stages.filter(s => dealIsSecuredStage(s.id)).map(s => +s.id);
+    const deals = securedIds.length ? await apiGetAll('deals', 'or=(stage_id.in.(' + securedIds.join(',') + '),job_number.not.is.null)&select=id,name,org_id,job_number,service_sub_id,service_major_id,stage_id&order=name.asc') : [];
+    _tsJobs.rows = deals.map(d => ({ d, client: (orgs.find(o => +o.id === +d.org_id) || {}).name || '—', rt: dealRevenueType(d, subs) }));
+  } catch (e) {
+    body.innerHTML = '<tr class="empty-row"><td>' + (/job_number|42703/.test(String(e.message)) ? TS_MISSING_MSG : 'Could not load deals: ' + escHtml(e.message)) + '</td></tr>';
+    return;
+  }
+  _tsJobsPaint();
+}
+function _tsJobsPaint() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  const all = _tsJobs.rows, blank = all.filter(r => !String(r.d.job_number || '').trim()).length;
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = all.length + ' secured contracts and projects · ' + blank + ' without a job number — staff can only capture time against a deal that has one';
+  const rows = _tsJobs.onlyBlank ? all.filter(r => !String(r.d.job_number || '').trim()) : all;
+  const bar = document.getElementById('page-chip-bar');
+  if (bar) { bar.style.display = 'flex'; bar.innerHTML = `<label style="font-size:13px;display:flex;gap:6px;align-items:center;"><input type="checkbox" ${_tsJobs.onlyBlank ? 'checked' : ''} onchange="_tsJobs.onlyBlank=this.checked;_tsJobsPaint()"> Only those without a job number</label>`; }
+  makeSortableFilterableTable({
+    tableId: 'ts_jobs', headRoot: head, bodyRoot: body,
+    columns: [
+      { key: 'client', label: 'Client', get: r => r.client },
+      { key: 'name', label: 'Deal', get: r => r.d.name || '' },
+      { key: 'type', label: 'Type', get: r => r.rt === 'project' ? 'Project' : r.rt === 'annuity' ? 'Contract' : 'Not set' },
+      { key: 'job', label: 'Job number (PA… / CA…)', get: r => r.d.job_number || '' },
+    ],
+    rows: rows.slice(),
+    rowRenderer: r => `<tr>
+      <td style="font-weight:600;color:#003057;">${escHtml(r.client)}</td>
+      <td>${escHtml(r.d.name || '')}</td>
+      <td>${r.rt === 'project' ? 'Project' : r.rt === 'annuity' ? 'Contract' : '<span style="color:#9A3412;">Not set</span>'}</td>
+      <td><input class="form-control" style="max-width:180px;text-transform:uppercase;" value="${escAttr(r.d.job_number || '')}" placeholder="e.g. PA3639" onchange="tsSaveJobNumber(${+r.d.id}, this)"></td>
+    </tr>`,
+    emptyMessage: 'No deals match',
+  });
+}
+async function tsSaveJobNumber(dealId, el) {
+  const v = (el.value || '').trim().toUpperCase();
+  const row = _tsJobs.rows.find(r => +r.d.id === +dealId);
+  if (!row || v === String(row.d.job_number || '')) { el.value = v; return; }
+  if (!can('manage_labour_rates')) { showStatus('You do not have permission to change job numbers', 'error'); el.value = row.d.job_number || ''; return; }
+  try {
+    await apiPatch('deals', dealId, { job_number: v || null });
+    row.d.job_number = v || null; el.value = v;
+    const sub = document.getElementById('page-sub');
+    if (sub) { const blank = _tsJobs.rows.filter(r => !String(r.d.job_number || '').trim()).length; sub.textContent = _tsJobs.rows.length + ' secured contracts and projects · ' + blank + ' without a job number — staff can only capture time against a deal that has one'; }
+    showStatus(v ? 'Job number saved' : 'Job number cleared');
+  } catch (e) {
+    el.value = row.d.job_number || '';
+    showStatus(/23505|duplicate/i.test(e.message) ? 'That job number is already on another deal' : 'Not saved: ' + e.message, 'error');
+  }
+}
+
+// ── Approvals ──
+let _tsAp = { rows: [], jobs: new Map(), filter: 'submitted', sel: new Set() };
+async function renderTsApprovalsPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  const cb = document.getElementById('page-chip-bar'); if (cb) { cb.innerHTML = ''; cb.style.display = 'none'; }
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  try {
+    await tsEnsurePeople();
+    const since = new Date(Date.now() - 42 * 86400000).toISOString().slice(0, 10);
+    const rows = await apiGetAll('timesheet_entries', 'or=(status.eq.submitted,and(status.eq.approved,entry_date.gte.' + since + '))&select=*&order=person_id.asc,entry_date.asc,start_time.asc');
+    _tsAp.rows = rows; _tsAp.jobs = await tsJobIndex(rows); _tsAp.sel = new Set();
+  } catch (e) {
+    body.innerHTML = '<tr class="empty-row"><td>' + (/PGRST205|404/.test(String(e.message)) ? TS_MISSING_MSG : 'Could not load timesheets: ' + escHtml(e.message)) + '</td></tr>';
+    return;
+  }
+  _tsApPaint();
+}
+function _tsApPaint() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  const f = _tsAp.filter, rows = _tsAp.rows.filter(r => r.status === f);
+  const nSub = _tsAp.rows.filter(r => r.status === 'submitted').length, nApp = _tsAp.rows.filter(r => r.status === 'approved').length;
+  const sub = document.getElementById('page-sub');
+  if (sub) sub.textContent = nSub + ' entr' + (nSub === 1 ? 'y' : 'ies') + ' waiting for approval';
+  const own = r => currentUser && +r.person_id === +currentUser.personId;
+  const byPerson = new Map(); rows.forEach(r => { if (!byPerson.has(+r.person_id)) byPerson.set(+r.person_id, []); byPerson.get(+r.person_id).push(r); });
+  head.innerHTML = '';
+  let html = `<tr><td colspan="9" style="padding:10px 12px;background:#fff;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button class="btn ${f === 'submitted' ? 'btn-primary' : ''} btn-sm" onclick="_tsAp.filter='submitted';_tsAp.sel=new Set();_tsApPaint()">Waiting (${nSub})</button>
+      <button class="btn ${f === 'approved' ? 'btn-primary' : ''} btn-sm" onclick="_tsAp.filter='approved';_tsAp.sel=new Set();_tsApPaint()">Approved, last 6 weeks (${nApp})</button>
+      <span style="flex:1"></span>
+      <span style="font-size:12px;color:var(--text3);">${_tsAp.sel.size} selected</span>
+      ${f === 'submitted' ? `<button class="btn btn-primary btn-sm" ${_tsAp.sel.size ? '' : 'disabled'} onclick="tsDecide('approve')">Approve selected</button>
+      <button class="btn btn-sm" ${_tsAp.sel.size ? '' : 'disabled'} onclick="tsDecide('return')">Return selected…</button>`
+        : `<button class="btn btn-sm" ${_tsAp.sel.size ? '' : 'disabled'} onclick="tsDecide('reopen')">Reopen selected…</button>`}
+    </div></td></tr>`;
+  if (!rows.length) html += `<tr class="empty-row"><td colspan="9">${f === 'submitted' ? 'Nothing is waiting for approval.' : 'Nothing approved in the last six weeks.'}</td></tr>`;
+  [...byPerson.entries()].sort((a, b) => tsPersonName(a[0]).localeCompare(tsPersonName(b[0]))).forEach(([pid, rs]) => {
+    const ids = rs.filter(r => !own(r)).map(r => +r.id);
+    const mins = rs.reduce((t, r) => t + (+r.minutes || 0), 0), km = rs.reduce((t, r) => t + (+r.km || 0), 0);
+    html += `<tr style="background:#003057;color:#fff;"><td colspan="9" style="padding:6px 12px;font-weight:700;">
+      <label style="cursor:pointer;"><input type="checkbox" ${ids.length && ids.every(i => _tsAp.sel.has(i)) ? 'checked' : ''} ${ids.length ? '' : 'disabled'} onchange="tsApPersonAll(${pid}, this.checked)"> ${escHtml(tsPersonName(pid))}</label>
+      <span style="font-weight:400;margin-left:12px;">${tsHrs(mins)} h${km ? ' · ' + tsNum(km) + ' km' : ''}${own(rs[0]) ? ' · your own time — someone else must approve it' : ''}</span></td></tr>`;
+    rs.forEach(r => {
+      const j = _tsAp.jobs.get(tsJobKey(r)) || { number: '?', client: '', title: '' };
+      html += `<tr>
+        <td style="width:34px;text-align:center;"><input type="checkbox" ${own(r) ? 'disabled' : ''} ${_tsAp.sel.has(+r.id) ? 'checked' : ''} onchange="tsApToggle(${+r.id}, this.checked)"></td>
+        <td style="white-space:nowrap;">${escHtml(new Date(r.entry_date + 'T00:00').toLocaleDateString('en-ZA', { weekday: 'short', day: '2-digit', month: 'short' }))}</td>
+        <td style="white-space:nowrap;">${escHtml(String(r.start_time).slice(0, 5))}–${escHtml(String(r.end_time).slice(0, 5))}</td>
+        <td style="white-space:nowrap;font-weight:600;">${escHtml(j.number || j.title)}</td>
+        <td>${escHtml(j.number ? j.client + ' — ' + j.title : 'Internal')}</td>
+        <td style="max-width:360px;">${escHtml(r.description || '')}${r.pmsa_ref ? ' <span style="color:var(--text3);">· PMSA ' + escHtml(r.pmsa_ref) + '</span>' : ''}</td>
+        <td style="text-align:right;white-space:nowrap;">${tsHrs(r.minutes)} h</td>
+        <td style="font-size:12px;color:var(--text2);white-space:nowrap;">${(+r.normal_minutes ? 'normal ' + tsHrs(r.normal_minutes) : '')}${(+r.after_minutes ? ' after ' + tsHrs(r.after_minutes) : '')}${(+r.holiday_minutes ? ' holiday ' + tsHrs(r.holiday_minutes) : '')}</td>
+        <td style="text-align:right;white-space:nowrap;">${r.km ? tsNum(r.km) + ' km' : ''}</td></tr>`;
+    });
+  });
+  body.innerHTML = html;
+}
+function tsApToggle(id, on) { if (on) _tsAp.sel.add(+id); else _tsAp.sel.delete(+id); _tsApPaint(); }
+function tsApPersonAll(pid, on) {
+  _tsAp.rows.filter(r => r.status === _tsAp.filter && +r.person_id === +pid && +r.person_id !== +currentUser.personId).forEach(r => { if (on) _tsAp.sel.add(+r.id); else _tsAp.sel.delete(+r.id); });
+  _tsApPaint();
+}
+async function tsDecide(decision) {
+  const ids = [..._tsAp.sel]; if (!ids.length) return;
+  let reason = null;
+  if (decision !== 'approve') {
+    reason = await promptDialog({ title: decision === 'return' ? 'Return to the person' : 'Reopen approved time', message: decision === 'return' ? 'Say what needs correcting — the person sees this on their phone.' : 'Say why approved time is being reopened.', placeholder: 'Reason', confirmLabel: decision === 'return' ? 'Return' : 'Reopen' });
+    if (!reason || !String(reason).trim()) return;
+  } else if (!(await confirmDialog({ title: 'Approve time', message: 'Approve ' + ids.length + ' entr' + (ids.length === 1 ? 'y' : 'ies') + '? Approved time is locked and feeds the labour cost.', confirmLabel: 'Approve' }))) return;
+  try {
+    const n = await api('rpc/timesheet_decide', 'POST', { p_actor_id: +currentUser.personId, p_entry_ids: ids, p_decision: decision, p_reason: reason }, '', { prefer: '' });
+    showStatus((+n || ids.length) + ' entr' + ((+n || ids.length) === 1 ? 'y' : 'ies') + (decision === 'approve' ? ' approved' : decision === 'return' ? ' returned' : ' reopened'));
+    await renderTsApprovalsPage();
+  } catch (e) { showStatus(e.message, 'error'); }
+}
+
+// ── Work Labour Report ──
+let _tsRep = null;
+function tsMonthBounds(offset) {
+  const n = new Date(), a = new Date(n.getFullYear(), n.getMonth() + offset, 1), b = new Date(n.getFullYear(), n.getMonth() + offset + 1, 0);
+  const f = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return [f(a), f(b)];
+}
+async function renderTsReportPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  const cb = document.getElementById('page-chip-bar'); if (cb) { cb.innerHTML = ''; cb.style.display = 'none'; }
+  if (!can('view_labour_report')) { body.innerHTML = '<tr class="empty-row"><td>You do not have access to the labour report.</td></tr>'; return; }
+  await tsEnsurePeople();
+  const [from, to] = tsMonthBounds(0);
+  if (!_tsRep) _tsRep = { from, to, person: '', status: 'both', mode: 'person', rows: null, jobs: null };
+  _tsRepPaint();
+  await tsRepLoad();
+}
+async function tsRepLoad() {
+  const R = _tsRep, body = document.getElementById('ts-rep-out');
+  if (body) body.innerHTML = '<div style="padding:20px;color:var(--text3);">Loading…</div>';
+  try {
+    let q = 'entry_date=gte.' + R.from + '&entry_date=lte.' + R.to + '&select=*&order=entry_date.asc,start_time.asc';
+    if (R.person) q += '&person_id=eq.' + +R.person;
+    if (R.status === 'approved') q += '&status=eq.approved'; else if (R.status === 'both') q += '&status=in.(submitted,approved)';
+    R.rows = await apiGetAll('v_timesheet_costed', q);
+    R.jobs = await tsJobIndex(R.rows);
+  } catch (e) {
+    R.rows = null;
+    if (body) body.innerHTML = '<div style="padding:20px;color:#991B1B;">' + (/PGRST205|404/.test(String(e.message)) ? TS_MISSING_MSG : 'Could not load the report: ' + escHtml(e.message)) + '</div>';
+    return;
+  }
+  const out = document.getElementById('ts-rep-out'); if (out) out.innerHTML = tsReportHtml(R, false);
+}
+function _tsRepPaint() {
+  const R = _tsRep, body = document.getElementById('table-body');
+  const people = (allData['people'] || []).slice().sort((a, b) => tsPersonName(a.id).localeCompare(tsPersonName(b.id)));
+  const sel = (id, opts, cur, fn) => `<select id="${id}" class="form-control" style="width:auto;" onchange="${fn}">${opts.map(o => `<option value="${escAttr(o[0])}" ${String(o[0]) === String(cur) ? 'selected' : ''}>${escHtml(o[1])}</option>`).join('')}</select>`;
+  body.innerHTML = `<tr><td style="padding:12px;background:#fff;">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
+      <div><div style="font-size:11px;color:var(--text3);">From</div><input type="date" class="form-control" value="${R.from}" onchange="_tsRep.from=this.value;tsRepLoad()"></div>
+      <div><div style="font-size:11px;color:var(--text3);">To</div><input type="date" class="form-control" value="${R.to}" onchange="_tsRep.to=this.value;tsRepLoad()"></div>
+      <button class="btn btn-sm" onclick="tsRepMonth(-1)">Last month</button><button class="btn btn-sm" onclick="tsRepMonth(0)">This month</button>
+      <div><div style="font-size:11px;color:var(--text3);">Person</div>${sel('ts-p', [['', 'Everyone']].concat(people.map(p => [p.id, tsPersonName(p.id)])), R.person, '_tsRep.person=this.value;tsRepLoad()')}</div>
+      <div><div style="font-size:11px;color:var(--text3);">Time included</div>${sel('ts-s', [['both', 'Submitted and approved'], ['approved', 'Approved only'], ['all', 'Everything, drafts too']], R.status, '_tsRep.status=this.value;tsRepLoad()')}</div>
+      <div><div style="font-size:11px;color:var(--text3);">Layout</div>${sel('ts-m', [['person', 'One report per person'], ['job', 'By job, everyone together']], R.mode, '_tsRep.mode=this.value;tsRepRedraw()')}</div>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="tsRepCsv()">Download CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="tsRepPrint()">Print / PDF</button>
+    </div>
+    <div id="ts-rep-out"></div></td></tr>`;
+}
+function tsRepMonth(off) { const [a, b] = tsMonthBounds(off); _tsRep.from = a; _tsRep.to = b; _tsRepPaint(); tsRepLoad(); }
+function tsRepRedraw() { const out = document.getElementById('ts-rep-out'); if (out && _tsRep.rows) out.innerHTML = tsReportHtml(_tsRep, false); }
+// Group a set of entries into the report's sections and rows.
+function tsRepGroups(rows, jobs) {
+  const sections = new Map();
+  rows.forEach(r => {
+    const j = jobs.get(tsJobKey(r)) || { number: '?', client: '', title: '', section: 'Other jobs' };
+    if (!sections.has(j.section)) sections.set(j.section, new Map());
+    const m = sections.get(j.section), k = tsJobKey(r);
+    if (!m.has(k)) m.set(k, { j, cost: 0, normal: 0, after: 0, hol: 0, km: 0, unrated: 0 });
+    const g = m.get(k);
+    g.normal += +r.normal_minutes || 0; g.after += +r.after_minutes || 0; g.hol += +r.holiday_minutes || 0; g.km += +r.km || 0;
+    if (r.labour_cost == null) g.unrated++; else g.cost += +r.labour_cost;
+  });
+  const order = ['Projects', 'Contracts', 'Other jobs', 'Internal'];
+  return order.filter(s => sections.has(s)).map(s => ({ title: s, jobRows: [...sections.get(s).values()].sort((a, b) => (a.j.number || a.j.title).localeCompare(b.j.number || b.j.title)) }));
+}
+function tsReportHtml(R, forPrint) {
+  const rows = R.rows || [];
+  if (!rows.length) return '<div style="padding:20px;color:var(--text3);">No time captured in this period.</div>';
+  const people = R.mode === 'person' ? [...new Set(rows.map(r => +r.person_id))].sort((a, b) => tsPersonName(a).localeCompare(tsPersonName(b))) : [null];
+  const th = 'border:1px solid #333;padding:3px 6px;font-weight:400;text-align:left;', num = 'text-align:right;white-space:nowrap;padding:3px 6px;';
+  const dfmt = s => new Date(s + 'T00:00').toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const unapproved = rows.filter(r => r.status !== 'approved').length;
+  const blocks = people.map((pid, i) => {
+    const mine = pid == null ? rows : rows.filter(r => +r.person_id === pid);
+    const groups = tsRepGroups(mine, R.jobs);
+    const title = pid == null ? 'Work Labour Report' : 'Work Labour Report for ' + tsPersonName(pid);
+    let h = `<div style="${forPrint && i ? 'page-break-before:always;' : ''}margin-bottom:28px;font-family:Arial,Helvetica,sans-serif;">
+      <div style="font-size:22px;">${escHtml(title)}</div>
+      <div style="font-size:14px;margin:2px 0 12px;">Report Duration: ${escHtml(dfmt(R.from))} - ${escHtml(dfmt(R.to))}</div>`;
+    groups.forEach(g => {
+      const t = g.jobRows.reduce((a, r) => ({ cost: a.cost + r.cost, normal: a.normal + r.normal, after: a.after + r.after, hol: a.hol + r.hol, km: a.km + r.km, unrated: a.unrated + r.unrated }), { cost: 0, normal: 0, after: 0, hol: 0, km: 0, unrated: 0 });
+      h += `<div style="background:#A8C8EC;padding:5px 8px;font-size:17px;margin-top:10px;">${escHtml(g.title)}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <tr><th style="${th}">${g.title === 'Internal' ? 'Work project' : 'Job Number'}</th><th style="${th}">Client Name</th><th style="${th}">Title</th><th style="${th}text-align:right;">Labour Cost</th><th style="${th}text-align:right;">Normal Hours</th><th style="${th}text-align:right;">After Hours</th><th style="${th}text-align:right;">P. Holidays</th><th style="${th}text-align:right;">Mileage</th></tr>
+        ${g.jobRows.map(r => `<tr style="border-bottom:1px dashed #666;"><td style="padding:3px 6px;">${escHtml(r.j.number)}</td><td style="padding:3px 6px;">${escHtml(r.j.number ? r.j.client : '')}</td><td style="padding:3px 6px;">${escHtml(r.j.title)}</td>
+          <td style="${num}">${r.unrated ? '<span title="No labour rate covers ' + r.unrated + ' of these entries" style="color:#9A3412;">' + tsNum(r.cost) + ' *</span>' : tsNum(r.cost)}</td><td style="${num}">${tsHrs(r.normal)}</td><td style="${num}">${tsHrs(r.after)}</td><td style="${num}">${tsHrs(r.hol)}</td><td style="${num}">${tsNum(r.km)}</td></tr>`).join('')}
+        <tr style="color:#1d2fb0;"><td colspan="3"></td><td style="${num}">${tsNum(t.cost)}</td><td style="${num}">${tsHrs(t.normal)}</td><td style="${num}">${tsHrs(t.after)}</td><td style="${num}">${tsHrs(t.hol)}</td><td style="${num}">${tsNum(t.km)}</td></tr></table>`;
+    });
+    const all = groups.flatMap(g => g.jobRows), un = all.reduce((a, r) => a + r.unrated, 0);
+    if (groups.length > 1) {
+      const T = all.reduce((a, r) => ({ cost: a.cost + r.cost, normal: a.normal + r.normal, after: a.after + r.after, hol: a.hol + r.hol, km: a.km + r.km }), { cost: 0, normal: 0, after: 0, hol: 0, km: 0 });
+      h += `<div style="margin-top:10px;font-size:13px;font-weight:700;">Total: ${tsNum(T.cost)} labour cost · ${tsHrs(T.normal)} normal · ${tsHrs(T.after)} after hours · ${tsHrs(T.hol)} public holiday · ${tsNum(T.km)} km</div>`;
+    }
+    if (un) h += `<div style="margin-top:6px;font-size:12px;color:#9A3412;">* ${un} entr${un === 1 ? 'y has' : 'ies have'} no labour rate in force on the day, so the cost excludes ${un === 1 ? 'it' : 'them'}. Add a rate under Site Admin → Lookups → Labour Rates.</div>`;
+    return h + '</div>';
+  });
+  const note = unapproved ? `<div style="font-size:12px;color:#9A3412;margin:0 0 10px;">${unapproved} entr${unapproved === 1 ? 'y is' : 'ies are'} submitted or draft, not approved yet.</div>` : '';
+  return note + blocks.join('');
+}
+function tsRepPrint() {
+  if (!_tsRep || !_tsRep.rows) return;
+  const w = window.open('', '_blank'); if (!w) { showStatus('Allow pop-ups to print the report', 'error'); return; }
+  w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Work Labour Report</title><style>@page{size:A4 landscape;margin:12mm}body{margin:0;font-family:Arial,Helvetica,sans-serif}</style></head><body>' + tsReportHtml(_tsRep, true) + '</body></html>');
+  w.document.close(); setTimeout(() => { try { w.focus(); w.print(); } catch (e) {} }, 300);
+}
+function tsRepCsv() {
+  const R = _tsRep; if (!R || !R.rows || !R.rows.length) return;
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const lines = [['Person', 'Section', 'Job number', 'Client', 'Title', 'Labour cost', 'Normal hours', 'After hours', 'Public holiday hours', 'Mileage'].map(q).join(',')];
+  [...new Set(R.rows.map(r => +r.person_id))].sort((a, b) => tsPersonName(a).localeCompare(tsPersonName(b))).forEach(pid => {
+    tsRepGroups(R.rows.filter(r => +r.person_id === pid), R.jobs).forEach(g => g.jobRows.forEach(r =>
+      lines.push([tsPersonName(pid), g.title, r.j.number, r.j.client, r.j.title, r.cost.toFixed(2), (r.normal / 60).toFixed(2), (r.after / 60).toFixed(2), (r.hol / 60).toFixed(2), r.km.toFixed(1)].map(q).join(','))));
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'work-labour-report-' + R.from + '-to-' + R.to + '.csv'; document.body.appendChild(a); a.click(); a.remove();
 }
 
 // ── Contract Management → Billing Schedules (v7.9.89, billing step 1) ─────────────────────
