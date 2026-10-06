@@ -727,7 +727,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -766,7 +766,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -22840,7 +22840,7 @@ function leadIsAppendMode() { return !!(leadData.id && window._leadDescStartAppe
 function setLeadSaveIndicator(state) {
   const el = document.getElementById('lead-save-indicator');
   if (!el) return;
-  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'] };
+  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'], note: ['Note not saved yet', '#b45309'] };
   const [t, c] = map[state] || ['', ''];
   el.textContent = t; el.style.color = c;
 }
@@ -23241,10 +23241,13 @@ function markLeadDirty(e) {
   window._leadEditSeq = (window._leadEditSeq || 0) + 1;
   // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
   // indicator shown is "Saved" after a successful save (below).
-  setLeadSaveIndicator('');
-  // The description add-box (append-mode) is committed on Save / the leave-guard,
-  // never by autosave — autosave must not create duplicate thread entries.
-  if (e && e.target && e.target.id === 'lead-description' && leadIsAppendMode()) return;
+  // The description add-box (append-mode) is committed on Save, on leaving the box and on
+  // the leave-guard, never by the field autosave — autosave must not create duplicate thread
+  // entries. v7.9.98: while a note is waiting the indicator says so (it used to go blank, and
+  // after an autosave it read "Saved ✓" beside a note that had not been saved).
+  const _noteBox = e && e.target && e.target.id === 'lead-description' && leadIsAppendMode();
+  setLeadSaveIndicator(_noteBox && e.target.value.trim() ? 'note' : '');
+  if (_noteBox) return;
   clearTimeout(_leadAutoSaveTimer);
   _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1500);
 }
@@ -23278,8 +23281,46 @@ async function leadAutoSaveNow() {
   // A typed-but-uncommitted description note stays pending until an explicit Save.
   // OR-ed with the current flag: saveLead leaves it true when edits landed mid-flight.
   const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
-  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator('saved'); }
+  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator(pendingNote ? 'note' : 'saved'); }
   else setLeadSaveIndicator('');
+}
+
+// Commit the typed "Add to description" note to lead_description_log (v7.9.98, Richard
+// 2026-10-06: Lesley-Anne's Premier note never reached the database, her Milco note saved
+// only an earlier draft). One function for every path — Save, leaving the box, closing the
+// form — so a note is written once and the box is emptied ONLY after the write succeeded.
+// Before this the write sat inside an empty catch: a failure looked exactly like a save,
+// the box was cleared and the form said "Saved". Returns true when there was nothing to
+// write or the write landed; false (with the error shown and the text still in the box)
+// when it did not.
+let _leadNoteBusy = null;
+async function leadCommitNote() {
+  if (_leadNoteBusy) return _leadNoteBusy;
+  const ta = document.getElementById('lead-description');
+  const text = ta ? ta.value.trim() : '';
+  if (!text || !leadData || !leadData.id || !leadIsAppendMode() || leadReadOnly) return true;
+  const leadId = leadData.id;
+  _leadNoteBusy = (async () => {
+    try {
+      await api('lead_description_log', 'POST', { lead_id: leadId, body: text, created_by: currentUser?.personId || null }, '');
+    } catch (e) {
+      showStatus('Your note could not be saved (' + (e && e.message ? e.message : 'network error') + '). It is still in the box — copy it somewhere safe before closing.', 'error');
+      setLeadSaveIndicator('note');
+      return false;
+    }
+    // Written. Empty the box of what was saved — keep anything typed while the write was on the wire.
+    if (+leadData.id === +leadId && ta) {
+      const now = ta.value.trim();
+      ta.value = now === text ? '' : (now.startsWith(text) ? now.slice(text.length).trim() : ta.value);
+    }
+    await loadLeadDescriptionLog(leadId);
+    if (+leadData.id === +leadId) {
+      renderLeadDescriptionHistory();
+      setLeadSaveIndicator(ta && ta.value.trim() ? 'note' : 'saved');
+    }
+    return true;
+  })().finally(() => { _leadNoteBusy = null; });
+  return _leadNoteBusy;
 }
 
 // Reset dirty tracking and (once) attach input + beforeunload guards.
@@ -23295,6 +23336,8 @@ function resetLeadDirty() {
   const h = (e) => { if (e.target.closest && (e.target.closest('.modal-overlay') || e.target.closest('#lead-qual-sector-wrap'))) return; markLeadDirty(e); };
   page.addEventListener('input', h);
   page.addEventListener('change', h);
+  // v7.9.98: leaving the note box (a `change` fires on blur) writes the note straight away.
+  page.addEventListener('change', (e) => { if (e.target && e.target.id === 'lead-description' && leadIsAppendMode()) leadCommitNote(); });
   window.addEventListener('beforeunload', (e) => {
     if (page.classList.contains('active') && leadFormDirty && !leadReadOnly) { e.preventDefault(); e.returnValue = ''; }
   });
@@ -23308,7 +23351,10 @@ async function closeLeadPage(opts) {
   // (source/description are nullable; the status engine gates progression, not
   // persistence), so flush unconditionally — no discard dialog.
   if (!opts.force && leadFormDirty && !leadReadOnly) {
-    await saveLead({ keepOpen: true });   // commits core + any pending description note
+    const saved = await saveLead({ keepOpen: true });   // commits core + any pending description note
+    // v7.9.98: never close over a note that did not save — it would be lost with the form.
+    const _box = document.getElementById('lead-description');
+    if (!saved && leadIsAppendMode() && _box && _box.value.trim()) return;
   }
   leadFormDirty = false;
   setLeadSaveIndicator('');
@@ -29659,8 +29705,7 @@ async function saveLead(opts) {
     // Description thread: in append-mode an explicit save commits the add-box as a
     // new log entry. NEVER on a silent autosave — that would create duplicate notes.
     if (appendMode && descInput && !opts.silent) {
-      try { await api('lead_description_log', 'POST', { lead_id: leadData.id, body: descInput, created_by: currentUser?.personId || null }, ''); } catch(e) {}
-      await loadLeadDescriptionLog(leadData.id);
+      if (!(await leadCommitNote())) { leadFormDirty = true; return false; }   // v7.9.98: error shown, text kept in the box, form stays open
     }
     if (opts.keepOpen) {
       if (opts.silent) {
