@@ -297,6 +297,14 @@ async function handleFiles(event, key) {
 // The userId form remains for in-app flows (change password) that already hold a
 // session. Never returns a hash, a salt, or any hint about which half of a wrong
 // pair was wrong. Failures are deliberately uniform.
+// MAINTENANCE MODE (2026-10-07): Focus is back on-line for the system_users ids below only
+// (4 = Richard, 12 = Lesley-Anne); everyone else is turned away at sign-in and on every
+// proxied call, and the client sends them to /maintenance.html. To open Focus to all,
+// set MAINTENANCE_ON to false (or delete this block and its three uses).
+const MAINTENANCE_ON = true;
+const MAINTENANCE_ALLOW = [4, 12];
+function maintenanceBlocks(userId) { return MAINTENANCE_ON && !MAINTENANCE_ALLOW.includes(+userId); }
+
 async function handleAuth(event, key) {
   let body;
   try { body = JSON.parse(event.body || '{}'); } catch (e) { return authReply(400, { ok: false, error: 'Bad request' }); }
@@ -327,6 +335,7 @@ async function handleAuth(event, key) {
   const user = rows && rows[0];
   if (!user || user.active === false) return authReply(200, { ok: false, error: 'Sign-in failed' });
   const userId = +user.id;
+  if (body.action !== 'check' && maintenanceBlocks(userId)) return authReply(200, { ok: false, maintenance: true, error: 'Focus is off-line for maintenance' });
   const hasPw = !!user.password_hash;
   const mustSet = !!user.must_set_password || !hasPw;
 
@@ -430,6 +439,10 @@ exports.handler = async (event) => {
   if (!session) {
     return { statusCode: 401, headers: { 'Content-Type': 'application/json', ...CORS },
              body: JSON.stringify({ error: 'auth', message: 'Sign in required' }) };
+  }
+  if (maintenanceBlocks(session.userId)) {
+    return { statusCode: 401, headers: { 'Content-Type': 'application/json', ...CORS },
+             body: JSON.stringify({ error: 'auth', reason: 'maintenance', message: 'Off-line for maintenance' }) };
   }
   // A genuine token is no longer enough on its own: the account must still be
   // active and the session not revoked (password changed/reset, deactivation).
