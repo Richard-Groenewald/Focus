@@ -371,6 +371,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root tr.rpp-master td{background:#f0f4f9; font-weight:600;}
 #rpp-root tr.rpp-master:hover td{background:#e9eff6;}
 #rpp-root tr.rpp-master td.deal-total{background:#e6ebf2;}
+#rpp-root tr.rpp-group td{background:#E3EAF3; color:var(--navy); font-weight:700; border-top:2px solid var(--navy); cursor:pointer;}
+#rpp-root tr.rpp-group:hover td{background:#D9E2EE;}
+#rpp-root tr.rpp-group td.deal-total{background:#D6DFEA;}
+#rpp-root tr.rpp-group .grp-n{font-weight:400; color:var(--text3);}
 #rpp-root tr.rpp-child td.deal{padding-left:26px; position:relative;}
 #rpp-root tr.rpp-child td.deal::before{content:""; position:absolute; left:12px; top:50%; width:9px; height:1px; background:var(--border);}
 #rpp-root .vchip{display:inline-block; margin-top:1px; padding:0 4px; border-radius:8px; font-size:8px; font-weight:700;}
@@ -729,7 +733,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -768,7 +772,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -18666,6 +18670,13 @@ const RPP = (function () {
   let sortKey = null, sortDir = null;
   const filters = {};   // colKey -> Set<excluded display value>
   const linOpen = new Set();   // expanded lineage families (master deal ids)
+  // v7.9.99: group-by (Richard 2026-10-09: "per person, per region, per service etc"). The key is
+  // one of GROUPS (a COLS key); groups start collapsed so the page reads as a subtotal table.
+  let groupBy = null;
+  const grpOpen = new Set();   // expanded groups (display value)
+  let lastGroupKeys = [];      // the groups as last painted, for Expand all / Collapse all
+  const GROUPS = [{key:'owner',label:'Person'},{key:'region',label:'Region'},{key:'branch',label:'Branch'},{key:'service',label:'Service'},{key:'client',label:'Client'}];
+  const groupLabel = () => (GROUPS.find(g=>g.key===groupBy)||{}).label || '';
 
   function toggleLin(mid){ linOpen.has(+mid) ? linOpen.delete(+mid) : linOpen.add(+mid); paint(); }
 
@@ -18883,24 +18894,14 @@ const RPP = (function () {
     const deals = visibleDeals();
     let body=''; let gDeal=0; const fyT={}; winFYs.forEach(f=>fyT[f.key]=0); const monT=Array.from({length:12},()=>0);
 
-    // Lineage grouping: a family (original + extensions/variations sharing a
-    // master) renders under a VIRTUAL master header row whose values are the
-    // sum of its visible members; click toggles the children. Singles render
-    // exactly as before. Grand/FY/month totals accumulate per real deal only —
-    // the header is presentational and never double-counts.
-    const famByMid = new Map(); const groups = [];
-    deals.forEach(d=>{
-      let g = famByMid.get(d.masterId);
-      if (!g){ g = { mid:d.masterId, members:[] }; famByMid.set(d.masterId, g); groups.push(g); }
-      g.members.push(d);
-    });
-
     const lineageTag = d =>
       d.otype==='extension' ? ' <span class="tag-ext">Extension</span>' :
       d.otype==='variation' ? ' <span class="tag-var">Variation</span>' :
       ' <span class="tag-orig">Original</span>';
 
-    const dealRowHtml = (d, fam, open) => {
+    // Grand/FY/month totals accumulate here per real deal — hidden rows (a collapsed family or
+    // group) included — so the TOTAL row and the strip are over every deal that passes the filters.
+    const dealRowHtml = (d, fam, open, hidden) => {
       const dt = dealValue(d); gDeal += dt;
       let row = fam
         ? `<td></td>${showDetail ? `<td class="deal">${escHtml(d.deal)}${lineageTag(d)}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`
@@ -18915,30 +18916,79 @@ const RPP = (function () {
         if (f.key===effOpen){ f.months.forEach((mk,i)=>{ const L=layers(d,f.key,i); monT[i]+=effective(L); row+=monthCell(L, i===0); }); row+=`<td class="num col-total">${fmt(t)}</td>`; }
         else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
       });
-      return `<tr${fam?` class="rpp-child"${open?'':' style="display:none;"'}`:''}>${row}</tr>`;
+      const hide = hidden || (fam && !open);
+      return `<tr${fam?' class="rpp-child"':''}${hide?' style="display:none;"':''}>${row}</tr>`;
     };
 
-    groups.forEach(g=>{
-      if (g.members.length === 1){ body += dealRowHtml(g.members[0], false, true); return; }
-      g.members.sort((a,b)=> (a.id===g.mid?-1:0) - (b.id===g.mid?-1:0));   // original first
-      const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
-      const open = linOpen.has(+g.mid);
-      let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${escHtml(orig.client)}</td>` +
-                (showDetail ? `<td class="deal" style="font-weight:700;color:var(--navy);">${escHtml(orig.deal)}</td>` : '') +
-                `<td class="num deal-total">${fmt(g.members.reduce((s,m)=>s+dealValue(m),0))}</td>`;
-      if (showDetail) ATTRS.forEach(a=>{
-        row += a.k==='stage' ? `<td style="color:var(--text3);font-size:11px;">${g.members.length} linked deals</td>` : `<td></td>`;
-      });
+    // A subtotal row's FY / month cells over a list of deals (a lineage family or a group). It is
+    // presentational: the totals above never read it, so nothing is double-counted.
+    const sumCells = list => {
+      let row = '';
       winFYs.forEach(f=>{
-        const t = g.members.reduce((s,m)=>s+fyValue(m,f.key),0);
+        const t = list.reduce((s,m)=>s+fyValue(m,f.key),0);
         if (f.key===effOpen){
-          f.months.forEach((mk,i)=>{ const v=g.members.reduce((s,m)=>s+effective(layers(m,f.key,i)),0); row+=`<td class="num${i===0?' fy-edge':''}">${fmt(v)}</td>`; });
+          f.months.forEach((mk,i)=>{ const v=list.reduce((s,m)=>s+effective(layers(m,f.key,i)),0); row+=`<td class="num${i===0?' fy-edge':''}">${fmt(v)}</td>`; });
           row+=`<td class="num col-total">${fmt(t)}</td>`;
         } else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
       });
-      body += `<tr class="rpp-master" onclick="RPP.toggleLin(${g.mid})" style="cursor:pointer;">${row}</tr>`;
-      g.members.forEach(m=> body += dealRowHtml(m, true, open));
-    });
+      return row;
+    };
+
+    // Lineage grouping: a family (original + extensions/variations sharing a
+    // master) renders under a VIRTUAL master header row whose values are the
+    // sum of its visible members; click toggles the children. Singles render
+    // exactly as before. `hidden` = the rows sit in a collapsed group (v7.9.99).
+    const dealsHtml = (list, hidden) => {
+      const famByMid = new Map(); const groups = [];
+      list.forEach(d=>{
+        let g = famByMid.get(d.masterId);
+        if (!g){ g = { mid:d.masterId, members:[] }; famByMid.set(d.masterId, g); groups.push(g); }
+        g.members.push(d);
+      });
+      let html = '';
+      groups.forEach(g=>{
+        if (g.members.length === 1){ html += dealRowHtml(g.members[0], false, true, hidden); return; }
+        g.members.sort((a,b)=> (a.id===g.mid?-1:0) - (b.id===g.mid?-1:0));   // original first
+        const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
+        const open = linOpen.has(+g.mid);
+        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${escHtml(orig.client)}</td>` +
+                  (showDetail ? `<td class="deal" style="font-weight:700;color:var(--navy);">${escHtml(orig.deal)}</td>` : '') +
+                  `<td class="num deal-total">${fmt(g.members.reduce((s,m)=>s+dealValue(m),0))}</td>`;
+        if (showDetail) ATTRS.forEach(a=>{
+          row += a.k==='stage' ? `<td style="color:var(--text3);font-size:11px;">${g.members.length} linked deals</td>` : `<td></td>`;
+        });
+        row += sumCells(g.members);
+        html += `<tr class="rpp-master" onclick="RPP.toggleLin(${g.mid})" style="cursor:pointer;${hidden?'display:none;':''}">${row}</tr>`;
+        g.members.forEach(m=> html += dealRowHtml(m, true, open, hidden));
+      });
+      return html;
+    };
+
+    // v7.9.99 group-by: one bucket per distinct value of the chosen column, a subtotal header row
+    // each (click to open its deals), the deals rendered inside with their lineage grouping. Groups
+    // are ordered by subtotal, largest first (blanks last) — unless the grouped column itself is
+    // the sort, when they follow it by name.
+    const gc = groupBy ? colByKey[groupBy] : null;
+    if (gc){
+      const buckets = new Map();
+      deals.forEach(d=>{ const k = colDisplay(gc,d); let b = buckets.get(k); if (!b){ b = { key:k, members:[] }; buckets.set(k,b); } b.members.push(d); });
+      const list = [...buckets.values()];
+      list.forEach(b=> b.value = b.members.reduce((s,m)=>s+dealValue(m),0));
+      const blank = k => k==='(Blanks)' || k==='—';
+      const byName = (a,b)=> a.key.localeCompare(b.key, undefined, {numeric:true});
+      if (sortKey===groupBy && sortDir) list.sort((a,b)=> sortDir==='asc' ? byName(a,b) : byName(b,a));
+      else list.sort((a,b)=> (blank(a.key)-blank(b.key)) || (b.value-a.value) || byName(a,b));
+      lastGroupKeys = list.map(b=>b.key);
+      list.forEach(b=>{
+        const open = grpOpen.has(b.key), n = b.members.length;
+        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${blank(b.key) ? `<i>No ${groupLabel().toLowerCase()}</i>` : escHtml(b.key)}<span class="grp-n"> · ${n} deal${n===1?'':'s'}</span></td>` +
+                  (showDetail ? '<td></td>' : '') + `<td class="num deal-total">${fmt(b.value)}</td>`;
+        if (showDetail) ATTRS.forEach(()=> row += '<td></td>');
+        row += sumCells(b.members);
+        body += `<tr class="rpp-group" data-grp="${escAttr(b.key)}" onclick="RPP.toggleGroup(this.dataset.grp)">${row}</tr>`;
+        body += dealsHtml(b.members, !open);
+      });
+    } else { lastGroupKeys = []; body = dealsHtml(deals, false); }
     if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">No deals match the current filters.</td></tr>`;
 
     let foot = `<td>TOTAL</td>${showDetail ? '<td></td>' : ''}<td class="num">${fmt(gDeal)}</td>`;
@@ -18997,6 +19047,7 @@ const RPP = (function () {
     const {start, visN, total, effOpen} = ctx;
     const hiddenPrev = start, hiddenNext = total - (start + visN);
     let msg = `${metric==='margin'?'Margin':'Revenue'} · Basis: ${BASIS_LABEL[basis]}. Value & totals = ${BASIS_NOTE[basis]}. `;
+    if (groupBy) msg += `Grouped by ${groupLabel()}: ${lastGroupKeys.length} group${lastGroupKeys.length!==1?'s':''}, a subtotal each — click a group for its deals. `;
     msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs ${BASIS_LABEL[basis].toLowerCase()})`:''}. `
          : detailOn ? 'Expand an FY to see months & actuals. '
                     : 'Compact: FY-total columns only. ';
@@ -19032,6 +19083,9 @@ const RPP = (function () {
   function syncControls(){
     document.querySelectorAll('#rpp-basisSeg button').forEach(b=> b.classList.toggle('on', b.dataset.basis===basis));
     document.querySelectorAll('#rpp-metricSeg button').forEach(b=> b.classList.toggle('on', b.dataset.metric===metric));
+    document.querySelectorAll('#rpp-groupSeg button').forEach(b=> b.classList.toggle('on', (b.dataset.group||'')===(groupBy||'')));
+    const ga = document.getElementById('rpp-grpAll');
+    if (ga){ ga.style.display = groupBy ? '' : 'none'; ga.textContent = (lastGroupKeys.length && lastGroupKeys.every(k=>grpOpen.has(k))) ? 'Collapse all' : 'Expand all'; }
     document.getElementById('rpp-varToggle').classList.toggle('on', varianceOn);
   }
 
@@ -19071,6 +19125,9 @@ const RPP = (function () {
   function setBasis(b){ basis=b; if (b==='secured' && !viewChipOn('pipeline','stages','secured')) viewChipSet('pipeline','stages','secured',true); paint(); }
   function chipsChanged(){ if (basis==='secured' && !viewChipOn('pipeline','stages','secured')) basis='expected'; paint(); }
   function setMetric(m){ metric=m; paint(); }
+  function setGroup(k){ groupBy = k || null; grpOpen.clear(); paint(); }
+  function toggleGroup(k){ grpOpen.has(k) ? grpOpen.delete(k) : grpOpen.add(k); paint(); }
+  function toggleAllGroups(){ if (lastGroupKeys.every(k=>grpOpen.has(k))) grpOpen.clear(); else lastGroupKeys.forEach(k=>grpOpen.add(k)); paint(); }
   function toggleVariance(){ varianceOn=!varianceOn; paint(); }
   function toggleDetail(){ detailOn=!detailOn; if(detailOn) openFY=null; paint(); }
   function toggleFY(k){ openFY = (openFY===k ? null : k); paint(); }
@@ -19162,6 +19219,16 @@ const RPP = (function () {
             <button data-metric="revenue" onclick="RPP.setMetric('revenue')">Revenue</button>
             <button data-metric="margin" onclick="RPP.setMetric('margin')">Margin</button>
           </div>
+          <span class="lbl">Group by</span>
+          <div class="seg" id="rpp-groupSeg">
+            <button data-group="" onclick="RPP.setGroup('')">None</button>
+            <button data-group="owner" onclick="RPP.setGroup('owner')">Person</button>
+            <button data-group="region" onclick="RPP.setGroup('region')">Region</button>
+            <button data-group="branch" onclick="RPP.setGroup('branch')">Branch</button>
+            <button data-group="service" onclick="RPP.setGroup('service')">Service</button>
+            <button data-group="client" onclick="RPP.setGroup('client')">Client</button>
+          </div>
+          <button class="btn-toggle" id="rpp-grpAll" style="display:none;" onclick="RPP.toggleAllGroups()">Expand all</button>
           <span class="hint">Past months show <b style="color:var(--green)">actuals</b>; future months show the selected projection.</span>
           <button class="btn-toggle" id="rpp-varToggle" style="margin-left:auto;" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
         </div>
@@ -19201,7 +19268,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, chipsChanged, setMetric, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
