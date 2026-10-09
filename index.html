@@ -371,6 +371,25 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root tr.rpp-master td{background:#f0f4f9; font-weight:600;}
 #rpp-root tr.rpp-master:hover td{background:#e9eff6;}
 #rpp-root tr.rpp-master td.deal-total{background:#e6ebf2;}
+#rpp-root td.drill{cursor:pointer;}
+#rpp-root td.drill:hover{outline:2px solid var(--red); outline-offset:-2px;}
+#rpp-root tr.rpp-deal{cursor:pointer;}
+#rpp-root .tot.click{cursor:pointer;}
+#rpp-root .tot.click:hover .v{text-decoration:underline;}
+.rpp-drill .dd-scope{font-size:12px; color:var(--text3); margin-top:2px;}
+.rpp-drill table{width:100%; border-collapse:collapse; font-size:12px;}
+.rpp-drill th, .rpp-drill td{padding:6px 10px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap;}
+.rpp-drill thead th{position:sticky; top:0; background:var(--navy); color:#fff; font-size:10px; text-transform:uppercase; letter-spacing:0.03em; z-index:1;}
+.rpp-drill .num{text-align:right; font-variant-numeric:tabular-nums;}
+.rpp-drill tbody tr{cursor:pointer;}
+.rpp-drill tbody tr:hover{background:#FFF5F5;}
+.rpp-drill td.hi, .rpp-drill th.hi{background:#FBF7EF; font-weight:700;}
+.rpp-drill td.actual{color:var(--green); font-weight:700;}
+.rpp-drill .dd-deal{font-weight:600; color:var(--navy);}
+.rpp-drill .dd-sub{font-size:11px; color:var(--text3);}
+.rpp-drill .dd-how{font-size:11px; color:var(--text3);}
+.rpp-drill tfoot tr.tot td{background:var(--khaki); color:var(--navy); font-weight:800; border-top:2px solid var(--navy);}
+.rpp-drill .dd-note{padding:10px 14px; font-size:11px; color:var(--text3);}
 #rpp-root tr.rpp-group td{background:#E3EAF3; color:var(--navy); font-weight:700; border-top:2px solid var(--navy); cursor:pointer;}
 #rpp-root tr.rpp-group:hover td{background:#D9E2EE;}
 #rpp-root tr.rpp-group td.deal-total{background:#D6DFEA;}
@@ -733,7 +752,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.99 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.00 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -772,7 +791,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.99 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.00 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6052,7 +6071,8 @@ async function closeOppPage(opts) {
   // itself (force); a plain Back/Close redraws the register the way closeLeadPage does.
   const redraw = !opts.force && _oppAutoSavedAny;
   _oppAutoSavedAny = false;
-  if (redraw && (currentPage === 'opportunities' || currentPage === 'deal_administration')) {
+  if (redraw && currentPage === 'revenue_pipeline') RPP.dealChanged(oppData);   // v7.10.00: a deal opened from the pipeline
+  else if (redraw && (currentPage === 'opportunities' || currentPage === 'deal_administration')) {
     // Client-only repaint, the way toggleLineage and the column sorts already redraw this
     // register: patch the cached row the table was drawn from and call _renderTable, which
     // replaces the body in ONE innerHTML assignment with no Loading row — the list keeps
@@ -18675,6 +18695,10 @@ const RPP = (function () {
   let groupBy = null;
   const grpOpen = new Set();   // expanded groups (display value)
   let lastGroupKeys = [];      // the groups as last painted, for Expand all / Collapse all
+  // v7.10.00 drill-down: every subtotal cell (TOTAL row, a group, a family, the strip) names the
+  // deals behind it by an index into this list, rebuilt with the body; `drill(idx, fy, month, part)`
+  // opens the modal. A deal row opens the deal itself.
+  let drillTargets = [];
   const GROUPS = [{key:'owner',label:'Person'},{key:'region',label:'Region'},{key:'branch',label:'Branch'},{key:'service',label:'Service'},{key:'client',label:'Client'}];
   const groupLabel = () => (GROUPS.find(g=>g.key===groupBy)||{}).label || '';
 
@@ -18893,6 +18917,10 @@ const RPP = (function () {
 
     const deals = visibleDeals();
     let body=''; let gDeal=0; const fyT={}; winFYs.forEach(f=>fyT[f.key]=0); const monT=Array.from({length:12},()=>0);
+    drillTargets = [{ label:'All deals shown', list: deals }];
+    const target = (label, list) => drillTargets.push({ label, list }) - 1;
+    const dcell = (idx, fy, i, cls, v) =>
+      `<td class="${cls} drill" title="Click for the deals behind this figure" onclick="event.stopPropagation();RPP.drill(${idx},${fy==null?'null':fy},${i==null?'null':i})">${fmt(v)}</td>`;
 
     const lineageTag = d =>
       d.otype==='extension' ? ' <span class="tag-ext">Extension</span>' :
@@ -18917,19 +18945,19 @@ const RPP = (function () {
         else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
       });
       const hide = hidden || (fam && !open);
-      return `<tr${fam?' class="rpp-child"':''}${hide?' style="display:none;"':''}>${row}</tr>`;
+      return `<tr class="rpp-deal${fam?' rpp-child':''}" title="Open the deal" onclick="openOpportunity(${d.id})"${hide?' style="display:none;"':''}>${row}</tr>`;
     };
 
     // A subtotal row's FY / month cells over a list of deals (a lineage family or a group). It is
     // presentational: the totals above never read it, so nothing is double-counted.
-    const sumCells = list => {
+    const sumCells = (list, idx) => {
       let row = '';
       winFYs.forEach(f=>{
         const t = list.reduce((s,m)=>s+fyValue(m,f.key),0);
         if (f.key===effOpen){
-          f.months.forEach((mk,i)=>{ const v=list.reduce((s,m)=>s+effective(layers(m,f.key,i)),0); row+=`<td class="num${i===0?' fy-edge':''}">${fmt(v)}</td>`; });
-          row+=`<td class="num col-total">${fmt(t)}</td>`;
-        } else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
+          f.months.forEach((mk,i)=>{ const v=list.reduce((s,m)=>s+effective(layers(m,f.key,i)),0); row+=dcell(idx, f.key, i, 'num'+(i===0?' fy-edge':''), v); });
+          row+=dcell(idx, f.key, null, 'num col-total', t);
+        } else row+=dcell(idx, f.key, null, 'num col-total fy-edge', t);
       });
       return row;
     };
@@ -18951,13 +18979,14 @@ const RPP = (function () {
         g.members.sort((a,b)=> (a.id===g.mid?-1:0) - (b.id===g.mid?-1:0));   // original first
         const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
         const open = linOpen.has(+g.mid);
+        const idx = target(`${orig.client} › ${orig.deal} (${g.members.length} linked deals)`, g.members);
         let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${escHtml(orig.client)}</td>` +
                   (showDetail ? `<td class="deal" style="font-weight:700;color:var(--navy);">${escHtml(orig.deal)}</td>` : '') +
-                  `<td class="num deal-total">${fmt(g.members.reduce((s,m)=>s+dealValue(m),0))}</td>`;
+                  dcell(idx, null, null, 'num deal-total', g.members.reduce((s,m)=>s+dealValue(m),0));
         if (showDetail) ATTRS.forEach(a=>{
           row += a.k==='stage' ? `<td style="color:var(--text3);font-size:11px;">${g.members.length} linked deals</td>` : `<td></td>`;
         });
-        row += sumCells(g.members);
+        row += sumCells(g.members, idx);
         html += `<tr class="rpp-master" onclick="RPP.toggleLin(${g.mid})" style="cursor:pointer;${hidden?'display:none;':''}">${row}</tr>`;
         g.members.forEach(m=> html += dealRowHtml(m, true, open, hidden));
       });
@@ -18981,21 +19010,23 @@ const RPP = (function () {
       lastGroupKeys = list.map(b=>b.key);
       list.forEach(b=>{
         const open = grpOpen.has(b.key), n = b.members.length;
-        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${blank(b.key) ? `<i>No ${groupLabel().toLowerCase()}</i>` : escHtml(b.key)}<span class="grp-n"> · ${n} deal${n===1?'':'s'}</span></td>` +
-                  (showDetail ? '<td></td>' : '') + `<td class="num deal-total">${fmt(b.value)}</td>`;
+        const name = blank(b.key) ? `No ${groupLabel().toLowerCase()}` : b.key;
+        const idx = target(`${groupLabel()}: ${name}`, b.members);
+        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${blank(b.key) ? `<i>${escHtml(name)}</i>` : escHtml(b.key)}<span class="grp-n"> · ${n} deal${n===1?'':'s'}</span></td>` +
+                  (showDetail ? '<td></td>' : '') + dcell(idx, null, null, 'num deal-total', b.value);
         if (showDetail) ATTRS.forEach(()=> row += '<td></td>');
-        row += sumCells(b.members);
+        row += sumCells(b.members, idx);
         body += `<tr class="rpp-group" data-grp="${escAttr(b.key)}" onclick="RPP.toggleGroup(this.dataset.grp)">${row}</tr>`;
         body += dealsHtml(b.members, !open);
       });
     } else { lastGroupKeys = []; body = dealsHtml(deals, false); }
     if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">No deals match the current filters.</td></tr>`;
 
-    let foot = `<td>TOTAL</td>${showDetail ? '<td></td>' : ''}<td class="num">${fmt(gDeal)}</td>`;
+    let foot = `<td>TOTAL</td>${showDetail ? '<td></td>' : ''}${dcell(0, null, null, 'num', gDeal)}`;
     if (showDetail) ATTRS.forEach(()=>foot+=`<td></td>`);
     winFYs.forEach(f=>{
-      if (f.key===effOpen){ f.months.forEach((mk,i)=>foot+=`<td class="num">${fmt(monT[i])}</td>`); foot+=`<td class="num">${fmt(fyT[f.key])}</td>`; }
-      else foot+=`<td class="num">${fmt(fyT[f.key])}</td>`;
+      if (f.key===effOpen){ f.months.forEach((mk,i)=>foot+=dcell(0, f.key, i, 'num', monT[i])); foot+=dcell(0, f.key, null, 'num', fyT[f.key]); }
+      else foot+=dcell(0, f.key, null, 'num', fyT[f.key]);
     });
 
     document.getElementById('rpp-grid').style.width = 'auto';
@@ -19071,13 +19102,13 @@ const RPP = (function () {
       else if (d.prob >= 100) sec += L.secured;
       else pot += L.expected;
     })));
-    const cell = (k,v,extra='',tip='') => `<div class="tot ${extra}"${tip?` title="${escAttr(tip)}"`:''}><span class="k">${k}</span><span class="v">${fmt(v)}</span></div>`;
+    const cell = (k,v,part,extra='',tip='') => `<div class="tot click ${extra}" title="${escAttr(tip)} — click for the deals behind it" onclick="RPP.drill(0,null,null,'${part}')"><span class="k">${k}</span><span class="v">${fmt(v)}</span></div>`;
     const op = t => `<div class="tot op"><span class="k">&nbsp;</span><span class="v">${t}</span></div>`;
     document.getElementById('rpp-totstrip').innerHTML =
-      cell('Expected', act+sec+pot, 'expected', 'Actual + secured + unsecured weighted by probability') + op('=') +
-      cell('Actual to date', act, 'actual', 'Recorded actuals') + op('+') +
-      cell('Secured', sec, '', 'Secured deals, months with no actual recorded yet') + op('+') +
-      cell('Weighted potential', pot, '', 'Unsecured projection × probability');
+      cell('Expected', act+sec+pot, 'expected', 'expected', 'Actual + secured + unsecured weighted by probability') + op('=') +
+      cell('Actual to date', act, 'act', 'actual', 'Recorded actuals') + op('+') +
+      cell('Secured', sec, 'sec', '', 'Secured deals, months with no actual recorded yet') + op('+') +
+      cell('Weighted potential', pot, 'pot', '', 'Unsecured projection × probability');
   }
 
   function syncControls(){
@@ -19126,6 +19157,70 @@ const RPP = (function () {
   function chipsChanged(){ if (basis==='secured' && !viewChipOn('pipeline','stages','secured')) basis='expected'; paint(); }
   function setMetric(m){ metric=m; paint(); }
   function setGroup(k){ groupBy = k || null; grpOpen.clear(); paint(); }
+
+  // ── drill-down (v7.10.00): the deals behind a figure ──
+  // `idx` names a drillTargets entry (0 = every deal shown), `fy` / `mi` narrow the period (null =
+  // all years / the whole year), `part` picks the column to sort and highlight. Each deal's months
+  // in the period are split exactly as the strip splits them — actual where recorded, else secured
+  // when the deal is at 100%, else projection × probability — so the modal's totals equal the
+  // figure clicked: Expected = act + sec + pot; on the Secured basis the grid shows act + sec.
+  const money = n => 'R ' + Math.round(n||0).toLocaleString('en-US');
+  function drill(idx, fy, mi, part){
+    const t = drillTargets[idx]; if (!t) return;
+    const fys = fy==null ? FYS : [fyByKey[fy]].filter(Boolean);
+    const f0 = fys[0];
+    const period = fy==null ? (FYS.length>1 ? `${FYS[0].label} – ${FYS[FYS.length-1].label}` : (f0 ? f0.label : ''))
+                 : mi==null ? f0.label
+                 : (()=>{ const [Y,M]=f0.months[mi].split('-'); return `${MNAMES[+M-1]} ${Y}`; })();
+    const isM = metric==='margin';
+    const rows = t.list.map(d=>{
+      let proj=0, act=0, sec=0, pot=0, actMonths=0, months=0;
+      fys.forEach(f=> (mi==null ? f.months.map((_,i)=>i) : [mi]).forEach(i=>{
+        const c = cellOf(d,f.key,i); if (!c) return;
+        const base = isM ? (c.oppMar||0) : (c.oppRev||0);
+        const L = layers(d,f.key,i);
+        if (!(base || L.actual!=null)) return;
+        months++; proj += base;
+        if (L.actual!=null){ act += L.actual; actMonths++; } else if (d.prob>=100) sec += L.secured; else pot += L.expected;
+      }));
+      return { d, proj, act, sec, pot, expected: act+sec+pot, actMonths, months };
+    }).filter(r=> r.months > 0);
+    const key = part==='act' ? 'act' : part==='sec' ? 'sec' : part==='pot' ? 'pot' : basis==='secured' ? 'counted' : 'expected';
+    rows.forEach(r=> r.counted = r.act + r.sec);
+    rows.sort((a,b)=> (b[key]-a[key]) || (b.expected-a.expected) || a.d.client.localeCompare(b.d.client));
+    const T = rows.reduce((o,r)=>{ o.proj+=r.proj; o.act+=r.act; o.sec+=r.sec; o.pot+=r.pot; return o; }, {proj:0,act:0,sec:0,pot:0});
+    const figure = basis==='secured' ? T.act+T.sec : T.act+T.sec+T.pot;
+    const hi = k => (k===key || (key==='counted' && (k==='act'||k==='sec')) || (key==='expected' && k==='expected')) ? ' hi' : '';
+    const num = (k, v, cls='') => `<td class="num${hi(k)}${cls}">${v ? money(v) : '–'}</td>`;
+    const body = rows.map(r=>{
+      const d = r.d;
+      const tag = d.otype==='extension' ? ' <span class="tag-ext">Extension</span>' : d.otype==='variation' ? ' <span class="tag-var">Variation</span>' : '';
+      const how = r.actMonths ? `${r.actMonths} of ${r.months} month${r.months===1?'':'s'} actual` : d.prob>=100 ? 'secured' : `× ${d.prob}%`;
+      return `<tr onclick="closeModal();openOpportunity(${d.id})" title="Open the deal">` +
+        `<td><div class="dd-deal">${escHtml(d.deal)}${tag}</div><div class="dd-sub">${escHtml(d.client)} · ${escHtml(d.owner)}</div></td>` +
+        `<td>${stageBadge(d.stage)}</td><td class="num">${d.prob}%</td>` +
+        num('proj', r.proj) + num('act', r.act, r.act?' actual':'') + num('sec', r.sec) + num('pot', r.pot) + num('expected', r.expected) +
+        `<td class="dd-how">${how}</td></tr>`;
+    }).join('') || `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:14px;">No deal carries a figure in this period.</td></tr>`;
+    const foot = `<tr class="tot"><td>TOTAL · ${rows.length} deal${rows.length===1?'':'s'}</td><td></td><td></td>` +
+      num('proj', T.proj) + num('act', T.act) + num('sec', T.sec) + num('pot', T.pot) + num('expected', T.act+T.sec+T.pot) + `<td></td></tr>`;
+    const basisNote = basis==='secured' ? 'Secured basis: the grid counts Actual + Secured only' : 'Expected = Actual + Secured + Weighted potential';
+    showModal('<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">' +
+      '<div class="modal rpp-drill" style="width:1040px;"><div class="modal-header"><div><div class="modal-title">' + escHtml(t.label) + '</div>' +
+      '<div class="dd-scope">' + escHtml(period) + ' · ' + (isM ? 'Margin' : 'Revenue') + ' · ' + basisNote + ' · figure <b>' + money(figure) + '</b></div></div>' +
+      '<button class="modal-close" onclick="closeModal()">×</button></div>' +
+      '<div class="modal-body" style="padding:0;"><table><thead><tr><th>Deal</th><th>Stage</th><th class="num">Prob</th><th class="num">Projected</th><th class="num">Actual</th><th class="num">Secured</th><th class="num">Weighted</th><th class="num">Expected</th><th>Counted as</th></tr></thead>' +
+      '<tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table>' +
+      '<div class="dd-note">Projected is the unweighted stream for the period. Each month counts once: an actual where one is recorded, else the full figure on a secured deal, else the projection × the deal\'s probability. Click a deal to open it.</div></div></div></div>');
+  }
+  // A deal autosaved while open from this page (name, probability, stage): patch the row and repaint
+  // (closeOppPage, v7.10.00) — a Save re-renders the whole page through loadTable.
+  function dealChanged(opp){
+    const d = DEALS.find(x => x.id === +opp.id); if (!d) return;
+    d.deal = opp.name || '—'; d.prob = opp.probability!=null ? +opp.probability : 0; d.order = opp.order_date || '';
+    d.stage_id = +opp.stage_id || 0; d.stage = ((allData['stages']||[]).find(s=>+s.id===+opp.stage_id)||{}).name || '—';
+    if (document.getElementById('rpp-root')) paint();
+  }
   function toggleGroup(k){ grpOpen.has(k) ? grpOpen.delete(k) : grpOpen.add(k); paint(); }
   function toggleAllGroups(){ if (lastGroupKeys.every(k=>grpOpen.has(k))) grpOpen.clear(); else lastGroupKeys.forEach(k=>grpOpen.add(k)); paint(); }
   function toggleVariance(){ varianceOn=!varianceOn; paint(); }
@@ -19268,7 +19363,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
