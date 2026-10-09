@@ -334,6 +334,8 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root .tot .k{font-size:9px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(255,255,255,0.55);}
 #rpp-root .tot .v{font-size:15px; font-weight:800; white-space:nowrap;}
 #rpp-root .tot.actual .v{color:#6EE7B7;}
+#rpp-root .tot.expected .v{font-size:20px;}
+#rpp-root .tot.op{opacity:0.6;}
 
 #rpp-root .tabs{display:flex; gap:0; align-items:flex-end;}
 #rpp-root .tab{padding:4px 8px; font-size:11px; font-weight:700; color:var(--navy); background:#fff;
@@ -727,7 +729,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -766,7 +768,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.97 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.9.98 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -18659,7 +18661,7 @@ const RPP = (function () {
 
   // ── state ──
   let DEALS = [], FYS = [], fyByKey = {};
-  let basis = 'total', metric = 'revenue', varianceOn = false;
+  let basis = 'expected', metric = 'revenue', varianceOn = false;
   let detailOn = true, openFY = null, fyStart = 0;
   let sortKey = null, sortDir = null;
   const filters = {};   // colKey -> Set<excluded display value>
@@ -18709,16 +18711,17 @@ const RPP = (function () {
   function cellOf(d, fyKey, i){ const f = fyByKey[fyKey]; return f ? d.cells.get(f.months[i]) : null; }
   function layers(d, fyKey, i){
     const c = cellOf(d, fyKey, i);
-    if (!c) return { total:0, weighted:0, secured:0, actual:null };
+    if (!c) return { expected:0, secured:0, actual:null };
     const isM = metric === 'margin';
-    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // projection (Total view)
-    // Three views of the SAME data: Total = projection, Weighted = projection ×
-    // probability, Secured = projection of deals at 100% (i.e. secured). There is
-    // no stored "secured" value — it's the live 100% slice. The frozen secured
-    // figure lives in secured_snapshots (audit only, never read here).
+    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // the deal's projection for the month
+    // v7.9.98: two bases, no unweighted Total (Richard 2026-10-09: "not a very useful metric").
+    // Expected = projection × probability; a secured deal is at 100%, so it counts in full — which
+    // makes Expected = actual + secured + weighted potential. Secured = the projection of deals at
+    // 100% only (the floor). There is no stored "secured" value: it is the live 100% slice; the
+    // frozen figure lives in secured_snapshots (audit only, never read here).
     const sec  = (d.prob >= 100) ? base : 0;
     const act  = isM ? c.actMar : c.actRev;             // real actual column; null if absent
-    return { total:base, weighted: base*(d.prob/100), secured:sec, actual: act!=null ? act : null };
+    return { expected: base*(d.prob/100), secured:sec, actual: act!=null ? act : null };
   }
   const proj = L => L[basis];
   const effective = L => L.actual!=null ? L.actual : proj(L);
@@ -18988,11 +18991,12 @@ const RPP = (function () {
     tabsEl.innerHTML = tabs;
   }
 
-  const BASIS_LABEL = {total:'Total', weighted:'Weighted', secured:'Secured'};
+  const BASIS_LABEL = {expected:'Expected', secured:'Secured'};
+  const BASIS_NOTE  = {expected:'actuals-to-date + secured + unsecured weighted by probability', secured:'actuals-to-date + secured deals only'};
   function updateNote(ctx){
     const {start, visN, total, effOpen} = ctx;
     const hiddenPrev = start, hiddenNext = total - (start + visN);
-    let msg = `${metric==='margin'?'Margin':'Revenue'} · Basis: ${BASIS_LABEL[basis]}. Value & totals = actuals-to-date + ${BASIS_LABEL[basis].toLowerCase()} projection forward. `;
+    let msg = `${metric==='margin'?'Margin':'Revenue'} · Basis: ${BASIS_LABEL[basis]}. Value & totals = ${BASIS_NOTE[basis]}. `;
     msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs ${BASIS_LABEL[basis].toLowerCase()})`:''}. `
          : detailOn ? 'Expand an FY to see months & actuals. '
                     : 'Compact: FY-total columns only. ';
@@ -19005,14 +19009,24 @@ const RPP = (function () {
     document.getElementById('rpp-note').textContent = msg;
   }
 
+  // The headline: Expected = Actual + Secured + Weighted potential, each month of each deal counted in
+  // exactly one of the three — an actual where one is recorded, else the secured figure (deal at
+  // 100%), else the unsecured projection × its probability — so the parts always add to the whole.
   function renderTotStrip(){
-    let tot=0, wt=0, sec=0, act=0;
+    let act=0, sec=0, pot=0;
     visibleDeals().forEach(d=> FYS.forEach(f=> f.months.forEach((mk,i)=>{
-      const L=layers(d,f.key,i); tot+=L.total; wt+=L.weighted; sec+=L.secured; if(L.actual!=null) act+=L.actual;
+      const L=layers(d,f.key,i);
+      if (L.actual!=null) act += L.actual;
+      else if (d.prob >= 100) sec += L.secured;
+      else pot += L.expected;
     })));
-    const cell = (k,v,extra='') => `<div class="tot ${extra}"><span class="k">${k}</span><span class="v">${fmt(v)}</span></div>`;
+    const cell = (k,v,extra='',tip='') => `<div class="tot ${extra}"${tip?` title="${escAttr(tip)}"`:''}><span class="k">${k}</span><span class="v">${fmt(v)}</span></div>`;
+    const op = t => `<div class="tot op"><span class="k">&nbsp;</span><span class="v">${t}</span></div>`;
     document.getElementById('rpp-totstrip').innerHTML =
-      cell('Total',tot) + cell('Weighted',wt) + cell('Secured',sec) + cell('Actual to date',act,'actual');
+      cell('Expected', act+sec+pot, 'expected', 'Actual + secured + unsecured weighted by probability') + op('=') +
+      cell('Actual to date', act, 'actual', 'Recorded actuals') + op('+') +
+      cell('Secured', sec, '', 'Secured deals, months with no actual recorded yet') + op('+') +
+      cell('Weighted potential', pot, '', 'Unsecured projection × probability');
   }
 
   function syncControls(){
@@ -19053,9 +19067,9 @@ const RPP = (function () {
 
   // toggles re-paint from cached cells (no refetch); only owner-view change reloads
   // The Secured basis values only secured deals: choosing it switches their chip on (for the session)
-  // rather than leave a page of dashes; switching that chip off while on the basis falls back to Total.
+  // rather than leave a page of dashes; switching that chip off while on the basis falls back to Expected.
   function setBasis(b){ basis=b; if (b==='secured' && !viewChipOn('pipeline','stages','secured')) viewChipSet('pipeline','stages','secured',true); paint(); }
-  function chipsChanged(){ if (basis==='secured' && !viewChipOn('pipeline','stages','secured')) basis='total'; paint(); }
+  function chipsChanged(){ if (basis==='secured' && !viewChipOn('pipeline','stages','secured')) basis='expected'; paint(); }
   function setMetric(m){ metric=m; paint(); }
   function toggleVariance(){ varianceOn=!varianceOn; paint(); }
   function toggleDetail(){ detailOn=!detailOn; if(detailOn) openFY=null; paint(); }
@@ -19140,9 +19154,8 @@ const RPP = (function () {
         <div class="rpp-toolbar">
           <span class="lbl">Projection basis</span>
           <div class="seg" id="rpp-basisSeg">
-            <button data-basis="total" onclick="RPP.setBasis('total')">Total</button>
-            <button data-basis="weighted" onclick="RPP.setBasis('weighted')">Weighted</button>
-            <button data-basis="secured" onclick="RPP.setBasis('secured')">Secured</button>
+            <button data-basis="expected" title="Actual + secured + unsecured weighted by probability" onclick="RPP.setBasis('expected')">Expected</button>
+            <button data-basis="secured" title="Actual + secured deals only — the floor" onclick="RPP.setBasis('secured')">Secured</button>
           </div>
           <span class="lbl">View</span>
           <div class="seg" id="rpp-metricSeg">
