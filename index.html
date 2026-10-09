@@ -390,6 +390,15 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .rpp-drill .dd-how{font-size:11px; color:var(--text3);}
 .rpp-drill tfoot tr.tot td{background:var(--khaki); color:var(--navy); font-weight:800; border-top:2px solid var(--navy);}
 .rpp-drill .dd-note{padding:10px 14px; font-size:11px; color:var(--text3);}
+#rpp-root .rpp-flag{display:inline-block; margin-left:5px; padding:0 5px; border-radius:8px; font-size:9px; font-weight:700; background:#FEF3C7; color:#92400E; white-space:nowrap; vertical-align:middle; text-transform:none; letter-spacing:0;}
+#rpp-root td.noact{background:#FEF3C7; color:#92400E;}
+#rpp-root #rpp-truststrip{display:flex; gap:6px; align-items:center; flex-wrap:wrap; background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; padding:6px 12px; margin:-4px 0 12px;}
+#rpp-root #rpp-truststrip .tlbl{font-size:11px; font-weight:700; color:#92400E; margin-right:6px;}
+#rpp-root .tchip{display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; background:#fff; border:1px solid #FDE68A; color:#92400E; opacity:0.55;}
+#rpp-root .tchip.on{opacity:1; cursor:pointer; background:#FEF3C7;}
+#rpp-root .tchip.on:hover{background:#FDE68A;}
+#rpp-root .tchip.off{font-style:italic;}
+.rpp-drill .dd-flags .rpp-flag{display:inline-block; margin:0 4px 2px 0; padding:0 5px; border-radius:8px; font-size:9px; font-weight:700; background:#FEF3C7; color:#92400E; white-space:nowrap;}
 #rpp-root tr.rpp-group td{background:#E3EAF3; color:var(--navy); font-weight:700; border-top:2px solid var(--navy); cursor:pointer;}
 #rpp-root tr.rpp-group:hover td{background:#D9E2EE;}
 #rpp-root tr.rpp-group td.deal-total{background:#D6DFEA;}
@@ -752,7 +761,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.00 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.01 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -791,7 +800,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.00 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.01 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6489,7 +6498,7 @@ function probCriteria(includeInactive) {
     .map(c => Object.assign({}, c, { answers: ans.filter(a => +a.criterion_id === +c.id).sort(byOrder) }));
 }
 // answers = {criterionId: answerId}. null when no active question carries a weight.
-function probScoreCompute(answers, stage) {
+function probScoreCompute(answers, stage, type) {
   const crit = probCriteria();
   let total = 0, sum = 0, answered = 0;
   crit.forEach(c => {
@@ -6499,7 +6508,7 @@ function probScoreCompute(answers, stage) {
   });
   if (!(total > 0)) return null;
   const raw = Math.round(sum / total);
-  const scale = stageScale(stage, oppDealType()), min = scale.min, max = scale.max;   // v7.9.97: an extension's own limits
+  const scale = stageScale(stage, type || oppDealType()), min = scale.min, max = scale.max;   // v7.9.97: an extension's own limits (v7.10.01: the type may be passed — the pipeline scores deals not on the form)
   return { raw, final: Math.max(min, Math.min(max, raw)), min, max, capped: raw > max, raised: raw < min,
     answered, count: crit.length, fixed: min >= max, ext: scale.ext };
 }
@@ -18699,6 +18708,20 @@ const RPP = (function () {
   // deals behind it by an index into this list, rebuilt with the body; `drill(idx, fy, month, part)`
   // opens the modal. A deal row opens the deal itself.
   let drillTargets = [];
+  // v7.10.01 trust flags — an OPTIONAL view (Richard 2026-10-09), off until the Trust flags button
+  // is pressed; the answers and questions load once, on the first press. The flags say how far
+  // the Expected figure can be believed: see trustOf().
+  let trustOn = false, trustLoaded = false, trustLoading = false, scoreOK = false;
+  let answersByDeal = new Map();   // deal id -> {criterionId: answerId}
+  const TRUST = [
+    { key:'unscored', label:'not scored',               tip:'An unsecured deal whose probability was typed with no calculator answers behind it' },
+    { key:'typed',    label:'typed, differs from score', tip:'The probability on the deal is not what its calculator answers say' },
+    { key:'overdue',  label:'order date passed',        tip:'An unsecured deal whose expected order date is in the past' },
+    { key:'noActual', label:'past months, no actual',   tip:'Months already gone that still carry a projection with no actual recorded — the figure shown is the forecast, not what happened' },
+    { key:'noStream', label:'no revenue stream',        tip:'An open deal with a probability but no revenue months — it adds nothing to the figure, which is understated by it' },
+  ];
+  const thisMonth = () => new Date().toISOString().slice(0, 7);
+  const todayStr  = () => new Date().toISOString().slice(0, 10);
   const GROUPS = [{key:'owner',label:'Person'},{key:'region',label:'Region'},{key:'branch',label:'Branch'},{key:'service',label:'Service'},{key:'client',label:'Client'}];
   const groupLabel = () => (GROUPS.find(g=>g.key===groupBy)||{}).label || '';
 
@@ -18769,8 +18792,8 @@ const RPP = (function () {
     if (pct === 0) return `<br><span class="vchip flat">0%</span>`;
     return `<br><span class="vchip ${pct>0?'up':'down'}">${pct>0?'▲':'▼'} ${Math.abs(pct)}%</span>`;
   }
-  function monthCell(L, edge){
-    const cls = 'num' + (edge?' fy-edge':'') + (L.actual!=null?' actual':'');
+  function monthCell(L, edge, noact){
+    const cls = 'num' + (edge?' fy-edge':'') + (L.actual!=null?' actual':'') + (noact?' noact':'');
     const chip = (varianceOn && L.actual!=null) ? varChip(L.actual, proj(L)) : '';
     return `<td class="${cls}">${fmt(effective(L))}${chip}</td>`;
   }
@@ -18929,11 +18952,13 @@ const RPP = (function () {
 
     // Grand/FY/month totals accumulate here per real deal — hidden rows (a collapsed family or
     // group) included — so the TOTAL row and the strip are over every deal that passes the filters.
+    const showTrust = trustOn && trustLoaded, tm = thisMonth(), isM = metric==='margin';
     const dealRowHtml = (d, fam, open, hidden) => {
       const dt = dealValue(d); gDeal += dt;
+      const tags = showTrust ? trustTags(d.trust) : '';   // v7.10.01: in the deal cell when shown, else the first cell
       let row = fam
-        ? `<td></td>${showDetail ? `<td class="deal">${escHtml(d.deal)}${lineageTag(d)}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`
-        : `<td>${escHtml(d.client)}</td>${showDetail ? `<td class="deal">${escHtml(d.deal)}${d.otype!=='new_business' ? lineageTag(d) : ''}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`;   // v7.9.96: an extension or variation is tagged on its own too
+        ? `<td>${showDetail ? '' : tags}</td>${showDetail ? `<td class="deal">${escHtml(d.deal)}${lineageTag(d)}${tags}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`
+        : `<td>${escHtml(d.client)}${showDetail ? '' : tags}</td>${showDetail ? `<td class="deal">${escHtml(d.deal)}${d.otype!=='new_business' ? lineageTag(d) : ''}${tags}</td>` : ''}<td class="num deal-total">${fmt(dt)}</td>`;   // v7.9.96: an extension or variation is tagged on its own too
       if (showDetail) ATTRS.forEach(a=>{
         if (a.k==='stage') row+=`<td>${stageBadge(d.stage)}</td>`;
         else if (a.k==='prob') row+=`<td class="num prob" style="color:${d.prob>=100?'var(--green)':d.prob>=50?'var(--navy)':'var(--text3)'}">${d.prob}%</td>`;
@@ -18941,7 +18966,11 @@ const RPP = (function () {
       });
       winFYs.forEach(f=>{
         const t=fyValue(d,f.key); fyT[f.key]+=t;
-        if (f.key===effOpen){ f.months.forEach((mk,i)=>{ const L=layers(d,f.key,i); monT[i]+=effective(L); row+=monthCell(L, i===0); }); row+=`<td class="num col-total">${fmt(t)}</td>`; }
+        if (f.key===effOpen){ f.months.forEach((mk,i)=>{
+          const L=layers(d,f.key,i); monT[i]+=effective(L);
+          const c = showTrust && mk < tm && L.actual==null ? cellOf(d,f.key,i) : null;   // a past month shown as its projection
+          row+=monthCell(L, i===0, !!(c && (isM ? c.oppMar : c.oppRev)));
+        }); row+=`<td class="num col-total">${fmt(t)}</td>`; }
         else row+=`<td class="num col-total fy-edge">${fmt(t)}</td>`;
       });
       const hide = hidden || (fam && !open);
@@ -18980,7 +19009,8 @@ const RPP = (function () {
         const orig = g.members.find(m=>m.id===g.mid) || g.members[0];
         const open = linOpen.has(+g.mid);
         const idx = target(`${orig.client} › ${orig.deal} (${g.members.length} linked deals)`, g.members);
-        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${escHtml(orig.client)}</td>` +
+        const nf = showTrust ? g.members.filter(m=>m.trust && m.trust.any).length : 0;
+        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${escHtml(orig.client)}${nf ? `<span class="rpp-flag">${nf} flagged</span>` : ''}</td>` +
                   (showDetail ? `<td class="deal" style="font-weight:700;color:var(--navy);">${escHtml(orig.deal)}</td>` : '') +
                   dcell(idx, null, null, 'num deal-total', g.members.reduce((s,m)=>s+dealValue(m),0));
         if (showDetail) ATTRS.forEach(a=>{
@@ -19012,7 +19042,8 @@ const RPP = (function () {
         const open = grpOpen.has(b.key), n = b.members.length;
         const name = blank(b.key) ? `No ${groupLabel().toLowerCase()}` : b.key;
         const idx = target(`${groupLabel()}: ${name}`, b.members);
-        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${blank(b.key) ? `<i>${escHtml(name)}</i>` : escHtml(b.key)}<span class="grp-n"> · ${n} deal${n===1?'':'s'}</span></td>` +
+        const nf = showTrust ? b.members.filter(m=>m.trust && m.trust.any).length : 0;
+        let row = `<td><span class="lin-toggle ${open?'open':''}">›</span>${blank(b.key) ? `<i>${escHtml(name)}</i>` : escHtml(b.key)}<span class="grp-n"> · ${n} deal${n===1?'':'s'}</span>${nf ? `<span class="rpp-flag">${nf} flagged</span>` : ''}</td>` +
                   (showDetail ? '<td></td>' : '') + dcell(idx, null, null, 'num deal-total', b.value);
         if (showDetail) ATTRS.forEach(()=> row += '<td></td>');
         row += sumCells(b.members, idx);
@@ -19078,6 +19109,7 @@ const RPP = (function () {
     const {start, visN, total, effOpen} = ctx;
     const hiddenPrev = start, hiddenNext = total - (start + visN);
     let msg = `${metric==='margin'?'Margin':'Revenue'} · Basis: ${BASIS_LABEL[basis]}. Value & totals = ${BASIS_NOTE[basis]}. `;
+    if (trustOn && trustLoaded) msg += `Trust flags on: a flag marks a figure that rests on a judgement nobody checked (a probability typed without the calculator, or not matching it), an order date already passed, a past month still showing its projection (amber cells), or an open deal with no stream.${scoreOK ? '' : ' Scoring flags are unavailable: the probability calculator tables are not installed.'} `;
     if (groupBy) msg += `Grouped by ${groupLabel()}: ${lastGroupKeys.length} group${lastGroupKeys.length!==1?'s':''}, a subtotal each — click a group for its deals. `;
     msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs ${BASIS_LABEL[basis].toLowerCase()})`:''}. `
          : detailOn ? 'Expand an FY to see months & actuals. '
@@ -19117,11 +19149,13 @@ const RPP = (function () {
     document.querySelectorAll('#rpp-groupSeg button').forEach(b=> b.classList.toggle('on', (b.dataset.group||'')===(groupBy||'')));
     const ga = document.getElementById('rpp-grpAll');
     if (ga){ ga.style.display = groupBy ? '' : 'none'; ga.textContent = (lastGroupKeys.length && lastGroupKeys.every(k=>grpOpen.has(k))) ? 'Collapse all' : 'Expand all'; }
-    document.getElementById('rpp-varToggle').classList.toggle('on', varianceOn);
+    const vb = document.getElementById('rpp-varToggle'); if (vb) vb.classList.toggle('on', varianceOn);   // the page may be gone by the time a load settles
+    const tb = document.getElementById('rpp-trustToggle'); if (tb){ tb.classList.toggle('on', trustOn); tb.textContent = trustOn && !trustLoaded ? 'Trust flags…' : 'Trust flags ⚑'; }
   }
 
   function paint(){
     const hs = document.getElementById('rpp-hscroll'); if (!hs) return;
+    if (trustOn && trustLoaded) DEALS.forEach(d=> d.trust = trustOf(d));   // the flags depend on the metric, so once per paint
     // Stage and type chips (v7.9.96), counted over the ownership-scoped deals.
     const chipBar = document.getElementById('page-chip-bar');
     if (chipBar && currentPage === 'revenue_pipeline') { chipBar.innerHTML = viewChipBarHtml('pipeline', DEALS); chipBar.style.display = ''; }
@@ -19147,6 +19181,7 @@ const RPP = (function () {
     alignTabs(ctx);
     updateNote(ctx);
     renderTotStrip();
+    renderTrustStrip();
     syncControls();
   }
 
@@ -19165,8 +19200,9 @@ const RPP = (function () {
   // when the deal is at 100%, else projection × probability — so the modal's totals equal the
   // figure clicked: Expected = act + sec + pot; on the Secured basis the grid shows act + sec.
   const money = n => 'R ' + Math.round(n||0).toLocaleString('en-US');
-  function drill(idx, fy, mi, part){
+  function drill(idx, fy, mi, part, flag){
     const t = drillTargets[idx]; if (!t) return;
+    const showTrust = trustOn && trustLoaded, fl = flag && showTrust ? TRUST.find(x=>x.key===flag) : null;
     const fys = fy==null ? FYS : [fyByKey[fy]].filter(Boolean);
     const f0 = fys[0];
     const period = fy==null ? (FYS.length>1 ? `${FYS[0].label} – ${FYS[FYS.length-1].label}` : (f0 ? f0.label : ''))
@@ -19184,7 +19220,7 @@ const RPP = (function () {
         if (L.actual!=null){ act += L.actual; actMonths++; } else if (d.prob>=100) sec += L.secured; else pot += L.expected;
       }));
       return { d, proj, act, sec, pot, expected: act+sec+pot, actMonths, months };
-    }).filter(r=> r.months > 0);
+    }).filter(r=> fl ? trustHas(r.d.trust, fl.key) : r.months > 0);   // a flag lists its deals whether or not they carry a figure
     const key = part==='act' ? 'act' : part==='sec' ? 'sec' : part==='pot' ? 'pot' : basis==='secured' ? 'counted' : 'expected';
     rows.forEach(r=> r.counted = r.act + r.sec);
     rows.sort((a,b)=> (b[key]-a[key]) || (b.expected-a.expected) || a.d.client.localeCompare(b.d.client));
@@ -19200,21 +19236,93 @@ const RPP = (function () {
         `<td><div class="dd-deal">${escHtml(d.deal)}${tag}</div><div class="dd-sub">${escHtml(d.client)} · ${escHtml(d.owner)}</div></td>` +
         `<td>${stageBadge(d.stage)}</td><td class="num">${d.prob}%</td>` +
         num('proj', r.proj) + num('act', r.act, r.act?' actual':'') + num('sec', r.sec) + num('pot', r.pot) + num('expected', r.expected) +
-        `<td class="dd-how">${how}</td></tr>`;
-    }).join('') || `<tr><td colspan="9" style="text-align:center;color:var(--text3);padding:14px;">No deal carries a figure in this period.</td></tr>`;
+        `<td class="dd-how">${how}</td>${showTrust ? `<td class="dd-flags">${trustTags(d.trust)}</td>` : ''}</tr>`;
+    }).join('') || `<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:14px;">${fl ? 'No deal shown carries this flag.' : 'No deal carries a figure in this period.'}</td></tr>`;
     const foot = `<tr class="tot"><td>TOTAL · ${rows.length} deal${rows.length===1?'':'s'}</td><td></td><td></td>` +
-      num('proj', T.proj) + num('act', T.act) + num('sec', T.sec) + num('pot', T.pot) + num('expected', T.act+T.sec+T.pot) + `<td></td></tr>`;
+      num('proj', T.proj) + num('act', T.act) + num('sec', T.sec) + num('pot', T.pot) + num('expected', T.act+T.sec+T.pot) + `<td></td>${showTrust ? '<td></td>' : ''}</tr>`;
     const basisNote = basis==='secured' ? 'Secured basis: the grid counts Actual + Secured only' : 'Expected = Actual + Secured + Weighted potential';
     showModal('<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">' +
-      '<div class="modal rpp-drill" style="width:1040px;"><div class="modal-header"><div><div class="modal-title">' + escHtml(t.label) + '</div>' +
-      '<div class="dd-scope">' + escHtml(period) + ' · ' + (isM ? 'Margin' : 'Revenue') + ' · ' + basisNote + ' · figure <b>' + money(figure) + '</b></div></div>' +
+      '<div class="modal rpp-drill" style="width:' + (showTrust ? 1240 : 1040) + 'px;"><div class="modal-header"><div><div class="modal-title">' + escHtml(t.label) + (fl ? ' — ' + escHtml(fl.label) : '') + '</div>' +
+      '<div class="dd-scope">' + escHtml(period) + ' · ' + (isM ? 'Margin' : 'Revenue') + ' · ' + basisNote + ' · ' + (fl ? 'these deals carry <b>' + money(figure) + '</b> of the figure' : 'figure <b>' + money(figure) + '</b>') + (fl ? ' · ' + escHtml(fl.tip) : '') + '</div></div>' +
       '<button class="modal-close" onclick="closeModal()">×</button></div>' +
-      '<div class="modal-body" style="padding:0;"><table><thead><tr><th>Deal</th><th>Stage</th><th class="num">Prob</th><th class="num">Projected</th><th class="num">Actual</th><th class="num">Secured</th><th class="num">Weighted</th><th class="num">Expected</th><th>Counted as</th></tr></thead>' +
+      '<div class="modal-body" style="padding:0;"><table><thead><tr><th>Deal</th><th>Stage</th><th class="num">Prob</th><th class="num">Projected</th><th class="num">Actual</th><th class="num">Secured</th><th class="num">Weighted</th><th class="num">Expected</th><th>Counted as</th>' + (showTrust ? '<th>Flags</th>' : '') + '</tr></thead>' +
       '<tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table>' +
       '<div class="dd-note">Projected is the unweighted stream for the period. Each month counts once: an actual where one is recorded, else the full figure on a secured deal, else the projection × the deal\'s probability. Click a deal to open it.</div></div></div></div>');
   }
   // A deal autosaved while open from this page (name, probability, stage): patch the row and repaint
   // (closeOppPage, v7.10.00) — a Save re-renders the whole page through loadTable.
+  // ── trust flags (v7.10.01) ──
+  async function loadTrust(){
+    trustLoading = true;
+    try {
+      const [rows] = await Promise.all([
+        apiGetAll('deal_probability_answers','select=deal_id,criterion_id,answer_id'),
+        probCriteriaLoad(),
+      ]);
+      answersByDeal = new Map();
+      (rows||[]).forEach(r=>{ let m = answersByDeal.get(+r.deal_id); if (!m){ m = {}; answersByDeal.set(+r.deal_id, m); } m[r.criterion_id] = +r.answer_id; });
+      scoreOK = true;
+    } catch(e){
+      scoreOK = false;   // tables absent (sql/add_probability_calculator.sql not run): the scoring flags are not offered
+      if (!/^404\b|PGRST205/.test(e.message||'')) console.warn('Trust flags: scores not loaded:', e);
+    }
+    trustLoaded = true; trustLoading = false;
+  }
+  // The flags on one deal. "Live" = an unsecured deal on an open stage whose probability is a
+  // judgement (the stage leaves a range): only there can a probability be unscored, typed or overdue.
+  // Past months without an actual are flagged on every deal, secured ones included: the grid shows
+  // the projection for them and nothing says so otherwise.
+  function trustOf(d){
+    const f = { noActual:0 };
+    const st = (allData['stages']||[]).find(x=>+x.id===d.stage_id) || null;
+    const scale = stageScale(st, d.otype);
+    const live = d.open && !d.secured && !(scale.min >= scale.max);
+    if (live && scoreOK){
+      const ans = answersByDeal.get(d.id);
+      const sc = ans ? probScoreCompute(ans, st, d.otype) : null;
+      if (!sc || !sc.answered) f.unscored = true;
+      else if (sc.final !== d.prob) f.typed = sc.final;
+    }
+    if (live && d.order && d.order < todayStr()) f.overdue = true;
+    if (live && d.prob > 0 && !d.cells.size) f.noStream = true;
+    const isM = metric==='margin', tm = thisMonth();
+    d.cells.forEach((c, mk)=>{ if (mk < tm){ const base = isM ? c.oppMar : c.oppRev, act = isM ? c.actMar : c.actRev; if (base && act==null) f.noActual++; } });
+    f.any = !!(f.unscored || f.typed!=null || f.overdue || f.noStream || f.noActual);
+    return f;
+  }
+  const trustHas = (f, key) => !!f && (key==='noActual' ? f.noActual > 0 : key==='typed' ? f.typed!=null : !!f[key]);
+  function trustTags(f){
+    if (!f || !f.any) return '';
+    const tag = (t, tip) => `<span class="rpp-flag" title="${escAttr(tip)}">${t}</span>`;
+    let h = '';
+    if (f.unscored) h += tag('not scored', TRUST[0].tip);
+    if (f.typed!=null) h += tag(`typed · score ${f.typed}%`, TRUST[1].tip);
+    if (f.overdue) h += tag('order date passed', TRUST[2].tip);
+    if (f.noActual) h += tag(`${f.noActual} past month${f.noActual===1?'':'s'} no actual`, TRUST[3].tip);
+    if (f.noStream) h += tag('no stream', TRUST[4].tip);
+    return h;
+  }
+  function renderTrustStrip(){
+    const el = document.getElementById('rpp-truststrip'); if (!el) return;
+    if (!trustOn || !trustLoaded){ el.style.display = 'none'; el.innerHTML = ''; return; }
+    const deals = visibleDeals();
+    let months = 0; const counts = {};
+    TRUST.forEach(t=> counts[t.key] = 0);
+    deals.forEach(d=>{ const f = d.trust; if (!f) return; TRUST.forEach(t=>{ if (trustHas(f, t.key)) counts[t.key]++; }); months += f.noActual; });
+    const flagged = deals.filter(d=> d.trust && d.trust.any).length;
+    const chip = t => {
+      const n = counts[t.key], off = (t.key==='unscored' || t.key==='typed') && !scoreOK;
+      const txt = t.key==='noActual' && n ? `${months} past month${months===1?'':'s'} without an actual on ${n} deal${n===1?'':'s'}` : `${n} ${t.label}`;
+      return `<span class="tchip ${n?'on':''}${off?' off':''}" title="${escAttr(off ? 'Probability calculator not installed on this database' : t.tip + (n ? ' — click for the deals' : ''))}"${n?` onclick="RPP.drill(0,null,null,null,'${t.key}')"`:''}>${off ? 'scores unavailable' : txt}</span>`;
+    };
+    el.style.display = '';
+    el.innerHTML = `<span class="tlbl">Trust flags · ${flagged} of ${deals.length} deal${deals.length===1?'':'s'} flagged</span>` + TRUST.filter(t=> scoreOK || t.key!=='typed').map(chip).join('');   // one "unavailable" chip, not two
+  }
+  async function toggleTrust(){
+    trustOn = !trustOn;
+    if (trustOn && !trustLoaded){ syncControls(); if (!trustLoading) await loadTrust(); if (!trustOn) return; }
+    paint();
+  }
   function dealChanged(opp){
     const d = DEALS.find(x => x.id === +opp.id); if (!d) return;
     d.deal = opp.name || '—'; d.prob = opp.probability!=null ? +opp.probability : 0; d.order = opp.order_date || '';
@@ -19277,11 +19385,14 @@ const RPP = (function () {
     FYS = [...fySet].sort((a,b)=>a-b).map(fy=>({ key:fy, label:getFYLabel(fy), months:getFYMonths(fy) }));
     fyByKey = Object.fromEntries(FYS.map(f=>[f.key, f]));
 
+    const openCat = new Set(stageCats.filter(c=>/^opportunity-open/i.test(c.name||'')).map(c=>+c.id));
     DEALS = deals.map((d,i)=>({
       _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id,
       masterId: d.master_deal_id ? +d.master_deal_id : +d.id,
       otype: d.opportunity_type || 'new_business',
       stage_id: +d.stage_id || 0,
+      open: openCat.has(+((stages.find(s=>+s.id===+d.stage_id)||{}).category_id)),   // trust flags (v7.10.01)
+      secured: dealIsSecuredStage(d.stage_id),
       client: (orgs.find(o=>+o.id===+d.org_id)||{}).name || '—',
       deal: d.name || '—',
       owner: personName(people, d.owner_id),
@@ -19325,8 +19436,10 @@ const RPP = (function () {
           </div>
           <button class="btn-toggle" id="rpp-grpAll" style="display:none;" onclick="RPP.toggleAllGroups()">Expand all</button>
           <span class="hint">Past months show <b style="color:var(--green)">actuals</b>; future months show the selected projection.</span>
-          <button class="btn-toggle" id="rpp-varToggle" style="margin-left:auto;" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
+          <button class="btn-toggle" id="rpp-trustToggle" style="margin-left:auto;" title="Flag the deals and months whose figure rests on an unchecked judgement" onclick="RPP.toggleTrust()">Trust flags ⚑</button>
+          <button class="btn-toggle" id="rpp-varToggle" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
         </div>
+        <div id="rpp-truststrip" style="display:none;"></div>
         <div class="tbl-filter-banner-bar" id="rpp-filter-banner" style="display:none;"></div>
         <div class="hscroll" id="rpp-hscroll">
           <div class="tabs" id="rpp-tabs"></div>
@@ -19340,7 +19453,8 @@ const RPP = (function () {
     renderViewFilterBar('pipeline');
     document.getElementById('page-sub').textContent = 'Loading…';
     try {
-      await loadData();
+      trustLoaded = false;
+      await Promise.all([loadData(), trustOn ? loadTrust() : null]);   // v7.10.01: the answers reload with the deals while the view is on
       DEALS = await filterDealsByView(DEALS, oppsOwnerView);
       if (currentPage !== 'revenue_pipeline') return;   // the user has moved on while this loaded
       document.getElementById('page-sub').textContent = DEALS.length + ' deal' + (DEALS.length!==1?'s':'');
@@ -19363,7 +19477,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
