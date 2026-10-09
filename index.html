@@ -398,6 +398,14 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root .tchip.on{opacity:1; cursor:pointer; background:#FEF3C7;}
 #rpp-root .tchip.on:hover{background:#FDE68A;}
 #rpp-root .tchip.off{font-style:italic;}
+.rpp-drill .fs-bar{display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:12px 14px; border-bottom:1px solid var(--border);}
+.rpp-drill .fs-bar .tlbl{font-size:11px; font-weight:700; color:var(--navy); text-transform:uppercase; letter-spacing:0.03em;}
+.rpp-drill .fs-sel{font-family:inherit; font-size:12px; padding:4px 8px; border:1px solid var(--border); border-radius:6px; background:#fff; max-width:640px;}
+.rpp-drill tr.fy td{background:#F3F4F6; font-weight:700; color:var(--navy);}
+.rpp-drill tr.past td{color:var(--text3);}
+.rpp-drill tr.past td.actual{color:var(--green);}
+.rpp-drill .dd-var{font-weight:700; font-size:11px;}
+.rpp-drill .dd-var.up{color:#166534;} .rpp-drill .dd-var.down{color:#991B1B;}
 .rpp-drill .dd-flags .rpp-flag{display:inline-block; margin:0 4px 2px 0; padding:0 5px; border-radius:8px; font-size:9px; font-weight:700; background:#FEF3C7; color:#92400E; white-space:nowrap;}
 #rpp-root tr.rpp-group td{background:#E3EAF3; color:var(--navy); font-weight:700; border-top:2px solid var(--navy); cursor:pointer;}
 #rpp-root tr.rpp-group:hover td{background:#D9E2EE;}
@@ -761,7 +769,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.01 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.02 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -800,7 +808,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.01 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.02 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2235,6 +2243,8 @@ function _mockSeed() {
       { id: 16, criterion_id: 6, label: 'Nice to have', score: 0, sort_order: 1, active: true },        { id: 17, criterion_id: 6, label: 'Planned priority', score: 50, sort_order: 2, active: true },   { id: 18, criterion_id: 6, label: 'Critical / exposed', score: 100, sort_order: 3, active: true },
     ],
     deal_probability_answers: [],
+    forecast_snapshots: [],
+    forecast_snapshot_lines: [],
     settings: [
       { id: 1, key: 'environment',            value: 'Development' },
       { id: 2, key: 'fy_start_month',         value: 'July' },
@@ -16328,7 +16338,7 @@ async function doLogin() {
 // Two tables stay writable: the presence heartbeat (or they would look offline
 // to everyone else) and bug reports (a viewer who spots a problem should still
 // be able to say so).
-const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat', 'rpc/log_activity'];   // rpc: system jobs, not user data entry
+const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat', 'rpc/log_activity', 'rpc/take_forecast_snapshot'];   // rpc: system jobs, not user data entry
 
 function isReadOnlyUser() {
   if (typeof currentUser === 'undefined' || !currentUser) return false;
@@ -18712,6 +18722,10 @@ const RPP = (function () {
   // is pressed; the answers and questions load once, on the first press. The flags say how far
   // the Expected figure can be believed: see trustOf().
   let trustOn = false, trustLoaded = false, trustLoading = false, scoreOK = false;
+  // v7.10.02 forecast snapshots (sql/add_forecast_snapshots.sql): the pipeline frozen at each month
+  // end, taken by pg_cron on the 1st, else by the first visit here in a new month (fsEnsure), else by
+  // hand from Forecast history. _fsMissing = the tables are not installed (404 / PGRST205).
+  let _fsMissing = false, _fsEnsured = false, _fs = null;
   let answersByDeal = new Map();   // deal id -> {criterionId: answerId}
   const TRUST = [
     { key:'unscored', label:'not scored',               tip:'An unsecured deal whose probability was typed with no calculator answers behind it' },
@@ -19251,6 +19265,128 @@ const RPP = (function () {
   }
   // A deal autosaved while open from this page (name, probability, stage): patch the row and repaint
   // (closeOppPage, v7.10.00) — a Save re-renders the whole page through loadTable.
+  // ── forecast snapshots (v7.10.02) ──
+  const ym = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+  const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return ym(d); };
+  const monthLabel = mk => { const [Y, M] = mk.split('-'); return MABBR[+M - 1] + ' ' + Y; };
+  const fsNotInstalled = e => /^404\b|PGRST20[25]/.test((e && e.message) || '');
+  const fsCanTake = () => can('administer_deals') || can('manage_settings');
+  // Once per session: if the month just ended has no snapshot, take it (the cron's fallback). Silent.
+  async function fsEnsure(){
+    if (_fsEnsured || _fsMissing) return; _fsEnsured = true;
+    const want = prevMonth();
+    try {
+      const latest = await api('forecast_snapshots', 'GET', null, 'select=id,for_month&order=for_month.desc&limit=1', { silent: true });
+      if (latest.length && latest[0].for_month >= want) return;
+      if (MOCK) fsMockTake(want, 'auto', false);
+      else await api('rpc/take_forecast_snapshot', 'POST', { p_for_month: want, p_actor_id: currentUser.personId, p_trigger: 'auto', p_force: false }, '', { silent: true, prefer: '' });
+    } catch(e){ if (fsNotInstalled(e)) _fsMissing = true; else console.warn('Forecast snapshot not taken:', e); }
+  }
+  async function fsOpen(){
+    if (_fsMissing){ showStatus('Forecast snapshots are not installed on this database (sql/add_forecast_snapshots.sql).', 'error'); return; }
+    let list;
+    try { list = await api('forecast_snapshots', 'GET', null, 'select=*&order=for_month.desc'); }
+    catch(e){ if (fsNotInstalled(e)){ _fsMissing = true; showStatus('Forecast snapshots are not installed on this database (sql/add_forecast_snapshots.sql).', 'error'); } else showStatus('Could not load the snapshots: ' + e.message, 'error'); return; }
+    const keep = _fs && list.some(x => +x.id === +_fs.pick) ? _fs.pick : (list.length ? +list[0].id : null);
+    _fs = { list, pick: keep, lines: null, linesFor: null };
+    if (!document.querySelector('.rpp-fs')) showModal('<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">' +
+      '<div class="modal rpp-drill rpp-fs" style="width:1040px;"><div class="modal-header"><div><div class="modal-title">Forecast history</div>' +
+      '<div class="dd-scope">The pipeline as it stood at each month end, held against today — over the deals shown on the page, in the view (Revenue / Margin) selected.</div></div>' +
+      '<button class="modal-close" onclick="closeModal()">×</button></div><div class="modal-body" style="padding:0;" id="rpp-fs-body"></div></div></div>');
+    fsPaint();
+    if (_fs.pick) fsLoad(_fs.pick);
+  }
+  function fsPick(id){ if (!_fs) return; _fs.pick = +id || null; _fs.lines = null; fsPaint(); if (_fs.pick) fsLoad(_fs.pick); }
+  async function fsLoad(id){
+    try {
+      const rows = await apiGetAll('forecast_snapshot_lines', 'snapshot_id=eq.' + (+id) + '&select=deal_id,month,probability,secured,projected_revenue,projected_margin,actual_revenue,actual_margin,expected_revenue,expected_margin');
+      if (!_fs || _fs.pick !== +id) return;   // another snapshot was picked meanwhile
+      _fs.lines = rows; _fs.linesFor = +id; fsPaint();
+    } catch(e){ showStatus('Could not load the snapshot: ' + e.message, 'error'); }
+  }
+  async function fsTake(month, force){
+    const label = monthLabel(month);
+    if (force && !(await confirmDialog({ title: 'Re-take the snapshot', message: 'Replace the snapshot for ' + label + '? The forecast it holds is lost — history is meant to be taken once.', confirmLabel: 'Re-take', cancelLabel: 'Keep it', danger: true }))) return;
+    try {
+      if (MOCK) fsMockTake(month, 'manual', !!force);
+      else await api('rpc/take_forecast_snapshot', 'POST', { p_for_month: month, p_actor_id: currentUser.personId, p_trigger: 'manual', p_force: !!force }, '', { prefer: '' });
+      showStatus('Snapshot taken for ' + label, 'success');
+      await fsOpen();
+    } catch(e){ if (fsNotInstalled(e)) _fsMissing = true; showStatus('Snapshot not taken: ' + e.message, 'error'); }
+  }
+  // The comparison: per month, the chosen snapshot's expected figure against today's, over the deals
+  // shown on the page; deals the snapshot held that are not shown now, and deals shown now it did not
+  // hold, are totalled separately so the two columns can be reconciled.
+  function fsPaint(){
+    const el = document.getElementById('rpp-fs-body'); if (!el || !_fs) return;
+    const isM = metric === 'margin', pm = prevMonth();
+    const have = _fs.list.some(x => x.for_month === pm);
+    const opts = _fs.list.map(x => `<option value="${x.id}" ${+x.id === +_fs.pick ? 'selected' : ''}>${monthLabel(x.for_month)} — taken ${escHtml(String(x.taken_at || '').slice(0, 10))} (${escHtml(x.trigger)}) · ${x.deals} deals · expected ${fmt(+x.expected_revenue)}</option>`).join('');
+    let h = `<div class="fs-bar"><span class="tlbl">Snapshot</span>` +
+      (_fs.list.length ? `<select class="fs-sel" onchange="RPP.fsPick(this.value)">${opts}</select>` : `<span style="color:var(--text3);">None taken yet.</span>`) +
+      (fsCanTake() ? `<button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="RPP.fsTake('${pm}', ${have})">${have ? 'Re-take' : 'Take snapshot for'} ${monthLabel(pm)}</button>` : '') + `</div>`;
+    const snap = _fs.list.find(x => +x.id === +_fs.pick);
+    if (!snap){ el.innerHTML = h + `<div class="dd-note">A snapshot is taken on the 1st of every month for the month just ended${fsCanTake() ? ', or by the button above' : ''}.</div>`; return; }
+    if (!_fs.lines || _fs.linesFor !== +snap.id){ el.innerHTML = h + `<div class="dd-note">Loading ${monthLabel(snap.for_month)}…</div>`; return; }
+    const vis = visibleDeals(), visIds = new Set(vis.map(d => d.id));
+    const snapIds = new Set(_fs.lines.map(l => +l.deal_id));
+    const exp = l => +(isM ? l.expected_margin : l.expected_revenue) || 0;
+    const then = {}, months = new Set(); let dropped = 0, droppedN = new Set();
+    _fs.lines.forEach(l => { if (visIds.has(+l.deal_id)){ then[l.month] = (then[l.month] || 0) + exp(l); months.add(l.month); } else { dropped += exp(l); droppedN.add(+l.deal_id); } });
+    const now = {}, act = {}; let added = 0, addedN = new Set();
+    vis.forEach(d => FYS.forEach(f => f.months.forEach((mk, i) => {
+      const L = layers(d, f.key, i); const v = L.actual != null ? L.actual : L.expected;
+      if (!v && L.actual == null) return;
+      now[mk] = (now[mk] || 0) + v; months.add(mk);
+      if (L.actual != null) act[mk] = (act[mk] || 0) + L.actual;
+      if (!snapIds.has(d.id)) addedN.add(d.id), added += v;
+    })));
+    const tm = thisMonth(), keys = [...months].sort();
+    const chip = (a, b) => { if (!b) return '<span class="dd-how">–</span>'; const pct = Math.round((a - b) / Math.abs(b) * 100); return `<span class="dd-var ${pct > 0 ? 'up' : pct < 0 ? 'down' : ''}">${pct > 0 ? '▲' : pct < 0 ? '▼' : ''} ${Math.abs(pct)}%</span>`; };
+    let body = '', T = { then: 0, now: 0, act: 0, actThen: 0 }, fy = null, F = null;
+    const fyRow = () => F ? `<tr class="fy"><td>${getFYLabel(fy)}</td><td class="num">${fmt(F.then)}</td><td class="num">${fmt(F.now)}</td><td class="num">${chip(F.now, F.then)}</td><td class="num">${F.act ? fmt(F.act) : '–'}</td><td class="num">${F.act ? chip(F.act, F.actThen) : ''}</td></tr>` : '';
+    keys.forEach(mk => {
+      const f = fyOfMonth(mk);
+      if (f !== fy){ body += fyRow(); fy = f; F = { then: 0, now: 0, act: 0, actThen: 0 }; }
+      const t = then[mk] || 0, n = now[mk] || 0, a = act[mk];
+      F.then += t; F.now += n; T.then += t; T.now += n;
+      if (a != null){ F.act += a; F.actThen += t; T.act += a; T.actThen += t; }
+      body += `<tr class="${mk < tm ? 'past' : ''}"><td>${monthLabel(mk)}${mk < tm ? ' <span class="dd-how">past</span>' : mk === tm ? ' <span class="dd-how">this month</span>' : ''}</td>` +
+        `<td class="num">${fmt(t)}</td><td class="num">${fmt(n)}</td><td class="num">${chip(n, t)}</td><td class="num${a != null ? ' actual' : ''}">${a != null ? fmt(a) : '–'}</td><td class="num">${a != null ? chip(a, t) : ''}</td></tr>`;
+    });
+    body += fyRow();
+    const foot = `<tr class="tot"><td>TOTAL</td><td class="num">${fmt(T.then)}</td><td class="num">${fmt(T.now)}</td><td class="num">${chip(T.now, T.then)}</td><td class="num">${T.act ? fmt(T.act) : '–'}</td><td class="num">${T.act ? chip(T.act, T.actThen) : ''}</td></tr>`;
+    const recon = `<div class="dd-note">Both columns are over the ${vis.length} deal${vis.length === 1 ? '' : 's'} shown on the page. ` +
+      (droppedN.size ? `The snapshot also held ${droppedN.size} deal${droppedN.size === 1 ? '' : 's'} not shown now (lost, filtered out or deleted) worth ${fmt(dropped)} then. ` : '') +
+      (addedN.size ? `${addedN.size} deal${addedN.size === 1 ? '' : 's'} shown now ${addedN.size === 1 ? 'was' : 'were'} not in the snapshot, worth ${fmt(added)} today. ` : '') +
+      `Actual = what has been recorded since; its variance is against the forecast for the same months, the measure of how good the forecast was.</div>`;
+    el.innerHTML = h + `<table><thead><tr><th>Month</th><th class="num">Forecast then</th><th class="num">Expected now</th><th class="num">Now vs then</th><th class="num">Actual recorded</th><th class="num">Actual vs forecast</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>` + recon;
+  }
+  // Mock mode's take_forecast_snapshot: the same rule over the mock store.
+  function fsMockTake(month, trigger, force){
+    const db = _mockStore(); const snaps = db.forecast_snapshots || (db.forecast_snapshots = []); const lines = db.forecast_snapshot_lines || (db.forecast_snapshot_lines = []);
+    const ex = snaps.find(x => x.for_month === month);
+    if (ex){ if (!force) return ex.id; snaps.splice(snaps.indexOf(ex), 1); for (let i = lines.length - 1; i >= 0; i--) if (+lines[i].snapshot_id === +ex.id) lines.splice(i, 1); }
+    const id = snaps.reduce((m, x) => Math.max(m, +x.id), 0) + 1, lid = () => lines.reduce((m, x) => Math.max(m, +x.id), 0) + 1;
+    const streams = (db.revenue_streams || []).slice().sort((a, b) => a.id - b.id), rows = (db.revenue_stream_months || []).slice().sort((a, b) => (a.stream_id - b.stream_id) || ((a.id || 0) - (b.id || 0)));
+    const byDeal = new Map();
+    rows.forEach(r => { const st = streams.find(x => +x.id === +r.stream_id); if (!st) return;
+      let dm = byDeal.get(+st.deal_id); if (!dm){ dm = new Map(); byDeal.set(+st.deal_id, dm); }
+      const c = dm.get(r.month) || {}; const pick = (a, v) => a != null ? a : (v != null ? +v : a);
+      c.pr = pick(c.pr, r.opportunity_revenue); c.pm = pick(c.pm, r.opportunity_margin);
+      if (r.is_actual_revenue) c.ar = pick(c.ar, r.actual_revenue); if (r.is_actual_margin) c.am = pick(c.am, r.actual_margin);
+      dm.set(r.month, c); });
+    const head = { id, for_month: month, taken_at: new Date().toISOString(), taken_by: currentUser.personId, trigger, deals: 0, lines: 0, horizon_from: null, horizon_to: null, expected_revenue: 0, expected_margin: 0, secured_revenue: 0, actual_revenue: 0, note: null };
+    const dealIds = new Set();
+    (db.deals || []).forEach(d => { const dm = byDeal.get(+d.id); if (!dm) return; const prob = d.probability != null ? +d.probability : 0;
+      dm.forEach((c, mk) => { if (c.pr == null && c.pm == null && c.ar == null && c.am == null) return;
+        const er = c.ar != null ? c.ar : Math.round((c.pr || 0) * prob) / 100, em = c.am != null ? c.am : Math.round((c.pm || 0) * prob) / 100;
+        lines.push({ id: lid(), snapshot_id: id, deal_id: +d.id, deal_name: d.name, org_id: d.org_id, owner_id: d.owner_id, region_id: d.region_id, branch_id: d.branch_id, service_major_id: d.service_major_id, service_sub_id: d.service_sub_id, stage_id: d.stage_id, opportunity_type: d.opportunity_type || 'new_business', probability: prob, secured: prob >= 100, month: mk, projected_revenue: c.pr, projected_margin: c.pm, actual_revenue: c.ar, actual_margin: c.am, expected_revenue: er, expected_margin: em });
+        dealIds.add(+d.id); head.lines++; head.expected_revenue += er; head.expected_margin += em; if (c.ar != null) head.actual_revenue += c.ar; else if (prob >= 100) head.secured_revenue += (c.pr || 0);
+        head.horizon_from = head.horizon_from && head.horizon_from < mk ? head.horizon_from : mk; head.horizon_to = head.horizon_to && head.horizon_to > mk ? head.horizon_to : mk; }); });
+    head.deals = dealIds.size; snaps.push(head); return id;
+  }
+
   // ── trust flags (v7.10.01) ──
   async function loadTrust(){
     trustLoading = true;
@@ -19436,7 +19572,8 @@ const RPP = (function () {
           </div>
           <button class="btn-toggle" id="rpp-grpAll" style="display:none;" onclick="RPP.toggleAllGroups()">Expand all</button>
           <span class="hint">Past months show <b style="color:var(--green)">actuals</b>; future months show the selected projection.</span>
-          <button class="btn-toggle" id="rpp-trustToggle" style="margin-left:auto;" title="Flag the deals and months whose figure rests on an unchecked judgement" onclick="RPP.toggleTrust()">Trust flags ⚑</button>
+          <button class="btn-toggle" id="rpp-fsBtn" style="margin-left:auto;" title="The pipeline as it stood at each month end, against today" onclick="RPP.fsOpen()">Forecast history</button>
+          <button class="btn-toggle" id="rpp-trustToggle" title="Flag the deals and months whose figure rests on an unchecked judgement" onclick="RPP.toggleTrust()">Trust flags ⚑</button>
           <button class="btn-toggle" id="rpp-varToggle" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
         </div>
         <div id="rpp-truststrip" style="display:none;"></div>
@@ -19459,6 +19596,7 @@ const RPP = (function () {
       if (currentPage !== 'revenue_pipeline') return;   // the user has moved on while this loaded
       document.getElementById('page-sub').textContent = DEALS.length + ' deal' + (DEALS.length!==1?'s':'');
       chipsChanged();   // reconciles a Secured basis left from before the chips were reset, then paints
+      fsEnsure();       // v7.10.02: the month just ended gets its snapshot if the cron did not take it (silent, background)
     } catch(e){
       const note = document.getElementById('rpp-note');
       if (note) note.textContent = 'Error loading pipeline: ' + e.message;
@@ -19477,7 +19615,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, fsOpen, fsPick, fsTake, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
