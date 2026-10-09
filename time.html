@@ -1,0 +1,629 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003057">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/time.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/icons/favicon-48.png">
+<title>Focus Time</title>
+<style>
+  :root { --navy:#003057; --red:#FA0A11; --khaki:#C3B091; --bg:#F1F4F8; --card:#fff; --line:#D9E1E9; --text:#0E1C28; --text2:#41505F; --text3:#6B7A89; --ok:#166534; --warn:#9A3412; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; background:var(--bg); color:var(--text); font-family:Arial,Helvetica,sans-serif; font-size:16px; }
+  body { padding-bottom:calc(88px + env(safe-area-inset-bottom)); min-height:100vh; }
+  [hidden] { display:none !important; }
+  button { font:inherit; cursor:pointer; }
+  .bar { position:sticky; top:0; z-index:20; background:var(--navy); color:#fff; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; display:flex; align-items:center; gap:10px; }
+  .bar h1 { margin:0; font-size:17px; flex:1; }
+  .bar .who { font-size:12px; opacity:.8; }
+  .bar button { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:8px; padding:6px 10px; font-size:13px; }
+  #envbar { display:none; background:#F59E0B; color:#000; font:700 11px Arial; text-align:center; padding:3px; letter-spacing:.05em; }
+  .sync { margin:8px 16px 0; font-size:13px; padding:8px 12px; border-radius:8px; background:#FFF7ED; color:var(--warn); border:1px solid #FED7AA; display:flex; gap:8px; align-items:center; }
+  .sync button { margin-left:auto; border:1px solid var(--warn); background:#fff; color:var(--warn); border-radius:6px; padding:4px 10px; }
+  .week { display:flex; align-items:center; gap:8px; padding:12px 16px 4px; }
+  .week button { width:44px; height:44px; border-radius:10px; border:1px solid var(--line); background:#fff; font-size:20px; color:var(--navy); }
+  .week .t { flex:1; text-align:center; font-weight:700; color:var(--navy); }
+  .week .t small { display:block; font-weight:400; color:var(--text3); font-size:12px; }
+  .day { margin:10px 16px 0; }
+  .dayh { display:flex; align-items:center; font-size:13px; color:var(--text2); font-weight:700; text-transform:uppercase; letter-spacing:.04em; padding:0 2px 4px; }
+  .dayh .tot { margin-left:auto; text-transform:none; letter-spacing:0; color:var(--navy); }
+  .dayh .plus { margin-left:10px; background:none; border:none; color:var(--navy); font-size:22px; line-height:1; padding:0 4px; }
+  .entry { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin-bottom:8px; }
+  .entry.pend { border-left:4px solid #F59E0B; }
+  .entry .r1 { display:flex; gap:8px; align-items:baseline; }
+  .entry .job { font-weight:700; color:var(--navy); }
+  .entry .hrs { margin-left:auto; font-weight:700; white-space:nowrap; }
+  .entry .sub { color:var(--text2); font-size:14px; margin-top:2px; }
+  .entry .desc { color:var(--text); font-size:14px; margin-top:6px; white-space:pre-wrap; }
+  .chip { display:inline-block; font-size:11px; font-weight:700; border-radius:10px; padding:2px 8px; margin-top:8px; margin-right:6px; }
+  .c-draft { background:#E5E7EB; color:#374151; } .c-submitted { background:#DBEAFE; color:#1E40AF; }
+  .c-approved { background:#DCFCE7; color:var(--ok); } .c-returned { background:#FEE2E2; color:#991B1B; }
+  .c-pend { background:#FEF3C7; color:var(--warn); } .c-info { background:#F1F4F8; color:var(--text2); }
+  .empty { color:var(--text3); font-size:14px; padding:6px 2px; }
+  .foot { position:fixed; left:0; right:0; bottom:0; z-index:30; background:#fff; border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; align-items:center; }
+  .foot .sum { flex:1; font-size:13px; color:var(--text2); line-height:1.3; } .foot .sum b { color:var(--navy); font-size:16px; }
+  .btn { border:none; border-radius:12px; padding:0 18px; height:48px; font-weight:700; font-size:16px; }
+  .btn-red { background:var(--red); color:#fff; } .btn-navy { background:var(--navy); color:#fff; }
+  .btn-line { background:#fff; color:var(--navy); border:1px solid var(--navy); }
+  .btn[disabled] { opacity:.45; }
+  /* login */
+  .login { max-width:380px; margin:0 auto; padding:calc(40px + env(safe-area-inset-top)) 20px 20px; }
+  .login h2 { color:var(--navy); margin:0 0 4px; } .login p { color:var(--text2); margin:0 0 18px; }
+  label { display:block; font-size:13px; font-weight:700; color:var(--text2); margin:14px 0 6px; }
+  input, textarea, select { width:100%; font:inherit; font-size:16px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--text); }
+  textarea { min-height:96px; resize:vertical; }
+  .err { color:#991B1B; background:#FEE2E2; border-radius:8px; padding:8px 10px; font-size:14px; margin-top:12px; }
+  /* sheet */
+  .shade { position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:50; display:flex; align-items:flex-end; }
+  .sheet { background:#fff; width:100%; max-height:94vh; overflow-y:auto; border-radius:18px 18px 0 0; padding:16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .sheet h3 { margin:0 0 4px; color:var(--navy); }
+  .row2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .pick { display:block; width:100%; text-align:left; background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:48px; }
+  .pick .ph { color:var(--text3); }
+  .dur { font-size:14px; color:var(--text2); margin-top:8px; } .dur b { color:var(--navy); }
+  .mic { position:relative; } .mic button { position:absolute; right:8px; bottom:8px; width:44px; height:44px; border-radius:22px; border:1px solid var(--line); background:#fff; font-size:20px; }
+  .mic button.on { background:var(--red); color:#fff; border-color:var(--red); }
+  .acts { display:flex; gap:10px; margin-top:16px; } .acts .btn { flex:1; }
+  .full { position:fixed; inset:0; z-index:60; background:var(--bg); display:flex; flex-direction:column; }
+  .full .top { background:var(--navy); padding:calc(10px + env(safe-area-inset-top)) 12px 10px; display:flex; gap:8px; }
+  .full .top input { flex:1; } .full .top button { background:none; border:none; color:#fff; font-size:15px; }
+  .full .list { flex:1; overflow-y:auto; padding:8px 12px calc(20px + env(safe-area-inset-bottom)); }
+  .opt { display:block; width:100%; text-align:left; background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:6px; }
+  .opt b { color:var(--navy); } .opt span { display:block; color:var(--text2); font-size:14px; }
+  .grp { font-size:12px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.05em; margin:12px 2px 6px; }
+  /* day grid (Outlook-style) */
+  .seg { display:flex; gap:0; margin:6px 16px 0; border:1px solid var(--navy); border-radius:10px; overflow:hidden; }
+  .seg button { flex:1; border:none; background:#fff; color:var(--navy); height:38px; font-weight:700; }
+  .seg button.on { background:var(--navy); color:#fff; }
+  .strip { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin:10px 16px 0; }
+  .strip button { border:1px solid var(--line); background:#fff; border-radius:10px; padding:6px 0; color:var(--text2); font-size:11px; line-height:1.25; }
+  .strip button b { display:block; font-size:16px; color:var(--text); }
+  .strip button.on { background:var(--navy); border-color:var(--navy); color:#fff; } .strip button.on b { color:#fff; }
+  .strip button.today b { color:var(--red); } .strip button.on.today b { color:#fff; }
+  .strip button i { display:block; font-style:normal; font-size:10px; min-height:12px; opacity:.85; }
+  .dayhead { margin:10px 16px 4px; display:flex; align-items:baseline; font-weight:700; color:var(--navy); } .dayhead small { margin-left:auto; font-weight:400; color:var(--text3); font-size:12px; }
+  .grid { margin:0 16px; height:calc(100vh - 410px); min-height:300px; overflow-y:auto; background:#fff; border:1px solid var(--line); border-radius:12px; position:relative; -webkit-overflow-scrolling:touch; }
+  .gin { position:relative; user-select:none; -webkit-user-select:none; -webkit-touch-callout:none; cursor:crosshair; }
+  .hl { position:absolute; left:0; right:0; border-top:1px solid var(--line); pointer-events:none; } .hl span { position:absolute; left:6px; top:-8px; background:#fff; padding:0 3px; font-size:11px; color:var(--text3); }
+  .hh { position:absolute; left:50px; right:0; border-top:1px dotted #E5EAF0; pointer-events:none; }
+  .blk { position:absolute; left:52px; right:6px; border-radius:8px; padding:3px 8px; overflow:hidden; background:#DBEAFE; border:1px solid #93C5FD; border-left:5px solid var(--navy); color:var(--text); font-size:12px; line-height:1.25; cursor:pointer; }
+  .blk b { color:var(--navy); font-size:13px; } .blk.pend { border-left-color:#F59E0B; } .blk.st-approved { background:#DCFCE7; border-color:#86EFAC; border-left-color:var(--ok); }
+  .blk.st-submitted { background:#E0E7FF; border-color:#A5B4FC; } .blk.st-returned { background:#FEE2E2; border-color:#FCA5A5; border-left-color:var(--red); }
+  .rh { position:absolute; left:0; right:0; height:16px; touch-action:none; cursor:ns-resize; z-index:2; } .rh.s { top:-4px; } .rh.e { bottom:-4px; }
+  .rh::after { content:''; position:absolute; left:50%; margin-left:-14px; width:28px; height:4px; border-radius:2px; background:var(--navy); opacity:.55; } .rh.s::after { top:4px; } .rh.e::after { bottom:4px; }
+  .selbox { position:absolute; left:52px; right:6px; background:rgba(250,10,17,.14); border:2px solid var(--red); border-radius:8px; z-index:3; pointer-events:none; font-size:12px; font-weight:700; color:var(--red); padding:2px 8px; }
+  .nowl { position:absolute; left:46px; right:0; border-top:2px solid var(--red); pointer-events:none; z-index:1; } .nowl::before { content:''; position:absolute; left:-5px; top:-6px; width:9px; height:9px; border-radius:5px; background:var(--red); }
+  .chips { display:flex; gap:6px; margin-top:8px; flex-wrap:wrap; } .chips button { border:1px solid var(--line); background:#fff; border-radius:16px; padding:6px 12px; font-size:14px; color:var(--navy); }
+  .hint { margin:6px 16px 0; font-size:12px; color:var(--text3); }
+  .toast { position:fixed; left:16px; right:16px; bottom:calc(100px + env(safe-area-inset-bottom)); z-index:80; background:#111827; color:#fff; padding:12px 14px; border-radius:12px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="envbar"></div>
+
+<section id="v-login" hidden>
+  <div class="login">
+    <h2>Focus Time</h2>
+    <p>Capture your hours against the job. Sign in with your Focus username and password.</p>
+    <label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" autocorrect="off">
+    <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+    <div id="lerr" class="err" hidden></div>
+    <div class="acts"><button class="btn btn-red" id="lbtn" onclick="doLogin()">Sign in</button></div>
+  </div>
+</section>
+
+<section id="v-app" hidden>
+  <div class="bar"><h1>Focus Time</h1><span class="who" id="who"></span><button onclick="signOut()">Sign out</button></div>
+  <div id="syncbar" class="sync" hidden></div>
+  <div class="week"><button onclick="moveWeek(-1)" aria-label="Previous week">&#8249;</button><div class="t" id="wk"></div><button onclick="moveWeek(1)" aria-label="Next week">&#8250;</button></div>
+  <div class="seg" id="seg"><button id="seg-day" onclick="setView('day')">Day</button><button id="seg-list" onclick="setView('list')">Week list</button></div>
+  <div id="days"></div>
+  <div class="foot">
+    <div class="sum" id="wsum"></div>
+    <button class="btn btn-line" id="subbtn" onclick="submitWeek()">Submit week</button>
+    <button class="btn btn-red" onclick="openSheet()">+ Time</button>
+  </div>
+</section>
+
+<div id="overlay"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+'use strict';
+const API = '/.netlify/functions/sb/';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+
+let S = null;          // { t: token, u: userId, s: sessionId } — the same record the main app keeps
+let ME = { personId: null, name: '' };
+let JOBS = [];         // [{ key:'d12'|'w3', kind:'deal'|'work', id, number, client, title }]
+let SERVER = [];       // my entries as the server has them
+let PEND = LS.get('ts_pend', []);   // [{ uuid, id, op:'insert'|'update'|'delete', data, err }]
+let weekStart = mondayOf(new Date());
+let VIEW = LS.get('ts_view', 'day');      // 'day' = the Outlook-style grid, 'list' = the week as a list
+let SEL = null;                            // the day shown in the grid (YYYY-MM-DD)
+const HR = 48, STEP = 15;                  // pixels per hour, snap in minutes
+let flushing = false;
+
+// ── dates & times (local, no timezone arithmetic) ──────────────────────────────────────────
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const parseYmd = s => { const [y, m, d] = s.split('-').map(Number); return new Date(y, m - 1, d); };
+function mondayOf(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x; }
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const hm = t => String(t || '').slice(0, 5);
+const toMin = t => { const [h, m] = hm(t).split(':').map(Number); return h * 60 + m; };
+const fmtH = min => { min = Math.round(min || 0); return Math.floor(min / 60) + 'h' + (min % 60 ? ' ' + pad(min % 60) + 'm' : ''); };
+const dayName = d => d.toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'short' });
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+
+// ── session ─────────────────────────────────────────────────────────────────────────────────
+function loadSession() { const s = LS.get('focus_session', null); if (s && s.t) { S = s; return true; } return false; }
+function tokenPerson(t) { try { return JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).p || null; } catch (e) { return null; } }
+function showLogin(msg) {
+  S = null; LS.del('focus_session');
+  $('v-app').hidden = true; $('v-login').hidden = false;
+  const e = $('lerr'); e.hidden = !msg; e.textContent = msg || '';
+}
+async function doLogin() {
+  const username = $('u').value.trim(), password = $('p').value;
+  if (!username || !password) { showLogin('Enter your username and password'); return; }
+  $('lbtn').disabled = true;
+  try {
+    const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'login', username, password }) })).json();
+    if (!r || !r.ok) {
+      showLogin(r && r.mustSet ? 'You need to choose your own password first — sign in once on the main Focus site.' : ((r && r.error) || 'Sign-in failed'));
+      return;
+    }
+    S = { t: r.token, u: +r.userId, s: r.sessionId ? +r.sessionId : null };
+    LS.set('focus_session', S);
+    $('p').value = '';
+    await start();
+  } catch (e) { showLogin('Could not reach the server — you need a connection to sign in'); }
+  finally { $('lbtn').disabled = false; }
+}
+function signOut() {
+  if (PEND.length && !confirm(PEND.length + ' entr' + (PEND.length === 1 ? 'y has' : 'ies have') + ' not synced yet and will be lost if you sign out. Sign out anyway?')) return;
+  PEND = []; LS.del('ts_pend'); LS.del('ts_jobs'); showLogin('');
+}
+
+// ── API ─────────────────────────────────────────────────────────────────────────────────────
+class NetErr extends Error {}
+async function api(path, method, body, prefer) {
+  const h = { 'Content-Type': 'application/json', 'X-Focus-Token': S.t };
+  if (ME.personId) h['X-Actor-Id'] = String(ME.personId);
+  if (prefer) h['Prefer'] = prefer;
+  let r;
+  try { r = await fetch(API + path, { method: method || 'GET', headers: h, body: body ? JSON.stringify(body) : undefined }); }
+  catch (e) { throw new NetErr('offline'); }
+  const text = await r.text();
+  if (r.status === 401) { showLogin('Your session expired — sign in again.'); throw new Error('auth'); }
+  if (!r.ok) {
+    let m = text; try { const j = JSON.parse(text); m = j.message || j.error || m; } catch (e) {}
+    const err = new Error(m); err.status = r.status; throw err;
+  }
+  return text ? JSON.parse(text) : [];
+}
+
+// ── start-up ────────────────────────────────────────────────────────────────────────────────
+async function start() {
+  $('v-login').hidden = true; $('v-app').hidden = false;
+  ME.personId = tokenPerson(S.t);
+  try {
+    const u = (await api('system_users?id=eq.' + S.u + '&select=person_id,people(first_name,last_name),user_roles(roles(name,role_permissions(permissions(name)))),user_permission_overrides(granted,permissions(name))'))[0];
+    if (!u) throw new Error('auth');
+    ME.personId = u.person_id; ME.name = u.people ? [u.people.first_name, u.people.last_name].filter(Boolean).join(' ') : '';
+    const perms = new Set(); let admin = false;
+    (u.user_roles || []).forEach(ur => { if (ur.roles) { if (ur.roles.name === 'Admin') admin = true; (ur.roles.role_permissions || []).forEach(rp => rp.permissions && perms.add(rp.permissions.name)); } });
+    (u.user_permission_overrides || []).forEach(o => { if (o.permissions) { if (o.granted) perms.add(o.permissions.name); else perms.delete(o.permissions.name); } });
+    ME.can = admin || perms.has('all') || perms.has('capture_time');
+    LS.set('ts_me', ME);
+  } catch (e) {
+    if (e.message === 'auth') return;
+    const c = LS.get('ts_me', null); if (c && c.personId) ME = c;   // offline: last known identity
+  }
+  if (!ME.personId) { showLogin('Could not identify your account — try again with a connection.'); return; }
+  if (ME.can === false) { showLogin('Your login does not have time capture switched on. Ask an administrator for the capture_time permission.'); return; }
+  $('who').textContent = ME.name;
+  await refresh();
+}
+async function refresh() {
+  JOBS = LS.get('ts_jobs', []); SERVER = LS.get('ts_server', []);
+  paint();
+  try {
+    await flush();
+    await Promise.all([loadJobs(), loadEntries()]);
+  } catch (e) { /* offline: the cached view stays */ }
+  paint();
+}
+async function loadJobs() {
+  const [deals, works] = await Promise.all([
+    api('deals?job_number=not.is.null&select=id,name,job_number,org_id,organisations(name)&order=job_number.asc'),
+    api('work_projects?active=eq.true&select=id,name,kind&order=sort_order.asc.nullslast,name.asc'),
+  ]);
+  JOBS = deals.filter(d => String(d.job_number || '').trim()).map(d => ({ key: 'd' + d.id, kind: 'deal', id: +d.id, number: String(d.job_number).trim(), client: (d.organisations && d.organisations.name) || '', title: d.name || '' }))
+    .concat(works.map(w => ({ key: 'w' + w.id, kind: 'work', id: +w.id, number: '', client: 'Internal', title: w.name })));
+  LS.set('ts_jobs', JOBS);
+}
+async function loadEntries() {
+  const from = ymd(addDays(new Date(), -70));
+  SERVER = await api('timesheet_entries?person_id=eq.' + ME.personId + '&entry_date=gte.' + from + '&select=*&order=entry_date.desc,start_time.desc&limit=1000');
+  LS.set('ts_server', SERVER);
+}
+
+// ── the merged view: server rows overlaid with what is waiting to sync ──────────────────────
+function viewRows() {
+  const rows = new Map();
+  SERVER.forEach(r => rows.set('i' + r.id, Object.assign({}, r)));
+  PEND.forEach(p => {
+    if (p.op === 'delete') { rows.delete('i' + p.id); return; }
+    const k = p.id ? 'i' + p.id : 'u' + p.uuid;
+    const base = rows.get(k) || { id: p.id || null, client_uuid: p.uuid, status: 'draft' };
+    rows.set(k, Object.assign(base, p.data, { _pend: p }));
+  });
+  return [...rows.values()];
+}
+const jobOf = r => JOBS.find(j => r.deal_id ? j.key === 'd' + r.deal_id : j.key === 'w' + r.work_project_id);
+const locked = r => r.status === 'submitted' || r.status === 'approved';
+
+// ── painting ────────────────────────────────────────────────────────────────────────────────
+function paint() {
+  const all = viewRows(), ws = ymd(weekStart), we = ymd(addDays(weekStart, 6));
+  $('wk').innerHTML = esc(weekStart.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' })) + ' – ' + esc(addDays(weekStart, 6).toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }))
+    + '<small>' + (ymd(mondayOf(new Date())) === ws ? 'This week' : 'Week of ' + esc(ws)) + '</small>';
+  const wrows = all.filter(r => r.entry_date >= ws && r.entry_date <= we);
+  const mins = r => r.minutes != null ? r.minutes : Math.max(0, toMin(r.end_time) - toMin(r.start_time));
+  if (!SEL || SEL < ws || SEL > we) SEL = (ymd(new Date()) >= ws && ymd(new Date()) <= we) ? ymd(new Date()) : ws;
+  $('seg-day').className = VIEW === 'day' ? 'on' : ''; $('seg-list').className = VIEW === 'list' ? 'on' : '';
+  if (VIEW === 'day') { paintDay(wrows, mins); footer(wrows, mins); return; }
+  let html = '';
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(weekStart, i), key = ymd(d);
+    const rs = wrows.filter(r => r.entry_date === key).sort((a, b) => hm(a.start_time).localeCompare(hm(b.start_time)));
+    const tot = rs.reduce((t, r) => t + mins(r), 0);
+    html += '<div class="day"><div class="dayh"><span>' + esc(dayName(d)) + '</span><span class="tot">' + (tot ? fmtH(tot) : '') + '</span><button class="plus" onclick="openSheet(null,\'' + key + '\')" aria-label="Add time on this day">+</button></div>';
+    if (!rs.length) html += '<div class="empty">Nothing captured</div>';
+    rs.forEach(r => {
+      const j = jobOf(r), st = r.status || 'draft', ref = r.id ? 'i' + r.id : 'u' + r.client_uuid;
+      const cls = [];
+      if (r.normal_minutes != null) { if (r.normal_minutes) cls.push('normal ' + fmtH(r.normal_minutes)); if (r.after_minutes) cls.push('after hours ' + fmtH(r.after_minutes)); if (r.holiday_minutes) cls.push('public holiday ' + fmtH(r.holiday_minutes)); }
+      html += '<div class="entry' + (r._pend ? ' pend' : '') + '" onclick="openSheet(\'' + ref + '\')">'
+        + '<div class="r1"><span class="job">' + esc(j ? (j.number || j.title) : 'Job') + '</span><span class="hrs">' + esc(hm(r.start_time)) + '–' + esc(hm(r.end_time)) + ' · ' + fmtH(mins(r)) + '</span></div>'
+        + '<div class="sub">' + esc(j ? (j.number ? j.client + ' — ' + j.title : j.title) : '') + '</div>'
+        + (r.description ? '<div class="desc">' + esc(r.description) + '</div>' : '')
+        + '<span class="chip c-' + esc(st) + '">' + esc(st.charAt(0).toUpperCase() + st.slice(1)) + '</span>'
+        + (r._pend ? '<span class="chip c-pend">' + (r._pend.err ? 'Not saved: ' + esc(r._pend.err) : 'Waiting to sync') + '</span>' : '')
+        + (r.km ? '<span class="chip c-info">' + esc(+r.km) + ' km</span>' : '')
+        + (cls.length ? '<span class="chip c-info">' + esc(cls.join(' · ')) + '</span>' : '')
+        + (st === 'returned' && r.return_reason ? '<div class="desc" style="color:#991B1B;">Returned: ' + esc(r.return_reason) + '</div>' : '')
+        + '</div>';
+    });
+    html += '</div>';
+  }
+  $('days').innerHTML = html;
+  footer(wrows, mins);
+}
+function footer(wrows, mins) {
+  const total = wrows.reduce((t, r) => t + mins(r), 0), open = wrows.filter(r => !locked(r)).length;
+  $('wsum').innerHTML = '<b>' + fmtH(total) + '</b> this week<br>' + (open ? open + ' to submit' : (wrows.length ? 'All submitted' : ''));
+  $('subbtn').disabled = !open || PEND.length > 0;
+  const sb = $('syncbar'), bad = PEND.filter(p => p.err).length;
+  sb.hidden = !PEND.length;
+  if (PEND.length) sb.innerHTML = '<span>' + (bad ? bad + ' entr' + (bad === 1 ? 'y' : 'ies') + ' could not be saved — tap it to fix. ' : '') + (PEND.length - bad ? (PEND.length - bad) + ' waiting to sync.' : '') + '</span><button onclick="flushNow()">Sync now</button>';
+}
+function moveWeek(n) { weekStart = addDays(weekStart, 7 * n); if (SEL) SEL = ymd(addDays(parseYmd(SEL), 7 * n)); paint(); }
+function setView(v) { VIEW = v; LS.set('ts_view', v); paint(); }
+function setDay(d) { SEL = d; paint(); }
+
+// ── the day grid: a calendar day like Outlook's schedule ───────────────────────────────────
+// Tap an empty slot for a new hour at that time; press and hold, then drag, to sweep out the
+// exact span (on a computer simply drag); drag the top or bottom edge of a block to resize it.
+// Everything snaps to 15 minutes. The rules are the same as the sheet's: no overlap, no future.
+const snap = m => Math.round(m / STEP) * STEP;
+const hhmm = m => pad(Math.floor(m / 60)) + ':' + pad(m % 60);
+let GRID = { drag: null, suppress: false };
+function paintDay(wrows, mins) {
+  const today = ymd(new Date());
+  const rs = wrows.filter(r => r.entry_date === SEL).sort((a, b) => hm(a.start_time).localeCompare(hm(b.start_time)));
+  const prev = document.getElementById('grid');
+  const keepTop = prev ? prev.scrollTop : null;
+  let strip = '<div class="strip">';
+  for (let i = 0; i < 7; i++) {
+    const d = addDays(weekStart, i), k = ymd(d), t = wrows.filter(r => r.entry_date === k).reduce((a, r) => a + mins(r), 0);
+    strip += '<button class="' + (k === SEL ? 'on ' : '') + (k === today ? 'today' : '') + '" onclick="setDay(\'' + k + '\')">' + esc(d.toLocaleDateString('en-ZA', { weekday: 'short' })) + '<b>' + d.getDate() + '</b><i>' + (t ? fmtH(t) : '') + '</i></button>';
+  }
+  strip += '</div>';
+  const dayTot = rs.reduce((a, r) => a + mins(r), 0);
+  let g = '<div class="dayhead">' + esc(dayName(parseYmd(SEL))) + '<small>' + (dayTot ? fmtH(dayTot) + ' captured' : 'Nothing captured') + '</small></div>'
+    + '<div class="grid" id="grid"><div class="gin" id="gin" style="height:' + (24 * HR) + 'px">';
+  for (let h = 0; h < 24; h++) g += '<div class="hl" style="top:' + (h * HR) + 'px"><span>' + pad(h) + ':00</span></div><div class="hh" style="top:' + (h * HR + HR / 2) + 'px"></div>';
+  rs.forEach(r => {
+    const j = jobOf(r), st = r.status || 'draft', ref = r.id ? 'i' + r.id : 'u' + r.client_uuid;
+    const a = toMin(r.start_time), b = toMin(r.end_time), top = a / 60 * HR, h = Math.max(22, (b - a) / 60 * HR - 2), editable = !locked(r);
+    g += '<div class="blk st-' + esc(st) + (r._pend ? ' pend' : '') + '" data-ref="' + esc(ref) + '" style="top:' + top + 'px;height:' + h + 'px" onclick="blkTap(event,\'' + esc(ref) + '\')">'
+      + (editable ? '<div class="rh s" data-ref="' + esc(ref) + '" data-edge="s"></div><div class="rh e" data-ref="' + esc(ref) + '" data-edge="e"></div>' : '')
+      + '<b>' + esc(j ? (j.number || j.title) : 'Job') + '</b> <span>' + esc(hm(r.start_time)) + '–' + esc(hm(r.end_time)) + '</span>'
+      + (h > 40 ? '<br>' + esc(j ? (j.number ? j.client : 'Internal') : '') : '') + (h > 58 && r.description ? '<br>' + esc(r.description) : '') + '</div>';
+  });
+  if (SEL === today) { const n = new Date(); g += '<div class="nowl" style="top:' + ((n.getHours() * 60 + n.getMinutes()) / 60 * HR) + 'px"></div>'; }
+  g += '<div class="selbox" id="selbox" hidden></div></div></div><div class="hint">Tap a time to add. Hold and drag to choose the span. Drag a block\'s edge to resize it.</div>';
+  $('days').innerHTML = strip + g;
+  const grid = $('grid');
+  if (keepTop != null) grid.scrollTop = keepTop;
+  else { const first = rs.length ? toMin(rs[0].start_time) : 7 * 60; grid.scrollTop = Math.max(0, first / 60 * HR - 30); }
+  bindGrid();
+}
+const gridMin = cy => { const gin = $('gin'), y = cy - gin.getBoundingClientRect().top; return Math.max(0, Math.min(24 * 60, y / HR * 60)); };
+function dayRowsSel(exceptRef) { return viewRows().filter(r => r.entry_date === SEL && (r.id ? 'i' + r.id : 'u' + r.client_uuid) !== exceptRef); }
+// A requested span, trimmed so it never touches another entry; null when there is no room.
+function clampSpan(s, e, exceptRef) {
+  const others = dayRowsSel(exceptRef);
+  if (others.some(r => toMin(r.start_time) <= s && toMin(r.end_time) > s)) return null;
+  others.forEach(r => { const rs = toMin(r.start_time); if (rs >= s && rs < e) e = rs; });
+  e = Math.min(e, 23 * 60 + 59);
+  return e - s >= STEP ? [s, e] : null;
+}
+function showSel(s, e) {
+  const b = $('selbox'); b.hidden = false; b.style.top = (s / 60 * HR) + 'px'; b.style.height = Math.max(8, (e - s) / 60 * HR) + 'px';
+  b.textContent = hhmm(s) + '–' + hhmm(e) + ' · ' + fmtH(e - s);
+}
+function newFromSpan(a, b) {
+  if (SEL > ymd(new Date())) { toast('You cannot capture time for a future day'); return; }
+  let s = snap(Math.min(a, b)), e = snap(Math.max(a, b));
+  if (e - s < STEP) { s = Math.min(snap(a), 23 * 60); e = s + 60; }   // a plain tap = one hour from that slot
+  const span = clampSpan(s, e, null);
+  if (!span) { toast('No free time there — it overlaps another entry'); return; }
+  openSheet(null, SEL, hhmm(span[0]), hhmm(span[1]));
+}
+function blkTap(ev, ref) { ev.stopPropagation(); if (GRID.suppress) return; openSheet(ref); }
+function bindGrid() {
+  const gin = $('gin'); if (!gin) return;
+  const pt = ev => (ev.touches && ev.touches[0]) || (ev.changedTouches && ev.changedTouches[0]) || ev;
+  let press = null;   // a touch that may become a tap or a hold-and-drag sweep
+  const finish = () => {
+    const d = GRID.drag; if (!d) return;
+    GRID.drag = null; $('selbox').hidden = true;
+    GRID.suppress = true; setTimeout(() => GRID.suppress = false, 350);
+    if (d.kind === 'new') newFromSpan(d.a, d.b); else resizeEnd(d);
+  };
+  const move = ev => {
+    const d = GRID.drag; if (!d) return;
+    if (ev.cancelable) ev.preventDefault();
+    const m = gridMin(pt(ev).clientY);
+    if (d.kind === 'new') { d.b = m; const s = snap(Math.min(d.a, m)), e = Math.max(snap(Math.max(d.a, m)), s + STEP); showSel(s, e); }
+    else resizeMove(d, m);
+  };
+  // touch
+  gin.addEventListener('touchstart', ev => {
+    const t = ev.target, c = pt(ev);
+    if (t.classList.contains('rh')) { ev.preventDefault(); startResize(t); return; }
+    if (t.closest('.blk')) return;
+    press = { x: c.clientX, y: c.clientY, at: Date.now(), moved: false };
+    press.timer = setTimeout(() => { if (press && !press.moved) { if (navigator.vibrate) navigator.vibrate(20); const m = gridMin(press.y); GRID.drag = { kind: 'new', a: m, b: m }; showSel(snap(m), snap(m) + 60); } }, 350);
+  }, { passive: false });
+  gin.addEventListener('touchmove', ev => {
+    const c = pt(ev);
+    if (press && !GRID.drag && (Math.abs(c.clientX - press.x) > 8 || Math.abs(c.clientY - press.y) > 8)) { press.moved = true; clearTimeout(press.timer); }
+    if (GRID.drag) move(ev);
+  }, { passive: false });
+  gin.addEventListener('touchend', ev => {
+    if (GRID.drag) { if (press) clearTimeout(press.timer); press = null; if (ev.cancelable) ev.preventDefault(); finish(); return; }
+    if (press && !press.moved && Date.now() - press.at < 350) {
+      clearTimeout(press.timer); const y = press.y; press = null;
+      if (ev.cancelable) ev.preventDefault();
+      GRID.suppress = true; setTimeout(() => GRID.suppress = false, 350);
+      const m = gridMin(y); newFromSpan(m, m); return;
+    }
+    if (press) clearTimeout(press.timer); press = null;
+  }, { passive: false });
+  gin.addEventListener('touchcancel', () => { if (press) clearTimeout(press.timer); press = null; if (GRID.drag) { GRID.drag = null; $('selbox').hidden = true; } });
+  // mouse
+  gin.addEventListener('mousedown', ev => {
+    if (ev.button !== 0) return;
+    if (ev.target.classList.contains('rh')) { ev.preventDefault(); startResize(ev.target); GRID.drag.mouse = true; }
+    else if (!ev.target.closest('.blk')) { const m = gridMin(ev.clientY); GRID.drag = { kind: 'new', a: m, b: m, mouse: true }; showSel(snap(m), snap(m) + 60); }
+  });
+  window.onmousemove = ev => { if (GRID.drag && GRID.drag.mouse) move(ev); };
+  window.onmouseup = () => { if (GRID.drag && GRID.drag.mouse) finish(); };
+}
+// resizing an existing block by its top (s) or bottom (e) edge
+function startResize(handle) {
+  const ref = handle.dataset.ref, r = viewRows().find(x => (x.id ? 'i' + x.id : 'u' + x.client_uuid) === ref); if (!r) return;
+  GRID.drag = { kind: 'size', ref, r, edge: handle.dataset.edge, s: toMin(r.start_time), e: toMin(r.end_time), blk: handle.closest('.blk') };
+}
+function resizeMove(d, m) {
+  const others = dayRowsSel(d.ref);
+  let s = d.s, e = d.e;
+  if (d.edge === 'e') { e = Math.max(snap(m), s + STEP); others.forEach(o => { const os = toMin(o.start_time); if (os >= s && os < e) e = os; }); e = Math.min(e, 23 * 60 + 59); }
+  else { s = Math.min(snap(m), e - STEP); others.forEach(o => { const oe = toMin(o.end_time); if (oe <= e && oe > s) s = oe; }); s = Math.max(0, s); }
+  d.ns = s; d.ne = e;
+  d.blk.style.top = (s / 60 * HR) + 'px'; d.blk.style.height = Math.max(22, (e - s) / 60 * HR - 2) + 'px';
+  showSel(s, e);
+}
+function resizeEnd(d) {
+  const s = d.ns != null ? d.ns : d.s, e = d.ne != null ? d.ne : d.e;
+  if (s === d.s && e === d.e) { paint(); return; }
+  queueUpdate(d.r, Object.assign(rowData(d.r), { start_time: hhmm(s), end_time: hhmm(e) }));
+  savePend(); paint(); flush();
+}
+const rowData = r => ({ entry_date: r.entry_date, start_time: hm(r.start_time), end_time: hm(r.end_time), deal_id: r.deal_id || null, work_project_id: r.work_project_id || null, description: r.description || '', km: r.km == null ? null : r.km, pmsa_ref: r.pmsa_ref || null });
+function queueUpdate(r, data) {
+  if (!r.id) { const p = PEND.find(x => x.uuid === r.client_uuid); if (p) { p.data = data; p.err = null; } }                       // still unsynced: edit the queued insert
+  else { PEND = PEND.filter(p => !(p.id === r.id && p.op === 'update')); PEND.push({ uuid: r.client_uuid, id: r.id, op: 'update', data }); }
+}
+
+// ── sync ────────────────────────────────────────────────────────────────────────────────────
+function savePend() { LS.set('ts_pend', PEND); }
+async function flushNow() { const had = PEND.length; await flush(true); await loadEntries().catch(() => {}); paint(); if (had && !PEND.length) toast('Synced'); }
+async function flush(retryErrors) {
+  if (flushing || !S) return;
+  flushing = true;
+  try {
+    for (const p of PEND.slice()) {
+      if (p.err && !retryErrors) continue;
+      try {
+        if (p.op === 'insert') {
+          await api('timesheet_entries?on_conflict=client_uuid', 'POST', Object.assign({ client_uuid: p.uuid, person_id: ME.personId, created_by: ME.personId }, p.data), 'resolution=ignore-duplicates,return=representation');
+        } else if (p.op === 'update') {
+          await api('timesheet_entries?id=eq.' + p.id, 'PATCH', p.data, 'return=representation');
+        } else if (p.op === 'delete') {
+          await api('timesheet_entries?id=eq.' + p.id, 'DELETE');
+        }
+        PEND = PEND.filter(x => x !== p); savePend();
+      } catch (e) {
+        if (e instanceof NetErr || e.message === 'auth' || (e.status >= 500)) break;   // try again later
+        p.err = e.message || 'refused'; savePend();                                      // the server said no: the person must fix it
+      }
+    }
+  } finally { flushing = false; }
+  if (!PEND.length) { try { await loadEntries(); } catch (e) {} }
+  paint();
+}
+addEventListener('online', () => { if (S) flushNow(); });
+
+// ── the entry sheet ─────────────────────────────────────────────────────────────────────────
+let ED = null;   // { ref, jobKey, date, ...}
+function openSheet(ref, date, startT, endT) {
+  let r = null;
+  if (ref) r = viewRows().find(x => (x.id ? 'i' + x.id : 'u' + x.client_uuid) === ref);
+  const dayRows = date ? viewRows().filter(x => x.entry_date === date) : [];
+  const last = viewRows().sort((a, b) => (b.entry_date + hm(b.end_time)).localeCompare(a.entry_date + hm(a.end_time)))[0];
+  const d = r ? r.entry_date : (date || ymd(new Date()));
+  const endsToday = viewRows().filter(x => x.entry_date === d).map(x => hm(x.end_time)).sort().pop();
+  ED = {
+    ref: ref || null, row: r, lock: r ? locked(r) : false,
+    jobKey: r ? (jobOf(r) || {}).key : (last ? (jobOf(last) || {}).key : null),
+    date: d,
+    start: r ? hm(r.start_time) : (startT || endsToday || '08:00'),
+    end: r ? hm(r.end_time) : (endT || ''),
+    desc: r ? (r.description || '') : '', km: r && r.km != null ? r.km : '', pmsa: r ? (r.pmsa_ref || '') : '',
+  };
+  paintSheet();
+}
+function paintSheet() {
+  const e = ED, j = JOBS.find(x => x.key === e.jobKey), ro = e.lock ? ' disabled' : '';
+  $('overlay').innerHTML = '<div class="shade" onclick="if(event.target===this)closeSheet()"><div class="sheet">'
+    + '<h3>' + (e.row ? (e.lock ? 'Entry (' + esc(e.row.status) + ')' : 'Edit time') : 'Add time') + '</h3>'
+    + '<label>Job</label><button class="pick" onclick="openPicker()"' + ro + '>' + (j ? '<b>' + esc(j.number || j.title) + '</b><br><span style="color:var(--text2);font-size:14px;">' + esc(j.number ? j.client + ' — ' + j.title : 'Internal') + '</span>' : '<span class="ph">Choose the job…</span>') + '</button>'
+    + '<label for="e-date">Date</label><input id="e-date" type="date" value="' + esc(e.date) + '" max="' + esc(ymd(new Date())) + '" onchange="ED.date=this.value;durTxt()"' + ro + '>'
+    + '<div class="row2"><div><label for="e-start">Start</label><input id="e-start" type="time" step="900" value="' + esc(e.start) + '" onchange="ED.start=this.value;durTxt()"' + ro + '></div>'
+    + '<div><label for="e-end">Finish</label><input id="e-end" type="time" step="900" value="' + esc(e.end) + '" onchange="ED.end=this.value;durTxt()"' + ro + '></div></div>'
+    + (e.lock ? '' : '<div class="acts" style="margin-top:8px;"><button class="btn btn-line" style="height:40px;font-size:14px;" onclick="setNow(\'start\')">Start = now</button><button class="btn btn-line" style="height:40px;font-size:14px;" onclick="setNow(\'end\')">Finish = now</button></div>')
+    + (e.lock ? '' : '<div class="chips">' + [[30, '30 min'], [60, '1 h'], [120, '2 h'], [240, '4 h'], [480, '8 h']].map(c => '<button onclick="setDur(' + c[0] + ')">' + c[1] + '</button>').join('') + '</div>')
+    + '<div class="dur" id="dur"></div>'
+    + '<label for="e-desc">What did you do?</label><div class="mic"><textarea id="e-desc" oninput="ED.desc=this.value" placeholder="Type, or tap the microphone on your keyboard to dictate"' + ro + '>' + esc(e.desc) + '</textarea>'
+    + (e.lock || !(window.SpeechRecognition || window.webkitSpeechRecognition) ? '' : '<button id="micbtn" onclick="toggleMic()" aria-label="Dictate">&#127908;</button>') + '</div>'
+    + '<div class="row2"><div><label for="e-km">Kilometres</label><input id="e-km" type="number" inputmode="decimal" min="0" step="0.1" value="' + esc(e.km) + '" oninput="ED.km=this.value"' + ro + '></div>'
+    + '<div><label for="e-pmsa">PMSA / job card no.</label><input id="e-pmsa" value="' + esc(e.pmsa) + '" oninput="ED.pmsa=this.value"' + ro + '></div></div>'
+    + (e.row && e.row.status === 'returned' && e.row.return_reason ? '<div class="err">Returned: ' + esc(e.row.return_reason) + '</div>' : '')
+    + (e.row && e.row._pend && e.row._pend.err ? '<div class="err">Not saved: ' + esc(e.row._pend.err) + '</div>' : '')
+    + '<div id="serr" class="err" hidden></div>'
+    + '<div class="acts">' + (e.row && !e.lock ? '<button class="btn btn-line" onclick="delEntry()">Delete</button>' : '') + '<button class="btn btn-line" onclick="closeSheet()">' + (e.lock ? 'Close' : 'Cancel') + '</button>'
+    + (e.lock ? '' : '<button class="btn btn-red" onclick="saveEntry()">Save</button>') + '</div>'
+    + '</div></div>';
+  durTxt();
+}
+function closeSheet() { stopMic(); ED = null; $('overlay').innerHTML = ''; }
+function durTxt() {
+  const el = $('dur'); if (!el || !ED) return;
+  if (!ED.start || !ED.end) { el.textContent = ''; return; }
+  const m = toMin(ED.end) - toMin(ED.start);
+  el.innerHTML = m > 0 ? 'Duration <b>' + fmtH(m) + '</b>' : '<span style="color:#991B1B;">Finish must be after the start (for a night shift, capture it as two entries)</span>';
+}
+function setDur(m) {
+  if (!ED.start) { ED.start = '08:00'; $('e-start').value = '08:00'; }
+  const t = Math.min(toMin(ED.start) + m, 23 * 60 + 59); ED.end = hhmm(t); $('e-end').value = ED.end; durTxt();
+}
+function setNow(w) { const n = new Date(), v = pad(n.getHours()) + ':' + pad(Math.round(n.getMinutes() / 5) * 5 % 60); ED[w] = v; if (w === 'start') $('e-start').value = v; else $('e-end').value = v; durTxt(); }
+function sheetErr(m) { const e = $('serr'); e.hidden = !m; e.textContent = m || ''; }
+function saveEntry() {
+  const e = ED;
+  if (!e.jobKey) return sheetErr('Choose the job first');
+  if (!e.date) return sheetErr('Choose the date');
+  if (e.date > ymd(new Date())) return sheetErr('You cannot capture time for a future date');
+  if (!e.start || !e.end) return sheetErr('Enter the start and finish times');
+  if (toMin(e.end) <= toMin(e.start)) return sheetErr('Finish must be after the start');
+  if (!String(e.desc || '').trim()) return sheetErr('Add a short description of the work');
+  const overlap = viewRows().find(x => x.entry_date === e.date && (x.id ? 'i' + x.id : 'u' + x.client_uuid) !== e.ref && toMin(x.start_time) < toMin(e.end) && toMin(x.end_time) > toMin(e.start));
+  if (overlap) return sheetErr('This overlaps another entry on that day (' + hm(overlap.start_time) + '–' + hm(overlap.end_time) + ')');
+  const j = JOBS.find(x => x.key === e.jobKey);
+  const data = { entry_date: e.date, start_time: e.start, end_time: e.end, deal_id: j.kind === 'deal' ? j.id : null, work_project_id: j.kind === 'work' ? j.id : null,
+    description: String(e.desc).trim(), km: e.km === '' ? null : +e.km, pmsa_ref: String(e.pmsa || '').trim() || null };
+  const r = e.row;
+  if (!r) PEND.push({ uuid: uuid(), id: null, op: 'insert', data });
+  else queueUpdate(r, data);
+  savePend(); closeSheet(); paint(); flush();
+}
+function delEntry() {
+  const r = ED.row; if (!r || !confirm('Delete this entry?')) return;
+  if (!r.id) PEND = PEND.filter(p => p.uuid !== r.client_uuid);
+  else { PEND = PEND.filter(p => p.id !== r.id); PEND.push({ uuid: r.client_uuid, id: r.id, op: 'delete' }); }
+  savePend(); closeSheet(); paint(); flush();
+}
+
+// ── job picker ──────────────────────────────────────────────────────────────────────────────
+function openPicker() {
+  if (ED.lock) return;
+  const used = new Map(); viewRows().forEach(r => { const j = jobOf(r); if (j) used.set(j.key, Math.max(used.get(j.key) || 0, +r.entry_date.replace(/-/g, ''))); });
+  window._recent = [...used.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(x => x[0]);
+  const box = document.createElement('div'); box.className = 'full'; box.id = 'picker';
+  box.innerHTML = '<div class="top"><input id="q" placeholder="Search job number, client or title" autocomplete="off" oninput="pickList()"><button onclick="closePicker()">Cancel</button></div><div class="list" id="plist"></div>';
+  document.body.appendChild(box); pickList(); $('q').focus();
+}
+function closePicker() { const p = $('picker'); if (p) p.remove(); }
+function pickList() {
+  const q = ($('q').value || '').toLowerCase().trim(), opt = j => '<button class="opt" onclick="pickJob(\'' + j.key + '\')"><b>' + esc(j.number || j.title) + '</b><span>' + esc(j.number ? j.client + ' — ' + j.title : 'Internal') + '</span></button>';
+  const hit = j => !q || (j.number + ' ' + j.client + ' ' + j.title).toLowerCase().includes(q);
+  const rec = !q ? window._recent.map(k => JOBS.find(j => j.key === k)).filter(Boolean) : [];
+  const deals = JOBS.filter(j => j.kind === 'deal' && hit(j)), works = JOBS.filter(j => j.kind === 'work' && hit(j));
+  $('plist').innerHTML = (rec.length ? '<div class="grp">Recent</div>' + rec.map(opt).join('') : '')
+    + (deals.length ? '<div class="grp">Projects and contracts</div>' + deals.map(opt).join('') : '')
+    + (works.length ? '<div class="grp">Internal</div>' + works.map(opt).join('') : '')
+    + (!deals.length && !works.length ? '<div class="empty">' + (JOBS.length ? 'No job matches “' + esc(q) + '”.' : 'No jobs loaded yet — connect once to load them. Ask an administrator to set the job number on each contract or project in Focus.') + '</div>' : '');
+}
+function pickJob(k) { ED.jobKey = k; closePicker(); paintSheet(); }
+
+// ── voice (where the browser offers it; the keyboard microphone always works as well) ──────
+let REC = null;
+function toggleMic() {
+  if (REC) { stopMic(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+  REC = new SR(); REC.lang = 'en-ZA'; REC.interimResults = false; REC.continuous = true;
+  REC.onresult = ev => {
+    let t = ''; for (let i = ev.resultIndex; i < ev.results.length; i++) if (ev.results[i].isFinal) t += ev.results[i][0].transcript;
+    if (t) { const el = $('e-desc'); el.value = (el.value ? el.value.replace(/\s*$/, ' ') : '') + t.trim(); ED.desc = el.value; }
+  };
+  REC.onerror = ev => { sheetErr(ev.error === 'not-allowed' ? 'Microphone access was refused — use your keyboard\'s microphone instead.' : (ev.error === 'network' ? 'Voice needs a connection — type instead.' : '')); stopMic(); };
+  REC.onend = () => stopMic();
+  try { REC.start(); const b = $('micbtn'); if (b) b.classList.add('on'); } catch (e) { REC = null; }
+}
+function stopMic() { try { if (REC) REC.stop(); } catch (e) {} REC = null; const b = $('micbtn'); if (b) b.classList.remove('on'); }
+
+// ── submit the week ─────────────────────────────────────────────────────────────────────────
+async function submitWeek() {
+  if (PEND.length) { toast('Sync your entries first'); return; }
+  const ws = ymd(weekStart), we = ymd(addDays(weekStart, 6)), n = viewRows().filter(r => r.entry_date >= ws && r.entry_date <= we && !locked(r)).length;
+  if (!n || !confirm('Submit ' + n + ' entr' + (n === 1 ? 'y' : 'ies') + ' for approval? You cannot change them afterwards unless they are returned to you.')) return;
+  try { await api('rpc/timesheet_submit', 'POST', { p_person_id: ME.personId, p_from: ws, p_to: we }); await loadEntries(); paint(); toast('Submitted for approval'); }
+  catch (e) { toast(e instanceof NetErr ? 'No connection — try again when you are online' : 'Could not submit: ' + e.message); }
+}
+let _tt; function toast(m) { const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(_tt); _tt = setTimeout(() => t.hidden = true, 3500); }
+
+// ── boot ────────────────────────────────────────────────────────────────────────────────────
+(async function () {
+  try { const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'env' }) })).json();
+    if (r && r.environment && !/^prod/i.test(r.environment)) { const b = $('envbar'); b.style.display = 'block'; b.textContent = r.environment.toUpperCase() + ' SITE — TEST DATA'; document.title = '[DEV] ' + document.title; } } catch (e) {}
+  if (loadSession()) { const c = LS.get('ts_me', null); if (c) ME = c; await start(); } else showLogin('');
+})();
+</script>
+</body>
+</html>
