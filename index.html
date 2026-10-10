@@ -326,6 +326,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root .seg button{font-family:inherit; font-size:11px; font-weight:700; padding:4px 12px; border:none; background:#fff; color:var(--navy); cursor:pointer; border-right:1px solid var(--navy);}
 #rpp-root .seg button:last-child{border-right:none;}
 #rpp-root .seg button.on{background:var(--navy); color:#fff;}
+#rpp-root .seg.off{opacity:0.45;}
+#rpp-root .seg button:disabled{cursor:default;}
+#rpp-root #rpp-basisSeg button::after{content:' off'; font-weight:400; opacity:0.7;}
+#rpp-root #rpp-basisSeg button.on::after{content:' on';}
 #rpp-root .btn-toggle{font-family:inherit; font-size:11px; font-weight:700; padding:4px 10px; border:1px solid var(--navy); border-radius:7px; background:#fff; color:var(--navy); cursor:pointer;}
 #rpp-root .btn-toggle.on{background:var(--navy); color:#fff;}
 
@@ -334,7 +338,9 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root .tot .k{font-size:9px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(255,255,255,0.55);}
 #rpp-root .tot .v{font-size:15px; font-weight:800; white-space:nowrap;}
 #rpp-root .tot.actual .v{color:#6EE7B7;}
-#rpp-root .tot.expected .v{font-size:20px;}
+#rpp-root .tot.head .v{font-size:20px;}
+#rpp-root .tot.off{opacity:0.45;}
+#rpp-root .tot.off .v{font-size:12px; font-weight:600;}
 #rpp-root .tot.op{opacity:0.6;}
 
 #rpp-root .tabs{display:flex; gap:0; align-items:flex-end;}
@@ -769,7 +775,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.03 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -808,7 +814,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.03 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -19068,7 +19074,13 @@ const RPP = (function () {
 
   // ── state ──
   let DEALS = [], FYS = [], fyByKey = {};
-  let basis = 'expected', metric = 'revenue', varianceOn = false;
+  // v7.10.04 projection basis (Richard 2026-10-10: "secured on/off, unsecured on/off; if unsecured on
+  // then either weighted (Projected) or total (Prospective)"). The two on/off switches ARE the stage
+  // chips — Secured = the Secured chip, Unsecured = the open-stage chips together — one state behind
+  // two controls, so a switched-off kind leaves the page instead of sitting there as rows of dashes.
+  // unsMode says how an open unsecured deal's months are valued while they are on.
+  let unsMode = 'weighted';   // 'weighted' (× probability → Projected) | 'total' (in full → Prospective)
+  let metric = 'revenue', varianceOn = false;
   let detailOn = true, openFY = null, fyStart = 0;
   let sortKey = null, sortDir = null;
   const filters = {};   // colKey -> Set<excluded display value>
@@ -19141,26 +19153,32 @@ const RPP = (function () {
     }
     return out;
   }
+  const isOpenStage = stageId => { const st = (allData['stages']||[]).find(s=>+s.id===+stageId); return !!st && /^opportunity-open/i.test((((allData['stage_categories']||[]).find(c=>+c.id===+st.category_id))||{}).name||''); };
   const stageBadge = s => `<span class="badge ${s==='Secured'?'b-secured':s==='Prospect'?'b-prospect':'b-lead'}">${escHtml(s)}</span>`;
 
   // ── revenue layers (read REAL columns; metric chooses revenue vs margin source) ──
   function cellOf(d, fyKey, i){ const f = fyByKey[fyKey]; return f ? d.cells.get(f.months[i]) : null; }
+  // v7.10.04: ONE rule, read by the grid, the strip, the drill and the snapshot comparison. A deal is
+  // SECURED (stage Secured or a fulfilment stage — the Secured chip's deals), OPEN (an Opportunity-Open
+  // stage: its potential is weighted by probability or taken in full, by unsMode) or CLOSED otherwise
+  // (Lost: nothing to come). Each month counts in exactly ONE part — `act` where an actual is
+  // recorded, else `sec` on a secured deal (the projection in full), else `pot` on an open deal, else
+  // nothing — so the strip's parts always add to the grid's TOTAL. `forecast` is what the basis gives
+  // the month without an actual (the variance chips measure actuals against it); `weighted` is the
+  // Projected valuation whatever the mode, which is what a forecast snapshot holds. There is no stored
+  // "secured" value: the frozen figure lives in secured_snapshots (audit only, never read here).
   function layers(d, fyKey, i){
     const c = cellOf(d, fyKey, i);
-    if (!c) return { expected:0, secured:0, actual:null };
+    if (!c) return { projection:0, actual:null, part:null, forecast:0, weighted:0, value:0 };
     const isM = metric === 'margin';
-    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // the deal's projection for the month
-    // v7.9.99: two bases, no unweighted Total (Richard 2026-10-09: "not a very useful metric").
-    // Expected = projection × probability; a secured deal is at 100%, so it counts in full — which
-    // makes Expected = actual + secured + weighted potential. Secured = the projection of deals at
-    // 100% only (the floor). There is no stored "secured" value: it is the live 100% slice; the
-    // frozen figure lives in secured_snapshots (audit only, never read here).
-    const sec  = (d.prob >= 100) ? base : 0;
+    const base = isM ? (c.oppMar||0) : (c.oppRev||0);   // the deal's projection for the month, unweighted
     const act  = isM ? c.actMar : c.actRev;             // real actual column; null if absent
-    return { expected: base*(d.prob/100), secured:sec, actual: act!=null ? act : null };
+    const weighted = d.secured ? base : d.open ? base*(d.prob/100) : 0;
+    const forecast = d.secured ? base : d.open ? (unsMode==='total' ? base : base*(d.prob/100)) : 0;
+    const part = act!=null ? 'act' : d.secured ? 'sec' : d.open ? 'pot' : null;
+    return { projection: base, actual: act!=null ? act : null, part, forecast, weighted, value: act!=null ? act : forecast };
   }
-  const proj = L => L[basis];
-  const effective = L => L.actual!=null ? L.actual : proj(L);
+  const effective = L => L.value;
   const fyValue = (d, fyKey) => { const m = fyByKey[fyKey].months; let s=0; for (let i=0;i<m.length;i++) s += effective(layers(d, fyKey, i)); return s; };
   const dealValue = d => FYS.reduce((s,f)=> s + fyValue(d, f.key), 0);
 
@@ -19172,7 +19190,7 @@ const RPP = (function () {
   }
   function monthCell(L, edge, noact){
     const cls = 'num' + (edge?' fy-edge':'') + (L.actual!=null?' actual':'') + (noact?' noact':'');
-    const chip = (varianceOn && L.actual!=null) ? varChip(L.actual, proj(L)) : '';
+    const chip = (varianceOn && L.actual!=null) ? varChip(L.actual, L.forecast) : '';
     return `<td class="${cls}">${fmt(effective(L))}${chip}</td>`;
   }
 
@@ -19429,7 +19447,7 @@ const RPP = (function () {
         body += dealsHtml(b.members, !open);
       });
     } else { lastGroupKeys = []; body = dealsHtml(deals, false); }
-    if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">No deals match the current filters.</td></tr>`;
+    if (!deals.length) body = `<tr><td colspan="99" style="text-align:center; color:var(--text3); padding:14px;">${emptyMessage()}</td></tr>`;
 
     let foot = `<td>TOTAL</td>${showDetail ? '<td></td>' : ''}${dcell(0, null, null, 'num', gDeal)}`;
     if (showDetail) ATTRS.forEach(()=>foot+=`<td></td>`);
@@ -19481,15 +19499,43 @@ const RPP = (function () {
     tabsEl.innerHTML = tabs;
   }
 
-  const BASIS_LABEL = {expected:'Expected', secured:'Secured'};
-  const BASIS_NOTE  = {expected:'actuals-to-date + secured + unsecured weighted by probability', secured:'actuals-to-date + secured deals only'};
+  // ── the basis in words (v7.10.04) ──
+  // Secured and Unsecured are the chips: secOn = the Secured chip, unsOn = any open-stage chip on.
+  // The headline figure is named by what is on — Projected (unsecured weighted), Prospective
+  // (unsecured in full) or Secured (unsecured off); with both off nothing is counted.
+  const secOn = () => viewChipOn('pipeline','stages','secured');
+  const openKeys = () => viewStageChips().open.map(c=>c.key);
+  const unsOn = () => openKeys().some(k => viewChipOn('pipeline','stages',k));
+  function basisText(){
+    const s = secOn(), u = unsOn(), w = unsMode==='weighted';
+    const potLabel = w ? 'Weighted potential' : 'Unweighted potential';
+    const potTip = w ? 'Open unsecured deals: projection × probability' : 'Open unsecured deals: the full projection, as if every one of them lands';
+    const label = !s && !u ? 'Switched off' : !u ? 'Secured' : w ? 'Projected' : 'Prospective';
+    const formula = !s && !u ? 'Secured and unsecured deals are both switched off — nothing is counted'
+      : `${label} = Actual to date + Secured${s ? '' : ' (off)'} + ${potLabel}${u ? '' : ' (off)'}`;
+    const off = [s ? null : 'secured', u ? null : 'unsecured'].filter(Boolean);
+    const note = !s && !u ? formula + '.'
+      : `${label} = ` + (s ? 'secured deals (actuals where recorded, else the projection in full)' : '') + (s && u ? ' + ' : '') +
+        (u ? (w ? 'open unsecured deals weighted by probability' : 'open unsecured deals in full, as if every one of them lands') : '') +
+        (off.length ? `; ${off.join(' and ')} deals are switched off` : '') + '.';
+    return { label, formula, note, potLabel, potTip, s, u, w };
+  }
+  // Why the page is empty: nothing in scope, every stage or type switched off, or the column filters.
+  function emptyMessage(){
+    if (!DEALS.length) return 'No deals in this view.';
+    if (!secOn() && !unsOn()) return 'Secured and unsecured deals are both switched off — switch one on above.';
+    if (Object.keys(filters).length) return 'No deals match the column filters.';
+    return 'Every deal in this view is switched off by the stage or type chips above.';
+  }
   function updateNote(ctx){
     const {start, visN, total, effOpen} = ctx;
     const hiddenPrev = start, hiddenNext = total - (start + visN);
-    let msg = `${metric==='margin'?'Margin':'Revenue'} · Basis: ${BASIS_LABEL[basis]}. Value & totals = ${BASIS_NOTE[basis]}. `;
+    const B = basisText();
+    let msg = `${metric==='margin'?'Margin':'Revenue'} · ${B.note} `;
+    if (visibleDeals().some(d => !d.secured && !d.open)) msg += 'Closed deals (Lost) are listed for their actuals only; nothing more is counted for them. ';
     if (trustOn && trustLoaded) msg += `Trust flags on: a flag marks a figure that rests on a judgement nobody checked (a probability typed without the calculator, or not matching it), an order date already passed, a past month still showing its projection (amber cells), or an open deal with no stream.${scoreOK ? '' : ' Scoring flags are unavailable: the probability calculator tables are not installed.'} `;
     if (groupBy) msg += `Grouped by ${groupLabel()}: ${lastGroupKeys.length} group${lastGroupKeys.length!==1?'s':''}, a subtotal each — click a group for its deals. `;
-    msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs ${BASIS_LABEL[basis].toLowerCase()})`:''}. `
+    msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs the ${B.label.toLowerCase()} figure)`:''}. `
          : detailOn ? 'Expand an FY to see months & actuals. '
                     : 'Compact: FY-total columns only. ';
     msg += `Showing ${visN} of ${total} financial year${total!==1?'s':''} (${FYS[start].label}–${FYS[start+visN-1].label}).`;
@@ -19497,32 +19543,39 @@ const RPP = (function () {
     const shown = visibleDeals().length, activeFilters = Object.keys(filters).length;
     if (activeFilters || shown!==DEALS.length)
       msg += ` · ${shown}/${DEALS.length} deals${activeFilters?`, ${activeFilters} filter${activeFilters>1?'s':''}`:''}.`;
-    if (!viewChipOn('pipeline','stages','secured')) msg += ' Secured deals are switched off above, so the Secured and Actual figures read –.';
     document.getElementById('rpp-note').textContent = msg;
   }
 
-  // The headline: Expected = Actual + Secured + Weighted potential, each month of each deal counted in
-  // exactly one of the three — an actual where one is recorded, else the secured figure (deal at
-  // 100%), else the unsecured projection × its probability — so the parts always add to the whole.
+  // The headline: <Projected | Prospective | Secured> = Actual to date + Secured + potential, each month
+  // of each deal counted in exactly one part (layers().part), so the parts always add to the whole
+  // and to the grid's TOTAL. A switched-off kind shows its tile muted as "off": its deals are not on
+  // the page, so it adds nothing. Actual to date is over whatever is listed (an actual is a fact).
   function renderTotStrip(){
+    const B = basisText();
     let act=0, sec=0, pot=0;
     visibleDeals().forEach(d=> FYS.forEach(f=> f.months.forEach((mk,i)=>{
       const L=layers(d,f.key,i);
-      if (L.actual!=null) act += L.actual;
-      else if (d.prob >= 100) sec += L.secured;
-      else pot += L.expected;
+      if (L.part==='act') act += L.value; else if (L.part==='sec') sec += L.value; else if (L.part==='pot') pot += L.value;
     })));
     const cell = (k,v,part,extra='',tip='') => `<div class="tot click ${extra}" title="${escAttr(tip)} — click for the deals behind it" onclick="RPP.drill(0,null,null,'${part}')"><span class="k">${k}</span><span class="v">${fmt(v)}</span></div>`;
+    const offCell = (k,tip) => `<div class="tot off" title="${escAttr(tip)}"><span class="k">${k}</span><span class="v">off</span></div>`;
     const op = t => `<div class="tot op"><span class="k">&nbsp;</span><span class="v">${t}</span></div>`;
     document.getElementById('rpp-totstrip').innerHTML =
-      cell('Expected', act+sec+pot, 'expected', 'expected', 'Actual + secured + unsecured weighted by probability') + op('=') +
-      cell('Actual to date', act, 'act', 'actual', 'Recorded actuals') + op('+') +
-      cell('Secured', sec, 'sec', '', 'Secured deals, months with no actual recorded yet') + op('+') +
-      cell('Weighted potential', pot, 'pot', '', 'Unsecured projection × probability');
+      cell(B.label, act+sec+pot, 'head', 'head', B.formula) + op('=') +
+      cell('Actual to date', act, 'act', 'actual', 'Recorded actuals on the deals shown') + op('+') +
+      (B.s ? cell('Secured', sec, 'sec', '', 'Secured deals, months with no actual recorded yet')
+           : offCell('Secured', 'Secured deals are switched off — the Secured switch or chip puts them back')) + op('+') +
+      (B.u ? cell(B.potLabel, pot, 'pot', '', B.potTip)
+           : offCell(B.potLabel, 'Unsecured deals are switched off — the Unsecured switch or the open-stage chips put them back'));
   }
 
   function syncControls(){
-    document.querySelectorAll('#rpp-basisSeg button').forEach(b=> b.classList.toggle('on', b.dataset.basis===basis));
+    const B = basisText();
+    const sb = document.getElementById('rpp-secOn'); if (sb) sb.classList.toggle('on', B.s);
+    const ub = document.getElementById('rpp-unsOn'); if (ub) ub.classList.toggle('on', B.u);
+    const ms = document.getElementById('rpp-modeSeg');
+    if (ms){ ms.classList.toggle('off', !B.u); ms.title = B.u ? '' : 'Switch Unsecured on to choose how open deals are valued'; }
+    document.querySelectorAll('#rpp-modeSeg button').forEach(b=>{ b.classList.toggle('on', B.u && b.dataset.mode===unsMode); b.disabled = !B.u; });
     document.querySelectorAll('#rpp-metricSeg button').forEach(b=> b.classList.toggle('on', b.dataset.metric===metric));
     document.querySelectorAll('#rpp-groupSeg button').forEach(b=> b.classList.toggle('on', (b.dataset.group||'')===(groupBy||'')));
     const ga = document.getElementById('rpp-grpAll');
@@ -19564,19 +19617,22 @@ const RPP = (function () {
   }
 
   // toggles re-paint from cached cells (no refetch); only owner-view change reloads
-  // The Secured basis values only secured deals: choosing it switches their chip on (for the session)
-  // rather than leave a page of dashes; switching that chip off while on the basis falls back to Expected.
-  function setBasis(b){ basis=b; if (b==='secured' && !viewChipOn('pipeline','stages','secured')) viewChipSet('pipeline','stages','secured',true); paint(); }
-  function chipsChanged(){ if (basis==='secured' && !viewChipOn('pipeline','stages','secured')) basis='expected'; paint(); }
+  // The basis switches ARE the chips (one state, v7.10.04): Secured = the Secured chip; Unsecured =
+  // every open-stage chip together — on while any is on, a click sets them all. A chip click reaches
+  // here through chipsChanged, so the switches, the chip bar and the figures never disagree.
+  function toggleSecured(){ viewChipSet('pipeline','stages','secured', !secOn()); paint(); }
+  function toggleUnsecured(){ const on = !unsOn(); openKeys().forEach(k=> viewChipSet('pipeline','stages',k,on)); paint(); }
+  function setUnsMode(m){ unsMode = m==='total' ? 'total' : 'weighted'; paint(); }
+  function chipsChanged(){ paint(); }
   function setMetric(m){ metric=m; paint(); }
   function setGroup(k){ groupBy = k || null; grpOpen.clear(); paint(); }
 
   // ── drill-down (v7.10.01): the deals behind a figure ──
   // `idx` names a drillTargets entry (0 = every deal shown), `fy` / `mi` narrow the period (null =
   // all years / the whole year), `part` picks the column to sort and highlight. Each deal's months
-  // in the period are split exactly as the strip splits them — actual where recorded, else secured
-  // when the deal is at 100%, else projection × probability — so the modal's totals equal the
-  // figure clicked: Expected = act + sec + pot; on the Secured basis the grid shows act + sec.
+  // in the period are split exactly as the strip splits them (layers().part) — actual where
+  // recorded, else secured on a secured deal, else the potential of an open deal, weighted or in full
+  // by the basis — so the modal's Counted total equals the figure clicked.
   const money = n => 'R ' + Math.round(n||0).toLocaleString('en-US');
   function drill(idx, fy, mi, part, flag){
     const t = drillTargets[idx]; if (!t) return;
@@ -19586,46 +19642,42 @@ const RPP = (function () {
     const period = fy==null ? (FYS.length>1 ? `${FYS[0].label} – ${FYS[FYS.length-1].label}` : (f0 ? f0.label : ''))
                  : mi==null ? f0.label
                  : (()=>{ const [Y,M]=f0.months[mi].split('-'); return `${MNAMES[+M-1]} ${Y}`; })();
-    const isM = metric==='margin';
+    const isM = metric==='margin', B = basisText();
     const rows = t.list.map(d=>{
       let proj=0, act=0, sec=0, pot=0, actMonths=0, months=0;
       fys.forEach(f=> (mi==null ? f.months.map((_,i)=>i) : [mi]).forEach(i=>{
-        const c = cellOf(d,f.key,i); if (!c) return;
-        const base = isM ? (c.oppMar||0) : (c.oppRev||0);
         const L = layers(d,f.key,i);
-        if (!(base || L.actual!=null)) return;
-        months++; proj += base;
-        if (L.actual!=null){ act += L.actual; actMonths++; } else if (d.prob>=100) sec += L.secured; else pot += L.expected;
+        if (!(L.projection || L.actual!=null)) return;
+        months++; proj += L.projection;
+        if (L.part==='act'){ act += L.value; actMonths++; } else if (L.part==='sec') sec += L.value; else if (L.part==='pot') pot += L.value;
       }));
-      return { d, proj, act, sec, pot, expected: act+sec+pot, actMonths, months };
+      return { d, proj, act, sec, pot, total: act+sec+pot, actMonths, months };
     }).filter(r=> fl ? trustHas(r.d.trust, fl.key) : r.months > 0);   // a flag lists its deals whether or not they carry a figure
-    const key = part==='act' ? 'act' : part==='sec' ? 'sec' : part==='pot' ? 'pot' : basis==='secured' ? 'counted' : 'expected';
-    rows.forEach(r=> r.counted = r.act + r.sec);
-    rows.sort((a,b)=> (b[key]-a[key]) || (b.expected-a.expected) || a.d.client.localeCompare(b.d.client));
+    const key = part==='act' ? 'act' : part==='sec' ? 'sec' : part==='pot' ? 'pot' : 'total';
+    rows.sort((a,b)=> (b[key]-a[key]) || (b.total-a.total) || a.d.client.localeCompare(b.d.client));
     const T = rows.reduce((o,r)=>{ o.proj+=r.proj; o.act+=r.act; o.sec+=r.sec; o.pot+=r.pot; return o; }, {proj:0,act:0,sec:0,pot:0});
-    const figure = basis==='secured' ? T.act+T.sec : T.act+T.sec+T.pot;
-    const hi = k => (k===key || (key==='counted' && (k==='act'||k==='sec')) || (key==='expected' && k==='expected')) ? ' hi' : '';
+    const figure = T.act+T.sec+T.pot;
+    const hi = k => k===key ? ' hi' : '';
     const num = (k, v, cls='') => `<td class="num${hi(k)}${cls}">${v ? money(v) : '–'}</td>`;
     const body = rows.map(r=>{
       const d = r.d;
       const tag = d.otype==='extension' ? ' <span class="tag-ext">Extension</span>' : d.otype==='variation' ? ' <span class="tag-var">Variation</span>' : '';
-      const how = r.actMonths ? `${r.actMonths} of ${r.months} month${r.months===1?'':'s'} actual` : d.prob>=100 ? 'secured' : `× ${d.prob}%`;
+      const how = r.actMonths ? `${r.actMonths} of ${r.months} month${r.months===1?'':'s'} actual` : d.secured ? 'secured' : d.open ? (B.w ? `× ${d.prob}%` : 'in full') : 'closed — not counted';
       return `<tr onclick="closeModal();openOpportunity(${d.id})" title="Open the deal">` +
         `<td><div class="dd-deal">${escHtml(d.deal)}${tag}</div><div class="dd-sub">${escHtml(d.client)} · ${escHtml(d.owner)}</div></td>` +
         `<td>${stageBadge(d.stage)}</td><td class="num">${d.prob}%</td>` +
-        num('proj', r.proj) + num('act', r.act, r.act?' actual':'') + num('sec', r.sec) + num('pot', r.pot) + num('expected', r.expected) +
+        num('proj', r.proj) + num('act', r.act, r.act?' actual':'') + num('sec', r.sec) + num('pot', r.pot) + num('total', r.total) +
         `<td class="dd-how">${how}</td>${showTrust ? `<td class="dd-flags">${trustTags(d.trust)}</td>` : ''}</tr>`;
     }).join('') || `<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:14px;">${fl ? 'No deal shown carries this flag.' : 'No deal carries a figure in this period.'}</td></tr>`;
     const foot = `<tr class="tot"><td>TOTAL · ${rows.length} deal${rows.length===1?'':'s'}</td><td></td><td></td>` +
-      num('proj', T.proj) + num('act', T.act) + num('sec', T.sec) + num('pot', T.pot) + num('expected', T.act+T.sec+T.pot) + `<td></td>${showTrust ? '<td></td>' : ''}</tr>`;
-    const basisNote = basis==='secured' ? 'Secured basis: the grid counts Actual + Secured only' : 'Expected = Actual + Secured + Weighted potential';
+      num('proj', T.proj) + num('act', T.act) + num('sec', T.sec) + num('pot', T.pot) + num('total', T.act+T.sec+T.pot) + `<td></td>${showTrust ? '<td></td>' : ''}</tr>`;
     showModal('<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">' +
       '<div class="modal rpp-drill" style="width:' + (showTrust ? 1240 : 1040) + 'px;"><div class="modal-header"><div><div class="modal-title">' + escHtml(t.label) + (fl ? ' — ' + escHtml(fl.label) : '') + '</div>' +
-      '<div class="dd-scope">' + escHtml(period) + ' · ' + (isM ? 'Margin' : 'Revenue') + ' · ' + basisNote + ' · ' + (fl ? 'these deals carry <b>' + money(figure) + '</b> of the figure' : 'figure <b>' + money(figure) + '</b>') + (fl ? ' · ' + escHtml(fl.tip) : '') + '</div></div>' +
+      '<div class="dd-scope">' + escHtml(period) + ' · ' + (isM ? 'Margin' : 'Revenue') + ' · ' + escHtml(B.formula) + ' · ' + (fl ? 'these deals carry <b>' + money(figure) + '</b> of the figure' : 'figure <b>' + money(figure) + '</b>') + (fl ? ' · ' + escHtml(fl.tip) : '') + '</div></div>' +
       '<button class="modal-close" onclick="closeModal()">×</button></div>' +
-      '<div class="modal-body" style="padding:0;"><table><thead><tr><th>Deal</th><th>Stage</th><th class="num">Prob</th><th class="num">Projected</th><th class="num">Actual</th><th class="num">Secured</th><th class="num">Weighted</th><th class="num">Expected</th><th>Counted as</th>' + (showTrust ? '<th>Flags</th>' : '') + '</tr></thead>' +
+      '<div class="modal-body" style="padding:0;"><table><thead><tr><th>Deal</th><th>Stage</th><th class="num">Prob</th><th class="num" title="The unweighted revenue stream for the period">Stream</th><th class="num">Actual</th><th class="num">Secured</th><th class="num" title="' + escAttr(B.potTip) + '">' + (B.w ? 'Weighted' : 'In full') + '</th><th class="num" title="' + escAttr(B.formula) + '">Counted</th><th>Counted as</th>' + (showTrust ? '<th>Flags</th>' : '') + '</tr></thead>' +
       '<tbody>' + body + '</tbody><tfoot>' + foot + '</tfoot></table>' +
-      '<div class="dd-note">Projected is the unweighted stream for the period. Each month counts once: an actual where one is recorded, else the full figure on a secured deal, else the projection × the deal\'s probability. Click a deal to open it.</div></div></div></div>');
+      '<div class="dd-note">Stream is the unweighted revenue stream for the period. Each month counts once: an actual where one is recorded, else the full figure on a secured deal, else ' + (B.w ? 'the projection × the deal\'s probability' : 'the full projection') + ' on an open deal; a closed deal counts nothing beyond its actuals. Click a deal to open it.</div></div></div></div>');
   }
   // A deal autosaved while open from this page (name, probability, stage): patch the row and repaint
   // (closeOppPage, v7.10.01) — a Save re-renders the whole page through loadTable.
@@ -19655,7 +19707,7 @@ const RPP = (function () {
     _fs = { list, pick: keep, lines: null, linesFor: null };
     if (!document.querySelector('.rpp-fs')) showModal('<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">' +
       '<div class="modal rpp-drill rpp-fs" style="width:1040px;"><div class="modal-header"><div><div class="modal-title">Forecast history</div>' +
-      '<div class="dd-scope">The pipeline as it stood at each month end, held against today — over the deals shown on the page, in the view (Revenue / Margin) selected.</div></div>' +
+      '<div class="dd-scope">The pipeline as it stood at each month end, held against today — over the deals shown on the page, in the view (Revenue / Margin) selected, always on the Projected (weighted) basis a snapshot holds: the Weighted / Total choice does not change this comparison, only which deals are shown.</div></div>' +
       '<button class="modal-close" onclick="closeModal()">×</button></div><div class="modal-body" style="padding:0;" id="rpp-fs-body"></div></div></div>');
     fsPaint();
     if (_fs.pick) fsLoad(_fs.pick);
@@ -19678,14 +19730,14 @@ const RPP = (function () {
       await fsOpen();
     } catch(e){ if (fsNotInstalled(e)) _fsMissing = true; showStatus('Snapshot not taken: ' + e.message, 'error'); }
   }
-  // The comparison: per month, the chosen snapshot's expected figure against today's, over the deals
+  // The comparison: per month, the chosen snapshot's expected (Projected, weighted) figure against today's, over the deals
   // shown on the page; deals the snapshot held that are not shown now, and deals shown now it did not
   // hold, are totalled separately so the two columns can be reconciled.
   function fsPaint(){
     const el = document.getElementById('rpp-fs-body'); if (!el || !_fs) return;
     const isM = metric === 'margin', pm = prevMonth();
     const have = _fs.list.some(x => x.for_month === pm);
-    const opts = _fs.list.map(x => `<option value="${x.id}" ${+x.id === +_fs.pick ? 'selected' : ''}>${monthLabel(x.for_month)} — taken ${escHtml(String(x.taken_at || '').slice(0, 10))} (${escHtml(x.trigger)}) · ${x.deals} deals · expected ${fmt(+x.expected_revenue)}</option>`).join('');
+    const opts = _fs.list.map(x => `<option value="${x.id}" ${+x.id === +_fs.pick ? 'selected' : ''}>${monthLabel(x.for_month)} — taken ${escHtml(String(x.taken_at || '').slice(0, 10))} (${escHtml(x.trigger)}) · ${x.deals} deals · projected ${fmt(+x.expected_revenue)}</option>`).join('');
     let h = `<div class="fs-bar"><span class="tlbl">Snapshot</span>` +
       (_fs.list.length ? `<select class="fs-sel" onchange="RPP.fsPick(this.value)">${opts}</select>` : `<span style="color:var(--text3);">None taken yet.</span>`) +
       (fsCanTake() ? `<button class="btn btn-sm btn-secondary" style="margin-left:auto;" onclick="RPP.fsTake('${pm}', ${have})">${have ? 'Re-take' : 'Take snapshot for'} ${monthLabel(pm)}</button>` : '') + `</div>`;
@@ -19699,7 +19751,7 @@ const RPP = (function () {
     _fs.lines.forEach(l => { if (visIds.has(+l.deal_id)){ then[l.month] = (then[l.month] || 0) + exp(l); months.add(l.month); } else { dropped += exp(l); droppedN.add(+l.deal_id); } });
     const now = {}, act = {}; let added = 0, addedN = new Set();
     vis.forEach(d => FYS.forEach(f => f.months.forEach((mk, i) => {
-      const L = layers(d, f.key, i); const v = L.actual != null ? L.actual : L.expected;
+      const L = layers(d, f.key, i); const v = L.actual != null ? L.actual : L.weighted;   // always the Projected (weighted) valuation: what a snapshot holds
       if (!v && L.actual == null) return;
       now[mk] = (now[mk] || 0) + v; months.add(mk);
       if (L.actual != null) act[mk] = (act[mk] || 0) + L.actual;
@@ -19724,7 +19776,7 @@ const RPP = (function () {
       (droppedN.size ? `The snapshot also held ${droppedN.size} deal${droppedN.size === 1 ? '' : 's'} not shown now (lost, filtered out or deleted) worth ${fmt(dropped)} then. ` : '') +
       (addedN.size ? `${addedN.size} deal${addedN.size === 1 ? '' : 's'} shown now ${addedN.size === 1 ? 'was' : 'were'} not in the snapshot, worth ${fmt(added)} today. ` : '') +
       `Actual = what has been recorded since; its variance is against the forecast for the same months, the measure of how good the forecast was.</div>`;
-    el.innerHTML = h + `<table><thead><tr><th>Month</th><th class="num">Forecast then</th><th class="num">Expected now</th><th class="num">Now vs then</th><th class="num">Actual recorded</th><th class="num">Actual vs forecast</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>` + recon;
+    el.innerHTML = h + `<table><thead><tr><th>Month</th><th class="num">Forecast then</th><th class="num">Projected now</th><th class="num">Now vs then</th><th class="num">Actual recorded</th><th class="num">Actual vs forecast</th></tr></thead><tbody>${body}</tbody><tfoot>${foot}</tfoot></table>` + recon;
   }
   // Mock mode's take_forecast_snapshot: the same rule over the mock store.
   function fsMockTake(month, trigger, force){
@@ -19743,10 +19795,12 @@ const RPP = (function () {
     const head = { id, for_month: month, taken_at: new Date().toISOString(), taken_by: currentUser.personId, trigger, deals: 0, lines: 0, horizon_from: null, horizon_to: null, expected_revenue: 0, expected_margin: 0, secured_revenue: 0, actual_revenue: 0, note: null };
     const dealIds = new Set();
     (db.deals || []).forEach(d => { const dm = byDeal.get(+d.id); if (!dm) return; const prob = d.probability != null ? +d.probability : 0;
+      // v7.10.04: the kind comes from the stage, as on the page — secured in full, open × probability, closed (Lost) nothing
+      const secured = dealIsSecuredStage(d.stage_id), w = secured ? 100 : isOpenStage(d.stage_id) ? prob : 0;
       dm.forEach((c, mk) => { if (c.pr == null && c.pm == null && c.ar == null && c.am == null) return;
-        const er = c.ar != null ? c.ar : Math.round((c.pr || 0) * prob) / 100, em = c.am != null ? c.am : Math.round((c.pm || 0) * prob) / 100;
-        lines.push({ id: lid(), snapshot_id: id, deal_id: +d.id, deal_name: d.name, org_id: d.org_id, owner_id: d.owner_id, region_id: d.region_id, branch_id: d.branch_id, service_major_id: d.service_major_id, service_sub_id: d.service_sub_id, stage_id: d.stage_id, opportunity_type: d.opportunity_type || 'new_business', probability: prob, secured: prob >= 100, month: mk, projected_revenue: c.pr, projected_margin: c.pm, actual_revenue: c.ar, actual_margin: c.am, expected_revenue: er, expected_margin: em });
-        dealIds.add(+d.id); head.lines++; head.expected_revenue += er; head.expected_margin += em; if (c.ar != null) head.actual_revenue += c.ar; else if (prob >= 100) head.secured_revenue += (c.pr || 0);
+        const er = c.ar != null ? c.ar : Math.round((c.pr || 0) * w) / 100, em = c.am != null ? c.am : Math.round((c.pm || 0) * w) / 100;
+        lines.push({ id: lid(), snapshot_id: id, deal_id: +d.id, deal_name: d.name, org_id: d.org_id, owner_id: d.owner_id, region_id: d.region_id, branch_id: d.branch_id, service_major_id: d.service_major_id, service_sub_id: d.service_sub_id, stage_id: d.stage_id, opportunity_type: d.opportunity_type || 'new_business', probability: prob, secured, month: mk, projected_revenue: c.pr, projected_margin: c.pm, actual_revenue: c.ar, actual_margin: c.am, expected_revenue: er, expected_margin: em });
+        dealIds.add(+d.id); head.lines++; head.expected_revenue += er; head.expected_margin += em; if (c.ar != null) head.actual_revenue += c.ar; else if (secured) head.secured_revenue += (c.pr || 0);
         head.horizon_from = head.horizon_from && head.horizon_from < mk ? head.horizon_from : mk; head.horizon_to = head.horizon_to && head.horizon_to > mk ? head.horizon_to : mk; }); });
     head.deals = dealIds.size; snaps.push(head); return id;
   }
@@ -19827,6 +19881,7 @@ const RPP = (function () {
     const d = DEALS.find(x => x.id === +opp.id); if (!d) return;
     d.deal = opp.name || '—'; d.prob = opp.probability!=null ? +opp.probability : 0; d.order = opp.order_date || '';
     d.stage_id = +opp.stage_id || 0; d.stage = ((allData['stages']||[]).find(s=>+s.id===+opp.stage_id)||{}).name || '—';
+    d.secured = dealIsSecuredStage(d.stage_id); d.open = isOpenStage(d.stage_id);   // v7.10.04: the kind decides how the deal is valued
     if (document.getElementById('rpp-root')) paint();
   }
   function toggleGroup(k){ grpOpen.has(k) ? grpOpen.delete(k) : grpOpen.add(k); paint(); }
@@ -19885,13 +19940,12 @@ const RPP = (function () {
     FYS = [...fySet].sort((a,b)=>a-b).map(fy=>({ key:fy, label:getFYLabel(fy), months:getFYMonths(fy) }));
     fyByKey = Object.fromEntries(FYS.map(f=>[f.key, f]));
 
-    const openCat = new Set(stageCats.filter(c=>/^opportunity-open/i.test(c.name||'')).map(c=>+c.id));
     DEALS = deals.map((d,i)=>({
       _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id,
       masterId: d.master_deal_id ? +d.master_deal_id : +d.id,
       otype: d.opportunity_type || 'new_business',
       stage_id: +d.stage_id || 0,
-      open: openCat.has(+((stages.find(s=>+s.id===+d.stage_id)||{}).category_id)),   // trust flags (v7.10.02)
+      open: isOpenStage(d.stage_id),   // an Opportunity-Open stage: potential (v7.10.04); trust flags (v7.10.02)
       secured: dealIsSecuredStage(d.stage_id),
       client: (orgs.find(o=>+o.id===+d.org_id)||{}).name || '—',
       deal: d.name || '—',
@@ -19917,8 +19971,13 @@ const RPP = (function () {
         <div class="rpp-toolbar">
           <span class="lbl">Projection basis</span>
           <div class="seg" id="rpp-basisSeg">
-            <button data-basis="expected" title="Actual + secured + unsecured weighted by probability" onclick="RPP.setBasis('expected')">Expected</button>
-            <button data-basis="secured" title="Actual + secured deals only — the floor" onclick="RPP.setBasis('secured')">Secured</button>
+            <button id="rpp-secOn" title="Secured deals and contracts in fulfilment: actuals where recorded, else the projection in full. Click to switch them on or off — the same switch as the Secured chip above" onclick="RPP.toggleSecured()">Secured</button>
+            <button id="rpp-unsOn" title="Open unsecured deals (every open stage), valued by the choice beside. Click to switch them on or off — the same switch as the open-stage chips above" onclick="RPP.toggleUnsecured()">Unsecured</button>
+          </div>
+          <span class="lbl">Unsecured as</span>
+          <div class="seg" id="rpp-modeSeg">
+            <button data-mode="weighted" title="Projected: each open deal's projection × its probability" onclick="RPP.setUnsMode('weighted')">Weighted</button>
+            <button data-mode="total" title="Prospective: each open deal's full projection, as if every one of them lands" onclick="RPP.setUnsMode('total')">Total</button>
           </div>
           <span class="lbl">View</span>
           <div class="seg" id="rpp-metricSeg">
@@ -19959,7 +20018,7 @@ const RPP = (function () {
       DEALS = await filterDealsByView(DEALS, oppsOwnerView);
       if (currentPage !== 'revenue_pipeline') return;   // the user has moved on while this loaded
       document.getElementById('page-sub').textContent = DEALS.length + ' deal' + (DEALS.length!==1?'s':'');
-      chipsChanged();   // reconciles a Secured basis left from before the chips were reset, then paints
+      chipsChanged();   // paints — the chips carry the basis (v7.10.04)
       fsEnsure();       // v7.10.03: the month just ended gets its snapshot if the cron did not take it (silent, background)
     } catch(e){
       const note = document.getElementById('rpp-note');
@@ -19979,7 +20038,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, setBasis, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, fsOpen, fsPick, fsTake, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, toggleSecured, toggleUnsecured, setUnsMode, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, fsOpen, fsPick, fsTake, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 

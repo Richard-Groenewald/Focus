@@ -16,9 +16,13 @@
 -- take_forecast_snapshot(p_for_month, p_actor_id, p_trigger, p_force) builds one. It mirrors the
 -- page's valuation rule (index.html RPP.layers / renderTotStrip): per deal and month the projection
 -- is the first non-null opportunity figure over the deal's streams; a month counts as its ACTUAL
--- where one is recorded, else as the projection × the deal's probability (a deal at 100% — secured —
--- counts in full). Expected = actual + secured + weighted potential. An existing snapshot for the
--- month is returned untouched unless p_force, which rebuilds it.
+-- where one is recorded, else by the deal's KIND, read from its stage (v7.10.04, as the page reads
+-- it): a SECURED deal (stage Secured or a fulfilment stage) counts the projection in full, an OPEN
+-- deal (an Opportunity-Open stage) the projection × its probability, and a CLOSED deal (Lost)
+-- nothing — whatever probability it still carries. Expected = actual + secured + weighted potential,
+-- the page's Projected figure. An existing snapshot for the month is returned untouched unless
+-- p_force, which rebuilds it. Re-run this file on both databases after v7.10.04: only the function
+-- body changes (CREATE OR REPLACE), everything else is a no-op; snapshots already taken stand.
 --
 -- Scheduling: pg_cron, where the project offers it, runs the function at 00:15 UTC on the 1st of
 -- every month for the month just ended. Where it does not, the app takes the missing month's
@@ -113,11 +117,21 @@ BEGIN
       projected_revenue, projected_margin, actual_revenue, actual_margin, expected_revenue, expected_margin)
   SELECT v_id, d.id, d.name, d.org_id, d.owner_id, d.region_id, d.branch_id,
          d.service_major_id, d.service_sub_id, d.stage_id, COALESCE(d.opportunity_type, 'new_business'),
-         COALESCE(d.probability, 0), COALESCE(d.probability, 0) >= 100, m.month,
+         COALESCE(d.probability, 0), k.secured, m.month,
          m.proj_rev, m.proj_mar, m.act_rev, m.act_mar,
-         COALESCE(m.act_rev, ROUND(COALESCE(m.proj_rev, 0) * COALESCE(d.probability, 0) / 100.0, 2)),
-         COALESCE(m.act_mar, ROUND(COALESCE(m.proj_mar, 0) * COALESCE(d.probability, 0) / 100.0, 2))
+         COALESCE(m.act_rev, ROUND(COALESCE(m.proj_rev, 0) * k.weight / 100.0, 2)),
+         COALESCE(m.act_mar, ROUND(COALESCE(m.proj_mar, 0) * k.weight / 100.0, 2))
   FROM deals d
+  LEFT JOIN stages st ON st.id = d.stage_id
+  LEFT JOIN stage_categories sc ON sc.id = st.category_id
+  CROSS JOIN LATERAL (
+    -- The deal's kind, exactly as index.html reads it (dealIsSecuredStage / RPP.isOpenStage):
+    -- secured → 100, open → the probability, closed or unknown stage → 0.
+    SELECT (lower(COALESCE(st.name, '')) = 'secured' OR COALESCE(sc.name, '') ILIKE 'fulfilment%') AS secured,
+           CASE WHEN lower(COALESCE(st.name, '')) = 'secured' OR COALESCE(sc.name, '') ILIKE 'fulfilment%' THEN 100
+                WHEN COALESCE(sc.name, '') ILIKE 'opportunity-open%' THEN COALESCE(d.probability, 0)
+                ELSE 0 END AS weight
+  ) k
   JOIN (
     -- One row per deal and month over all the deal's streams: the first non-null figure by stream
     -- (the page merges the same way); an actual counts only where its is_actual flag is set.
