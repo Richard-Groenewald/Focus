@@ -341,6 +341,12 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 #rpp-root .tot.head .v{font-size:20px;}
 #rpp-root .tot.off{opacity:0.45;}
 #rpp-root .tot.off .v{font-size:12px; font-weight:600;}
+#rpp-root tr.rpp-target td{background:#F6F2EA; color:var(--navy); font-size:11px; font-weight:700; border-bottom:1px solid var(--border); line-height:1.15;}
+#rpp-root tr.rpp-target td.tg-lbl{font-size:10px; text-transform:uppercase; letter-spacing:0.04em; color:#6B5B3E; white-space:nowrap;}
+#rpp-root tr.rpp-target .tg-pct{display:block; font-size:9px; font-weight:600; color:var(--text3);}
+#rpp-root tr.rpp-target .tg-pct.met{color:var(--green);}
+#rpp-root tr.rpp-target .tg-none{color:var(--text3); font-weight:400;}
+#rpp-root tr.rpp-target-total td{position:sticky; z-index:1;}
 #rpp-root .tot.op{opacity:0.6;}
 
 #rpp-root .tabs{display:flex; gap:0; align-items:flex-end;}
@@ -775,7 +781,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -814,7 +820,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -3157,6 +3163,7 @@ const PAGES = {
   // Persisted as JSON in settings.dashboard_role_widgets.
   // v7.9.96: which stage/type chips start switched on, per role (settings.register_view_defaults).
   default_views: { title: 'Default Views', table: null, custom: true, readOnly: true, columns: [], fields: [] },
+  targets: { title: 'Targets', table: 'targets', custom: true, readOnly: true, columns: [], fields: [] },   // v7.10.05
   dashboard_admin: {
     title: 'Dashboards',
     table: null,
@@ -4062,6 +4069,7 @@ async function loadTable(page) {
     if (page === 'settings') { await renderSettingsPage(); return; }
     if (page === 'dashboard_admin') { await renderDashboardAdmin(); return; }
     if (page === 'default_views') { await renderDefaultViewsPage(); return; }
+    if (page === 'targets') { await renderTargetsPage(); return; }
     if (page === 'broadcast_admin') { await renderBroadcastAdmin(); return; }
     if (page === 'milestone_admin') { await renderMilestoneAdmin(); return; }
     if (page === 'probability_criteria') { await renderProbCriteria(); return; }
@@ -5577,6 +5585,8 @@ const MENU = [
             icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' },
           { page: 'default_views', label: 'Default Views', permission: 'manage_settings',
             icon: '<path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>' },
+          { page: 'targets', label: 'Targets', permission: 'manage_settings',
+            icon: '<circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1"/>' },
           { page: 'broadcast_admin', label: 'Broadcasts', permission: 'manage_settings',
             icon: '<path d="M2 6v4l8 3V3L2 6z"/><path d="M12 5.5a3.5 3.5 0 0 1 0 5" stroke="currentColor" fill="none" stroke-width="1.5" stroke-linecap="round"/>' },
           { page: 'milestone_admin', label: 'Milestones', permission: 'manage_settings',
@@ -17390,6 +17400,240 @@ async function saveDefaultViews() {
   } catch (e) { showStatus('Could not save: ' + e.message, 'error'); }
 }
 
+// ── Site Admin → Settings → Targets (v7.10.05) ──────────────────────────────────────────────────
+// Richard 2026-10-10: "focus needs to provide for targets, revenue and margin. targets can be set by
+// period (typically fy), company, region, salesperson and potentially others. targets do not need to
+// sum ... targets need to be set in site admin". One row per period and scope (sql/add_targets.sql)
+// carrying a revenue target and / or a margin target. Nothing rolls up: the company target is its
+// own row, the regional ones theirs, and they need not agree. The Revenue Pipeline shows them
+// against its figures (RPP, Targets toggle). State _tg: the rows, the FY filter, the open editor
+// (editing = row id | 'new') and its draft, which every input writes to so a repaint loses nothing.
+const TARGET_SCOPES = [
+  { key: 'company', label: 'Company',     table: null },
+  { key: 'region',  label: 'Region',      table: 'regions' },
+  { key: 'branch',  label: 'Branch',      table: 'branches' },
+  { key: 'person',  label: 'Salesperson', table: 'people' },
+];
+const TARGET_PERIODS = [['fy', 'Financial year'], ['month', 'Month']];
+let _tg = null;
+const _tgMoney = n => 'R ' + Math.round(+n || 0).toLocaleString('en-US');
+function targetsNotInstalled(e) { return /^404\b|PGRST205/.test((e && e.message) || ''); }
+// An FY target runs from the first day of the FY's first month to the last day of its twelfth; a
+// month target over that month. The FY is read back from period_start (targetPeriodKey), so a
+// later change of settings.fy_start_month relabels an old row rather than losing it.
+function targetPeriodRange(type, key) {
+  const lastDay = ym => { const [y, m] = ym.split('-').map(Number); return ym + '-' + String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0'); };
+  if (type === 'fy') { const ms = getFYMonths(+key); return { period_start: ms[0] + '-01', period_end: lastDay(ms[11]) }; }
+  return { period_start: key + '-01', period_end: lastDay(key) };
+}
+function targetPeriodKey(t) { const ym = String(t.period_start).slice(0, 7); return t.period_type === 'fy' ? _fyOfMonth(ym) : ym; }
+function targetPeriodLabel(t) {
+  if (t.period_type === 'fy') return getFYLabel(targetPeriodKey(t));
+  const [y, m] = String(t.period_start).split('-');
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m - 1] + ' ' + y;
+}
+function targetFYOf(t) { return t.period_type === 'fy' ? targetPeriodKey(t) : _fyOfMonth(String(t.period_start).slice(0, 7)); }
+// The salespeople a target can name: the home organisation's members (ensureHomeOrgMembers), else
+// — a database without that table, or the mock seed — the people flagged is_xone, else everyone.
+function _tgSalesPeople() {
+  const people = allData['people'] || [], ids = new Set((allData['home_organisation_members'] || []).map(m => +m.person_id));
+  const list = ids.size ? people.filter(p => ids.has(+p.id)) : (people.some(p => p.is_xone) ? people.filter(p => p.is_xone) : people);
+  return list.map(p => ({ id: +p.id, name: [p.first_name, p.last_name].filter(Boolean).join(' ') || ('#' + p.id) })).sort((a, b) => a.name.localeCompare(b.name));
+}
+function _tgScopeRows(scope, keepId) {   // the pick list for a scope type; keepId = the row's own pick, kept even if retired
+  if (!scope.table) return [];
+  let list = scope.table === 'people' ? _tgSalesPeople()
+    : (allData[scope.table] || []).filter(r => r.active !== false || +r.id === +keepId).map(r => ({ id: +r.id, name: r.name || ('#' + r.id) })).sort((a, b) => a.name.localeCompare(b.name));
+  if (keepId && !list.some(r => r.id === +keepId)) {
+    const raw = (allData[scope.table] || []).find(r => +r.id === +keepId);
+    list = list.concat([{ id: +keepId, name: raw ? (scope.table === 'people' ? [raw.first_name, raw.last_name].filter(Boolean).join(' ') : raw.name) : '#' + keepId }]);
+  }
+  return list;
+}
+function targetScopeName(t) {
+  if (t.scope_type === 'company') return 'Company';
+  const sc = TARGET_SCOPES.find(s => s.key === t.scope_type); if (!sc) return t.scope_type + ' #' + t.scope_id;
+  const row = _tgScopeRows(sc, t.scope_id).find(r => r.id === +t.scope_id);
+  return sc.label + ': ' + (row ? row.name : '#' + t.scope_id);
+}
+async function renderTargetsPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  document.getElementById('add-btn').style.display = 'none';
+  head.innerHTML = '';
+  document.getElementById('page-sub').textContent = 'Revenue and margin targets by period and scope';
+  body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--text3);">Loading…</td></tr>';
+  let rows = [], missing = false;
+  try {
+    const [t, regions, branches, people] = await Promise.all([
+      apiGetAll('targets', 'select=*').catch(e => { if (targetsNotInstalled(e)) { missing = true; return []; } throw e; }),
+      allData['regions']  || apiGet('regions', 'select=*'),
+      allData['branches'] || apiGet('branches', 'select=*'),
+      allData['people']   || apiGetAll('people', 'select=*'),
+      ensureHomeOrgMembers(),
+    ]);
+    allData['regions'] = regions; allData['branches'] = branches; allData['people'] = people;
+    rows = t;
+  } catch (e) {
+    if (currentPage === 'targets') body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--red);">Could not load: ' + escHtml(e.message) + '</td></tr>';
+    return;
+  }
+  if (currentPage !== 'targets') return;   // the user has moved on while this loaded
+  const keepFY = _tg && _tg.fy != null ? _tg.fy : getCurrentFY();
+  _tg = { rows, fy: keepFY, editing: null, draft: null, missing, saving: false };
+  _tgPaint();
+}
+function _tgRowsForFY(fy) {
+  const order = { company: 0, region: 1, branch: 2, person: 3 };
+  return _tg.rows.filter(t => fy === 'all' || targetFYOf(t) === +fy).map(t => ({ t, key: targetPeriodKey(t), name: targetScopeName(t) }))
+    .sort((a, b) => (targetFYOf(a.t) - targetFYOf(b.t)) || ((a.t.period_type === 'month') - (b.t.period_type === 'month')) || String(a.key).localeCompare(String(b.key)) ||
+                    ((order[a.t.scope_type] ?? 9) - (order[b.t.scope_type] ?? 9)) || a.name.localeCompare(b.name));
+}
+function _tgPaint() {
+  const body = document.getElementById('table-body'); if (!body || !_tg) return;
+  const fyNow = getCurrentFY(), fys = new Set([fyNow - 1, fyNow, fyNow + 1, fyNow + 2]);
+  _tg.rows.forEach(t => fys.add(targetFYOf(t)));
+  const fyOpts = [...fys].sort((a, b) => a - b).map(f => '<option value="' + f + '"' + (_tg.fy === f ? ' selected' : '') + '>' + getFYLabel(f) + '</option>').join('') +
+    '<option value="all"' + (_tg.fy === 'all' ? ' selected' : '') + '>All periods</option>';
+  const td = 'padding:8px 12px;vertical-align:middle;', th = 'padding:9px 12px;text-align:left;white-space:nowrap;font-size:12px;';
+  const list = _tgRowsForFY(_tg.fy);
+  let rowsHtml = '';
+  if (_tg.editing === 'new') rowsHtml += _tgEditorHtml();
+  let lastFY = null;
+  list.forEach(({ t, name }) => {
+    const fy = targetFYOf(t);
+    if (_tg.fy === 'all' && fy !== lastFY) { rowsHtml += '<tr><td colspan="6" style="padding:10px 12px 4px;font-size:11px;font-weight:700;color:var(--navy);text-transform:uppercase;letter-spacing:0.04em;background:var(--bg);">' + getFYLabel(fy) + '</td></tr>'; lastFY = fy; }
+    if (_tg.editing === +t.id) { rowsHtml += _tgEditorHtml(); return; }
+    const busy = _tg.editing != null;
+    rowsHtml += '<tr style="border-top:1px solid var(--border);">' +
+      '<td style="' + td + 'white-space:nowrap;font-weight:600;">' + escHtml(targetPeriodLabel(t)) + (t.period_type === 'month' ? ' <span style="font-size:10px;color:var(--text3);font-weight:400;">month</span>' : '') + '</td>' +
+      '<td style="' + td + '">' + escHtml(name) + '</td>' +
+      '<td style="' + td + 'text-align:right;white-space:nowrap;">' + (t.revenue_target != null ? _tgMoney(t.revenue_target) : '<span style="color:var(--text3);">–</span>') + '</td>' +
+      '<td style="' + td + 'text-align:right;white-space:nowrap;">' + (t.margin_target != null ? _tgMoney(t.margin_target) : '<span style="color:var(--text3);">–</span>') + '</td>' +
+      '<td style="' + td + 'color:var(--text2);font-size:12px;">' + escHtml(t.note || '') + '</td>' +
+      '<td style="' + td + 'text-align:right;white-space:nowrap;">' +
+        '<button class="btn btn-sm btn-secondary" ' + (busy ? 'disabled' : '') + ' onclick="_tgEdit(' + (+t.id) + ')">Edit</button> ' +
+        '<button class="btn btn-sm btn-secondary" ' + (busy ? 'disabled' : '') + ' style="color:var(--red);" onclick="_tgDelete(' + (+t.id) + ')">Delete</button></td></tr>';
+  });
+  if (!list.length && _tg.editing !== 'new') rowsHtml += '<tr><td colspan="6" style="padding:18px 12px;color:var(--text3);text-align:center;">' + (_tg.missing ? 'Targets are not installed on this database — run sql/add_targets.sql.' : 'No targets set' + (_tg.fy === 'all' ? '' : ' for ' + getFYLabel(_tg.fy)) + ' yet.') + '</td></tr>';
+  // The "need not add up" line: for one FY, the company figure beside what each scope's rows add to.
+  let recon = '';
+  if (_tg.fy !== 'all' && list.length) {
+    const fyRows = list.map(x => x.t).filter(t => t.period_type === 'fy');
+    const part = (metric, label) => {
+      const sum = type => fyRows.filter(t => t.scope_type === type && t[metric] != null).reduce((s, t) => s + +t[metric], 0);
+      const have = type => fyRows.some(t => t.scope_type === type && t[metric] != null);
+      const bits = [have('company') ? 'Company ' + _tgMoney(sum('company')) : null,
+        have('region') ? 'Regions together ' + _tgMoney(sum('region')) : null,
+        have('branch') ? 'Branches together ' + _tgMoney(sum('branch')) : null,
+        have('person') ? 'Salespeople together ' + _tgMoney(sum('person')) : null].filter(Boolean);
+      return bits.length ? '<div><strong>' + label + '</strong> · ' + bits.join(' · ') + '</div>' : '';
+    };
+    const r = part('revenue_target', getFYLabel(_tg.fy) + ' revenue'), m = part('margin_target', getFYLabel(_tg.fy) + ' margin');
+    if (r || m) recon = '<div style="font-size:12px;color:var(--text3);margin-top:12px;line-height:1.6;">' + r + m + '<div>Targets stand on their own: the company figure and what the regions, branches or salespeople add up to need not agree.</div></div>';
+  }
+  body.innerHTML = '<tr><td style="padding:0;border:none;"><div style="padding:2px 0 24px;max-width:1100px;">' +
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.5;">A target is a revenue figure, a margin figure, or both, for a period — a financial year or a single month — and a scope: the company, a region, a branch or a salesperson. ' +
+      'Each row stands on its own; nothing is rolled up or checked against another row. The Revenue Pipeline shows them against its figures through its <strong>Targets</strong> button.</div>' +
+    '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">' +
+      '<label style="font-size:12px;font-weight:700;color:var(--navy);">Financial year</label>' +
+      '<select class="form-control" style="width:auto;" onchange="_tgSetFY(this.value)">' + fyOpts + '</select>' +
+      (_tg.missing ? '<span style="color:var(--red);font-size:12px;">Targets are not installed on this database — run sql/add_targets.sql.</span>'
+        : '<button class="btn btn-sm btn-primary" style="margin-left:auto;" ' + (_tg.editing != null ? 'disabled' : '') + ' onclick="_tgAdd()">+ Add target</button>') +
+    '</div>' +
+    '<div class="card" style="padding:0;overflow-x:auto;">' +
+    '<table style="width:100%;border-collapse:collapse;font-size:13px;"><thead><tr style="background:var(--bg);">' +
+      '<th style="' + th + '">Period</th><th style="' + th + '">Scope</th><th style="' + th + 'text-align:right;">Revenue target</th><th style="' + th + 'text-align:right;">Margin target</th><th style="' + th + '">Note</th><th style="' + th + '"></th>' +
+    '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>' + recon + '</div></td></tr>';
+}
+function _tgEditorHtml() {
+  const d = _tg.draft, td = 'padding:8px 12px;vertical-align:middle;';
+  const fyNow = getCurrentFY(), fys = [fyNow - 1, fyNow, fyNow + 1, fyNow + 2, fyNow + 3];
+  if (d.period_type === 'fy' && d.fy && !fys.includes(+d.fy)) fys.push(+d.fy);
+  const sel = (name, opts, val) => '<select class="form-control" style="width:auto;min-width:110px;display:inline-block;" onchange="_tgDraft(\'' + name + '\', this.value, true)">' +
+    opts.map(o => '<option value="' + escAttr(String(o[0])) + '"' + (String(o[0]) === String(val) ? ' selected' : '') + '>' + escHtml(o[1]) + '</option>').join('') + '</select>';
+  const scope = TARGET_SCOPES.find(s => s.key === d.scope_type) || TARGET_SCOPES[0];
+  const money = (name, ph) => '<input type="number" min="0" step="1" class="form-control" style="width:150px;text-align:right;display:inline-block;" placeholder="' + ph + '" value="' + escAttr(d[name] == null ? '' : String(d[name])) + '" oninput="_tgDraft(\'' + name + '\', this.value)">';
+  return '<tr style="border-top:1px solid var(--border);background:#FFFBEB;">' +
+    '<td style="' + td + 'white-space:nowrap;">' + sel('period_type', TARGET_PERIODS, d.period_type) + ' ' +
+      (d.period_type === 'fy' ? sel('fy', fys.sort((a, b) => a - b).map(f => [f, getFYLabel(f)]), d.fy)
+        : '<input type="month" class="form-control" style="width:auto;display:inline-block;" value="' + escAttr(d.month || '') + '" onchange="_tgDraft(\'month\', this.value)">') + '</td>' +
+    '<td style="' + td + 'white-space:nowrap;">' + sel('scope_type', TARGET_SCOPES.map(s => [s.key, s.label]), d.scope_type) +
+      (scope.table ? ' ' + sel('scope_id', [['', 'Choose…']].concat(_tgScopeRows(scope, d.scope_id).map(r => [r.id, r.name])), d.scope_id) : '') + '</td>' +
+    '<td style="' + td + 'text-align:right;">' + money('revenue_target', 'Revenue, R') + '</td>' +
+    '<td style="' + td + 'text-align:right;">' + money('margin_target', 'Margin, R') + '</td>' +
+    '<td style="' + td + '"><input type="text" class="form-control" style="min-width:160px;" placeholder="Note (optional)" value="' + escAttr(d.note || '') + '" oninput="_tgDraft(\'note\', this.value)"></td>' +
+    '<td style="' + td + 'text-align:right;white-space:nowrap;"><button class="btn btn-sm btn-primary" ' + (_tg.saving ? 'disabled' : '') + ' onclick="_tgSave()">Save</button> <button class="btn btn-sm btn-secondary" onclick="_tgCancel()">Cancel</button></td></tr>';
+}
+function _tgSetFY(v) { if (!_tg) return; _tg.fy = v === 'all' ? 'all' : +v; _tgPaint(); }
+function _tgDraft(field, value, repaint) {
+  if (!_tg || !_tg.draft) return;
+  _tg.draft[field] = value;
+  if (field === 'scope_type') _tg.draft.scope_id = '';
+  if (repaint) _tgPaint();
+}
+function _tgAdd() {
+  if (!_tg || _tg.missing || _tg.editing != null) return;
+  _tg.editing = 'new';
+  _tg.draft = { period_type: 'fy', fy: _tg.fy === 'all' ? getCurrentFY() : _tg.fy, month: new Date().toISOString().slice(0, 7), scope_type: 'company', scope_id: '', revenue_target: '', margin_target: '', note: '' };
+  _tgPaint();
+}
+function _tgEdit(id) {
+  if (!_tg || _tg.editing != null) return;
+  const t = _tg.rows.find(r => +r.id === +id); if (!t) return;
+  const key = targetPeriodKey(t);
+  _tg.editing = +id;
+  _tg.draft = { period_type: t.period_type, fy: t.period_type === 'fy' ? key : getCurrentFY(), month: t.period_type === 'month' ? key : new Date().toISOString().slice(0, 7),
+    scope_type: t.scope_type, scope_id: t.scope_id == null ? '' : String(t.scope_id), revenue_target: t.revenue_target == null ? '' : String(+t.revenue_target), margin_target: t.margin_target == null ? '' : String(+t.margin_target), note: t.note || '' };
+  _tgPaint();
+}
+function _tgCancel() { if (!_tg) return; _tg.editing = null; _tg.draft = null; _tgPaint(); }
+async function _tgSave() {
+  if (!_tg || !_tg.draft || _tg.saving) return;
+  const d = _tg.draft, scope = TARGET_SCOPES.find(s => s.key === d.scope_type);
+  if (!scope) { showStatus('Choose a scope', 'error'); return; }
+  if (scope.table && !d.scope_id) { showStatus('Choose the ' + scope.label.toLowerCase(), 'error'); return; }
+  const key = d.period_type === 'fy' ? +d.fy : String(d.month || '');
+  if (d.period_type === 'fy' ? !key : !/^\d{4}-\d{2}$/.test(key)) { showStatus('Choose the period', 'error'); return; }
+  const num = v => (v === '' || v == null) ? null : Number(v);
+  const rev = num(d.revenue_target), mar = num(d.margin_target);
+  if (rev == null && mar == null) { showStatus('Enter a revenue target, a margin target, or both', 'error'); return; }
+  if ([rev, mar].some(v => v != null && (!isFinite(v) || v < 0))) { showStatus('A target is an amount in rand, zero or more', 'error'); return; }
+  const range = targetPeriodRange(d.period_type, key);
+  const body = { period_type: d.period_type, period_start: range.period_start, period_end: range.period_end, scope_type: d.scope_type,
+    scope_id: scope.table ? +d.scope_id : null, revenue_target: rev, margin_target: mar, note: String(d.note || '').trim() || null };
+  _tg.saving = true; _tgPaint();
+  try {
+    if (_tg.editing === 'new') {
+      body.created_by = currentUser.personId;
+      const rows = await api('targets', 'POST', body, '');
+      _tg.rows.push((rows && rows[0]) || body);
+    } else {
+      body.updated_by = currentUser.personId; body.updated_at = new Date().toISOString();
+      const rows = await api('targets', 'PATCH', body, 'id=eq.' + (+_tg.editing));
+      const i = _tg.rows.findIndex(r => +r.id === +_tg.editing);
+      if (i >= 0) _tg.rows[i] = (rows && rows[0]) || Object.assign({}, _tg.rows[i], body);
+    }
+    _tg.editing = null; _tg.draft = null;
+    showStatus('Target saved');
+    if (typeof RPP !== 'undefined') RPP.targetsChanged();
+  } catch (e) {
+    showStatus(/23505|duplicate key/i.test(e.message || '') ? 'A target for that scope and period already exists — edit that row instead' : 'Could not save: ' + e.message, 'error');
+  } finally { _tg.saving = false; _tgPaint(); }
+}
+async function _tgDelete(id) {
+  if (!_tg || _tg.editing != null) return;
+  const t = _tg.rows.find(r => +r.id === +id); if (!t) return;
+  const ok = await confirmDialog({ title: 'Delete target', message: 'Delete the ' + targetPeriodLabel(t) + ' target for ' + targetScopeName(t) + '?', confirmLabel: 'Delete', cancelLabel: 'Keep it', danger: true });
+  if (!ok) return;
+  try {
+    await api('targets', 'DELETE', null, 'id=eq.' + (+id));
+    _tg.rows = _tg.rows.filter(r => +r.id !== +id);
+    showStatus('Target deleted');
+    if (typeof RPP !== 'undefined') RPP.targetsChanged();
+  } catch (e) { showStatus('Could not delete: ' + e.message, 'error'); }
+  _tgPaint();
+}
+
 // ── Opportunity page header: client · deal · type, then the owner (v7.9.96) ──────────────────────
 // Richard 2026-10-04: "the top of the page should show, in addition to owner (to be shown last),
 // short client name, short deal name, whether it is an extension or variation". The deal name is
@@ -19102,6 +19346,11 @@ const RPP = (function () {
   // end, taken by pg_cron on the 1st, else by the first visit here in a new month (fsEnsure), else by
   // hand from Forecast history. _fsMissing = the tables are not installed (404 / PGRST205).
   let _fsMissing = false, _fsEnsured = false, _fs = null;
+  // v7.10.05 targets (sql/add_targets.sql): an OPTIONAL view like the trust flags — the Targets button
+  // loads the rows once and the grid gains a TARGET row under TOTAL for the page's scope (the company
+  // on Show All, the signed-in person on Show Own) and one under each Person / Region / Branch group.
+  let targetsOn = false, targetsLoaded = false, targetsLoading = false, _tgMissing = false, targetRows = [];
+  const GROUP_SCOPE = { owner: { type: 'person', idKey: 'owner_id' }, region: { type: 'region', idKey: 'region_id' }, branch: { type: 'branch', idKey: 'branch_id' } };
   let answersByDeal = new Map();   // deal id -> {criterionId: answerId}
   const TRUST = [
     { key:'unscored', label:'not scored',               tip:'An unsecured deal whose probability was typed with no calculator answers behind it' },
@@ -19179,6 +19428,19 @@ const RPP = (function () {
     return { projection: base, actual: act!=null ? act : null, part, forecast, weighted, value: act!=null ? act : forecast };
   }
   const effective = L => L.value;
+  // ── targets (v7.10.05) ──
+  // The target set for a scope and period, in the page's metric. An FY target is matched by the FY its
+  // period_start falls in, a month target by its month (the admin page writes them that way).
+  const targetOf = (st, sid, pt, key) => targetRows.find(t => t.scope_type === st && (st === 'company' || +t.scope_id === +sid) && t.period_type === pt &&
+    (pt === 'fy' ? fyOfMonth(String(t.period_start).slice(0, 7)) === +key : String(t.period_start).slice(0, 7) === key)) || null;
+  const targetVal = t => { if (!t) return null; const v = metric === 'margin' ? t.margin_target : t.revenue_target; return v == null ? null : +v; };
+  // The scope the TOTAL row is held against: Show All = the company, Show Own = the signed-in person;
+  // Team and Collaborations mix owners, so no single target applies.
+  function pageTargetScope(){
+    if (oppsOwnerView === 'all') return { type: 'company', id: null, label: 'Company' };
+    if (oppsOwnerView === 'own') return { type: 'person', id: currentUser.personId, label: 'yours' };
+    return null;
+  }
   const fyValue = (d, fyKey) => { const m = fyByKey[fyKey].months; let s=0; for (let i=0;i<m.length;i++) s += effective(layers(d, fyKey, i)); return s; };
   const dealValue = d => FYS.reduce((s,f)=> s + fyValue(d, f.key), 0);
 
@@ -19387,6 +19649,29 @@ const RPP = (function () {
       return row;
     };
 
+    // v7.10.05: a target row — per FY (and per month when the FY is open) the target set for the scope
+    // in the page's metric, and the share of it the figure above reaches. No target → "–".
+    const showTargets = targetsOn && targetsLoaded;
+    const tgCell = (t, v, cls) => {
+      if (t == null) return `<td class="num tg${cls}"><span class="tg-none">–</span></td>`;
+      const pct = t > 0 ? Math.round((v || 0) / t * 100) : null;
+      return `<td class="num tg${cls}" title="Target ${money(t)} · figure ${money(v || 0)}${pct != null ? ' · ' + pct + '% of target' : ''}">${fmt(t)}<span class="tg-pct${pct != null && pct >= 100 ? ' met' : ''}">${pct == null ? '' : pct + '%'}</span></td>`;
+    };
+    const sumFY = (list, f) => list.reduce((s, m) => s + fyValue(m, f.key), 0);
+    const sumMonth = (list, f, i) => list.reduce((s, m) => s + effective(layers(m, f.key, i)), 0);
+    const targetRowHtml = (scope, list, label, cls) => {
+      let row = `<td class="tg-lbl">${label}</td>${showDetail ? '<td></td>' : ''}<td class="num tg"></td>`;
+      if (showDetail) ATTRS.forEach(() => row += '<td></td>');
+      winFYs.forEach(f => {
+        const fyTarget = scope ? targetVal(targetOf(scope.type, scope.id, 'fy', f.key)) : null;
+        if (f.key === effOpen){
+          f.months.forEach((mk, i) => row += tgCell(scope ? targetVal(targetOf(scope.type, scope.id, 'month', mk)) : null, sumMonth(list, f, i), i === 0 ? ' fy-edge' : ''));
+          row += tgCell(fyTarget, sumFY(list, f), ' col-total');
+        } else row += tgCell(fyTarget, sumFY(list, f), ' col-total fy-edge');
+      });
+      return `<tr class="rpp-target${cls ? ' ' + cls : ''}">${row}</tr>`;
+    };
+
     // Lineage grouping: a family (original + extensions/variations sharing a
     // master) renders under a VIRTUAL master header row whose values are the
     // sum of its visible members; click toggles the children. Singles render
@@ -19444,6 +19729,10 @@ const RPP = (function () {
         if (showDetail) ATTRS.forEach(()=> row += '<td></td>');
         row += sumCells(b.members, idx);
         body += `<tr class="rpp-group" data-grp="${escAttr(b.key)}" onclick="RPP.toggleGroup(this.dataset.grp)">${row}</tr>`;
+        if (showTargets && GROUP_SCOPE[groupBy] && !blank(b.key)){   // v7.10.05: the group's own target, shown whether or not it is open
+          const gs = GROUP_SCOPE[groupBy], id = b.members[0][gs.idKey];
+          body += targetRowHtml(id != null ? { type: gs.type, id } : null, b.members, 'target', '');
+        }
         body += dealsHtml(b.members, !open);
       });
     } else { lastGroupKeys = []; body = dealsHtml(deals, false); }
@@ -19458,7 +19747,8 @@ const RPP = (function () {
 
     document.getElementById('rpp-grid').style.width = 'auto';
     document.getElementById('rpp-card').style.display = 'inline-block';
-    document.getElementById('rpp-thead').innerHTML = `<tr>${head}</tr><tr class="rpp-tot-row">${foot}</tr>`;
+    const tgTotal = showTargets ? (() => { const sc = pageTargetScope(); return targetRowHtml(sc, deals, 'TARGET · ' + (sc ? sc.label : 'none for this view'), 'rpp-target-total'); })() : '';
+    document.getElementById('rpp-thead').innerHTML = `<tr>${head}</tr><tr class="rpp-tot-row">${foot}</tr>${tgTotal}`;
     document.getElementById('rpp-tbody').innerHTML = body;
     document.getElementById('rpp-tfoot').innerHTML = '';
     return {winFYs, effOpen, showDetail, start, visN, total};
@@ -19475,6 +19765,8 @@ const RPP = (function () {
     // the header row (header height varies, so measure and offset).
     const headH = ths[0].getBoundingClientRect().height;
     document.querySelectorAll('#rpp-thead .rpp-tot-row td').forEach(td=> td.style.top = headH + 'px');
+    const totRow = document.querySelector('#rpp-thead .rpp-tot-row'), totH = totRow ? totRow.getBoundingClientRect().height : 0;
+    document.querySelectorAll('#rpp-thead .rpp-target-total td').forEach(td=> td.style.top = (headH + totH) + 'px');   // v7.10.05
     // Client is the only always-pinned column (the spacer). Everything else that
     // isn't an FY column — the Deal name (shown only when open), Value, and the
     // attribute columns — sits under the "Deal detail" tab.
@@ -19535,6 +19827,12 @@ const RPP = (function () {
     if (visibleDeals().some(d => !d.secured && !d.open)) msg += 'Closed deals (Lost) are listed for their actuals only; nothing more is counted for them. ';
     if (trustOn && trustLoaded) msg += `Trust flags on: a flag marks a figure that rests on a judgement nobody checked (a probability typed without the calculator, or not matching it), an order date already passed, a past month still showing its projection (amber cells), or an open deal with no stream.${scoreOK ? '' : ' Scoring flags are unavailable: the probability calculator tables are not installed.'} `;
     if (groupBy) msg += `Grouped by ${groupLabel()}: ${lastGroupKeys.length} group${lastGroupKeys.length!==1?'s':''}, a subtotal each — click a group for its deals. `;
+    if (targetsOn && targetsLoaded){   // v7.10.05
+      const sc = pageTargetScope(), m = metric === 'margin' ? 'margin' : 'revenue';
+      msg += _tgMissing ? 'Targets are not installed on this database (sql/add_targets.sql). '
+        : !targetRows.length ? 'No targets have been set yet (Site Admin → Settings → Targets). '
+        : `Targets on: the TARGET row shows ${sc ? `the ${sc.type === 'company' ? "company's" : 'your'} ${m} target` : `no ${m} target (none applies to the Team or Collaborations view)`} per financial year, and per month where one is set, with the share of it the figure above reaches${groupBy && GROUP_SCOPE[groupBy] ? `; each ${groupLabel().toLowerCase()} row carries its own` : ''}. Targets need not add up to one another. `;
+    }
     msg += effOpen!=null ? `${fyByKey[effOpen].label} expanded — green cells are actuals${varianceOn?` (▲▼ vs the ${B.label.toLowerCase()} figure)`:''}. `
          : detailOn ? 'Expand an FY to see months & actuals. '
                     : 'Compact: FY-total columns only. ';
@@ -19582,6 +19880,7 @@ const RPP = (function () {
     if (ga){ ga.style.display = groupBy ? '' : 'none'; ga.textContent = (lastGroupKeys.length && lastGroupKeys.every(k=>grpOpen.has(k))) ? 'Collapse all' : 'Expand all'; }
     const vb = document.getElementById('rpp-varToggle'); if (vb) vb.classList.toggle('on', varianceOn);   // the page may be gone by the time a load settles
     const tb = document.getElementById('rpp-trustToggle'); if (tb){ tb.classList.toggle('on', trustOn); tb.textContent = trustOn && !trustLoaded ? 'Trust flags…' : 'Trust flags ⚑'; }
+    const tg = document.getElementById('rpp-tgToggle'); if (tg){ tg.classList.toggle('on', targetsOn); tg.textContent = targetsOn && !targetsLoaded ? 'Targets…' : 'Targets ◎'; }
   }
 
   function paint(){
@@ -19805,6 +20104,21 @@ const RPP = (function () {
     head.deals = dealIds.size; snaps.push(head); return id;
   }
 
+  // ── targets (v7.10.05): loaded once on the first press; reloaded with the deals while the view is on ──
+  async function loadTargets(){
+    targetsLoading = true;
+    try { targetRows = await apiGetAll('targets', 'select=*'); _tgMissing = false; }
+    catch(e){ targetRows = []; _tgMissing = /^404\b|PGRST205/.test(e.message || ''); if (!_tgMissing) console.warn('Targets not loaded:', e); }
+    targetsLoaded = true; targetsLoading = false;
+  }
+  async function toggleTargets(){
+    targetsOn = !targetsOn;
+    if (targetsOn && !targetsLoaded){ syncControls(); if (!targetsLoading) await loadTargets(); if (!targetsOn) return; }
+    paint();
+  }
+  // The admin page saved or deleted a target: the next paint reads the fresh rows.
+  function targetsChanged(){ targetsLoaded = false; if (targetsOn && document.getElementById('rpp-root')) loadTargets().then(paint); }
+
   // ── trust flags (v7.10.02) ──
   async function loadTrust(){
     trustLoading = true;
@@ -19941,7 +20255,7 @@ const RPP = (function () {
     fyByKey = Object.fromEntries(FYS.map(f=>[f.key, f]));
 
     DEALS = deals.map((d,i)=>({
-      _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id,
+      _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id, branch_id: d.branch_id != null ? +d.branch_id : null,
       masterId: d.master_deal_id ? +d.master_deal_id : +d.id,
       otype: d.opportunity_type || 'new_business',
       stage_id: +d.stage_id || 0,
@@ -19996,6 +20310,7 @@ const RPP = (function () {
           <button class="btn-toggle" id="rpp-grpAll" style="display:none;" onclick="RPP.toggleAllGroups()">Expand all</button>
           <span class="hint">Past months show <b style="color:var(--green)">actuals</b>; future months show the selected projection.</span>
           <button class="btn-toggle" id="rpp-fsBtn" style="margin-left:auto;" title="The pipeline as it stood at each month end, against today" onclick="RPP.fsOpen()">Forecast history</button>
+          <button class="btn-toggle" id="rpp-tgToggle" title="Show the revenue and margin targets set under Site Admin → Settings → Targets against the figures" onclick="RPP.toggleTargets()">Targets ◎</button>
           <button class="btn-toggle" id="rpp-trustToggle" title="Flag the deals and months whose figure rests on an unchecked judgement" onclick="RPP.toggleTrust()">Trust flags ⚑</button>
           <button class="btn-toggle" id="rpp-varToggle" title="Show ▲▼ variance of actuals vs the projected basis" onclick="RPP.toggleVariance()">Variance ▲▼</button>
         </div>
@@ -20013,8 +20328,8 @@ const RPP = (function () {
     renderViewFilterBar('pipeline');
     document.getElementById('page-sub').textContent = 'Loading…';
     try {
-      trustLoaded = false;
-      await Promise.all([loadData(), trustOn ? loadTrust() : null]);   // v7.10.02: the answers reload with the deals while the view is on
+      trustLoaded = false; if (targetsOn) targetsLoaded = false;
+      await Promise.all([loadData(), trustOn ? loadTrust() : null, targetsOn ? loadTargets() : null]);   // v7.10.02 / v7.10.05: the answers and targets reload with the deals while their view is on
       DEALS = await filterDealsByView(DEALS, oppsOwnerView);
       if (currentPage !== 'revenue_pipeline') return;   // the user has moved on while this loaded
       document.getElementById('page-sub').textContent = DEALS.length + ' deal' + (DEALS.length!==1?'s':'');
@@ -20038,7 +20353,7 @@ const RPP = (function () {
     closeFilter();
   });
 
-  return { render, toggleSecured, toggleUnsecured, setUnsMode, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, fsOpen, fsPick, fsTake, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
+  return { render, toggleSecured, toggleUnsecured, setUnsMode, chipsChanged, setMetric, setGroup, toggleGroup, toggleAllGroups, drill, dealChanged, toggleTrust, toggleTargets, targetsChanged, fsOpen, fsPick, fsTake, toggleVariance, toggleDetail, toggleFY, pageFY, toggleLin,
            cycleSort, openFilter, sortFromPopup, toggleValue, toggleSelectAll, clearFilter, clearAllFilters, closeFilter, filterPopupList };
 })();
 
