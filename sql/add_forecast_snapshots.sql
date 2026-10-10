@@ -34,7 +34,9 @@
 -- on DEV and PROD before or with the code (without it the Forecast history button says so and
 -- nothing else changes). Attributed to Claude Code acting for Richard.
 
-\set ON_ERROR_STOP on
+-- Runs in the Supabase SQL editor or psql: no psql meta-commands here (a `\set ON_ERROR_STOP`
+-- line failed in the editor on 2026-10-10 with a syntax error); the transaction below already
+-- aborts as a whole on any error.
 BEGIN;
 
 SELECT set_config('request.headers', json_build_object(
