@@ -10,10 +10,12 @@
 --                          its month, so a later change of the FY start month relabels an old row
 --                          rather than losing it;
 --             scope_type   'company' (scope_id NULL) | 'region' (regions.id) | 'branch'
---                          (branches.id) | 'person' (people.id — a salesperson). scope_id carries
---                          no foreign key: the scopes live in different tables and a retired
---                          region or person keeps its target in history. Add a scope type by
---                          widening the CHECK and the client's TARGET_SCOPES list.
+--                          (branches.id) | 'person' (people.id — a salesperson) | 'service'
+--                          (service_major.id — a service family) | 'service_type' (service_sub.id).
+--                          scope_id carries no foreign key: the scopes live in different tables
+--                          and a retired region or person keeps its target in history. Add a scope
+--                          type by widening the CHECK below (and the ALTER that follows it, for a
+--                          database that already has the table) and the client's TARGET_SCOPES.
 --             revenue_target / margin_target  rand, either may be blank but not both.
 --           Nothing rolls up: the company target is its own row, the regional ones theirs, and
 --           they need not agree — by design, so no constraint or trigger relates them.
@@ -35,7 +37,7 @@ CREATE TABLE IF NOT EXISTS targets (
   period_type     TEXT          NOT NULL CHECK (period_type IN ('fy', 'month')),
   period_start    DATE          NOT NULL,
   period_end      DATE          NOT NULL CHECK (period_end >= period_start),
-  scope_type      TEXT          NOT NULL CHECK (scope_type IN ('company', 'region', 'branch', 'person')),
+  scope_type      TEXT          NOT NULL CHECK (scope_type IN ('company', 'region', 'branch', 'person', 'service', 'service_type')),
   scope_id        BIGINT        CHECK ((scope_type = 'company') = (scope_id IS NULL)),
   revenue_target  NUMERIC(18,2) CHECK (revenue_target IS NULL OR revenue_target >= 0),
   margin_target   NUMERIC(18,2) CHECK (margin_target IS NULL OR margin_target >= 0),
@@ -46,7 +48,14 @@ CREATE TABLE IF NOT EXISTS targets (
   updated_by      BIGINT        REFERENCES people(id),
   CONSTRAINT targets_one_figure CHECK (revenue_target IS NOT NULL OR margin_target IS NOT NULL)
 );
-COMMENT ON TABLE targets IS 'Revenue and margin targets by period (fy | month) and scope (company | region | branch | person). Rows do not roll up: each scope''s target stands on its own.';
+COMMENT ON TABLE targets IS 'Revenue and margin targets by period (fy | month) and scope (company | region | branch | person | service | service_type). Rows do not roll up: each scope''s target stands on its own.';
+
+-- v7.10.06 (service scopes): a database that ran the first cut carries the four-value check under
+-- the name Postgres gave the column constraint; replace it with the current list. A no-op in effect
+-- on a fresh install (the same check is dropped and put back).
+ALTER TABLE targets DROP CONSTRAINT IF EXISTS targets_scope_type_check;
+ALTER TABLE targets ADD CONSTRAINT targets_scope_type_check
+  CHECK (scope_type IN ('company', 'region', 'branch', 'person', 'service', 'service_type'));
 
 -- One target per scope and period. COALESCE so the company rows (scope_id NULL) are unique too.
 CREATE UNIQUE INDEX IF NOT EXISTS targets_scope_period_uniq

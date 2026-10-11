@@ -781,7 +781,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.06 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -820,7 +820,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.06 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -17409,10 +17409,12 @@ async function saveDefaultViews() {
 // against its figures (RPP, Targets toggle). State _tg: the rows, the FY filter, the open editor
 // (editing = row id | 'new') and its draft, which every input writes to so a repaint loses nothing.
 const TARGET_SCOPES = [
-  { key: 'company', label: 'Company',     table: null },
-  { key: 'region',  label: 'Region',      table: 'regions' },
-  { key: 'branch',  label: 'Branch',      table: 'branches' },
-  { key: 'person',  label: 'Salesperson', table: 'people' },
+  { key: 'company',      label: 'Company',        table: null },
+  { key: 'region',       label: 'Region',         table: 'regions' },
+  { key: 'branch',       label: 'Branch',         table: 'branches' },
+  { key: 'person',       label: 'Salesperson',    table: 'people' },
+  { key: 'service',      label: 'Service family', table: 'service_major' },   // v7.10.06 (Richard: "targets against services/products")
+  { key: 'service_type', label: 'Service type',   table: 'service_sub' },
 ];
 const TARGET_PERIODS = [['fy', 'Financial year'], ['month', 'Month']];
 let _tg = null;
@@ -17442,11 +17444,15 @@ function _tgSalesPeople() {
 }
 function _tgScopeRows(scope, keepId) {   // the pick list for a scope type; keepId = the row's own pick, kept even if retired
   if (!scope.table) return [];
+  // A service type is named with its family ("Manpower – On-Site Guarding") so the list reads unambiguously.
+  const nameOf = r => scope.table === 'people' ? [r.first_name, r.last_name].filter(Boolean).join(' ')
+    : scope.table === 'service_sub' ? [((allData['service_major'] || []).find(m => +m.id === +r.major_id) || {}).name, r.name].filter(Boolean).join(' – ')
+    : r.name;
   let list = scope.table === 'people' ? _tgSalesPeople()
-    : (allData[scope.table] || []).filter(r => r.active !== false || +r.id === +keepId).map(r => ({ id: +r.id, name: r.name || ('#' + r.id) })).sort((a, b) => a.name.localeCompare(b.name));
+    : (allData[scope.table] || []).filter(r => r.active !== false || +r.id === +keepId).map(r => ({ id: +r.id, name: nameOf(r) || ('#' + r.id) })).sort((a, b) => a.name.localeCompare(b.name));
   if (keepId && !list.some(r => r.id === +keepId)) {
     const raw = (allData[scope.table] || []).find(r => +r.id === +keepId);
-    list = list.concat([{ id: +keepId, name: raw ? (scope.table === 'people' ? [raw.first_name, raw.last_name].filter(Boolean).join(' ') : raw.name) : '#' + keepId }]);
+    list = list.concat([{ id: +keepId, name: raw ? nameOf(raw) : '#' + keepId }]);
   }
   return list;
 }
@@ -17464,14 +17470,16 @@ async function renderTargetsPage() {
   body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--text3);">Loading…</td></tr>';
   let rows = [], missing = false;
   try {
-    const [t, regions, branches, people] = await Promise.all([
+    const [t, regions, branches, people, smaj, ssub] = await Promise.all([
       apiGetAll('targets', 'select=*').catch(e => { if (targetsNotInstalled(e)) { missing = true; return []; } throw e; }),
       allData['regions']  || apiGet('regions', 'select=*'),
       allData['branches'] || apiGet('branches', 'select=*'),
       allData['people']   || apiGetAll('people', 'select=*'),
+      allData['service_major'] || apiGet('service_major', 'select=*'),
+      allData['service_sub']   || apiGet('service_sub', 'select=*'),
       ensureHomeOrgMembers(),
     ]);
-    allData['regions'] = regions; allData['branches'] = branches; allData['people'] = people;
+    allData['regions'] = regions; allData['branches'] = branches; allData['people'] = people; allData['service_major'] = smaj; allData['service_sub'] = ssub;
     rows = t;
   } catch (e) {
     if (currentPage === 'targets') body.innerHTML = '<tr><td style="padding:24px;border:none;color:var(--red);">Could not load: ' + escHtml(e.message) + '</td></tr>';
@@ -17483,7 +17491,7 @@ async function renderTargetsPage() {
   _tgPaint();
 }
 function _tgRowsForFY(fy) {
-  const order = { company: 0, region: 1, branch: 2, person: 3 };
+  const order = { company: 0, region: 1, branch: 2, person: 3, service: 4, service_type: 5 };
   return _tg.rows.filter(t => fy === 'all' || targetFYOf(t) === +fy).map(t => ({ t, key: targetPeriodKey(t), name: targetScopeName(t) }))
     .sort((a, b) => (targetFYOf(a.t) - targetFYOf(b.t)) || ((a.t.period_type === 'month') - (b.t.period_type === 'month')) || String(a.key).localeCompare(String(b.key)) ||
                     ((order[a.t.scope_type] ?? 9) - (order[b.t.scope_type] ?? 9)) || a.name.localeCompare(b.name));
@@ -17525,14 +17533,16 @@ function _tgPaint() {
       const bits = [have('company') ? 'Company ' + _tgMoney(sum('company')) : null,
         have('region') ? 'Regions together ' + _tgMoney(sum('region')) : null,
         have('branch') ? 'Branches together ' + _tgMoney(sum('branch')) : null,
-        have('person') ? 'Salespeople together ' + _tgMoney(sum('person')) : null].filter(Boolean);
+        have('person') ? 'Salespeople together ' + _tgMoney(sum('person')) : null,
+        have('service') ? 'Service families together ' + _tgMoney(sum('service')) : null,
+        have('service_type') ? 'Service types together ' + _tgMoney(sum('service_type')) : null].filter(Boolean);
       return bits.length ? '<div><strong>' + label + '</strong> · ' + bits.join(' · ') + '</div>' : '';
     };
     const r = part('revenue_target', getFYLabel(_tg.fy) + ' revenue'), m = part('margin_target', getFYLabel(_tg.fy) + ' margin');
-    if (r || m) recon = '<div style="font-size:12px;color:var(--text3);margin-top:12px;line-height:1.6;">' + r + m + '<div>Targets stand on their own: the company figure and what the regions, branches or salespeople add up to need not agree.</div></div>';
+    if (r || m) recon = '<div style="font-size:12px;color:var(--text3);margin-top:12px;line-height:1.6;">' + r + m + '<div>Targets stand on their own: the company figure and what the regions, branches, salespeople or services add up to need not agree.</div></div>';
   }
   body.innerHTML = '<tr><td style="padding:0;border:none;"><div style="padding:2px 0 24px;max-width:1100px;">' +
-    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.5;">A target is a revenue figure, a margin figure, or both, for a period — a financial year or a single month — and a scope: the company, a region, a branch or a salesperson. ' +
+    '<div style="font-size:12px;color:var(--text3);margin-bottom:14px;line-height:1.5;">A target is a revenue figure, a margin figure, or both, for a period — a financial year or a single month — and a scope: the company, a region, a branch, a salesperson, a service family or a service type. ' +
       'Each row stands on its own; nothing is rolled up or checked against another row. The Revenue Pipeline shows them against its figures through its <strong>Targets</strong> button.</div>' +
     '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;">' +
       '<label style="font-size:12px;font-weight:700;color:var(--navy);">Financial year</label>' +
@@ -19350,7 +19360,10 @@ const RPP = (function () {
   // loads the rows once and the grid gains a TARGET row under TOTAL for the page's scope (the company
   // on Show All, the signed-in person on Show Own) and one under each Person / Region / Branch group.
   let targetsOn = false, targetsLoaded = false, targetsLoading = false, _tgMissing = false, targetRows = [];
-  const GROUP_SCOPE = { owner: { type: 'person', idKey: 'owner_id' }, region: { type: 'region', idKey: 'region_id' }, branch: { type: 'branch', idKey: 'branch_id' } };
+  // v7.10.06: a Service group is a service type where the deals carry one, else the family (a deal
+  // with a family and no type groups under the family's name alone); Service family is the family.
+  const GROUP_SCOPE = { owner: { type: 'person', idKey: 'owner_id' }, region: { type: 'region', idKey: 'region_id' }, branch: { type: 'branch', idKey: 'branch_id' },
+    service: { type: 'service_type', idKey: 'service_sub_id', fallback: { type: 'service', idKey: 'service_major_id' } }, family: { type: 'service', idKey: 'service_major_id' } };
   let answersByDeal = new Map();   // deal id -> {criterionId: answerId}
   const TRUST = [
     { key:'unscored', label:'not scored',               tip:'An unsecured deal whose probability was typed with no calculator answers behind it' },
@@ -19361,7 +19374,7 @@ const RPP = (function () {
   ];
   const thisMonth = () => new Date().toISOString().slice(0, 7);
   const todayStr  = () => new Date().toISOString().slice(0, 10);
-  const GROUPS = [{key:'owner',label:'Person'},{key:'region',label:'Region'},{key:'branch',label:'Branch'},{key:'service',label:'Service'},{key:'client',label:'Client'}];
+  const GROUPS = [{key:'owner',label:'Person'},{key:'region',label:'Region'},{key:'branch',label:'Branch'},{key:'service',label:'Service'},{key:'family',label:'Service family'},{key:'client',label:'Client'}];
   const groupLabel = () => (GROUPS.find(g=>g.key===groupBy)||{}).label || '';
 
   function toggleLin(mid){ linOpen.has(+mid) ? linOpen.delete(+mid) : linOpen.add(+mid); paint(); }
@@ -19463,6 +19476,7 @@ const RPP = (function () {
     {key:'value',   label:'Value',      get:d=>dealValue(d), filterable:false},
     {key:'owner',   label:'Owner',      get:d=>d.owner},
     {key:'service', label:'Service',    get:d=>d.service},
+    {key:'family',  label:'Service family', get:d=>d.family},   // v7.10.06: a group-by only (no column of its own)
     {key:'stage',   label:'Stage',      get:d=>d.stage},
     {key:'region',  label:'Region',     get:d=>d.region},
     {key:'branch',  label:'Branch',     get:d=>d.branch},
@@ -19730,8 +19744,9 @@ const RPP = (function () {
         row += sumCells(b.members, idx);
         body += `<tr class="rpp-group" data-grp="${escAttr(b.key)}" onclick="RPP.toggleGroup(this.dataset.grp)">${row}</tr>`;
         if (showTargets && GROUP_SCOPE[groupBy] && !blank(b.key)){   // v7.10.05: the group's own target, shown whether or not it is open
-          const gs = GROUP_SCOPE[groupBy], id = b.members[0][gs.idKey];
-          body += targetRowHtml(id != null ? { type: gs.type, id } : null, b.members, 'target', '');
+          const gs = GROUP_SCOPE[groupBy]; let type = gs.type, id = b.members[0][gs.idKey];
+          if (id == null && gs.fallback){ type = gs.fallback.type; id = b.members[0][gs.fallback.idKey]; }
+          body += targetRowHtml(id != null ? { type, id } : null, b.members, 'target', '');
         }
         body += dealsHtml(b.members, !open);
       });
@@ -20256,6 +20271,8 @@ const RPP = (function () {
 
     DEALS = deals.map((d,i)=>({
       _i:i, id:+d.id, owner_id:d.owner_id, region_id:d.region_id, branch_id: d.branch_id != null ? +d.branch_id : null,
+      service_major_id: d.service_major_id != null ? +d.service_major_id : null, service_sub_id: d.service_sub_id != null ? +d.service_sub_id : null,   // v7.10.06 targets
+      family: (smaj.find(s=>+s.id===+d.service_major_id)||{}).name || '—',
       masterId: d.master_deal_id ? +d.master_deal_id : +d.id,
       otype: d.opportunity_type || 'new_business',
       stage_id: +d.stage_id || 0,
@@ -20305,6 +20322,7 @@ const RPP = (function () {
             <button data-group="region" onclick="RPP.setGroup('region')">Region</button>
             <button data-group="branch" onclick="RPP.setGroup('branch')">Branch</button>
             <button data-group="service" onclick="RPP.setGroup('service')">Service</button>
+            <button data-group="family" title="The service family (Manpower, Technology Works …)" onclick="RPP.setGroup('family')">Service family</button>
             <button data-group="client" onclick="RPP.setGroup('client')">Client</button>
           </div>
           <button class="btn-toggle" id="rpp-grpAll" style="display:none;" onclick="RPP.toggleAllGroups()">Expand all</button>
