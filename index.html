@@ -210,6 +210,11 @@ tr.client-band-child td:first-child{border-left:3px solid #003057;}
 .modal-close:hover{background:var(--bg);color:var(--text);}
 .modal-body{padding:22px;flex:1;}
 .modal-footer{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;position:sticky;bottom:0;background:var(--bg2);}
+/* Capture Time (v7.10.05): the mobile timesheet, time.html, framed phone-sized over the page */
+.time-modal{width:440px;height:min(860px,94vh);max-height:94vh;overflow:hidden;}
+.time-modal .modal-header{padding:12px 16px;}
+.time-modal .modal-header .btn{font-size:12px;padding:4px 9px;}
+.time-modal iframe{flex:1;min-height:0;width:100%;border:0;display:block;background:#F1F4F8;}
 
 /* ── Status ────────────────────────────────────────────── */
 .status-bar{position:fixed;bottom:20px;right:20px;padding:10px 16px;border-radius:var(--radius);font-size:13px;font-weight:600;display:none;z-index:99999;animation:slideIn 0.2s ease;}
@@ -775,7 +780,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -814,7 +819,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.04 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.05 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5686,8 +5691,9 @@ function buildNav(navigate = true) {
 
   // Dashboard — standalone top item; everyone's post-login landing page.
   html += renderItem({ page: 'dashboard', label: 'Dashboard', icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' });
-  // v7.9.98: the mobile timesheet is its own page (/time); this opens it in a new tab for anyone who captures time.
-  if (can('capture_time')) html += `<button class="nav-item" id="nav-open-time" onclick="window.open('/time','_blank','noopener')">
+  // v7.9.98: the mobile timesheet is its own page (/time); v7.10.05: it opens in a modal over the page
+  // (openTimeCapture) for anyone who captures time — the modal's header still offers a tab of its own.
+  if (can('capture_time')) html += `<button class="nav-item" id="nav-open-time" onclick="openTimeCapture()">
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
       Capture Time
     </button>`;
@@ -7105,6 +7111,46 @@ async function renderContractsPage() {
   } catch (e) {
     body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// ── Capture Time in a modal (v7.10.05) ──────────────────────────────────────────────────────────
+// Richard 2026-10-13: "open capture time on modal window" — the sidebar's Capture Time no longer
+// leaves the app for a new tab: time.html (the mobile timesheet, /time) is framed phone-sized over
+// the page. Same origin, so the frame signs in from the focus_session record this app keeps (the
+// signed-in user's own time, never the masqueraded person's); ?embed=1 tells the page it sits inside
+// Focus — no bar of its own, no Sign out (which would drop this app's session too), and an expired
+// session shows a note instead of a login form. The header keeps "Open in tab" for a phone or a
+// second screen. Closing asks the frame (embedUnsaved(), same origin) so a half-typed entry is
+// never thrown away silently; entries already queued live in localStorage and sync on the next open.
+// A backdrop click does NOT close it (a form sits behind it); × or Escape does.
+function openTimeCapture() {
+  if (!can('capture_time')) return;
+  if (document.getElementById('time-frame')) return;
+  showModal('<div class="modal-overlay"><div class="modal time-modal" role="dialog" aria-label="Capture Time">'
+    + '<div class="modal-header"><div class="modal-title">Capture Time</div>'
+    + '<div style="display:flex;align-items:center;gap:6px;">'
+    + '<a href="/time" target="_blank" rel="noopener" class="btn btn-ghost btn-sm" title="Open the timesheet in a tab of its own">Open in tab ↗</a>'
+    + '<button class="modal-close" onclick="closeTimeCapture()" aria-label="Close" title="Close">×</button></div></div>'
+    + '<iframe id="time-frame" src="/time?embed=1" title="Capture Time"></iframe></div></div>');
+  document.addEventListener('keydown', _timeCaptureKey);
+  const f = document.getElementById('time-frame'); if (f) { try { f.focus(); } catch (e) {} }
+  _logActivity('time');
+}
+function _timeCaptureKey(e) { if (e.key === 'Escape') closeTimeCapture(); }
+// force = true closes without asking (sign-out, session expiry).
+async function closeTimeCapture(force) {
+  const f = document.getElementById('time-frame');
+  if (!f) { document.removeEventListener('keydown', _timeCaptureKey); return; }
+  if (!force) {
+    let open = false;
+    try { const w = f.contentWindow; open = !!(w && typeof w.embedUnsaved === 'function' && w.embedUnsaved()); } catch (e) {}
+    if (open) {
+      const ok = await confirmDialog({ title: 'Close Capture Time?', message: 'The time entry you were adding has not been saved. Closing this window loses it.', confirmLabel: 'Close anyway', cancelLabel: 'Keep editing', danger: true });
+      if (!ok) return;
+    }
+  }
+  document.removeEventListener('keydown', _timeCaptureKey);
+  if (document.getElementById('time-frame')) closeModal();
 }
 
 // ── Timesheets (v7.9.98) ───────────────────────────────────────────────────────────────────────
@@ -17135,6 +17181,7 @@ async function signOutClicked() {
   doLogout();
 }
 function doLogout() {
+  if (document.getElementById('time-frame')) closeTimeCapture(true);   // v7.10.05
   _saveSession(null);
   currentUser = null;
   realUser = null;
