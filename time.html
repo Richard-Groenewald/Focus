@@ -16,6 +16,9 @@
   html,body { margin:0; background:var(--bg); color:var(--text); font-family:Arial,Helvetica,sans-serif; font-size:16px; }
   body { padding-bottom:calc(88px + env(safe-area-inset-bottom)); min-height:100vh; }
   [hidden] { display:none !important; }
+  /* v7.10.08: framed inside Focus (?embed=1, or any iframe) — Focus draws the title bar and the DEV stripe */
+  body.embed .bar, body.embed #envbar { display:none !important; }
+  body.embed .login { padding-top:28px; }
   button { font:inherit; cursor:pointer; }
   .bar { position:sticky; top:0; z-index:20; background:var(--navy); color:#fff; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; display:flex; align-items:center; gap:10px; }
   .bar h1 { margin:0; font-size:17px; flex:1; }
@@ -112,7 +115,8 @@
     <label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" autocorrect="off">
     <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
     <div id="lerr" class="err" hidden></div>
-    <div class="acts"><button class="btn btn-red" id="lbtn" onclick="doLogin()">Sign in</button></div>
+    <div class="acts" id="lacts"><button class="btn btn-red" id="lbtn" onclick="doLogin()">Sign in</button></div>
+    <p id="lembed" hidden>This window uses your Focus sign-in. Close it, sign in to Focus again and reopen Capture Time.</p>
   </div>
 </section>
 
@@ -144,6 +148,14 @@ const LS = {
 };
 
 let S = null;          // { t: token, u: userId, s: sessionId } — the same record the main app keeps
+// v7.10.08: inside Focus (the Capture Time modal frames /time?embed=1) the session record belongs to
+// the main app: never sign in or out of it here, and show a note instead of the login form.
+const EMBED = (() => { try { if (window.self !== window.top) return true; } catch (e) { return true; } return new URLSearchParams(location.search).has('embed'); })();
+if (EMBED) {
+  document.body.classList.add('embed');
+  // Escape with nothing open asks Focus to close the window (a key pressed in here never reaches Focus).
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && !ED && !$('picker')) { try { window.parent.closeTimeCapture(); } catch (x) {} } });
+}
 let ME = { personId: null, name: '' };
 let JOBS = [];         // [{ key:'d12'|'w3', kind:'deal'|'work', id, number, client, title }]
 let SERVER = [];       // my entries as the server has them
@@ -170,9 +182,10 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().t
 function loadSession() { const s = LS.get('focus_session', null); if (s && s.t) { S = s; return true; } return false; }
 function tokenPerson(t) { try { return JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).p || null; } catch (e) { return null; } }
 function showLogin(msg) {
-  S = null; LS.del('focus_session');
+  S = null; if (!EMBED) LS.del('focus_session');
   $('v-app').hidden = true; $('v-login').hidden = false;
   const e = $('lerr'); e.hidden = !msg; e.textContent = msg || '';
+  if (EMBED) { ['u', 'p', 'lacts'].forEach(id => { $(id).hidden = true; }); document.querySelectorAll('#v-login label').forEach(l => { l.hidden = true; }); $('lembed').hidden = false; }
 }
 async function doLogin() {
   const username = $('u').value.trim(), password = $('p').value;
@@ -192,6 +205,7 @@ async function doLogin() {
   finally { $('lbtn').disabled = false; }
 }
 function signOut() {
+  if (EMBED) return;   // v7.10.08: the session is Focus's — close the window instead
   if (PEND.length && !confirm(PEND.length + ' entr' + (PEND.length === 1 ? 'y has' : 'ies have') + ' not synced yet and will be lost if you sign out. Sign out anyway?')) return;
   PEND = []; LS.del('ts_pend'); LS.del('ts_jobs'); showLogin('');
 }
@@ -492,6 +506,9 @@ addEventListener('online', () => { if (S) flushNow(); });
 
 // ── the entry sheet ─────────────────────────────────────────────────────────────────────────
 let ED = null;   // { ref, jobKey, date, ...}
+// v7.10.08: Focus asks this before closing the Capture Time window (a function, so the frame's window
+// carries it — a top-level let does not): an editable sheet is open, so typed input would be lost.
+function embedUnsaved() { return !!(ED && !ED.lock); }
 function openSheet(ref, date, startT, endT) {
   let r = null;
   if (ref) r = viewRows().find(x => (x.id ? 'i' + x.id : 'u' + x.client_uuid) === ref);
