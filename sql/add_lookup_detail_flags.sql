@@ -19,7 +19,8 @@
 -- these columns are absent, so the code runs before or after this file.
 --
 -- Additive, re-runnable, no psql meta-commands (runs in the Supabase SQL editor). Flags the
--- next action named Other; nothing else is flagged — tick the rest on the lookup page.
+-- next action named Other and the activity type named Other (Richard added that type on PROD on
+-- 2026-10-20); nothing else is flagged — tick the rest on the lookup page.
 -- Attributed to Claude Code acting for Richard.
 BEGIN;
 
@@ -44,6 +45,12 @@ COMMENT ON COLUMN next_actions.detail_prompt   IS 'Prompt shown in Action Detail
 UPDATE next_actions
    SET requires_detail = true,
        detail_prompt   = COALESCE(NULLIF(trim(detail_prompt), ''), 'Say what the next action is')
+ WHERE lower(trim(name)) = 'other' AND requires_detail = false;
+
+-- An activity type named Other asks what the engagement was, the same way.
+UPDATE activity_types
+   SET requires_detail = true,
+       detail_prompt   = COALESCE(NULLIF(trim(detail_prompt), ''), 'Say what the engagement was')
  WHERE lower(trim(name)) = 'other' AND requires_detail = false;
 
 COMMIT;
