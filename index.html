@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.13 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.13 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -16862,7 +16862,7 @@ async function doLogin() {
 // Two tables stay writable: the presence heartbeat (or they would look offline
 // to everyone else) and bug reports (a viewer who spots a problem should still
 // be able to say so).
-const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat', 'rpc/log_activity', 'rpc/take_forecast_snapshot'];   // rpc: system jobs, not user data entry
+const READ_ONLY_WRITE_ALLOW = ['user_presence', 'bug_reports', 'rpc/sweep_leads', 'rpc/heartbeat', 'rpc/log_activity', 'rpc/take_forecast_snapshot', 'rpc/lead_open_bundle'];   // rpc: system jobs and reads, not user data entry
 
 function isReadOnlyUser() {
   if (typeof currentUser === 'undefined' || !currentUser) return false;
@@ -24171,11 +24171,126 @@ async function openNewLead() {
   resetLeadDirty();
 }
 
+// ── Lead open bundle (v7.10.14) ───────────────────────────────────────────────
+// lead_open_bundle(p_lead_id) (sql/add_lead_open_bundle.sql) returns everything
+// openLeadForm reads for one lead in ONE call. The open used to be seven
+// dependent round trips (lead → description log / contacts → engagements →
+// group engagements → milestones, plus cadence steps → campaign name), and on
+// prod's Nano instance any one of them can stall for seconds at the API layer
+// (Richard 2026-10-20: "clicking on edit lead takes many seconds"). The loaders
+// below read window._leadBundle while it holds THIS lead and keep their own
+// reads otherwise — so the function can be installed before or after this
+// build, a reload after a save (bundle cleared) still reads live rows, and mock
+// mode builds the same shape from the store (_leadMockBundle) so the bundle
+// path is what the mock exercises too.
+let _leadRpcMissing = false;   // set when rpc/lead_open_bundle answers 404 (function not installed)
+window._leadBundle = null;
+function _leadBundleFor(leadId) {
+  const B = window._leadBundle;
+  return (B && leadId != null && +B.lead_id === +leadId) ? B : null;
+}
+async function _leadFetchBundle(id) {
+  if (!id) return null;
+  if (MOCK) return _leadMockBundle(id);
+  if (_leadRpcMissing) return null;
+  try {
+    const b = await api('rpc/lead_open_bundle', 'POST', { p_lead_id: +id }, '', { prefer: '' });
+    if (!(b && typeof b === 'object' && !Array.isArray(b) && +b.lead_id === +id && Array.isArray(b.engagements))) return null;
+    return b;
+  } catch (e) {
+    if (/^404\b|PGRST202/.test((e && e.message) || '')) _leadRpcMissing = true;
+    else console.warn('lead_open_bundle failed — using the per-table reads:', e && e.message);
+    return null;
+  }
+}
+// Lookups the bundle carries: freshen the shared caches so the form's helpers
+// (qualification pools, milestone badges, home-org owner pool) need no round
+// trip of their own. The active-only lists replace the cache (same filter as
+// the per-table reads); the others fill a cache that is empty.
+function _leadSeedLookups(B) {
+  if (Array.isArray(B.red_flags)) allData['red_flags'] = B.red_flags;
+  if (Array.isArray(B.strategic_decisions)) allData['strategic_decisions'] = B.strategic_decisions;
+  if (Array.isArray(B.milestone_groups)) allData['milestone_groups'] = B.milestone_groups;
+  if (Array.isArray(B.milestone_types))  allData['milestone_types']  = B.milestone_types;
+  if (!allData['qualification_dimensions'] && Array.isArray(B.qualification_dimensions)) allData['qualification_dimensions'] = B.qualification_dimensions;
+  if (!allData['home_organisation_members'] && Array.isArray(B.home_org_member_ids)) allData['home_organisation_members'] = B.home_org_member_ids;
+  if (!allData['service_sub_all'] && Array.isArray(B.service_sub)) allData['service_sub_all'] = B.service_sub;
+  if (!allData['research_campaigns'] && Array.isArray(B.research_campaigns)) allData['research_campaigns'] = B.research_campaigns;
+  if (!allData['sales_campaigns'] && Array.isArray(B.sales_campaigns)) allData['sales_campaigns'] = B.sales_campaigns;
+}
+// Mock mode: the same shape the SQL function returns, built from the store.
+function _leadMockBundle(id) {
+  const db = _mockStore();
+  const T = t => db[t] || [];
+  const clone = x => JSON.parse(JSON.stringify(x));
+  const lead = T('leads').find(l => +l.id === +id) || null;
+  const site = lead && lead.site_id ? (T('sites').find(s => +s.id === +lead.site_id) || null) : null;
+  const org  = lead && lead.target_org_id ? (T('organisations').find(o => +o.id === +lead.target_org_id) || null) : null;
+  const byDateDesc = (a, b) => String(b.engagement_date || '').localeCompare(String(a.engagement_date || ''));
+  const chain = [];
+  let cur = lead ? (lead.target_org_id || (site && site.organisation_id) || null) : null;
+  const seen = new Set();
+  while (cur && !seen.has(+cur)) {
+    seen.add(+cur); chain.push(+cur);
+    const o = T('organisations').find(x => +x.id === +cur);
+    cur = o ? o.parent_org_id : null;
+  }
+  const own = T('engagements').filter(e => +e.lead_id === +id)
+    .sort((a, b) => byDateDesc(a, b) || String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  const ownIds = new Set(own.map(e => +e.id));
+  const active = rows => rows.filter(r => r.active !== false).sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || String(a.name || '').localeCompare(String(b.name || '')));
+  const bySort = rows => rows.slice().sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || (+a.id) - (+b.id));
+  const req = T('lead_stage_requests').filter(r => +r.lead_id === +id && r.status === 'pending' && (r.request_type === 'hold' || r.request_type === 'nurture'))
+    .sort((a, b) => String(b.requested_at || '').localeCompare(String(a.requested_at || '')))[0] || null;
+  const rc = lead && lead.research_campaign_id ? T('research_campaigns').find(c => +c.id === +lead.research_campaign_id) : null;
+  return clone({
+    generated_at: new Date().toISOString(),
+    lead_id: +id, lead, site, org,
+    description_log: T('lead_description_log').filter(d => +d.lead_id === +id)
+      .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')) || (+b.id) - (+a.id)),
+    service_estimates: T('lead_service_estimates').filter(x => +x.lead_id === +id),
+    engagements: own,
+    org_chain: chain,
+    group_engagements: T('engagements').filter(e => e.org_id != null && chain.includes(+e.org_id)).sort(byDateDesc),
+    milestones: T('engagement_milestones').filter(m => ownIds.has(+m.engagement_id)),
+    cadence_steps: lead && lead.research_campaign_id
+      ? T('campaign_cadence_steps').filter(c => +c.research_campaign_id === +lead.research_campaign_id).sort((a, b) => (+a.step_no) - (+b.step_no)) : [],
+    campaign_name: rc ? (rc.name || null) : null,
+    red_flag_links: T('lead_red_flags').filter(r => +r.lead_id === +id),
+    strategic_decision_links: T('lead_strategic_decisions').filter(r => +r.lead_id === +id),
+    stage_request: req,
+    red_flags: active(T('red_flags')), strategic_decisions: active(T('strategic_decisions')),
+    milestone_groups: bySort(T('milestone_groups')), milestone_types: bySort(T('milestone_types')),
+    qualification_dimensions: T('qualification_dimensions').slice().sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0)),
+    home_org_member_ids: T('home_organisation_members').map(h => ({ person_id: h.person_id })),
+    service_sub: T('service_sub').filter(x => x.active !== false).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+    research_campaigns: T('research_campaigns').filter(x => x.status === 'Active').sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+    sales_campaigns: T('sales_campaigns').filter(x => x.status === 'Active').sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))),
+  });
+}
+
 async function openLeadForm(id) {
   if (id) _logActivity('lead', id);
+  window._leadBundle = null;
   try {
-    const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
-    leadData = rows[0] || { id };
+    // One call for the lead and every child row the form reads (v7.10.14);
+    // the per-table read stands when the function is absent.
+    const B = await _leadFetchBundle(id);
+    if (B) {
+      window._leadBundle = B;
+      leadData = B.lead || { id };
+      _leadSeedLookups(B);
+      // The pending Hold / Nurture request rides along too: seed the lazy-load
+      // guard now, before the first refreshLeadWorkflowChrome, so it is not fetched.
+      window._leadStageRequest = B.stage_request || null;
+      window._leadStageRequestFor = +id;
+      // The site and organisation rows ride along: the rescues below need no trip.
+      if (B.site && leadData.site_id && !(allData['sites'] || []).some(s => +s.id === +leadData.site_id)) (allData['sites'] = allData['sites'] || []).push(B.site);
+      if (B.org && leadData.target_org_id && !(allData['organisations'] || []).some(o => +o.id === +leadData.target_org_id)) (allData['organisations'] = allData['organisations'] || []).push(B.org);
+    } else {
+      const rows = await apiGet('leads', 'id=eq.' + id + '&select=*');
+      leadData = rows[0] || { id };
+    }
     // If the lead's own site row isn't in the cache (deactivated, or paged out of a
     // capped load), populate used to fall through and silently swap in the org's
     // PRIMARY site — and the next autosave persisted the swap. Fetch the real one.
@@ -24253,6 +24368,8 @@ async function openLeadForm(id) {
     _updateLeadBackButtonForDealContext();
   } catch(e) {
     showStatus('Failed to load lead: ' + e.message, 'error');
+  } finally {
+    window._leadBundle = null;   // every later load (after a save, a logged engagement) reads live rows
   }
 }
 
@@ -24895,7 +25012,8 @@ async function loadLeadQualificationSelections(leadId) {
     return;
   }
   try {
-    const [rfLinks, sdLinks] = await Promise.all([
+    const B = _leadBundleFor(leadId);   // v7.10.14
+    const [rfLinks, sdLinks] = B ? [B.red_flag_links || [], B.strategic_decision_links || []] : await Promise.all([
       apiGet('lead_red_flags',           `lead_id=eq.${leadId}&select=*`),
       apiGet('lead_strategic_decisions', `lead_id=eq.${leadId}&select=*`),
     ]);
@@ -25677,7 +25795,8 @@ async function saveLeadContactEdit(i) {
 // ── Description thread (original retained; updates appended from the next open) ─
 async function loadLeadDescriptionLog(leadId) {
   if (!leadId) { leadDescriptionLog = []; return; }
-  try { leadDescriptionLog = await apiGet('lead_description_log', `lead_id=eq.${leadId}&select=*&order=created_at.desc,id.desc`); }
+  const B = _leadBundleFor(leadId);   // v7.10.14
+  try { leadDescriptionLog = B ? B.description_log : await apiGet('lead_description_log', `lead_id=eq.${leadId}&select=*&order=created_at.desc,id.desc`); }
   catch (e) { leadDescriptionLog = []; }
 }
 
@@ -26492,7 +26611,8 @@ async function loadLeadServiceEstimates(leadId) {
   window._leadSvcEstAsLoaded = [];
   if (leadId) {
     try {
-      window._leadSvcEstAsLoaded = await apiGet('lead_service_estimates', 'lead_id=eq.' + (+leadId) + '&select=*');
+      const B = _leadBundleFor(leadId);   // v7.10.14
+      window._leadSvcEstAsLoaded = B ? B.service_estimates : await apiGet('lead_service_estimates', 'lead_id=eq.' + (+leadId) + '&select=*');
       _leadSvcEstLoaded = true;
     } catch (e) { console.warn('service estimates load failed — grid stays read-only-ish (no sync this open):', e.message); }
   } else {
@@ -27355,13 +27475,15 @@ function renderLeadNextActionChip() {
 async function loadLeadCadence() {
   _leadCadence = null;
   if (!leadData || !leadData.research_campaign_id) return;
+  const B = _leadBundleFor(leadData.id);   // v7.10.14
   try {
-    const steps = await apiGet('campaign_cadence_steps',
+    const steps = B ? B.cadence_steps : await apiGet('campaign_cadence_steps',
       'research_campaign_id=eq.' + leadData.research_campaign_id + '&select=*&order=step_no.asc');
     if (!steps || !steps.length) return;
     let name = '';
     const cached = (allData['research_campaigns'] || []).find(c => +c.id === +leadData.research_campaign_id);
     if (cached) name = cached.name || '';
+    else if (B) name = B.campaign_name || '';
     else {
       try {
         const cs = await apiGet('research_campaigns', 'id=eq.' + leadData.research_campaign_id + '&select=name');
@@ -32383,8 +32505,9 @@ async function _liSyncMilestones(engId) {
 // ── Lead Interactions ─────────────────────────────────────
 async function loadLeadInteractions(leadId) {
   if (!leadId) { leadInteractions = []; return; }
+  const B = _leadBundleFor(leadId);   // v7.10.14: the open's one call carries all four reads below
   try {
-    leadInteractions = await apiGet('engagements',
+    leadInteractions = B ? B.engagements : await apiGet('engagements',
       `lead_id=eq.${leadId}&select=*&order=engagement_date.desc,created_at.desc`);
   } catch(e) {
     leadInteractions = [];
@@ -32394,7 +32517,8 @@ async function loadLeadInteractions(leadId) {
   // and its ancestors — interleaved read-only by renderLeadInteractions.
   // leadInteractions itself stays PURE: cadence step counts and edit paths rely on it.
   window._leadGroupEngs = [];
-  try {
+  if (B) window._leadGroupEngs = B.group_engagements || [];   // the chain was walked on the server (parent_org_id, nearest first)
+  else try {
     const orgId = leadData?.target_org_id
       || ((allData['sites'] || []).find(s => +s.id === +leadData?.site_id)?.organisation_id) || null;
     if (orgId) {
@@ -32410,8 +32534,14 @@ async function loadLeadInteractions(leadId) {
     }
   } catch (e) { window._leadGroupEngs = []; }
   // Milestone badges for the list (fail-silent pre-migration).
-  await _milLookups();
-  window._leadMilMap = await _milForEngagements(leadInteractions.map(i => +i.id));
+  await _milLookups();   // seeded from the bundle, so no trip while it holds
+  if (B && Array.isArray(B.milestones)) {
+    const map = {};
+    B.milestones.forEach(m => { (map[+m.engagement_id] = map[+m.engagement_id] || []).push(m); });
+    window._leadMilMap = map;
+  } else {
+    window._leadMilMap = await _milForEngagements(leadInteractions.map(i => +i.id));
+  }
 }
 
 function renderLeadInteractions() {
