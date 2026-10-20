@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.09 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.11 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.09 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.11 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2158,6 +2158,21 @@ function mockApi(table, method, body, params) {
 function _mockSeed() {
   const now = '2026-06-05T08:00:00Z';
   return {
+    // v7.10.11: the engagement modal's two lookups, so Log Engagement works in mock mode ("Other" and NFA included).
+    activity_types: [
+      { id: 1, name: 'Call',       description: null, active: true, sort_order: 10, applies_to_opportunities: true, applies_to_leads: true },
+      { id: 2, name: 'Email',      description: null, active: true, sort_order: 20, applies_to_opportunities: true, applies_to_leads: true },
+      { id: 3, name: 'Meeting',    description: null, active: true, sort_order: 30, applies_to_opportunities: true, applies_to_leads: true },
+      { id: 4, name: 'Site Visit', description: null, active: true, sort_order: 40, applies_to_opportunities: true, applies_to_leads: true },
+    ],
+    next_actions: [
+      { id: 1, name: 'Call',              description: null, active: true, sort_order: 10, applies_to_opportunities: true,  applies_to_leads: true },
+      { id: 2, name: 'Email',             description: null, active: true, sort_order: 20, applies_to_opportunities: true,  applies_to_leads: true },
+      { id: 3, name: 'Meeting',           description: null, active: true, sort_order: 30, applies_to_opportunities: true,  applies_to_leads: true },
+      { id: 4, name: 'Site Visit',        description: null, active: true, sort_order: 40, applies_to_opportunities: true,  applies_to_leads: true },
+      { id: 5, name: 'Other',             description: 'Any other next action — say what it is in Action Details (required) and when it is due', active: true, sort_order: 60, applies_to_opportunities: true, applies_to_leads: true },
+      { id: 6, name: 'No Further Action', description: 'Nothing owed after this engagement — saves as already complete, never an open obligation', active: true, sort_order: 70, applies_to_opportunities: false, applies_to_leads: true },
+    ],
     regions: [
       { id: 1, name: 'Western Cape', active: true },
       { id: 2, name: 'Gauteng',      active: true },
@@ -14775,6 +14790,10 @@ async function loadFilteredLookup(table, filter, selectId, currentValue) {
 // preserving the original ID so saving doesn't lose the reference. If only the legacy
 // text is available, append it as a "__legacy__" sentinel option.
 function preselectLookup(selectId, idField, textField, record) {
+  _preselectLookupInner(selectId, idField, textField, record);
+  if (selectId === 'li-next-action') liSyncOtherDetails();   // v7.10.11: an engagement reopened on "Other" shows its required-details marker
+}
+function _preselectLookupInner(selectId, idField, textField, record) {
   const sel = document.getElementById(selectId);
   if (!sel) return;
   const idVal = record[idField];
@@ -21585,7 +21604,8 @@ async function openParentHistory(parentId, pickOrgId) {
               <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap;">
                 <select id="ph-eng-na" class="form-control" style="width:200px;"><option value="">— next action —</option>${_naOpts}</select>
                 <input type="date" id="ph-eng-na-date" class="form-control" style="width:150px;">
-                <span style="font-size:11px;color:var(--text3);">Next action + due date required — "No Further Action" closes it immediately</span>
+                <input type="text" id="ph-eng-na-details" class="form-control" style="flex:1;min-width:200px;" placeholder="Action details — required for Other">
+                <span style="font-size:11px;color:var(--text3);">Next action + due date required — "No Further Action" closes it immediately; "Other" needs its details</span>
                 <button class="btn btn-primary btn-sm" style="margin-left:auto;" onclick="_phSaveGroupEngagement()">Save</button>
               </div>
             </div>
@@ -21690,6 +21710,8 @@ async function _phSaveGroupEngagement() {
   const isNfa = na && String(na.name || '').toLowerCase() === 'no further action';
   if (isNfa) naDate = new Date().toISOString().slice(0, 10);
   if (!naDate) { showStatus('A due date for the next action is required', 'error'); return; }
+  const naDetails = (document.getElementById('ph-eng-na-details')?.value || '').trim();
+  if (na && nextActionIsOther(na.name) && !naDetails) { showStatus('"Other" needs a description — say what the next action is', 'error'); return; }   // v7.10.11
   const type = (allData['activity_types'] || []).find(t => +t.id === typeId);
   try {
     await api('engagements', 'POST', {
@@ -21698,6 +21720,7 @@ async function _phSaveGroupEngagement() {
       engagement_type:  type ? type.name : null,
       activity_type_id: typeId,
       notes:            notes || null,
+      action_details:   naDetails || null,
       next_action:      na ? na.name : null,
       next_action_id:   naId,
       next_action_date: naDate,
@@ -24259,7 +24282,7 @@ function leadIsAppendMode() { return !!(leadData.id && window._leadDescStartAppe
 function setLeadSaveIndicator(state) {
   const el = document.getElementById('lead-save-indicator');
   if (!el) return;
-  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'] };
+  const map = { saving: ['Saving…', 'var(--text3)'], saved: ['Saved ✓', '#16a34a'], unsaved: ['Unsaved changes', '#b45309'], note: ['Note not saved yet', '#b45309'] };
   const [t, c] = map[state] || ['', ''];
   el.textContent = t; el.style.color = c;
 }
@@ -24660,10 +24683,13 @@ function markLeadDirty(e) {
   window._leadEditSeq = (window._leadEditSeq || 0) + 1;
   // Autosave is silent — no "unsaved"/"saving" chatter while editing. The only
   // indicator shown is "Saved" after a successful save (below).
-  setLeadSaveIndicator('');
-  // The description add-box (append-mode) is committed on Save / the leave-guard,
-  // never by autosave — autosave must not create duplicate thread entries.
-  if (e && e.target && e.target.id === 'lead-description' && leadIsAppendMode()) return;
+  // The description add-box (append-mode) is committed on Save, on leaving the box and on
+  // the leave-guard, never by the field autosave — autosave must not create duplicate thread
+  // entries. v7.10.10: while a note is waiting the indicator says so (it used to go blank, and
+  // after an autosave it read "Saved ✓" beside a note that had not been saved).
+  const _noteBox = e && e.target && e.target.id === 'lead-description' && leadIsAppendMode();
+  setLeadSaveIndicator(_noteBox && e.target.value.trim() ? 'note' : '');
+  if (_noteBox) return;
   clearTimeout(_leadAutoSaveTimer);
   _leadAutoSaveTimer = setTimeout(leadAutoSaveNow, 1500);
 }
@@ -24697,8 +24723,46 @@ async function leadAutoSaveNow() {
   // A typed-but-uncommitted description note stays pending until an explicit Save.
   // OR-ed with the current flag: saveLead leaves it true when edits landed mid-flight.
   const pendingNote = leadIsAppendMode() && !!(document.getElementById('lead-description')?.value || '').trim();
-  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator('saved'); }
+  if (ok) { leadFormDirty = leadFormDirty || pendingNote; setLeadSaveIndicator(pendingNote ? 'note' : 'saved'); }
   else setLeadSaveIndicator('');
+}
+
+// Commit the typed "Add to description" note to lead_description_log (v7.10.10, Richard
+// 2026-10-06: Lesley-Anne's Premier note never reached the database, her Milco note saved
+// only an earlier draft). One function for every path — Save, leaving the box, closing the
+// form — so a note is written once and the box is emptied ONLY after the write succeeded.
+// Before this the write sat inside an empty catch: a failure looked exactly like a save,
+// the box was cleared and the form said "Saved". Returns true when there was nothing to
+// write or the write landed; false (with the error shown and the text still in the box)
+// when it did not.
+let _leadNoteBusy = null;
+async function leadCommitNote() {
+  if (_leadNoteBusy) return _leadNoteBusy;
+  const ta = document.getElementById('lead-description');
+  const text = ta ? ta.value.trim() : '';
+  if (!text || !leadData || !leadData.id || !leadIsAppendMode() || leadReadOnly) return true;
+  const leadId = leadData.id;
+  _leadNoteBusy = (async () => {
+    try {
+      await api('lead_description_log', 'POST', { lead_id: leadId, body: text, created_by: currentUser?.personId || null }, '');
+    } catch (e) {
+      showStatus('Your note could not be saved (' + (e && e.message ? e.message : 'network error') + '). It is still in the box — copy it somewhere safe before closing.', 'error');
+      setLeadSaveIndicator('note');
+      return false;
+    }
+    // Written. Empty the box of what was saved — keep anything typed while the write was on the wire.
+    if (+leadData.id === +leadId && ta) {
+      const now = ta.value.trim();
+      ta.value = now === text ? '' : (now.startsWith(text) ? now.slice(text.length).trim() : ta.value);
+    }
+    await loadLeadDescriptionLog(leadId);
+    if (+leadData.id === +leadId) {
+      renderLeadDescriptionHistory();
+      setLeadSaveIndicator(ta && ta.value.trim() ? 'note' : 'saved');
+    }
+    return true;
+  })().finally(() => { _leadNoteBusy = null; });
+  return _leadNoteBusy;
 }
 
 // Reset dirty tracking and (once) attach input + beforeunload guards.
@@ -24714,6 +24778,8 @@ function resetLeadDirty() {
   const h = (e) => { if (e.target.closest && (e.target.closest('.modal-overlay') || e.target.closest('#lead-qual-sector-wrap'))) return; markLeadDirty(e); };
   page.addEventListener('input', h);
   page.addEventListener('change', h);
+  // v7.10.10: leaving the note box (a `change` fires on blur) writes the note straight away.
+  page.addEventListener('change', (e) => { if (e.target && e.target.id === 'lead-description' && leadIsAppendMode()) leadCommitNote(); });
   window.addEventListener('beforeunload', (e) => {
     if (page.classList.contains('active') && leadFormDirty && !leadReadOnly) { e.preventDefault(); e.returnValue = ''; }
   });
@@ -24727,7 +24793,10 @@ async function closeLeadPage(opts) {
   // (source/description are nullable; the status engine gates progression, not
   // persistence), so flush unconditionally — no discard dialog.
   if (!opts.force && leadFormDirty && !leadReadOnly) {
-    await saveLead({ keepOpen: true });   // commits core + any pending description note
+    const saved = await saveLead({ keepOpen: true });   // commits core + any pending description note
+    // v7.10.10: never close over a note that did not save — it would be lost with the form.
+    const _box = document.getElementById('lead-description');
+    if (!saved && leadIsAppendMode() && _box && _box.value.trim()) return;
   }
   leadFormDirty = false;
   setLeadSaveIndicator('');
@@ -29214,6 +29283,7 @@ function _promoteCaptureQ4Screen1AndContinue() {
 
   const list = allData['_next_actions_opps'] || [];
   const row = list.find(n => +n.id === nextActionId);
+  if (row && nextActionIsOther(row.name) && !actionDetails) { showStatus('"Other" needs a description — say what the next action is', 'error'); return; }   // v7.10.11
   s.q4.nextActionId   = nextActionId;
   s.q4.nextActionText = row ? row.name : '';
   s.q4.nextActionDate = nextActionDate;
@@ -31078,8 +31148,7 @@ async function saveLead(opts) {
     // Description thread: in append-mode an explicit save commits the add-box as a
     // new log entry. NEVER on a silent autosave — that would create duplicate notes.
     if (appendMode && descInput && !opts.silent) {
-      try { await api('lead_description_log', 'POST', { lead_id: leadData.id, body: descInput, created_by: currentUser?.personId || null }, ''); } catch(e) {}
-      await loadLeadDescriptionLog(leadData.id);
+      if (!(await leadCommitNote())) { leadFormDirty = true; return false; }   // v7.10.10: error shown, text kept in the box, form stays open
     }
     if (opts.keepOpen) {
       if (opts.silent) {
@@ -32596,7 +32665,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Action Details</label>
+            <label class="form-label">Action Details <span id="li-action-details-req" style="display:none;font-weight:400;color:var(--red);font-size:11px;">— required for Other: say what the next action is</span></label>
             <textarea id="li-action-details" class="form-control" rows="2" placeholder="More on what happens next..." ${lockExtra}>${actionDetailsValue}</textarea>
           </div>
           <div class="form-group" style="margin-top:-4px;">
@@ -32735,6 +32804,7 @@ async function loadLiLookups() {
     loadFilteredLookup('activity_types', flag, 'li-type'),
     loadFilteredLookup('next_actions',   flag, 'li-next-action'),
   ]);
+  liSyncOtherDetails();   // v7.10.11: an engagement opened on "Other" shows the required marker at once
   // Milestone picker (no-op when the open surface has no #li-milestones-wrap,
   // e.g. the cockpit quick-log, or on a pre-migration DB).
   _liRenderMilestones().catch(() => {});
@@ -33251,7 +33321,7 @@ async function bumpLeadLastTouch(leadId, extraPatch, knownTouchDate) {
   return (res && res[0]) ? res[0] : null;
 }
 
-// "No Further Action" (v7.8.85, replaces the retired 'Note'): a TERMINAL next
+// "No Further Action" (v7.8.85, replaces the retired 'Note' — renamed 'Other' in v7.10.11): a TERMINAL next
 // action — nothing is owed after this engagement. Selecting it forces the due
 // date to today and ticks the action complete (both locked while selected), so
 // it can never become an open obligation — the way 'Note' polluted Outstanding
@@ -33262,7 +33332,32 @@ function liSelectedNextActionIsNFA() {
   if (!sel || !sel.value) return false;
   return (sel.options[sel.selectedIndex]?.textContent || '').trim().toLowerCase() === 'no further action';
 }
+// "Other" (v7.10.11, Richard 2026-10-19: "there is a next action called 'Note'. This is not an action
+// item. Replace it with 'Other' ... a description of the other next action should be mandatory"): the
+// catch-all next action — the retired 'Note' row renamed in place by sql/next_action_note_to_other.sql,
+// which also rewrites the 'Note' text on old engagements and leads. An "Other" is an obligation only if
+// it says what it is, so Action Details is REQUIRED beside the due date: saveLeadInteraction (every
+// lead / deal engagement surface, the cockpit quick-log included), the group engagement form and the
+// promote wizard all refuse it blank. Matched by NAME like NFA, so it works against each environment's
+// lookup rows.
+function nextActionIsOther(name) { return String(name || '').trim().toLowerCase() === 'other'; }
+function liSelectedNextActionIsOther() {
+  const sel = document.getElementById('li-next-action');
+  if (!sel || !sel.value) return false;
+  return nextActionIsOther(sel.options[sel.selectedIndex]?.textContent);
+}
+// The label says Action Details is required while "Other" is selected, and an empty box takes focus.
+function liSyncOtherDetails() {
+  const req = document.getElementById('li-action-details-req'), det = document.getElementById('li-action-details');
+  const other = liSelectedNextActionIsOther();
+  if (req) req.style.display = other ? '' : 'none';
+  if (det) {
+    det.placeholder = other ? 'Required for Other: what is the next action?' : 'More on what happens next...';
+    if (other && !det.value.trim() && !det.disabled) { try { det.focus(); } catch (e) {} }
+  }
+}
 function onLiNextActionChange() {
+  liSyncOtherDetails();   // v7.10.11
   const dateEl = document.getElementById('li-next-date');
   const doneEl = document.getElementById('li-next-done');
   const noteWrap = document.getElementById('li-completion-note-wrap');
@@ -33328,6 +33423,12 @@ async function saveLeadInteraction(editId) {
   // due date, or it silently never appears in Outstanding Actions.
   if (!naVal) { showStatus('Next Action is required — set what happens next', 'error'); return; }
   if (!nextDate && !nextDone) { showStatus('Due Date is required for an open next action', 'error'); return; }
+  // v7.10.11: "Other" is an obligation only if it says what it is. The one exception: an existing
+  // engagement that already stood on Other (an old 'Note' renamed by the SQL) may be ticked complete
+  // without one — nobody should have to invent a description to close out history; an OPEN Other
+  // always needs its details.
+  const _wasOther = !!(editId && window._liEditing && nextActionIsOther(window._liEditing.next_action));
+  if (nextActionIsOther(nextActionText) && !actionDetails.trim() && !(_wasOther && nextDone)) { showStatus('"Other" needs a description — say what the next action is in Action Details', 'error'); return; }
 
   const prev = window._liEditing;
   const completedAt = nextDone
