@@ -21,7 +21,9 @@
 --   deals            id, name, stage_id, probability, owner/branch/region, org_id, service_sub_id
 --   orgs             id, parent_org_id, group_touch_soothes, sector_id
 --   org_touches      object {"o<org_id>": "YYYY-MM-DD"} — latest non-internal touch (_loadOrgTouches)
---   open_actions     engagements with an open, dated next action
+--   open_actions     engagements with an open, dated next action (v7.10.14: + next_action_id and
+--                    action_details, so Outstanding Actions prints a flagged action with its description —
+--                    re-run this file on both databases; the client reads the keys when present)
 --   promotion_requests / stage_requests   pending rows for Approvals Outstanding
 --   pending_milestones (≤100, oldest first) / approved_milestones (≤80, newest decided first)
 --                    engagement_milestones rows plus _lead_id, _deal_id, _deal_name / _engagement_date
@@ -72,6 +74,7 @@ SELECT jsonb_build_object(
 
   'open_actions', (SELECT coalesce(jsonb_agg(jsonb_build_object(
       'id', e.id, 'lead_id', e.lead_id, 'deal_id', e.deal_id, 'next_action', e.next_action,
+      'next_action_id', e.next_action_id, 'action_details', e.action_details,
       'next_action_date', e.next_action_date, 'engagement_type', e.engagement_type,
       'stream_id', e.stream_id, 'engagement_date', e.engagement_date) ORDER BY e.id), '[]'::jsonb)
     FROM public.engagements e
