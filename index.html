@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.14 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.15 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.14 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.15 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -18646,7 +18646,7 @@ async function _attentionActionRows(B) {
   let acts;
   try {
     acts = B ? (B.open_actions || []) : await apiGet('engagements',
-      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type,stream_id,engagement_date');
+      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_id,action_details,next_action_date,engagement_type,stream_id,engagement_date');
     // One row per open STREAM: within a stream only the newest open action is
     // the real obligation (older ones are legacy pile-up awaiting supersede).
     const latestByStream = new Map();
@@ -18660,8 +18660,11 @@ async function _attentionActionRows(B) {
   } catch (e) {
     // Pre-migration DB (no stream columns yet) — original per-engagement view.
     acts = await apiGet('engagements',
-      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_date,engagement_type');
+      'next_action_done=eq.false&next_action_date=not.is.null&select=id,lead_id,deal_id,next_action,next_action_id,action_details,next_action_date,engagement_type');
   }
+  // v7.10.15: an action whose row asks for a description prints with it ("Other: chase the PSIRA
+  // certificate") — the same label as the engagement lists; the next-action rows are read once a session.
+  try { await engagementLookupRows('next_action', null); } catch (e) { /* the label falls back to the name */ }
   const leads = B ? B.leads : await apiGet('leads', 'select=id,owner_id,branch_id,region_id,target_org_name,description,site_id,site_name,sites(name)');
   const deals = B ? B.deals : await apiGet('deals', 'select=id,owner_id,branch_id,region_id,name');
   const leadById = Object.fromEntries(leads.map(l => [+l.id, l]));
@@ -18673,7 +18676,8 @@ async function _attentionActionRows(B) {
     else if (a.deal_id != null) { parent = dealById[+a.deal_id]; kind = 'deal'; }
     if (!parent) continue;
     const label = kind === 'lead' ? (leadEngLabel(parent) || ('Lead #' + parent.id)) : (parent.name || ('Deal #' + parent.id));
-    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up', due: a.next_action_date, parent });
+    rows.push({ eng: a.id, id: parent.id, kind, label, action: a.next_action || a.engagement_type || 'Follow-up',
+                actionHtml: a.next_action ? nextActionLabelHtml(a) : escHtml(a.engagement_type || 'Follow-up'), due: a.next_action_date, parent });
   }
   rows.sort((x, y) => (x.due < y.due ? -1 : x.due > y.due ? 1 : 0));
   return rows;
@@ -18693,7 +18697,7 @@ async function _dashActions() {
     const od = r.due < today;
     return `<div onclick="openEngagement(${r.eng})" style="display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--border);cursor:pointer;font-size:12px;">
       <div style="min-width:0;"><div style="font-weight:600;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.label)}</div>
-        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.action)}</div></div>
+        <div style="color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${r.actionHtml || esc(r.action)}</div></div>
       <div style="white-space:nowrap;color:${od ? 'var(--red)' : 'var(--text2)'};font-weight:${od ? 700 : 400};">${r.due}</div>
     </div>`;
   }).join('');
@@ -31612,7 +31616,7 @@ function _attnApply() {
       const od = r.due < today;
       return `<tr>
         ${td(`<span style="font-weight:700;color:${od ? 'var(--red)' : 'var(--navy)'};">${r.due}</span>`, 'white-space:nowrap;')}
-        ${td(esc(r.action))}
+        ${td(r.actionHtml || esc(r.action))}
         ${td(`<span style="font-weight:700;color:var(--navy);">${esc(r.label)}</span> ` + pill(r.kind === 'lead' ? 'Lead' : 'Opportunity', r.kind === 'lead' ? 'background:#FFEDD5;color:#9A3412;' : 'background:#DBEAFE;color:#1E40AF;'))}
         ${td(esc(pName(r.parent.owner_id)))}
         ${td(`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openEngagement(${r.eng})">Engagement</button>
@@ -31658,7 +31662,7 @@ const REPORT_DEFS = {
               blurb: 'Outreaches, meetings, milestones and leads qualified per period.' },
 };
 
-let _rptState = { report: 'activity', interval: 'month', from: '', to: '', scope: '', detail: 'milestones' };
+let _rptState = { report: 'activity', interval: 'month', from: '', to: '', scope: '', detail: 'milestones', person: '' };   // person: a people id, '' = everyone in scope (v7.10.15)
 
 const _rptEsc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const _rptIso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -31706,7 +31710,30 @@ function _rptPeriods(fromIso, toIso, interval) {
   return out;
 }
 
-function _rptSet(k, v) { _rptState[k] = v; if (k === 'detail') { _rptPaint(); } else { _rptRun(); } }
+function _rptSet(k, v) { _rptState[k] = v; if (k === 'scope' && v === 'own') _rptState.person = ''; if (k === 'detail') { _rptPaint(); } else { _rptRun(); } }
+// v7.10.15 (Richard 2026-10-21: "reports: allow filter/view by name given suitable rights"): a Person
+// select beside the scope buttons, offered only to a user whose rights give a Team or All scope and
+// while that scope is on — one person's activity is the Mine rule applied to that person (engagements
+// they logged, engagements and qualified leads on records they own), still inside the scope in force,
+// so a Team manager never reaches outside the team. The list is the salespeople the Targets page
+// offers (home_organisation_members, else everyone), plus the current pick if it has since left it.
+function _rptPersonAllowed() { return _dashScopeOptions().length > 1 && _rptState.scope !== 'own'; }
+function _rptPersonId() { return _rptPersonAllowed() ? (+_rptState.person || 0) : 0; }
+function _rptPersonOptions() {
+  const list = _tgSalesPeople();
+  const who = +_rptState.person || 0;
+  if (who && !list.some(p => p.id === who)) {
+    const raw = (allData['people'] || []).find(p => +p.id === who);
+    list.push({ id: who, name: raw ? [raw.first_name, raw.last_name].filter(Boolean).join(' ') : '#' + who });
+  }
+  return list;
+}
+async function _rptEnsurePeople() {
+  const jobs = [];
+  if (!allData['people']) jobs.push(apiGet('people', 'select=id,first_name,last_name').then(r => { allData['people'] = r; }).catch(() => {}));
+  if (!allData['home_organisation_members']) jobs.push(apiGet('home_organisation_members', 'select=person_id').then(r => { allData['home_organisation_members'] = r; }).catch(() => { allData['home_organisation_members'] = []; }));
+  if (jobs.length) await Promise.all(jobs);
+}
 function _rptSetDate(k, v) { if (!v) return; _rptState[k] = v; _rptRun(); }
 
 function _rptPreset(key) {
@@ -31748,6 +31775,10 @@ function _rptControls() {
   const scopeBtns = scopes.length > 1
     ? scopes.map(s => btn(st.scope === s, `_rptSet('scope','${s}')`, s === 'own' ? 'Mine' : s === 'team' ? 'Team' : 'All')).join('') + div
     : '';
+  const personSel = _rptPersonAllowed()
+    ? `<select id="rpt-person" class="form-control" style="width:auto;min-width:170px;" title="One person's activity: engagements they logged, and engagements and qualified leads on records they own — inside the scope shown" onchange="_rptSet('person',this.value)">
+         <option value="">Everyone in scope</option>${_rptPersonOptions().map(p => `<option value="${p.id}" ${String(st.person) === String(p.id) ? 'selected' : ''}>${_rptEsc(p.name)}</option>`).join('')}</select>` + div
+    : '';
   const rptOpts = Object.entries(REPORT_DEFS)
     .map(([k, d]) => `<option value="${k}" ${st.report === k ? 'selected' : ''}>${_rptEsc(d.label)}</option>`).join('');
 
@@ -31755,6 +31786,7 @@ function _rptControls() {
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px;">
       <select class="form-control" style="width:auto;min-width:200px;" onchange="_rptSet('report',this.value)">${rptOpts}</select>
       ${scopeBtns}
+      ${personSel}
       ${btn(st.interval === 'week', "_rptSet('interval','week')", 'Week')}
       ${btn(st.interval === 'month', "_rptSet('interval','month')", 'Month')}
       ${btn(st.interval === 'quarter', "_rptSet('interval','quarter')", 'Quarter')}
@@ -31779,6 +31811,7 @@ function _rptControls() {
 // Fetch + compute. Everything the report needs is bounded by the date range, so
 // a wide range costs more rows but never more round-trips per period.
 async function _rptRun() {
+  if (_dashScopeOptions().length > 1) await _rptEnsurePeople();   // v7.10.15: the Person list needs names
   _rptControls();
   const out = document.getElementById('rpt-results');
   if (!out) return;
@@ -31792,7 +31825,7 @@ async function _rptRun() {
   try {
     const def = REPORT_DEFS[st.report] || REPORT_DEFS.activity;
     window._rptModel = await def.run(st);
-    if (sub) sub.textContent = `${def.label} · ${st.from} to ${st.to}`;
+    if (sub) sub.textContent = `${def.label} · ${st.from} to ${st.to}` + (window._rptModel && window._rptModel.personName ? ` · ${window._rptModel.personName}` : '');
     _rptPaint();
   } catch (e) {
     out.innerHTML = `<div style="padding:20px;color:var(--red);">Couldn't build the report: ${_rptEsc(e.message)}</div>`;
@@ -31861,7 +31894,11 @@ async function _rptActivity(st) {
   // Engagement History page and the Interactions widget use. Team adds my
   // branch/region; All drops the filter.
   const parentOf = e => e.lead_id != null ? leadById[+e.lead_id] : dealById[+e.deal_id];
+  // v7.10.15: a chosen person narrows every count to their activity — the Mine rule applied to them —
+  // on top of the scope, which is still judged, so a Team manager cannot read past the team by name.
+  const who = _rptPersonId();
   const inScope = (parent, createdBy) => {
+    if (who && !((createdBy != null && +createdBy === who) || (parent && parent.owner_id != null && +parent.owner_id === who))) return false;
     if (st.scope === 'all') return true;
     if (createdBy != null && +createdBy === me) return true;
     return parent ? _dashInScope(parent, st.scope) : false;
@@ -31947,7 +31984,7 @@ async function _rptActivity(st) {
 
   return { periods, totals, byChannel, byMeetingType, byMilestoneType, byPerson,
            qualRows, stageOk, pendingMils, internalSkipped, dropped, futureCount,
-           qualDistinct: qualAll.size, st };
+           qualDistinct: qualAll.size, person: who, personName: who ? pName(who) : '', st };
 }
 
 // ── Painting ────────────────────────────────────────────────────────────────
@@ -32040,6 +32077,7 @@ function _rptPaint() {
   }
 
   const notes = [];
+  if (m.person) notes.push(`Showing ${m.personName} only: engagements they logged, and engagements and qualified leads on records they own, inside the ${st.scope === 'team' ? 'Team' : 'All'} scope.`);
   if (m.dropped) notes.push(`Showing the most recent ${P.length} periods — ${m.dropped} earlier ${m.dropped === 1 ? 'period was' : 'periods were'} dropped to keep the table readable. Widen the interval to see them.`);
   if (m.pendingMils) notes.push(`${m.pendingMils} milestone${m.pendingMils === 1 ? '' : 's'} in this range still await review and are not counted above.`);
   if (m.internalSkipped) notes.push(`${m.internalSkipped} engagement${m.internalSkipped === 1 ? ' is' : 's are'} marked internal work and excluded by definition.`);
@@ -32076,7 +32114,8 @@ function _rptExportCsv() {
   const rows = [];
   rows.push(line(['Focus — ' + (REPORT_DEFS[_rptState.report] || {}).label]));
   rows.push(line(['Range', _rptState.from + ' to ' + _rptState.to, 'Interval', _rptState.interval,
-                  'Scope', _rptState.scope === 'own' ? 'Mine' : _rptState.scope === 'team' ? 'Team' : 'All']));
+                  'Scope', _rptState.scope === 'own' ? 'Mine' : _rptState.scope === 'team' ? 'Team' : 'All',
+                  'Person', m.personName || 'Everyone in scope']));
   rows.push('');
   rows.push(line(['Measure'].concat(heads, 'Total')));
   const push = (label, counts) => rows.push(line([label].concat(counts, _rptSum(counts))));
@@ -32809,6 +32848,7 @@ function renderLeadInteractionModalHtml(mode, interaction, locked = false) {
               <select id="li-type" class="form-control" ${dis} onchange="onLiTypeChange()">
                 <option value="">— select —</option>
               </select>
+              <div id="li-type-hint" style="display:none;font-size:11px;color:var(--text3);margin-top:4px;"></div>
             </div>
           </div>
           ${_liTimeRowHtml(i, dis, isProjectEng)}
@@ -33300,7 +33340,7 @@ function _liSnapshotForm() {
     relatedTo: window._liRelatedTo || null,
     quickLog: window._liQuickLogContext || null,
     stream: window._liStream || null,
-    date: v('li-date'), type: v('li-type'), notes: v('li-notes'),
+    date: v('li-date'), type: v('li-type'), autoType: document.getElementById('li-type')?.dataset.autoType || '', notes: v('li-notes'),
     nextAction: v('li-next-action'), nextDate: v('li-next-date'),
     actionDetails: v('li-action-details'),
     nextDone: !!document.getElementById('li-next-done')?.checked,
@@ -33327,6 +33367,8 @@ async function _liRestoreForm(snap) {
   }
   const set = (id, val) => { const el = document.getElementById(id); if (el) el.value = val; };
   set('li-date', snap.date); set('li-type', snap.type); set('li-notes', snap.notes);
+  const tySel = document.getElementById('li-type');
+  if (tySel && snap.autoType && snap.type === snap.autoType) tySel.dataset.autoType = snap.autoType;   // v7.10.15: the pre-fill survives the child modal
   set('li-next-action', snap.nextAction); set('li-next-date', snap.nextDate);
   set('li-action-details', snap.actionDetails);
   const done = document.getElementById('li-next-done');
@@ -33365,7 +33407,7 @@ async function _liInitStreamSection() {
   try {
     const filter = parent.kind === 'deal' ? `deal_id=eq.${parent.id}` : `lead_id=eq.${parent.id}`;
     rows = await apiGet('engagements',
-      `${filter}&select=id,stream_id,stream_label,engagement_date,next_action,next_action_date,next_action_done&order=engagement_date.desc,id.desc&limit=1000`);
+      `${filter}&select=id,stream_id,stream_label,engagement_date,next_action,next_action_id,next_action_date,next_action_done&order=engagement_date.desc,id.desc&limit=1000`);
   } catch (e) { /* pre-migration DB: hide the section rather than break logging */ window._liStream = null; wrap.style.display = 'none'; return; }
   const byRoot = new Map();
   rows.forEach(r => {
@@ -33373,7 +33415,7 @@ async function _liInitStreamSection() {
     const s = byRoot.get(root) || { rootId: root, label: null, latestDate: r.engagement_date, latestEngId: +r.id, open: null };
     if (+r.id === root && r.stream_label) s.label = r.stream_label;
     // rows arrive newest-first, so the first open action seen is the stream's current one
-    if (!s.open && r.next_action && !r.next_action_done) s.open = { engId: +r.id, action: r.next_action, due: r.next_action_date || null };
+    if (!s.open && r.next_action && !r.next_action_done) s.open = { engId: +r.id, action: r.next_action, actionId: r.next_action_id != null ? +r.next_action_id : null, due: r.next_action_date || null };
     byRoot.set(root, s);
   });
   const streams = [...byRoot.values()];
@@ -33415,7 +33457,7 @@ function _liRenderStreamSection() {
   const supersede = (st.mode === 'continue' && sel && sel.open) ? `
     <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text2);margin-top:8px;cursor:pointer;">
       <input type="checkbox" id="li-stream-supersede" ${st.supersedeTicked ? 'checked' : ''} style="margin-top:2px;"
-        onchange="window._liStream.supersedeTicked=this.checked">
+        onchange="window._liStream.supersedeTicked=this.checked;_liTypeFromAction()">
       <span>Actioning: <strong>${cEsc(sel.open.action)}</strong>${sel.open.due ? ' — due ' + sel.open.due : ''}<br>
       <span style="color:var(--text3);">Will be marked complete (superseded by this engagement). Untick to keep it open.</span></span>
     </label>` : '';
@@ -33440,6 +33482,51 @@ function _liRenderStreamSection() {
         oninput="window._liStream.label=this.value">
     </div>
     ${supersede}`;
+  _liTypeFromAction();
+}
+
+// v7.10.15 (Richard 2026-10-21, "both"): the engagement that closes a next action starts with its Type
+// set from that action — since v7.10.13 the planned "Call" and the Call type are the same lookup row.
+// Applies while the form is a NEW engagement continuing a stream whose open action is ticked to be
+// superseded (the actioned one shown under the stream picker). It fills a blank Type, or one this rule
+// filled (dataset.autoType), never a pick the user made; a stream switch or an unticked supersede takes
+// the automatic pick away again; a hand pick ends the rule for this form. The row is matched by id, else
+// by name; an action with no type counterpart (No Further Action, a next-action-only row) fills nothing.
+function _liActionedOpen() {
+  const st = window._liStream;
+  if (!st || st.mode !== 'continue' || !st.supersedeTicked) return null;
+  const sel = st.streams.find(s => s.rootId === st.selectedRoot) || null;
+  return sel && sel.open ? sel.open : null;
+}
+function _liTypeFromAction() {
+  const typeSel = document.getElementById('li-type');
+  if (!typeSel || typeSel.disabled) return;
+  const open = _liActionedOpen();
+  const auto = typeSel.dataset.autoType || '';
+  const current = typeSel.value || '';
+  let want = null;
+  if (open) {
+    const opts = [...typeSel.options].filter(o => o.value && o.value !== '__legacy__');
+    const byId = open.actionId != null ? opts.find(o => +o.value === +open.actionId) : null;
+    const nm = String(open.action || '').trim().toLowerCase();
+    want = byId || (nm ? opts.find(o => o.textContent.trim().toLowerCase() === nm) : null) || null;
+  }
+  if (want && (!current || current === auto)) {
+    if (current !== want.value) { typeSel.value = want.value; liSyncDetailRules(); }
+    typeSel.dataset.autoType = want.value;
+    _liTypeHint('Set from the open action “' + String(open.action || '').trim() + '” — change it if the engagement was something else.');
+  } else if (!want && auto && current === auto) {
+    typeSel.value = '';
+    delete typeSel.dataset.autoType;
+    _liTypeHint('');
+    liSyncDetailRules();
+  }
+}
+function _liTypeHint(text) {
+  const el = document.getElementById('li-type-hint');
+  if (!el) return;
+  el.textContent = text || '';
+  el.style.display = text ? '' : 'none';
 }
 
 // Default label for a NEW stream, derived from the parent's category (same rule
@@ -33578,7 +33665,7 @@ function liSyncDetailRules(changed) {
   else focusEl = (ty.asks && empty(notes)) ? notes : (na.asks && empty(det)) ? det : null;
   if (focusEl) { try { focusEl.focus(); } catch (e) {} }
 }
-function onLiTypeChange() { liSyncDetailRules('li-type'); }   // v7.10.12
+function onLiTypeChange() { const s = document.getElementById('li-type'); if (s) delete s.dataset.autoType; _liTypeHint(''); liSyncDetailRules('li-type'); }   // v7.10.12; v7.10.15: a hand pick ends the pre-fill from the open action
 function onLiNextActionChange() {
   liSyncDetailRules('li-next-action');   // v7.10.12
   const dateEl = document.getElementById('li-next-date');
