@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.19 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.19 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7119,6 +7119,36 @@ function dealIsSecuredStage(stageId) {
   const cat = (allData['stage_categories'] || []).find(c => +c.id === +st.category_id);
   return String(st.name || '').toLowerCase() === 'secured' || /^fulfilment/i.test((cat && cat.name) || '');
 }
+// v7.10.18: what a deal IS today, in one word — Contract / Project (secured, by the service's revenue
+// type), Suspended, Lost, else an Opportunity at its stage. The ONE reader for every surface that names
+// a deal's state beside its name — the group engagement history, the promoted lead's row, banner and
+// prompt — so the leads side and the opportunities side say the same thing about the same record
+// (Richard 2026-10-24: "the 'suspended' lead is actually a secured contract"). `stages` / `cats` /
+// `subs` default to the caches; a surface that loads its own rows passes them.
+function dealStateOf(d, stages, cats, subs) {
+  stages = stages || allData['stages'] || []; cats = cats || allData['stage_categories'] || [];
+  const st = d ? stages.find(x => +x.id === +d.stage_id) : null;
+  const cat = st ? cats.find(c => +c.id === +st.category_id) : null;
+  const sname = String((st && st.name) || '').trim().toLowerCase(), cname = String((cat && cat.name) || '');
+  const stage = st ? String(st.name) : '';
+  if (sname === 'secured' || /^fulfilment/i.test(cname)) {
+    const project = dealRevenueType(d, subs) === 'project';
+    return { key: project ? 'project' : 'contract', label: project ? 'Project' : 'Contract', stage, secured: true };
+  }
+  if (sname === 'suspended') return { key: 'suspended', label: 'Suspended', stage, secured: false };
+  if (sname === 'lost') return { key: 'lost', label: 'Lost', stage, secured: false };
+  return { key: 'open', label: stage ? 'Opportunity · ' + stage : 'Opportunity', stage, secured: false };
+}
+const DEAL_STATE_COLOURS = {
+  contract:  ['#DCFCE7', '#166534'], project: ['#DCFCE7', '#166534'],
+  suspended: ['#FEF3C7', '#92400E'], lost: ['#F1F5F9', '#475569'], open: ['#DBEAFE', '#1E40AF'],
+};
+// A small pill naming the state: "CONTRACT", "SUSPENDED", "OPPORTUNITY · PROSPECT".
+function dealStateTagHtml(state, title) {
+  if (!state) return '';
+  const c = DEAL_STATE_COLOURS[state.key] || DEAL_STATE_COLOURS.open;
+  return `<span class="deal-state-tag" style="display:inline-block;font-size:9px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:1px 6px;border-radius:999px;background:${c[0]};color:${c[1]};vertical-align:middle;white-space:nowrap;"${title ? ` title="${escAttr(title)}"` : ''}>${escHtml(state.label)}</span>`;
+}
 async function renderContractsPage() {
   const head = document.getElementById('table-head'), body = document.getElementById('table-body');
   head.innerHTML = '';
@@ -8707,6 +8737,7 @@ function checkDatesOrder(orderDate, startDate) {
 async function suspendDeal(deal) {
   const s = _stageByName('Suspended');
   if (!s || dealIsSuspended(deal)) return deal;
+  if (dealIsSecuredStage(deal.stage_id)) return deal;   // v7.10.18: a contract or project is never suspended, whatever its dates say
   const patch = { stage_id: s.id, probability: 0, suspended_from_stage_id: deal.stage_id, suspended_probability: deal.probability, suspended_at: new Date().toISOString() };
   const r = await api('deals', 'PATCH', patch, 'id=eq.' + deal.id + '&select=*');
   const row = (r && r[0]) || Object.assign({}, deal, patch);
@@ -14961,6 +14992,20 @@ async function saveOpportunity() {
       payload.suspended_from_stage_id = null; payload.suspended_probability = null; payload.suspended_at = null;
     }
   }
+  // v7.10.18: a stage picked by hand off Suspended LIFTS the suspension. Until now the row kept
+  // suspended_from_stage_id / suspended_probability / suspended_at and the ledger's last word was
+  // "Suspended" — Beatrix was suspended on its start date and secured by hand forty minutes later, and
+  // three weeks on the group history still read it as suspended. The columns are cleared and one
+  // engagement says where it went.
+  let liftedTo = null;
+  if (oppData.id && oppData.suspended_at && payload.suspended_at === undefined) {
+    const suspStage = _stageByName('Suspended');
+    if (!suspStage || +payload.stage_id !== +suspStage.id) {
+      payload.suspended_from_stage_id = null; payload.suspended_probability = null; payload.suspended_at = null;
+      const to = (allData['stages'] || []).find(st => +st.id === +payload.stage_id);
+      liftedTo = to ? to.name : 'a new stage';
+    }
+  }
 
   try {
     let deal;
@@ -14968,6 +15013,11 @@ async function saveOpportunity() {
       const result = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
       deal = result[0];
       showStatus('Opportunity updated');
+      if (liftedTo) {
+        try {
+          await api('engagements', 'POST', { deal_id: deal.id, engagement_date: _today(), engagement_type: 'Suspension lifted', notes: 'Suspension lifted by ' + (currentUser.name || 'the owner') + ': moved to ' + liftedTo + (dealIsSecuredStage(deal.stage_id) ? ' — now a ' + dealStateOf(deal).label.toLowerCase() : '') + '.', next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
+        } catch (e) { console.warn('suspension-lifted engagement:', e.message); }
+      }
     } else {
       const result = await api('deals', 'POST', payload, 'select=*');
       deal = result[0];
@@ -21544,8 +21594,16 @@ async function openParentHistory(parentId, pickOrgId) {
       ? 'or=(target_org_id.in.(' + idList + '),site_id.in.(' + siteIds.join(',') + '))'
       : 'target_org_id=in.(' + idList + ')';
     const leads = await apiGet('leads', leadFilter + '&select=id,description,site_id,site_name,target_org_id,status,created_at,source_id');
-    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,stage_id,created_at');
+    const deals = await apiGet('deals', 'org_id=in.(' + idList + ')&select=id,name,org_id,stage_id,service_sub_id,suspended_at,created_at');
     const leadIds = leads.map(l => +l.id), dealIds = deals.map(d => +d.id);
+    // Stage rows, categories and service types: what each deal IS today (v7.10.18, dealStateOf) and
+    // the members strip's contract count. Loaded here, before the rows are built.
+    const [_stRows, _stCats, _subRows] = await Promise.all([
+      apiGet('stages', 'select=id,name,category_id').catch(() => []),
+      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*').catch(() => []),
+      (allData['service_sub_all'] || allData['service_sub']) ? Promise.resolve(allData['service_sub_all'] || allData['service_sub']) : apiGet('service_sub', 'select=id,major_id,revenue_type,is_recurring,active').catch(() => []),
+    ]);
+    const _dealState = d => dealStateOf(d, _stRows, _stCats, _subRows);
     const engL = leadIds.length ? await apiGet('engagements', 'lead_id=in.(' + leadIds.join(',') + ')&select=*') : [];
     const engD = dealIds.length ? await apiGet('engagements', 'deal_id=in.(' + dealIds.join(',') + ')&select=*') : [];
     // Collective engagements logged against the family's organisations (v7.9.07).
@@ -21558,7 +21616,7 @@ async function openParentHistory(parentId, pickOrgId) {
     const dealById = new Map(deals.map(d => [+d.id, d]));
     const rows = [];
     engL.concat(engD, engO).forEach(en => {
-      let entityOrg = null, recLabel = '', open = '', kind = '';
+      let entityOrg = null, recLabel = '', open = '', kind = '', state = null, lifted = '';
       if (en.org_id) {
         // Collective row — logged against the organisation itself (the hold-all).
         entityOrg = +en.org_id;
@@ -21569,12 +21627,18 @@ async function openParentHistory(parentId, pickOrgId) {
         entityOrg = l.target_org_id ? +l.target_org_id : (l.site_id ? (siteOrg.get(+l.site_id) || null) : null);
         const siteRow = l.site_id ? sites.find(s => +s.id === +l.site_id) : null;
         recLabel = siteRow?.name || l.site_name || l.description || ('Lead #' + l.id);
-        open = 'openLead(' + (+l.id) + ')'; kind = 'Lead';
+        open = 'openLead(' + (+l.id) + ')'; kind = 'Lead' + (l.status ? ' · ' + l.status : '');
+        state = { key: l.status === 'Promoted' ? 'contract' : l.status === 'Dead' ? 'lost' : 'open', label: kind };
       } else if (en.deal_id && dealById.has(+en.deal_id)) {
+        // v7.10.18: the record is named by what it IS today — Contract / Project / Suspended / Lost /
+        // Opportunity at its stage — not "Deal"; and a Suspended or Restored entry on a deal that is no
+        // longer suspended says so, so a contract's history never ends on the word "Suspended".
         const d = dealById.get(+en.deal_id);
         entityOrg = d.org_id != null ? +d.org_id : null;
         recLabel = d.name || ('Deal #' + d.id);
-        open = 'openOpportunity(' + (+d.id) + ')'; kind = 'Deal';
+        open = 'openOpportunity(' + (+d.id) + ')';
+        state = _dealState(d); kind = state.label;
+        if (/^suspended$/i.test(String(en.engagement_type || '')) && state.key !== 'suspended') lifted = 'lifted — now ' + (state.key === 'open' ? 'an opportunity at ' + state.stage : 'a ' + state.label.toLowerCase());
       } else return;
       const person = (allData['people'] || []).find(p => +p.id === +en.created_by);
       rows.push({
@@ -21582,7 +21646,7 @@ async function openParentHistory(parentId, pickOrgId) {
         client: entityOrg != null ? orgName(entityOrg) : '—',
         orgId: entityOrg,
         isGroup: kind === 'Group',
-        rec: recLabel, open, kind,
+        rec: recLabel, open, kind, state, lifted,
         type: en.engagement_type || '',
         owner: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : '',
         notes: String(en.notes || '').replace(/\s+/g, ' ').trim(),
@@ -21593,10 +21657,6 @@ async function openParentHistory(parentId, pickOrgId) {
     // Members strip (v7.9.79, Richard 2026-09-30: "it says group 4 orgs... how do i see the orgs"):
     // one card per family organisation — parent first, then by name — with its open leads,
     // open opportunities and active contracts; a card click filters the history to that org.
-    const [_stRows, _stCats] = await Promise.all([
-      apiGet('stages', 'select=id,name,category_id').catch(() => []),
-      allData['stage_categories'] ? Promise.resolve(allData['stage_categories']) : apiGet('stage_categories', 'select=*').catch(() => []),
-    ]);
     const _catOf = new Map(_stRows.map(st => [+st.id, ((_stCats || []).find(c => +c.id === +st.category_id) || {}).name || '']));
     // A contract is a Secured deal (category Opportunity-Closed on prod) or one in fulfilment.
     const _isContract = d => { const st = _stRows.find(x => +x.id === +d.stage_id); return !!st && (String(st.name).toLowerCase() === 'secured' || _catOf.get(+st.id) === 'Fulfilment-Active'); };
@@ -21705,7 +21765,7 @@ function _phRenderRows() {
   const tb = document.getElementById('ph-tbody');
   if (!tb || !_phData) return;
   const q = (_phQ || '').trim().toLowerCase();
-  let rows = _phData.rows.filter(r => (_phOrg == null || r.orgId === _phOrg) && (!q || [r.client, r.rec, r.type, r.owner, r.notes].join(' ').toLowerCase().includes(q)));
+  let rows = _phData.rows.filter(r => (_phOrg == null || r.orgId === _phOrg) && (!q || [r.client, r.rec, r.kind, r.type, r.lifted, r.owner, r.notes].join(' ').toLowerCase().includes(q)));
   const k = _phSort.key, dir = _phSort.dir;
   rows = rows.slice().sort((a, b) => {
     const av = String(a[k] || '').toLowerCase(), bv = String(b[k] || '').toLowerCase();
@@ -21719,8 +21779,8 @@ function _phRenderRows() {
     <tr ${r.open ? `onclick="closeModal(); ${r.open}"` : ''} style="${r.open ? 'cursor:pointer;' : ''}${r.isGroup ? 'background:#F7F2E9;box-shadow:inset 3px 0 0 0 #C3B091;' : ''}">
       <td style="white-space:nowrap;">${r.date ? new Date(r.date).toLocaleDateString('en-ZA') : '—'}</td>
       <td style="font-weight:600;color:#003057;white-space:nowrap;">${cEsc(r.client)}${r.isGroup ? ' <span style="font-size:9px;font-weight:700;color:#8A6D3B;vertical-align:middle;">GROUP</span>' : ''}</td>
-      <td>${cEsc(r.rec)} <span style="font-size:10px;color:var(--text3);">(${r.kind})</span></td>
-      <td style="white-space:nowrap;">${cEsc(r.type || '—')}</td>
+      <td>${cEsc(r.rec)} ${r.state ? dealStateTagHtml(r.state, r.state.stage && r.state.stage !== r.state.label ? 'Stage: ' + r.state.stage : '') : `<span style="font-size:10px;color:var(--text3);">(${cEsc(r.kind)})</span>`}</td>
+      <td style="white-space:nowrap;">${cEsc(r.type || '—')}${r.lifted ? ` <span style="font-size:10px;color:var(--text3);font-weight:500;" title="${escAttr(r.lifted)}">· ${cEsc(r.lifted)}</span>` : ''}</td>
       <td style="white-space:nowrap;">${cEsc(r.owner || '—')}</td>
       <td style="font-size:12px;color:var(--text2);">${cEsc(r.notes.length > 90 ? r.notes.slice(0, 90) + '…' : r.notes)}</td>
     </tr>`).join('')
@@ -21836,6 +21896,13 @@ let leadsViewTab = 'Working';
 // Tab / scope / countdown re-renders reuse it instead of re-downloading (v7.9.36);
 // every showPage('leads') and every return from a lead form reloads it.
 let _leadsPageData = null;
+// v7.10.18: deal id → dealStateOf(deal) (+ name) for every deal, loaded with the register, so a
+// promoted lead's row, band and prompt name what the lead became. Empty until the register loads.
+let _leadDealStates = {};
+function _leadPromotedTag(dealId) {
+  const st = dealId ? _leadDealStates[+dealId] : null;
+  return st ? ' ' + dealStateTagHtml(st, (st.name ? st.name + ' — ' : '') + (st.stage && st.stage !== st.label ? 'stage ' + st.stage : st.label)) : '';
+}
 async function renderLeadsPage(opts) {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
@@ -21861,14 +21928,14 @@ async function renderLeadsPage(opts) {
   renderViewFilterBar('leads');
 
   try {
-    let leads, sources, regions, services, people, orgs, campaigns, sites, sectors;
+    let leads, sources, regions, services, people, orgs, campaigns, sites, sectors, dealRows, stageRows, stageCats, subRows;
     if (opts && opts.reuse && _leadsPageData) {
       // Client-only re-render: the rows are already in memory — no network, no sweeps.
       ({ leads, sources, regions, services, people, orgs, campaigns, sites, sectors } = _leadsPageData);
     } else {
     const sweepP = startLeadSweep();   // server-side sweeps overlap the reads (v7.9.37)
     // Load lookups + leads in parallel
-    [leads, sources, regions, services, people, orgs, campaigns, sites, sectors] = await Promise.all([
+    [leads, sources, regions, services, people, orgs, campaigns, sites, sectors, dealRows, stageRows, stageCats, subRows] = await Promise.all([
       apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
       allData['lead_sources'] || apiGet('lead_sources', 'select=*'),
       allData['regions']      || apiGet('regions', 'select=*'),
@@ -21881,6 +21948,12 @@ async function renderLeadsPage(opts) {
       allData['research_campaigns'] || apiGet('research_campaigns', 'select=*'),
       apiGet('sites', 'select=*'),
       allData['industry_sectors'] || apiGet('industry_sectors', 'select=*'),
+      // v7.10.18: what each promoted lead's deal IS today (Contract / Project / Suspended / Lost /
+      // Opportunity) — slim rows in the same round, so the Promoted row and prompt can name it.
+      apiGet('deals', 'select=id,name,stage_id,service_sub_id').catch(() => []),
+      allData['stages'] || apiGet('stages', 'select=*&order=sort_order.asc').catch(() => []),
+      allData['stage_categories'] || apiGet('stage_categories', 'select=*').catch(() => []),
+      allData['service_sub_all'] || allData['service_sub'] || apiGet('service_sub', 'select=id,major_id,revenue_type,is_recurring,active').catch(() => []),
     ]);
     allData['lead_sources']       = sources;
     allData['regions']            = regions;
@@ -21896,6 +21969,8 @@ async function renderLeadsPage(opts) {
     // whose wake date has arrived (replaces the retired DB status triggers).
     leads = await applyLeadSweeps(leads, sweepP);
     _leadsPageData = { leads, sources, regions, services, people, orgs, campaigns, sites, sectors };
+    _leadDealStates = {};
+    (dealRows || []).forEach(d => { _leadDealStates[+d.id] = Object.assign({ name: d.name || '' }, dealStateOf(d, stageRows, stageCats, subRows)); });
     }
 
     // Apply the ownership view (own / all / team) before the status tabs/counts.
@@ -22150,7 +22225,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
   if (l.status === 'Promoted' && l.promoted_at) {
     // Promoted leads are done being touched — the column shows the milestone
     // instead of a meaningless aging clock (Richard 2026-08-28).
-    lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>`;
+    lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(l.promoted_deal_id)}`;
   } else {
     // Effective touch (v7.9.07): the family's group engagement soothes the clock
     // when newer than the lead's own touch — marked "· grp" so the source shows.
@@ -22250,7 +22325,7 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
   if (promotedAll) {
     const latestPromo = rows.filter(l => l.promoted_at)
                             .sort((x, y) => new Date(y.promoted_at) - new Date(x.promoted_at))[0];
-    if (latestPromo) lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>`;
+    if (latestPromo) lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(latestPromo.promoted_deal_id)}`;
   } else {
     // Band's most recent touch: the members' own touches vs the collective's
     // group touch (v7.9.07) — whichever is newer wears the cell, "· grp" marked.
@@ -22288,6 +22363,10 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
 // 2026-08-28). The lead is already fully read-only at this stage, so "view the
 // lead" is just the normal open; the second button goes straight to the deal.
 function openPromotedLeadAsk(leadId, dealId) {
+  // v7.10.18: name what the lead became — a contract is not "an opportunity".
+  const st = _leadDealStates[+dealId] || null;
+  const noun = st ? (st.key === 'open' ? 'an opportunity' : st.key === 'suspended' ? 'a suspended opportunity' : st.key === 'lost' ? 'a lost opportunity' : 'a ' + st.label.toLowerCase()) : 'an opportunity';
+  const what = st ? (st.key === 'open' || st.key === 'suspended' || st.key === 'lost' ? 'opportunity' : st.label.toLowerCase()) : 'opportunity';
   showModal(`
     <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
       <div class="modal" style="width:480px;">
@@ -22296,14 +22375,40 @@ function openPromotedLeadAsk(leadId, dealId) {
           <button class="modal-close" onclick="closeModal()">×</button>
         </div>
         <div class="modal-body">
-          <div style="font-size:13px;color:var(--text2);line-height:1.5;">This lead has been promoted to an opportunity. Do you want to view the lead in read-only mode or open the opportunity?</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.5;">This lead has been promoted and is now ${noun}${st && st.key === 'open' && st.stage ? ' at ' + cEsc(st.stage) : ''}${st && st.name ? ': <strong>' + cEsc(st.name) + '</strong>' : ''} ${st ? dealStateTagHtml(st) : ''}. Do you want to view the lead in read-only mode or open the ${what}?</div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-secondary" onclick="closeModal(); openLead(${+leadId});">View lead (read-only)</button>
-          <button class="btn btn-primary" onclick="closeModal(); openOpportunity(${+dealId});">Open the opportunity →</button>
+          <button class="btn btn-primary" onclick="closeModal(); openOpportunity(${+dealId});">Open the ${what} →</button>
         </div>
       </div>
     </div>`);
+}
+
+// v7.10.18: the promoted lead's banner names what the lead became — "now a Contract: <deal>" —
+// from the register's cache when it has the deal, else one slim read in the background. The banner
+// keeps its generic wording when the deal cannot be read (deleted, or the read fails).
+async function _leadPromotedBanner(banner, dealId) {
+  if (!banner || !dealId) return;
+  const leadId = leadData && leadData.id;
+  try {
+    let st = _leadDealStates[+dealId] || null;
+    if (!st) {
+      const [rows, stages, cats, subs] = await Promise.all([
+        apiGet('deals', 'id=eq.' + (+dealId) + '&select=id,name,stage_id,service_sub_id'),
+        allData['stages'] || apiGet('stages', 'select=*&order=sort_order.asc'),
+        allData['stage_categories'] || apiGet('stage_categories', 'select=*'),
+        allData['service_sub_all'] || allData['service_sub'] || apiGet('service_sub', 'select=id,major_id,revenue_type,is_recurring,active'),
+      ]);
+      if (!rows || !rows[0]) return;
+      st = Object.assign({ name: rows[0].name || '' }, dealStateOf(rows[0], stages, cats, subs));
+      _leadDealStates[+dealId] = st;
+    }
+    if (!leadData || +leadData.id !== +leadId || leadData.status !== 'Promoted') return;   // another lead opened meanwhile
+    const noun = st.key === 'open' ? 'an opportunity' + (st.stage ? ' at ' + st.stage : '') : st.key === 'suspended' ? 'a suspended opportunity' : st.key === 'lost' ? 'a lost opportunity' : 'a ' + st.label.toLowerCase();
+    banner.innerHTML = '✓ This lead has been Promoted and is now ' + cEsc(noun) + (st.name ? ': <strong>' + cEsc(st.name) + '</strong>' : '') + ' ' + dealStateTagHtml(st) +
+      ' <button class="btn btn-secondary btn-sm" style="margin-left:8px;" onclick="_leadOpenedFromDealId = ' + (+dealId) + '; closeLeadPage();">Open →</button> <span style="font-weight:500;">View-only.</span>';
+  } catch (e) { console.warn('promoted banner:', e.message); }
 }
 
 // Open an existing lead for editing.
@@ -24443,6 +24548,7 @@ function applyLeadReadOnly(on) {
         banner.style.background = '#E8F5E9';
         banner.style.borderColor = '#16a34a';
         banner.style.color = '#0F5132';
+        _leadPromotedBanner(banner, leadData.promoted_deal_id);   // v7.10.18: names what it became (background)
       } else if (leadData.status === 'Dead') {
         banner.textContent = '✗ This lead is marked Dead. View-only.';
         banner.style.background = '#FEF2F2';
