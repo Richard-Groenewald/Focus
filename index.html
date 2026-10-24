@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.15 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.15 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1040,14 +1040,19 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
             <label class="form-label">Expected Order Date</label>
             <input type="date" id="opp-order-date-general" class="form-control" onchange="rsgSyncOrderDate('general')">
           </div>
-          <div class="form-group" style="margin-top:16px;margin-bottom:0;">
+          <div class="form-group" id="opp-legacy-desc-group" style="margin-top:16px;margin-bottom:0;">
             <label class="form-label">Description</label>
             <textarea id="opp-notes" class="form-control" style="height:160px;resize:none;"></textarea>
+          </div>
+          <!-- v7.10.16: the retired Description / Notes stub, shown only to settings.legacy_notes_viewers (applyLegacyDn). -->
+          <div id="opp-legacy-dn-stub" style="display:none;margin-top:16px;font-size:12px;color:var(--text3);align-items:center;gap:10px;flex-wrap:wrap;">
+            <span>The old description and notes are kept for a while.</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openLegacyNotes('opp')" title="Open the retired Description and Notes, read-only">Secret</button>
           </div>
         </div>
 
         <!-- Right column: Notes -->
-        <div class="form-group" style="margin-bottom:0;">
+        <div class="form-group" id="opp-legacy-notes-group" style="margin-bottom:0;">
           <label class="form-label">Notes</label>
           <textarea id="opp-ext-notes" class="form-control" style="height:calc(100% - 28px);min-height:320px;resize:none;"></textarea>
         </div>
@@ -1405,10 +1410,31 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
         <div class="opp-section" id="lead-details-section">
           <div class="opp-section-title">Details and Notes</div>
 
-          <div class="form-group">
+          <div class="form-group" id="lead-description-group">
             <label class="form-label" id="lead-description-label">Description <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <textarea id="lead-description" class="form-control" rows="3" placeholder="What's the opportunity here? Why is this a lead?"></textarea>
             <div id="lead-description-history" style="display:none;margin-top:8px;"></div>
+          </div>
+          <!-- v7.10.16: once the old Details and Notes is retired, the group above is hidden and only the
+               people listed in settings.legacy_notes_viewers see this stub (see applyLegacyDn). -->
+          <div id="lead-legacy-dn-stub" style="display:none;font-size:12px;color:var(--text3);align-items:center;gap:10px;flex-wrap:wrap;">
+            <span>The old description and notes are kept for a while.</span>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="openLegacyNotes('lead')" title="Open the retired Details and Notes, read-only">Secret</button>
+          </div>
+        </div>
+
+        <!-- v7.10.16: Research Notes — Les's research interview record (up to three interviews per
+             lead), offered only while the lead's source is a research one (applyLeadResearchSection). -->
+        <div class="opp-section" id="lead-research-section" style="display:none;">
+          <div class="opp-section-title">Research Notes</div>
+          <div id="lead-research-body"></div>
+        </div>
+
+        <!-- v7.10.16: General Notes — free text on every lead, nothing required. -->
+        <div class="opp-section" id="lead-general-notes-section">
+          <div class="opp-section-title">General Notes</div>
+          <div class="form-group" style="margin-bottom:0;">
+            <textarea id="lead-general-notes" class="form-control" rows="5" placeholder="Anything worth keeping about this lead. Optional."></textarea>
           </div>
         </div>
 
@@ -2318,6 +2344,7 @@ function _mockSeed() {
       { id: 3, key: 'escalation_month',       value: 'July' },
       { id: 4, key: 'new_lead_waiting_minutes', value: '10' },
       { id: 5, key: 'rsg_probability_cap',    value: '20' },
+      { id: 6, key: 'legacy_notes_viewers',   value: '2' },   // v7.10.16: Thandi sees the Secret button in mock mode
     ],
     promotion_reject_reasons: [
       { id: 1, name: 'Financials need rework',   description: 'Revenue stream / margin / dates are off.',         sort_order: 1, active: true, created_at: now },
@@ -2343,6 +2370,7 @@ function _mockSeed() {
     deal_contacts: [],
     lead_interactions: [],
     lead_description_log: [],
+    lead_research_interviews: [],   // v7.10.16
     lead_red_flags: [],
     lead_strategic_decisions: [],
     // v7.9.41 Proposal Generator: the per-post checklists and the default template, so the Proposal tab works offline.
@@ -5048,7 +5076,7 @@ const HELP_CONTENT = {
       { note: `<strong>What this register is.</strong> A lead is a <strong>provisional opportunity</strong> — a possible piece of business we are still qualifying. It lives on this page until it is <strong>Promoted</strong> into an opportunity, parked on purpose (<strong>Hold</strong> or <strong>Nurture</strong>), or closed (<strong>Dead</strong>). Two things become real before promotion: a typed organisation name becomes a <strong>Prospect organisation</strong> the moment the lead is saved, so the same client is recognised across leads, and the people you name are matched against people we already know. Everything else — the deal and its revenue stream — exists only from promotion.` },
       { h: 'The four rules behind the process', body: `<ol><li><strong>Stages move off the data, not on opinion.</strong> Raw → Working and Working → Review happen by themselves the moment the facts are in place. Nobody is asked to approve progress.</li><li><strong>One approval in the whole lifecycle: promotion.</strong> Sales management accepts or rejects a promotion request. Every other move — Hold, Nurture, coming back, Decline — is a direct action by the owner or a manager, recorded on the lead's audit trail.</li><li><strong>Oversight arrives after the fact where a lead leaves the pipeline.</strong> A death is confirmed by sales management afterwards; a red flag is ruled on by an Executive while work continues.</li><li><strong>Nothing sleeps forgotten — provided the limits are set.</strong> Hold carries a wake date; Raw and Working age against limits Admin sets; Nurture relies on you logging the next touch.</li></ol>` },
       { h: 'The lifecycle map', body: `Every move a lead can make is on this map — the stage columns, the gates between them, and the oversight checks.<div onclick="openLeadLifecycleZoom()" title="Click to enlarge" style="cursor:zoom-in;border:1px solid #d9dee3;border-radius:8px;background:#fff;padding:6px;margin-top:8px;"><img src="${LEAD_LIFECYCLE_IMG}" alt="Lead lifecycle map" style="width:100%;height:auto;display:block;" loading="lazy"></div><div style="font-size:11.5px;color:var(--text3,#889);margin-top:5px;">🔍 Click the map to open it full-size.</div><em>Note: the map image predates the 2026-08-12 revision — it still shows approval steps on Hold and Nurture entry, which are now direct actions, and its source list is illustrative. The text below is what Focus actually does.</em>` },
-      { h: 'Raw — capture', body: `Every lead lands here, from any source: ${srcList}. To leave Raw a lead needs four things, and Focus checks them for you:<ul><li>a <strong>source and its detail</strong> — who referred it, which client it expands, which campaign or study it came from, or a note for the rest;</li><li>a <strong>description</strong> of what is being pursued;</li><li>one <strong>contact</strong> — a person we already know, or a first and last name with an email address or phone number;</li><li>a <strong>first engagement</strong>, logged with a <strong>next action and its date</strong>. An engagement without a next step does not count.</li></ul>An organisation is <em>not</em> required yet — you may work a lead before you know whose site it is. Name it as soon as you can: it is needed to reach Review.` },
+      { h: 'Raw — capture', body: `Every lead lands here, from any source: ${srcList}. To leave Raw a lead needs three things, and Focus checks them for you:<ul><li>a <strong>source and its detail</strong> — who referred it, which client it expands, which campaign or study it came from, or a note for the rest;</li><li>one <strong>contact</strong> — a person we already know, or a first and last name with an email address or phone number;</li><li>a <strong>first engagement</strong>, logged with a <strong>next action and its date</strong>. An engagement without a next step does not count.</li></ul>An organisation is <em>not</em> required yet — you may work a lead before you know whose site it is. Name it as soon as you can: it is needed to reach Review.` },
       { h: 'Working — qualification', body: `The flip from Raw is automatic and immediate once the four items above are complete. ${grace > 0 ? 'For the first <strong>' + grace + ' minute' + (grace === 1 ? '' : 's') + '</strong> after reaching Working an edit that breaks one of them drops the lead back to Raw; after that Working is sticky.' : 'Working is sticky once reached.'} Leads of the same client group move to Working together.<br><br>In Working you rate the <strong>four gates</strong> on the Qualification tab:<ul><li><strong>Fit</strong> — the prospect matches our ideal client profile (sector, size, footprint).</li><li><strong>Access</strong> — we can reach the economic decision-maker.</li><li><strong>Capacity</strong> — they have the budget and the authority to buy.</li><li><strong>Trigger</strong> — a compelling event is driving them to act now.</li></ul>Each gate is <strong>Weak</strong> or <strong>Strong</strong>, and <strong>only Strong passes</strong> — Weak never counts and there is no admin threshold that changes that. Rate them in any order; the sequence Fit → Access → Capacity → Trigger is how the parked stages' entry bars build up (Nurture needs Fit and Access; Hold adds Capacity; Review needs all four), not a sequence you must follow.` },
       { h: 'Review — the approval queue', body: `A lead reaches Review by itself when <strong>all four gates are Strong</strong>, a <strong>primary service interest</strong> is set and an <strong>organisation</strong> is named (linked or typed). Once the gates are green, whatever still blocks Review is highlighted on the lead.<ul><li><strong>The owner</strong> presses <strong>Request promotion</strong> and assembles the deal package — organisation, contact, service, value, dates and the first action on the opportunity. An open next action already on the lead can serve as that first commitment.</li><li><strong>Sales management</strong> (the promote-lead right) sees the request in <strong>Approvals Outstanding</strong> and either <strong>accepts</strong> it — the opportunity is created and the lead becomes ${helpChip('Promoted')} — or <strong>rejects</strong> it with a reason; the package is kept for a re-request and the lead's stage follows its data again.</li><li>A manager who holds the right promotes directly with <strong>Promote →</strong>; no request is needed.</li></ul>This is the only approval in the lifecycle.` },
       { h: 'Hold — right profile, wrong moment', body: `From <strong>Working or Review</strong>, by the owner or a manager, as a direct action. The bar is <strong>Fit, Access and Capacity Strong</strong>; a <strong>wake date</strong> is mandatory. On entry a Strong Trigger is turned <strong>Weak</strong> — holding a lead says its moment is not now. It comes back to play in three ways: on the first register, dashboard or workbench load after the wake date (landing on Working, or straight on Review if every gate is Strong with a service interest and an organisation); early, the moment its Trigger goes Strong again with those two in place; or by hand, with <strong>Take lead off Hold</strong> on the Lead Progression tab. Hold applies to the one lead, not its client group.` },
@@ -5959,6 +5987,7 @@ async function openNewOpportunity() {
   setupOppOwnerReassign();
   oppFiles = []; _oppFilesDealId = null; _oppFilesPending = [];
   applyOppReadOnly('full'); // creator becomes the owner — always editable
+  applyLegacyDn('opp');   // v7.10.16: a new deal has nothing legacy to show
   oppScoreLoad(null).then(oppScoreFreshStages);   // background: the score questions (a new deal's answers wait in memory for its first Save)
 }
 
@@ -6029,6 +6058,7 @@ async function openOpportunity(id, adminMode = false) {
     await oppSuspensionOnOpen();
     oppScoreRefresh();   // the stage, the edit level and any suspension are settled now
     oppIdentRefresh();
+    applyLegacyDn('opp');   // v7.10.16: the retired Description / Notes and their Secret stub
   } catch(e) {
     showStatus('Failed to load deal: ' + e.message, 'error');
   }
@@ -24384,6 +24414,7 @@ function applyLeadReadOnly(on) {
   leadReadOnly = !!on;
   const page = document.getElementById('lead-page');
   if (!page) return;
+  renderLeadResearch();   // v7.10.16: the interview cards offer Add / Edit / Delete only while editable
 
   // Toggle every input/select/textarea inside the page
   page.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = leadReadOnly; });
@@ -24785,7 +24816,7 @@ async function _revertChildAdditions(table, leadId, keepIds) {
 }
 async function _deleteLeadCascade(id) {
   // Child tables are independent — delete them in parallel, then the lead.
-  await Promise.all(['deal_contacts', 'engagements', 'lead_description_log', 'lead_red_flags', 'lead_strategic_decisions']
+  await Promise.all(['deal_contacts', 'engagements', 'lead_description_log', 'lead_research_interviews', 'lead_red_flags', 'lead_strategic_decisions']
     .map(t => api(t, 'DELETE', null, 'lead_id=eq.' + id).catch(() => {})));
   try { await api('leads', 'DELETE', null, 'id=eq.' + id); } catch (e) {}
 }
@@ -24911,7 +24942,7 @@ async function leadCommitNote() {
   if (_leadNoteBusy) return _leadNoteBusy;
   const ta = document.getElementById('lead-description');
   const text = ta ? ta.value.trim() : '';
-  if (!text || !leadData || !leadData.id || !leadIsAppendMode() || leadReadOnly) return true;
+  if (LEGACY_DN_RETIRED || !text || !leadData || !leadData.id || !leadIsAppendMode() || leadReadOnly) return true;
   const leadId = leadData.id;
   _leadNoteBusy = (async () => {
     try {
@@ -25215,7 +25246,7 @@ function resetLeadForm() {
     'lead-source-org-id','lead-research-campaign-id','lead-sales-campaign-id',
     'lead-source-detail','lead-target-org-id','lead-target-org-name',
     'lead-site-id','lead-site-name',
-    'lead-description','lead-region-id','lead-branch-id','lead-service-combo','lead-service-major-id',
+    'lead-description','lead-general-notes','lead-region-id','lead-branch-id','lead-service-combo','lead-service-major-id',
     'lead-service-sub-id','lead-est-value','lead-owner-id',
     'lead-next-action','lead-next-action-date','lead-wake-date',
     'lead-dead-reason-value','lead-dead-notes-value',
@@ -25807,9 +25838,14 @@ async function loadLeadDescriptionLog(leadId) {
 function renderLeadDescriptionHistory() {
   const hist = document.getElementById('lead-description-history');
   if (!hist) return;
+  hist.innerHTML = leadDescriptionHistoryHtml();
+}
+// The thread as cards, newest note first and the Original last (v7.10.16: also the legacy modal's body;
+// `copy` adds a Copy button to each card so the text can be carried into the new section).
+function leadDescriptionHistoryHtml(copy) {
   const fmtWho = (id) => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; };
   const card = (body, meta, original) => `<div style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:${original ? '#FFFDF5' : '#fff'};">
-      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:3px;">${original ? 'Original' : 'Update'}${meta ? (' · ' + meta) : ''}</div>
+      <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);margin-bottom:3px;display:flex;align-items:center;gap:8px;"><span style="flex:1;">${original ? 'Original' : 'Update'}${meta ? (' · ' + meta) : ''}</span>${copy ? legacyCopyBtnHtml(body) : ''}</div>
       <div style="font-size:13px;white-space:pre-wrap;">${String(body || '').replace(/</g, '&lt;')}</div>
     </div>`;
   let html = '';
@@ -25821,7 +25857,216 @@ function renderLeadDescriptionHistory() {
     const meta = [(leadData.created_at ? new Date(leadData.created_at).toLocaleString('en-ZA') : ''), fmtWho(leadData.created_by)].filter(Boolean).join(' · ');
     html += card(leadData.description, meta, true);
   }
-  hist.innerHTML = html || '<div style="font-size:12px;color:var(--text3);">No description yet.</div>';
+  return html || '<div style="font-size:12px;color:var(--text3);">No description yet.</div>';
+}
+
+// ── Legacy Details and Notes (v7.10.16, Richard 2026-10-24: "retire the current details and notes …
+// keep the information and the format in its current form for a period, accessible only by Les by
+// pressing a 'Secret' button … in both leads and opportunities") ──
+// LEGACY_DN_RETIRED switches the old surfaces off: the lead's Description box and thread, the deal's
+// Description and Notes boxes. Nothing is deleted — the people listed in settings.legacy_notes_viewers
+// (people ids, comma-separated; Site Admin → Settings → Legacy Details and Notes) see a Secret button
+// where the section stood, which opens the old content read-only with a Copy button per entry so it
+// can be carried into the new section. Until the flag is on, the old section shows for everyone and
+// the stub stays hidden.
+let LEGACY_DN_RETIRED = true;   // `let`, so the mock-mode harness can flip it
+function legacyNotesViewerIds() { return String(appSettings['legacy_notes_viewers'] || '').split(',').map(s => +String(s).trim()).filter(n => n > 0); }
+function legacyNotesViewer() { return !!(currentUser && currentUser.personId && legacyNotesViewerIds().includes(+currentUser.personId)); }
+function applyLegacyDn(kind) {
+  const retired = LEGACY_DN_RETIRED, viewer = retired && legacyNotesViewer();
+  const show = (id, on, flex) => { const el = document.getElementById(id); if (el) el.style.display = on ? (flex ? 'flex' : '') : 'none'; };
+  if (kind === 'lead') {
+    const saved = !!(leadData && leadData.id);
+    show('lead-description-group', !retired);
+    show('lead-legacy-dn-stub', viewer && saved, true);
+    // The whole section goes when nothing in it is shown (applyLeadProgressiveReveal set it first).
+    const sec = document.getElementById('lead-details-section');
+    if (sec && retired && !(viewer && saved)) sec.style.display = 'none';
+  } else {
+    const saved = !!(oppData && oppData.id);
+    show('opp-legacy-desc-group', !retired);
+    show('opp-legacy-notes-group', !retired);
+    show('opp-legacy-dn-stub', viewer && saved, true);
+  }
+}
+function legacyCopyBtnHtml(text) {
+  return `<button type="button" class="btn btn-secondary btn-sm" style="padding:1px 8px;font-size:10px;" data-copy="${escAttr(String(text || ''))}" onclick="legacyCopy(this)" title="Copy this text">Copy</button>`;
+}
+async function legacyCopy(btn) {
+  const text = btn.getAttribute('data-copy') || '';
+  try { await navigator.clipboard.writeText(text); showStatus('Copied'); }
+  catch (e) { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); showStatus('Copied'); } catch (e2) { showStatus('Could not copy — select the text and copy it by hand', 'error'); } ta.remove(); }
+}
+function openLegacyNotes(kind) {
+  if (!legacyNotesViewer()) { showStatus('The retired Details and Notes are not available to you', 'error'); return; }
+  let body, title;
+  if (kind === 'lead') {
+    title = 'Details and Notes (retired) — lead';
+    body = `<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Read-only. Copy what is still needed into the new Details and Notes; this record will be removed later.</div>
+      <div style="max-height:60vh;overflow-y:auto;padding-right:4px;">${leadDescriptionHistoryHtml(true)}</div>`;
+  } else {
+    title = 'Description and Notes (retired) — deal';
+    const box = (label, text) => `<div class="form-group"><label class="form-label" style="display:flex;align-items:center;gap:8px;"><span style="flex:1;">${label}</span>${legacyCopyBtnHtml(text)}</label>
+      <textarea class="form-control" readonly style="height:160px;resize:vertical;background:#FFFDF5;">${escHtml(String(text || ''))}</textarea></div>`;
+    body = `<div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Read-only. Copy what is still needed into the new Details and Notes; this record will be removed later.</div>
+      ${box('Description', oppData && oppData.notes)}${box('Notes', oppData && oppData.ext_notes)}`;
+  }
+  showModal(`<div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+    <div class="modal" style="width:640px;max-width:95vw;">
+      <div class="modal-header"><div class="modal-title">${title}</div><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body" style="padding:16px 22px;">${body}</div>
+    </div></div>`);
+}
+
+// ── Research Notes (v7.10.16, Richard 2026-10-24: "a form, named Research Notes, that becomes
+// available only when the origin of the lead is Research" — Les's research interview record) ──
+// Table lead_research_interviews (sql/add_lead_research_notes.sql): up to three interviews per lead
+// (1/3 · 2/3 · 3/3), each the fields of Les's form. Nothing is required; a blank interview saves.
+// Writes go straight to the table (POST / PATCH / DELETE), never through the lead autosave.
+const LEAD_RESEARCH_MAX = 3;
+const LEAD_RESEARCH_ANON = [['', '—'], ['full', 'Full'], ['partial', 'Partial'], ['quote_me', 'Quote me']];
+const LEAD_RESEARCH_FIELDS = [
+  { key: 'participant',              label: 'Participant',                      hint: 'Name and research identifier' },
+  { key: 'role',                     label: 'Role',                             hint: 'Job title' },
+  { key: 'organisation',             label: 'Organisation',                     hint: 'Company name' },
+  { key: 'target_market',            label: 'Xone target market' },
+  { key: 'target_segment',           label: 'Target market segment' },
+  { key: 'guard_headcount',          label: 'Approx. guard headcount',          long: true },
+  { key: 'guard_headcount_estimate', label: 'If not disclosed, estimated guard headcount based on other sources', long: true },
+  { key: 'guarding_spend',           label: 'Annual guarding spend',            long: true },
+  { key: 'control_room_spend',       label: 'Annual control room spend',        long: true },
+  { key: 'spend_estimate',           label: 'If not disclosed, estimated annual spend based on other sources', long: true },
+  { key: 'technology_notes',         label: 'Technologies notes',               long: true },
+];
+let _leadResearch = { leadId: null, rows: [], editing: null, draft: null, saving: false, missing: false };
+// The lead's source is a research one: the select on the form while it is live, else the saved row.
+function leadSourceIsResearch() {
+  const sel = document.getElementById('lead-source-id');
+  const id = +(sel && sel.value) || +(leadData && leadData.source_id) || 0;
+  const src = (allData['lead_sources'] || []).find(x => +x.id === id);
+  return !!(src && /research/i.test(src.name || ''));
+}
+function applyLeadResearchSection() {
+  const sec = document.getElementById('lead-research-section');
+  if (!sec) return;
+  const on = leadSourceIsResearch() && !!(leadData && (leadData.id || leadLiveSourceComplete()));
+  sec.style.display = on ? '' : 'none';
+  if (!on) return;
+  const leadId = +leadData.id || null;
+  if (leadId !== _leadResearch.leadId) {
+    _leadResearch = { leadId, rows: [], editing: null, draft: null, saving: false, missing: false };
+    if (leadId) loadLeadResearchInterviews(leadId).then(() => { if (+leadData.id === leadId) renderLeadResearch(); });
+  }
+  renderLeadResearch();
+}
+async function loadLeadResearchInterviews(leadId) {
+  try { _leadResearch.rows = await apiGet('lead_research_interviews', `lead_id=eq.${leadId}&select=*&order=interview_no.asc,id.asc`); _leadResearch.missing = false; }
+  catch (e) { _leadResearch.rows = []; _leadResearch.missing = /404|PGRST205|does not exist/i.test(String(e && e.message)); }
+}
+function _lrPersonName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; }
+function _lrNextNo() { const used = new Set(_leadResearch.rows.map(r => +r.interview_no)); for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) if (!used.has(n)) return n; return LEAD_RESEARCH_MAX; }
+function renderLeadResearch() {
+  const body = document.getElementById('lead-research-body');
+  if (!body) return;
+  const R = _leadResearch, canEdit = !leadReadOnly;
+  if (!leadData.id) { body.innerHTML = '<div style="font-size:12px;color:var(--text3);">The interview record opens once the lead has saved.</div>'; return; }
+  if (R.missing) { body.innerHTML = '<div style="font-size:12px;color:#b45309;">Research Notes need sql/add_lead_research_notes.sql on this database.</div>'; return; }
+  const anonLabel = v => (LEAD_RESEARCH_ANON.find(a => a[0] === (v || '')) || ['', '—'])[1];
+  const card = (r) => {
+    const open = R.editing === r.id;
+    const head = `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;" onclick="leadResearchToggle(${r.id})">
+        <strong style="font-size:13px;">Interview ${r.interview_no || '?'}/${LEAD_RESEARCH_MAX}</strong>
+        <span style="font-size:12px;color:var(--text2);flex:1;">${escHtml([r.interview_date || '', r.participant || '', r.organisation || ''].filter(Boolean).join(' · '))}</span>
+        <span style="font-size:11px;color:var(--text3);">${escHtml(_lrPersonName(r.interviewer_id))}</span>
+        <span style="font-size:11px;color:var(--text3);">${open ? '▾' : '▸'}</span></div>`;
+    return `<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:#fff;">${head}${open ? (R.draft ? _lrEditorHtml() : _lrViewHtml(r)) : ''}</div>`;
+  };
+  let html = R.rows.map(card).join('');
+  if (R.editing === 'new' && R.draft) html += `<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:#fff;"><div style="padding:8px 10px;"><strong style="font-size:13px;">New interview</strong></div>${_lrEditorHtml()}</div>`;
+  if (!R.rows.length && R.editing !== 'new') html += '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">No interviews recorded yet.</div>';
+  if (canEdit && R.editing == null && R.rows.length < LEAD_RESEARCH_MAX) html += `<button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchAdd()">+ Add interview</button>`;
+  body.innerHTML = html;
+}
+function _lrViewHtml(r) {
+  const row = (label, val, long) => `<div style="margin-bottom:6px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);">${label}</div><div style="font-size:13px;white-space:${long ? 'pre-wrap' : 'normal'};">${escHtml(String(val || '')) || '<span style="color:var(--text3);">—</span>'}</div></div>`;
+  const anon = (LEAD_RESEARCH_ANON.find(a => a[0] === (r.anonymity || '')) || ['', '—'])[1];
+  return `<div style="padding:4px 10px 10px;border-top:1px solid var(--border);">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">${row('Interview date', r.interview_date)}${row('Interviewer', _lrPersonName(r.interviewer_id))}${row('Research anonymity', anon)}</div>
+    ${LEAD_RESEARCH_FIELDS.map(f => row(f.label, r[f.key], f.long)).join('')}
+    ${leadReadOnly ? '' : `<div style="display:flex;gap:8px;margin-top:4px;"><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchEdit(${r.id})">Edit</button><button type="button" class="btn btn-secondary btn-sm" style="color:var(--red);" onclick="leadResearchDelete(${r.id})">Delete</button></div>`}
+  </div>`;
+}
+function _lrEditorHtml() {
+  const d = _leadResearch.draft;
+  const inp = (key, label, hint, long) => `<div class="form-group" style="margin-bottom:8px;"><label class="form-label">${label}${hint ? ` <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${hint}</span>` : ''}</label>
+    ${long ? `<textarea class="form-control lr-f" data-key="${key}" rows="3" oninput="leadResearchTouch(this)">${escHtml(String(d[key] || ''))}</textarea>`
+           : `<input type="text" class="form-control lr-f" data-key="${key}" value="${escAttr(String(d[key] || ''))}" oninput="leadResearchTouch(this)">`}</div>`;
+  const nos = []; for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) nos.push(`<option value="${n}" ${+d.interview_no === n ? 'selected' : ''}>${n}/${LEAD_RESEARCH_MAX}</option>`);
+  return `<div style="padding:6px 10px 10px;border-top:1px solid var(--border);">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px;">
+      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Interview date</label><input type="date" class="form-control lr-f" data-key="interview_date" value="${escAttr(d.interview_date || '')}" onchange="leadResearchTouch(this)"></div>
+      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Interview #</label><select class="form-control lr-f" data-key="interview_no" onchange="leadResearchTouch(this)">${nos.join('')}</select></div>
+      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Interviewer</label><input type="text" class="form-control" value="${escAttr(_lrPersonName(d.interviewer_id))}" disabled title="Set from who is signed in"></div>
+    </div>
+    ${inp('participant', 'Participant', 'name and research identifier')}
+    ${inp('role', 'Role', 'job title')}
+    ${inp('organisation', 'Organisation', 'company name')}
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;">${inp('target_market', 'Xone target market')}${inp('target_segment', 'Target market segment')}</div>
+    <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Did the participant request research anonymity?</label>
+      <select class="form-control lr-f" data-key="anonymity" onchange="leadResearchTouch(this)">${LEAD_RESEARCH_ANON.map(a => `<option value="${a[0]}" ${(d.anonymity || '') === a[0] ? 'selected' : ''}>${a[1]}</option>`).join('')}</select></div>
+    ${LEAD_RESEARCH_FIELDS.filter(f => f.long).map(f => inp(f.key, f.label, '', true)).join('')}
+    <div style="display:flex;gap:8px;"><button type="button" class="btn btn-primary btn-sm" onclick="leadResearchSave()" ${_leadResearch.saving ? 'disabled' : ''}>Save interview</button><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchCancel()">Cancel</button></div>
+  </div>`;
+}
+function leadResearchTouch(el) { if (_leadResearch.draft) _leadResearch.draft[el.dataset.key] = el.value; }
+function _lrBusy() { if (_leadResearch.editing != null && _leadResearch.draft) { showStatus('Save or cancel the open interview first', 'error'); return true; } return false; }
+function leadResearchToggle(id) {
+  if (_leadResearch.editing === id && !_leadResearch.draft) { _leadResearch.editing = null; renderLeadResearch(); return; }
+  if (_lrBusy()) return;
+  _leadResearch.editing = id; _leadResearch.draft = null; renderLeadResearch();
+}
+function leadResearchAdd() {
+  if (leadReadOnly || !leadData.id || _lrBusy()) return;
+  const orgName = leadData.target_org_name || ((allData['organisations'] || []).find(o => +o.id === +leadData.target_org_id) || {}).name || '';
+  _leadResearch.editing = 'new';
+  _leadResearch.draft = { interview_no: _lrNextNo(), interview_date: new Date().toISOString().slice(0, 10), interviewer_id: currentUser?.personId || null, organisation: orgName, anonymity: '' };
+  renderLeadResearch();
+}
+function leadResearchEdit(id) {
+  if (leadReadOnly || _lrBusy()) return;
+  const r = _leadResearch.rows.find(x => +x.id === +id); if (!r) return;
+  _leadResearch.editing = id; _leadResearch.draft = Object.assign({}, r); renderLeadResearch();
+}
+function leadResearchCancel() { _leadResearch.draft = null; if (_leadResearch.editing === 'new') _leadResearch.editing = null; renderLeadResearch(); }
+async function leadResearchSave() {
+  const R = _leadResearch, d = R.draft; if (!d || R.saving || !leadData.id) return;
+  const body = { interview_no: +d.interview_no || 1, interview_date: d.interview_date || null, interviewer_id: d.interviewer_id || null, anonymity: d.anonymity || null };
+  LEAD_RESEARCH_FIELDS.forEach(f => { body[f.key] = (d[f.key] || '').trim() || null; });
+  R.saving = true; renderLeadResearch();
+  try {
+    if (R.editing === 'new') {
+      const res = await api('lead_research_interviews', 'POST', Object.assign({ lead_id: leadData.id, created_by: currentUser?.personId || null }, body), '');
+      if (res && res[0]) R.rows.push(res[0]);
+    } else {
+      body.updated_at = new Date().toISOString(); body.updated_by = currentUser?.personId || null;
+      const res = await api('lead_research_interviews', 'PATCH', body, 'id=eq.' + R.editing + '&select=*');
+      if (res && res[0]) { const i = R.rows.findIndex(x => +x.id === +R.editing); if (i >= 0) R.rows[i] = res[0]; }
+    }
+    R.rows.sort((a, b) => (+a.interview_no - +b.interview_no) || (+a.id - +b.id));
+    R.editing = null; R.draft = null;
+    showStatus('Interview saved');
+  } catch (e) { showStatus('Interview not saved: ' + (e && e.message ? e.message : 'error'), 'error'); }
+  R.saving = false; renderLeadResearch();
+}
+async function leadResearchDelete(id) {
+  if (leadReadOnly) return;
+  if (!await confirmDialog({ title: 'Delete interview', message: 'Delete this interview record? This cannot be undone.', confirmLabel: 'Delete', danger: true })) return;
+  try {
+    await api('lead_research_interviews', 'DELETE', null, 'id=eq.' + id);
+    _leadResearch.rows = _leadResearch.rows.filter(x => +x.id !== +id);
+    if (_leadResearch.editing === id) { _leadResearch.editing = null; _leadResearch.draft = null; }
+    renderLeadResearch();
+  } catch (e) { showStatus('Delete failed: ' + e.message, 'error'); }
 }
 
 // No description yet → editable box (writes the Original); description exists at
@@ -25927,6 +26172,8 @@ function populateLeadForm() {
   hideLeadContactEntry();
   // Details
   if (leadData.description) document.getElementById('lead-description').value = leadData.description;
+  document.getElementById('lead-general-notes').value = leadData.general_notes || '';   // v7.10.16
+  applyLeadResearchSection();   // v7.10.16: Research Notes for a research-sourced lead
   if (leadData.region_id) document.getElementById('lead-region-id').value = leadData.region_id;
   if (leadData.branch_id) document.getElementById('lead-branch-id').value = leadData.branch_id;
   document.getElementById('lead-service-major-id').value = leadData.service_major_id || '';
@@ -25973,7 +26220,7 @@ function onLeadSourceChange() {
   detailWrap.style.display = 'none';
 
   // Progressive reveal: choosing a source opens Target Client + Details on a new lead.
-  applyLeadProgressiveReveal();
+  applyLeadProgressiveReveal();   // also decides the Research Notes section (v7.10.16)
 
   // Once past New the whole Source block (the dropdown AND its selection — the
   // referrer/org/campaign) is frozen and shown via the compact summary. Don't
@@ -28145,6 +28392,8 @@ function applyLeadFormLayout() {
   const rightCol = document.getElementById('lead-right-col');
   const target   = document.getElementById('lead-target-section');
   const details  = document.getElementById('lead-details-section');
+  const research = document.getElementById('lead-research-section');   // v7.10.16
+  const general  = document.getElementById('lead-general-notes-section');
   const source   = document.getElementById('lead-source-section');
   const service  = document.getElementById('lead-service-section');
   const estval   = document.getElementById('lead-estvalue-section');
@@ -28163,7 +28412,7 @@ function applyLeadFormLayout() {
   // Left: Target Client → Principle Service Focus → Estimated Deal Value.
   // Right: Details and Notes → Lead Origin → status blocks (peer review / wake / dead).
   _ensureLeadColumnOrder(leftCol,  [target, service, estval].filter(Boolean));
-  _ensureLeadColumnOrder(rightCol, [details, source, workflow].filter(Boolean));
+  _ensureLeadColumnOrder(rightCol, [details, research, general, source, workflow].filter(Boolean));
 
   applyLeadProgressiveReveal();
   applyLeadSourceLock(!editable);
@@ -28187,6 +28436,10 @@ function applyLeadProgressiveReveal() {
   details.style.display = showAll ? '' : 'none';
   if (service) service.style.display = showAll ? '' : 'none';
   if (estval)  estval.style.display  = showAll ? '' : 'none';
+  const general = document.getElementById('lead-general-notes-section');
+  if (general) general.style.display = showAll ? '' : 'none';
+  applyLegacyDn('lead');   // v7.10.16: the retired section and its Secret stub
+  applyLeadResearchSection();
 }
 
 // Mirror the current Source form fields into a lead-shaped object and run the shared
@@ -30016,7 +30269,7 @@ async function commitPromotion(s) {
       margin_pct:       margin,
       order_date:       orderDt,
       start_date:       startDt,
-      notes:            leadData.description || null,
+      notes:            leadData.general_notes || leadData.description || null,   // v7.10.16: General Notes (the description is retired)
       owner_id:         leadData.owner_id || null,
       created_by:       currentUser?.personId || null,
     };
@@ -30194,7 +30447,7 @@ async function commitPromotion(s) {
     // §7.5 and IS the first commitment — the promotion row stays as history
     // (closed, no obligation) instead of forcing a second next action.
     const useExisting = !!s.q4.useExistingAction;
-    const promoNotes = `Promoted from lead #${leadData.id}: ${leadData.description || ''}`.trim()
+    const promoNotes = `Promoted from lead #${leadData.id}: ${leadData.general_notes || leadData.description || ''}`.trim()
       + (useExisting ? `\nFirst action continues from the lead: ${s.q4.existingActionLabel || 'open action'}${s.q4.existingActionDate ? ' — due ' + s.q4.existingActionDate : ''}` : '');
     const promoEng = await api('engagements', 'POST', {
       deal_id:          dealId,
@@ -30749,7 +31002,9 @@ function leadHasNextStep(l) {
 
 // conds 1-3 — the gate that starts the waiting clock.
 function leadWorkingPrereqsMet(l, primaryContact) {
-  return leadSourceComplete(l) && leadDetailsComplete(l) && leadTargetComplete(l, primaryContact);
+  // v7.10.16: the description is retired (Details and Notes → General / Research Notes, neither
+  // required), so it no longer gates Raw → Working; leadDetailsComplete stays for the legacy guide.
+  return leadSourceComplete(l) && leadTargetComplete(l, primaryContact);
 }
 
 // Has the post-promotion edit-grace window elapsed? Anchored on working_at (when
@@ -30995,7 +31250,7 @@ async function _onOpenLeadEditWindowClosed() {
   clearTimeout(_leadAutoSaveTimer);
   const ta = document.getElementById('lead-description');
   const finalDesc = ta ? ta.value.trim() : '';
-  if (!leadReadOnly && finalDesc && finalDesc !== (leadData.description || '')) {
+  if (!LEGACY_DN_RETIRED && !leadReadOnly && finalDesc && finalDesc !== (leadData.description || '')) {
     try {
       const res = await api('leads', 'PATCH', { description: finalDesc, updated_at: new Date().toISOString() }, 'id=eq.' + leadData.id + '&select=*');
       if (res && res[0]) leadData = res[0];
@@ -31063,7 +31318,7 @@ async function saveLead(opts) {
   // overwrites leads.description (the "Original"); from the next open the box is
   // append-only and entries go to lead_description_log (see leadIsAppendMode).
   const appendMode  = leadIsAppendMode();
-  const description = appendMode ? (leadData.description || '') : descInput;
+  const description = (appendMode || LEGACY_DN_RETIRED) ? (leadData.description || '') : descInput;   // v7.10.16: retired = never rewritten
 
   // Capture-always: NOTHING here hard-blocks a save. Source, description and
   // site are required to PROGRESS (the status engine keeps the lead at 'New'
@@ -31178,6 +31433,7 @@ async function saveLead(opts) {
     ...(_leadContactsPatch()),
 
     description: description || null,   // nullable: capture-always
+    general_notes: (document.getElementById('lead-general-notes')?.value || '').trim() || null,   // v7.10.16
     region_id:        selectFkOrKeep('lead-region-id', leadData.region_id),
     branch_id:        selectFkOrKeep('lead-branch-id', leadData.branch_id),
     service_major_ids: (function () {
@@ -35005,6 +35261,19 @@ async function renderSettingsPage() {
         </details>
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Legacy Details and Notes</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">The retired Details and Notes (a lead's description thread, a deal's Description and Notes boxes) stay readable for a while behind a <strong>Secret</strong> button. Only the people ticked here see that button.</div>
+        <div id="setting-legacy-viewers-list" style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${homeOrgPeople(allData['people'] || [], legacyNotesViewerIds()).map(p => {
+            const selected = legacyNotesViewerIds().includes(+p.id);
+            return `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;">
+              <input type="checkbox" class="setting-legacy-viewer" value="${p.id}" ${selected?'checked':''} style="accent-color:var(--red);">
+              ${escHtml((p.first_name || '') + ' ' + (p.last_name || ''))}
+            </label>`;
+          }).join('')}
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Interactions Widget</div>
         <div class="form-row-3">
           <div class="form-group">
@@ -35201,6 +35470,7 @@ async function saveSettings() {
       proposal_vat_pct:               numSetting('setting-vat-pct', 0, 100, 15, false),
       proposal_default_validity_days: numSetting('setting-validity-days', 1, 365, 30, true),
       proposal_xone_psira_no:         (document.getElementById('setting-psira-no')?.value || '').trim(),
+      legacy_notes_viewers:           [...document.querySelectorAll('.setting-legacy-viewer:checked')].map(cb => cb.value).join(','),   // v7.10.16
     };
     const upsertSetting = async (key, value) => {
       const r = await api('settings', 'PATCH', { value, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
