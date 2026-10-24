@@ -70,7 +70,7 @@ Entry bars by stage (each parked stage's bar matches its meaning):
 
 | From → To | Trigger | Approval |
 |---|---|---|
-| Raw → Working | Completeness (source, contact, next action) **and** first engagement — organisation **not** required here; the description was retired in v7.10.16 (General Notes and Research Notes are optional) | None (auto) |
+| Raw → Working | Completeness (source, contact, next action) **and** first engagement — organisation **not** required here; the description was retired in v7.10.16 (General Notes and Notes — the former Research Notes, v7.10.19 — are optional) | None (auto) |
 | Working → Review | FACT all green + service category + organisation | None (auto) |
 | Review → Promoted | SM approves | **Sales management — the only approval gate in the lifecycle** |
 | Working/Review → Hold | Owner or SM, **direct action**; F/A/C green; wake date mandatory. If Trigger is green (i.e. coming from Review), it is downgraded to **Weak (amber)** on entry | None |
