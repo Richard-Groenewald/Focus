@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.16 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.17 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.16 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.17 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -24182,6 +24182,7 @@ async function openNewLead() {
   window._leadStatusAtOpen = 'New';
   window._leadOrgFillWindow = true;   // fresh lead: org controls fully live
   window._leadDescStartAppend = false;   // brand-new lead: description box writes the Original
+  window._leadSourceAsLoaded = null;      // v7.10.17: no saved origin yet, so the pick stays open this sitting
   leadInteractions = [];
   _leadCadence = null;   // no cadence ribbon until the lead is saved + reopened
   resetLeadForm();
@@ -24349,6 +24350,7 @@ async function openLeadForm(id) {
     // this session append-only (add-a-note); a blank one stays a normal editable box
     // that becomes the thread's "Original". See leadIsAppendMode.
     window._leadDescStartAppend = !!((leadData.description || '').trim());
+    window._leadSourceAsLoaded = +leadData.source_id || null;   // v7.10.17: a saved origin is frozen for everyone but an Admin
     // Keep-guard baseline (bug #76): the organisation as loaded from the DB row
     // this open. saveLead falls back to this when the select reads back empty
     // without the user having gone through the Change flow.
@@ -26225,7 +26227,7 @@ function onLeadSourceChange() {
   // Once past New the whole Source block (the dropdown AND its selection — the
   // referrer/org/campaign) is frozen and shown via the compact summary. Don't
   // re-reveal the conditional field here.
-  if (leadData && leadData.id && leadData.status && leadData.status !== 'New') return;
+  if (leadSourceLockedNow()) return;   // v7.10.17: an Admin changing a saved origin still gets the conditional field
 
   // Show the relevant one
   if (name === 'Referral') { personWrap.style.display = ''; syncLeadSourcePersonUI(); }
@@ -28415,7 +28417,7 @@ function applyLeadFormLayout() {
   _ensureLeadColumnOrder(rightCol, [details, research, general, source, workflow].filter(Boolean));
 
   applyLeadProgressiveReveal();
-  applyLeadSourceLock(!editable);
+  applyLeadSourceLock(leadSourceLockedNow());   // v7.10.17: frozen once saved, Admin excepted
   applyLeadTargetOrgLock(!editable);
   applyLeadGraceLock();
 }
@@ -28572,6 +28574,18 @@ function reconcileLeadOrgDisplay(tag) {
 }
 
 // Once a lead is past New the Source is frozen and shown compactly (spec b1).
+// v7.10.17 (Richard 2026-10-24: "once a leads origin has been chosen, it is frozen. Only admin can
+// change"). The origin (source + its detail) locks from the next open after it was saved — the
+// sitting that picks it may still correct a mis-click — and an Admin may change it at any stage.
+// Before this the block locked only once the Working grace expired.
+function leadIsAdminUser() { return !!(currentUser && (currentUser.isAdmin || (currentUser.permissions || []).includes('all'))); }
+function leadSourceLockedNow() {
+  if (!leadData || !leadData.id) return false;
+  if (leadIsAdminUser()) return false;
+  if (window._leadSourceAsLoaded) return true;
+  const status = leadData.status || 'New';
+  return !(status === 'New' || leadInEditGrace(leadData));   // the older rule for a lead saved without an origin
+}
 function applyLeadSourceLock(locked) {
   const section = document.getElementById('lead-source-section');
   if (!section) return;
@@ -28586,7 +28600,7 @@ function applyLeadSourceLock(locked) {
   if (locked) {
     groups.forEach(g => g.style.display = 'none');
     compact.style.display = 'block';
-    compact.innerHTML = leadSourceSummaryHtml();
+    compact.innerHTML = leadSourceSummaryHtml() + (leadData && leadData.id && window._leadSourceAsLoaded && !leadIsAdminUser() ? '<div style="font-size:11px;color:var(--text3);margin-top:2px;">Fixed once chosen — an Admin can change it.</div>' : '');
   } else {
     compact.style.display = 'none';
     groups.forEach(g => { g.style.display = ''; });
