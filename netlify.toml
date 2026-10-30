@@ -11,6 +11,23 @@
 [build.environment]
   SECRETS_SCAN_OMIT_PATHS = "netlify/functions/sb.js,server.js"
 
+# API proxy (v7.10.21): /sb/* is rewritten at Netlify's edge to the Focus proxy
+# running as a Supabase Edge Function (supabase/functions/sb) — same origin for the
+# browser, no CORS preflights, no key in the client. x-region pins the function to
+# the database's own region; a query parameter cannot do that here because a target
+# with its own query string drops the request's (PostgREST's) parameters.
+# [[redirects]] cannot vary by deploy context, so this is PRODUCTION's target; for a
+# non-production SUPABASE_HOST build.js writes dist/_redirects, which is processed
+# first and points /sb/* at that project's copy instead (unpinned).
+# Rollback: FN_URL back to /.netlify/functions/sb — the Lambda is still deployed.
+[[redirects]]
+  from = "/sb/*"
+  to = "https://kevrfdjqyuhmgziqxuvs.supabase.co/functions/v1/sb/:splat"
+  status = 200
+  force = true
+  [redirects.headers]
+    x-region = "eu-west-1"
+
 # Serve the PWA manifest with its proper MIME type (Netlify defaults .webmanifest
 # to application/octet-stream, which some browsers reject for install).
 [[headers]]

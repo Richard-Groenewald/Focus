@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.20 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.20 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1947,7 +1947,10 @@ async function loadEnvironment() {
   setEnvLabel();
 }
 const SB_HOST = 'kevrfdjqyuhmgziqxuvs.supabase.co';
-const FN_URL = '/.netlify/functions/sb';
+// v7.10.21: /sb is a Netlify edge rewrite to the proxy running as a Supabase Edge
+// Function next to the database (netlify.toml, supabase/functions/sb). The Netlify
+// Lambda at /.netlify/functions/sb is unchanged and remains the rollback.
+const FN_URL = '/sb';
 
 // ── Session ── the sb function issues a signed token at sign-in and refuses every data call
 // without one, so the login screen is no longer client-side theatre. The token lives in
@@ -2453,7 +2456,9 @@ function _apiRelease() {
 // the request carried Prefer: count=… and the proxy exposes the header.
 function _contentRangeTotal(headers) {
   try {
-    const cr = headers && headers.get ? headers.get('content-range') : null;
+    // v7.10.21: the proxy also sends the total as X-Focus-Content-Range, a private twin
+    // for the case where an intermediary drops Content-Range on a 200.
+    const cr = headers && headers.get ? (headers.get('content-range') || headers.get('x-focus-content-range')) : null;
     const m = cr && String(cr).match(/\/(\d+)\s*$/);
     return m ? +m[1] : null;
   } catch (e) { return null; }
