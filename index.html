@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -26038,7 +26038,8 @@ function openLegacyNotes(kind) {
 // words): up to three notes per lead (1/3 · 2/3 · 3/3), each the fields of Les's form. Nothing is
 // required; a blank note saves.
 // Writes go straight to the table (POST / PATCH / DELETE), never through the lead autosave.
-const LEAD_RESEARCH_MAX = 3;
+// v7.10.22: no cap on the number of notes (was LEAD_RESEARCH_MAX = 3); Note # is the next number.
+// responsible_leadership needs sql/lead_notes_unlimited.sql (run on both databases with the release).
 const LEAD_RESEARCH_ANON = [['', '—'], ['full', 'Full'], ['partial', 'Partial'], ['quote_me', 'Quote me']];
 const LEAD_RESEARCH_FIELDS = [
   { key: 'participant',              label: 'Prospect name',                    hint: 'Name and research identifier' },
@@ -26080,7 +26081,8 @@ async function loadLeadResearchInterviews(leadId) {
   catch (e) { _leadResearch.rows = []; _leadResearch.missing = /404|PGRST205|does not exist/i.test(String(e && e.message)); }
 }
 function _lrPersonName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; }
-function _lrNextNo() { const used = new Set(_leadResearch.rows.map(r => +r.interview_no)); for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) if (!used.has(n)) return n; return LEAD_RESEARCH_MAX; }
+function _lrNextNo() { return _leadResearch.rows.reduce((m, r) => Math.max(m, +r.interview_no || 0), 0) + 1; }
+function _lrRlTag(on) { return on ? '<span style="font-size:10px;font-weight:700;color:var(--navy, #003057);border:1px solid var(--navy, #003057);border-radius:3px;padding:0 4px;white-space:nowrap;">RESPONSIBLE LEADERSHIP</span>' : ''; }
 function renderLeadResearch() {
   const body = document.getElementById('lead-research-body');
   if (!body) return;
@@ -26091,7 +26093,7 @@ function renderLeadResearch() {
   const card = (r) => {
     const open = R.editing === r.id;
     const head = `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;" onclick="leadResearchToggle(${r.id})">
-        <strong style="font-size:13px;">Note ${r.interview_no || '?'}/${LEAD_RESEARCH_MAX}</strong>
+        <strong style="font-size:13px;">Note ${r.interview_no || '?'}</strong>${_lrRlTag(r.responsible_leadership)}
         <span style="font-size:12px;color:var(--text2);flex:1;">${escHtml([r.interview_date || '', r.participant || '', r.organisation || ''].filter(Boolean).join(' · '))}</span>
         <span style="font-size:11px;color:var(--text3);">${escHtml(_lrPersonName(r.interviewer_id))}</span>
         <span style="font-size:11px;color:var(--text3);">${open ? '▾' : '▸'}</span></div>`;
@@ -26100,14 +26102,14 @@ function renderLeadResearch() {
   let html = R.rows.map(card).join('');
   if (R.editing === 'new' && R.draft) html += `<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:#fff;"><div style="padding:8px 10px;"><strong style="font-size:13px;">New note</strong></div>${_lrEditorHtml()}</div>`;
   if (!R.rows.length && R.editing !== 'new') html += '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">No notes recorded yet.</div>';
-  if (canEdit && R.editing == null && R.rows.length < LEAD_RESEARCH_MAX) html += `<button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchAdd()">+ Add notes</button>`;
+  if (canEdit && R.editing == null) html += `<button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchAdd()">+ Add notes</button>`;
   body.innerHTML = html;
 }
 function _lrViewHtml(r) {
   const row = (label, val, long) => `<div style="margin-bottom:6px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);">${label}</div><div style="font-size:13px;white-space:${long ? 'pre-wrap' : 'normal'};">${escHtml(String(val || '')) || '<span style="color:var(--text3);">—</span>'}</div></div>`;
   const anon = (LEAD_RESEARCH_ANON.find(a => a[0] === (r.anonymity || '')) || ['', '—'])[1];
   return `<div style="padding:4px 10px 10px;border-top:1px solid var(--border);">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">${row('Date', r.interview_date)}${row('Logged by', _lrPersonName(r.interviewer_id))}${row('Prospect anonymity', anon)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">${row('Date', r.interview_date)}${row('Logged by', _lrPersonName(r.interviewer_id))}${row('Prospect anonymity', anon)}${row('Responsible leadership', r.responsible_leadership ? 'Yes' : 'No')}</div>
     ${LEAD_RESEARCH_FIELDS.map(f => row(f.label, r[f.key], f.long)).join('')}
     ${leadReadOnly ? '' : `<div style="display:flex;gap:8px;margin-top:4px;"><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchEdit(${r.id})">Edit</button><button type="button" class="btn btn-secondary btn-sm" style="color:var(--red);" onclick="leadResearchDelete(${r.id})">Delete</button></div>`}
   </div>`;
@@ -26117,11 +26119,10 @@ function _lrEditorHtml() {
   const inp = (key, label, hint, long) => `<div class="form-group" style="margin-bottom:8px;"><label class="form-label">${label}${hint ? ` <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${hint}</span>` : ''}</label>
     ${long ? `<textarea class="form-control lr-f" data-key="${key}" rows="3" oninput="leadResearchTouch(this)">${escHtml(String(d[key] || ''))}</textarea>`
            : `<input type="text" class="form-control lr-f" data-key="${key}" value="${escAttr(String(d[key] || ''))}" oninput="leadResearchTouch(this)">`}</div>`;
-  const nos = []; for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) nos.push(`<option value="${n}" ${+d.interview_no === n ? 'selected' : ''}>${n}/${LEAD_RESEARCH_MAX}</option>`);
   return `<div style="padding:6px 10px 10px;border-top:1px solid var(--border);">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px;">
       <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Date</label><input type="date" class="form-control lr-f" data-key="interview_date" value="${escAttr(d.interview_date || '')}" onchange="leadResearchTouch(this)"></div>
-      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Note #</label><select class="form-control lr-f" data-key="interview_no" onchange="leadResearchTouch(this)">${nos.join('')}</select></div>
+      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Note #</label><input type="text" class="form-control" value="${+d.interview_no || 1}" disabled title="Numbered in order"></div>
       <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Logged by</label><input type="text" class="form-control" value="${escAttr(_lrPersonName(d.interviewer_id))}" disabled title="The signed-in person"></div>
     </div>
     ${inp('participant', 'Prospect name', 'name and research identifier')}
@@ -26130,6 +26131,7 @@ function _lrEditorHtml() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;">${inp('target_market', 'Xone target market')}${inp('target_segment', 'Target market segment')}</div>
     <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Did the prospect request research anonymity?</label>
       <select class="form-control lr-f" data-key="anonymity" onchange="leadResearchTouch(this)">${LEAD_RESEARCH_ANON.map(a => `<option value="${a[0]}" ${(d.anonymity || '') === a[0] ? 'selected' : ''}>${a[1]}</option>`).join('')}</select></div>
+    <div class="form-group" style="margin-bottom:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="lr-rl" ${d.responsible_leadership ? 'checked' : ''} onchange="_leadResearch.draft && (_leadResearch.draft.responsible_leadership = this.checked)"> Responsible leadership</label></div>
     ${LEAD_RESEARCH_FIELDS.filter(f => f.long).map(f => inp(f.key, f.label, '', true)).join('')}
     <div style="display:flex;gap:8px;"><button type="button" class="btn btn-primary btn-sm" onclick="leadResearchSave()" ${_leadResearch.saving ? 'disabled' : ''}>Save note</button><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchCancel()">Cancel</button></div>
   </div>`;
@@ -26145,7 +26147,7 @@ function leadResearchAdd() {
   if (leadReadOnly || !leadData.id || _lrBusy()) return;
   const orgName = leadData.target_org_name || ((allData['organisations'] || []).find(o => +o.id === +leadData.target_org_id) || {}).name || '';
   _leadResearch.editing = 'new';
-  _leadResearch.draft = { interview_no: _lrNextNo(), interview_date: new Date().toISOString().slice(0, 10), interviewer_id: currentUser?.personId || null, organisation: orgName, anonymity: '' };
+  _leadResearch.draft = { interview_no: _lrNextNo(), interview_date: new Date().toISOString().slice(0, 10), interviewer_id: currentUser?.personId || null, organisation: orgName, anonymity: '', responsible_leadership: false };
   renderLeadResearch();
 }
 function leadResearchEdit(id) {
@@ -26156,7 +26158,7 @@ function leadResearchEdit(id) {
 function leadResearchCancel() { _leadResearch.draft = null; if (_leadResearch.editing === 'new') _leadResearch.editing = null; renderLeadResearch(); }
 async function leadResearchSave() {
   const R = _leadResearch, d = R.draft; if (!d || R.saving || !leadData.id) return;
-  const body = { interview_no: +d.interview_no || 1, interview_date: d.interview_date || null, interviewer_id: d.interviewer_id || null, anonymity: d.anonymity || null };
+  const body = { interview_no: +d.interview_no || 1, interview_date: d.interview_date || null, interviewer_id: d.interviewer_id || null, anonymity: d.anonymity || null, responsible_leadership: !!d.responsible_leadership };
   LEAD_RESEARCH_FIELDS.forEach(f => { body[f.key] = (d[f.key] || '').trim() || null; });
   R.saving = true; renderLeadResearch();
   try {
@@ -26171,7 +26173,10 @@ async function leadResearchSave() {
     R.rows.sort((a, b) => (+a.interview_no - +b.interview_no) || (+a.id - +b.id));
     R.editing = null; R.draft = null;
     showStatus('Note saved');
-  } catch (e) { showStatus('Note not saved: ' + (e && e.message ? e.message : 'error'), 'error'); }
+  } catch (e) {
+    const msg = e && e.message ? e.message : 'error';
+    showStatus(/responsible_leadership/.test(msg) ? 'Note not saved: this database needs sql/lead_notes_unlimited.sql' : 'Note not saved: ' + msg, 'error');
+  }
   R.saving = false; renderLeadResearch();
 }
 async function leadResearchDelete(id) {
