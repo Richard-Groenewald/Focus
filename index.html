@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.23 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.23 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2827,6 +2827,91 @@ function stopBusy() { _netBusy(false); }
 // Sort is client-side; filter is value-checkbox (Excel-style) with text search
 // inside the popup. Datasets are small (<1000 rows per list) so this is fast.
 
+// ── Excel export without a library (v7.10.23) ───────────────────────────────────────────────────
+// Richard 2026-10-31: "when listing contracts under contract management, i get a screen that spans
+// several pages. i need the content to be made available as an excel". A real .xlsx is a zip of
+// XML parts; this writes one by hand (stored entries, CRC-32, no compression — a list of a few
+// hundred rows is tens of KB) so the single-file app takes on no dependency. Cells are typed:
+//   text   → inline string (escaped)         number → a plain number
+//   money  → number, format #,##0.00         date   → Excel serial from 'YYYY-MM-DD', format yyyy-mm-dd
+// so Excel sorts, sums and filters the sheet without any "convert text to number" step.
+//   xlsxDownload({ filename, sheet, columns: [{ label, type, width }], rows: [[cell, …], …], total: [cell, …] })
+// `total` (optional) is written bold under the rows. Returns the Blob (the harness reads it back).
+const _XLSX_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function _xlsxCrc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = _XLSX_CRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+// A stored (method 0) zip: local headers + data, then the central directory, then the end record.
+function _xlsxZip(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF], u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.text), crc = _xlsxCrc32(data);
+    const head = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name]);
+    parts.push(head, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name]));
+    offset += head.length + data.length;
+  });
+  const cdSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  return new Blob([...parts, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function _xlsxEsc(s) { return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _xlsxColName(i) { let n = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) n = String.fromCharCode(65 + (i - 1) % 26) + n; return n; }
+// 'YYYY-MM-DD' (anything Date can parse, read as a calendar day) → Excel serial (days since 1899-12-30).
+function _xlsxDateSerial(v) {
+  if (!v) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+  const d = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : new Date(v).getTime();
+  return isNaN(d) ? null : Math.round((d - Date.UTC(1899, 11, 30)) / 86400000);
+}
+// Styles: 0 plain · 1 bold (header, total) · 2 money · 3 date · 4 bold money (total).
+const _XLSX_STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+  + '<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd"/></numFmts>'
+  + '<fonts count="2"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font></fonts>'
+  + '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+  + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+  + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+  + '<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+  + '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+  + '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/></cellXfs>'
+  + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+function xlsxBuild({ sheet, columns, rows, total }) {
+  const cell = (ref, v, type, bold) => {
+    if (v == null || v === '') return bold ? `<c r="${ref}" s="1"/>` : '';
+    if (type === 'number' || type === 'money') { const n = +v; if (isNaN(n)) return `<c r="${ref}" t="inlineStr" s="${bold ? 1 : 0}"><is><t>${_xlsxEsc(v)}</t></is></c>`; return `<c r="${ref}" s="${type === 'money' ? (bold ? 4 : 2) : (bold ? 1 : 0)}"><v>${n}</v></c>`; }
+    if (type === 'date') { const d = _xlsxDateSerial(v); if (d != null) return `<c r="${ref}" s="3"><v>${d}</v></c>`; }
+    return `<c r="${ref}" t="inlineStr" s="${bold ? 1 : 0}"><is><t xml:space="preserve">${_xlsxEsc(v)}</t></is></c>`;
+  };
+  const line = (vals, rowNo, bold) => `<row r="${rowNo}">` + vals.map((v, i) => cell(_xlsxColName(i) + rowNo, v, bold ? (columns[i] || {}).type : (columns[i] || {}).type, bold)).join('') + '</row>';
+  const out = [`<row r="1">` + columns.map((c, i) => cell(_xlsxColName(i) + 1, c.label, 'text', true)).join('') + '</row>'];
+  rows.forEach((r, i) => out.push(line(r, i + 2, false)));
+  if (total) out.push(line(total, rows.length + 2, true));
+  const last = _xlsxColName(columns.length - 1) + (rows.length + 1 + (total ? 1 : 0));
+  const cols = '<cols>' + columns.map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${+c.width || 14}" customWidth="1"/>`).join('') + '</cols>';
+  const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
+    + cols + '<sheetData>' + out.join('') + '</sheetData>'
+    + `<autoFilter ref="A1:${_xlsxColName(columns.length - 1)}${rows.length + 1}"/>`
+    + '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>';
+  const name = _xlsxEsc(String(sheet || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 31) || 'Sheet1');
+  return _xlsxZip([
+    { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${name.replace(/'/g, "''")}'!$A$1:$${_xlsxColName(columns.length - 1)}$${rows.length + 1}</definedName></definedNames></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/styles.xml', text: _XLSX_STYLES },
+    { name: 'xl/worksheets/sheet1.xml', text: sheetXml },
+  ]);
+}
+function xlsxDownload(spec) {
+  const blob = xlsxBuild(spec);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = spec.filename || 'export.xlsx';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  return blob;
+}
+
 const _tableState = {};
 
 function makeSortableFilterableTable(cfg) {
@@ -2847,10 +2932,12 @@ function _tblDisplay(col, row) {
   return String(v);
 }
 
-function _renderTable(tableId) {
+// The rows a table shows, after its column filters and its sort — the one rule, shared by the
+// render and by an export (v7.10.23), so a downloaded sheet always matches the screen.
+function _tblVisibleRows(tableId) {
   const s = _tableState[tableId];
-  if (!s) return;
-  const { columns, rows, rowRenderer, headRoot, bodyRoot, emptyMessage } = s;
+  if (!s) return [];
+  const { columns, rows } = s;
 
   // Filter
   let filtered = rows.filter(row => columns.every(col => {
@@ -2876,6 +2963,14 @@ function _renderTable(tableId) {
       });
     }
   }
+  return filtered;
+}
+
+function _renderTable(tableId) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  const { columns, rows, rowRenderer, headRoot, bodyRoot, emptyMessage } = s;
+  const filtered = _tblVisibleRows(tableId);
 
   // Headers. When any column filter is active, a full-width banner row sits above
   // the column headers: impossible to miss, names the filtered columns, shows the
@@ -7214,6 +7309,10 @@ async function renderContractsPage() {
       + (unset ? ' · ' + unset + ' with the service type not set' : '');
     const money = n => n ? pgMoney(n) : '—';
     const date = s => s ? new Date(s).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+    // v7.10.23: Export to Excel — every contract the page lists (after the column filters and sort
+    // in force), one row each, as a real .xlsx (xlsxDownload); not just what fits on the screen.
+    const viewBar = document.getElementById('view-filter-bar');
+    if (viewBar && currentPage === 'cm_contracts') viewBar.innerHTML = '<button class="btn btn-secondary btn-sm" onclick="contractsExportXlsx()" title="Download the contracts listed here as an Excel workbook">⤓ Export to Excel</button>';
     makeSortableFilterableTable({
       tableId: 'cm_contracts',
       headRoot: head,
@@ -7248,6 +7347,42 @@ async function renderContractsPage() {
   } catch (e) {
     body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// The Contracts list as a workbook (v7.10.23). Rows = what the table shows now (_tblVisibleRows:
+// column filters and sort applied, so a filtered page exports the filtered list — the status bar
+// says so), plus a Group column (the client's family parent), a Secured in Focus flag and the
+// service-type-not-set wording the screen uses; a bold total of This month under the rows. Dates
+// and money are typed cells, so Excel sums and sorts them as they are.
+function contractsExportXlsx() {
+  const s = _tableState['cm_contracts'];
+  if (!s || !s.rows) { showStatus('The contracts list has not loaded yet', 'error'); return; }
+  const rows = _tblVisibleRows('cm_contracts');
+  if (!rows.length) { showStatus('No contracts to export under the current filters', 'error'); return; }
+  const groupOf = orgId => { const r = _orgFamilyRole(orgId); return !r ? '' : r.role === 'child' ? '↳ ' + (r.top.name || '') : 'Group · ' + r.n + ' orgs'; };
+  const month = new Date().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+  const columns = [
+    { label: 'Client', type: 'text', width: 30 },
+    { label: 'Group', type: 'text', width: 24 },
+    { label: 'Contract', type: 'text', width: 44 },
+    { label: 'Secured in Focus', type: 'text', width: 16 },
+    { label: 'Site', type: 'text', width: 26 },
+    { label: 'Service', type: 'text', width: 26 },
+    { label: 'Start', type: 'date', width: 12 },
+    { label: 'Ends', type: 'date', width: 12 },
+    { label: 'This month (' + month + ')', type: 'money', width: 20 },
+    { label: 'Pastel account', type: 'text', width: 16 },
+    { label: 'Owner', type: 'text', width: 20 },
+    { label: 'Extension', type: 'text', width: 20 },
+  ];
+  const data = rows.map(r => [
+    r.client, groupOf(r.d.org_id), r.name, r.inFocus ? 'Yes' : '', r.site, r.rt ? r.service : 'Service type not set',
+    r.start, r.end, r.monthly, r.account, r.owner, r.extension,
+  ]);
+  const total = ['Total', '', rows.length + ' contract' + (rows.length === 1 ? '' : 's'), '', '', '', '', '', rows.reduce((t, r) => t + (+r.monthly || 0), 0), '', '', ''];
+  const filtered = rows.length !== s.rows.length;
+  xlsxDownload({ filename: 'focus-contracts-' + new Date().toISOString().slice(0, 10) + '.xlsx', sheet: 'Contracts', columns, rows: data, total });
+  showStatus(rows.length + ' contract' + (rows.length === 1 ? '' : 's') + ' exported' + (filtered ? ' (the filters in force applied — ' + s.rows.length + ' listed in all)' : ''));
 }
 
 // ── Capture Time in a modal (v7.10.08) ──────────────────────────────────────────────────────────
