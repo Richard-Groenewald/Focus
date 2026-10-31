@@ -75,7 +75,7 @@ const FORM_PAGE = `<!doctype html><html><head><meta charset="utf-8">
 <div id="status"></div>
 <script>
   // Just enough of the app for the module to run - same api() semantics, no login, no sidebar.
-  const FN_URL = '/.netlify/functions/sb';
+  const FN_URL = '/sb';
   let pbActiveSchema = null;
   const currentUser = { personId: 1, isAdmin: true };   // PEOPLE id; Richard=admin, Lesley=Executive
   const can = () => true;                         // harness: every permission granted
@@ -120,7 +120,7 @@ const FORM_PAGE = `<!doctype html><html><head><meta charset="utf-8">
 http.createServer((req, res) => {
   const u = new URL(req.url, 'http://localhost');
 
-  if (u.pathname.startsWith('/.netlify/functions/')) {
+  if (u.pathname.startsWith('/.netlify/functions/') || u.pathname.startsWith('/sb/')) {
     const headers = { 'Content-Type': req.headers['content-type'] || 'application/json' };
     for (const h of ['x-actor-id', 'x-real-actor-id', 'prefer']) if (req.headers[h]) headers[h] = req.headers[h];
     const up = https.request({ hostname: DEV_HOST, port: 443, path: u.pathname + u.search,

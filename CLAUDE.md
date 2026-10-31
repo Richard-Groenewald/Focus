@@ -11,6 +11,7 @@ Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (
 ## Performance conventions (v7.9.36)
 
 - **Sequential round trips are the cost that users feel** (~1.4 s per proxied call). Never chain `await api(...)` calls that only depend on an id you already have: put them in one `Promise.all`.
+- **Proxy topology (v7.10.21).** The sb proxy runs as a **Supabase Edge Function** (`supabase/functions/sb/index.ts`, a Deno port of `netlify/functions/sb.js` with the same wire contract) in the database's own region. The browser still calls same-origin: `FN_URL = '/sb'`, which `netlify.toml` rewrites to `https://<prod ref>.supabase.co/functions/v1/sb/:splat` with `x-region: eu-west-1`; for a non-production `SUPABASE_HOST` `build.js` writes `dist/_redirects` pointing at that project's copy instead (`_redirects` beats `netlify.toml`; it cannot carry the region header). Reason: the Lambda ran in AWS us-east-1 against a database in eu-west-1 — two Atlantic crossings per call (~600 ms network for an 18 ms query; Supabase edge logs, 2026-10-30). **Deploy the function with the Supabase MCP / CLI (prod AND test), not Netlify**; `verify_jwt` is OFF (the session gate is the auth); `SUPABASE_SERVICE_ROLE_KEY` is injected by the platform, so session tokens stay valid across the two runtimes. Maintenance mode (`MAINTENANCE_ON` / `MAINTENANCE_ALLOW`) now lives in that file — flipping it means redeploying the function. The Netlify Lambda stays deployed, untouched: rollback is `FN_URL` (index.html, time.html, Focus.html) back to `/.netlify/functions/sb`. Gzip is now produced in the function (`CompressionStream`, bodies ≥ 1 KB) rather than passed through; `X-Focus-Content-Range` twins `Content-Range`. Netlify's own "Functions region" setting would have been the one-click fix, but it is a Pro feature and the team is on Free.
 - `api(table, method, body, params, opts)` accepts `opts.prefer` (e.g. `'resolution=merge-duplicates,return=minimal'` for an upsert), `opts.silent` (background traffic, no busy bar) and `opts.headers` (returns `{ rows, headers }`). `apiGetAll` pages in parallel using `Content-Range`; `apiCount` counts server-side.
 - A write already returns the row (`Prefer: return=representation`): splice it into memory and re-render, do not re-download the table. `reloadLeadAfterServerChange(row)` takes the PATCHed row.
 - Tab, scope and layout clicks must be client-only (`renderLeadsPage({ reuse: true })`, `_dashApplyOrderToDom`).
@@ -107,6 +108,7 @@ A deal has two phases:
 ### Supabase keys from Netlify
 - `sb_secret_` prefixed keys **fail** when called from Netlify functions.
 - **Use the service role JWT** as `SUPABASE_SECRET_KEY` instead.
+- The Supabase-hosted copy of the proxy (v7.10.21) reads the platform-injected `SUPABASE_SERVICE_ROLE_KEY` — the same JWT — so nothing has to be provisioned there.
 
 ### Table naming
 - Always write `deals`, never `opportunities`, when referencing the deals table.
