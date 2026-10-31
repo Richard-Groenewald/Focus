@@ -22,7 +22,7 @@
 --   orgs             id, parent_org_id, group_touch_soothes, sector_id
 --   org_touches      object {"o<org_id>": "YYYY-MM-DD"} — latest non-internal GROUP engagement (v7.9.07;
 --                    kept for a client on the previous release)
---   org_contacts     object {"o<org_id>": {d, k, id, label}} — v7.10.22 Last Contact per organisation from
+--   org_contacts     object {"o<org_id>": {d, k, id, label}} — v7.10.24 Last Contact per organisation from
 --                    v_org_contact (sql/add_last_touch_activity.sql must have run first); leads also carry
 --                    last_touch_at / last_touch_by (Last Touch = activity on the record)
 --   open_actions     engagements with an open, dated next action (v7.10.14: + next_action_id and
@@ -77,7 +77,7 @@ SELECT jsonb_build_object(
            WHERE org_id IS NOT NULL AND engagement_date IS NOT NULL AND work_mode IS DISTINCT FROM 'internal'
            GROUP BY org_id) t),
 
-  -- v7.10.22: Last Contact per organisation (sql/add_last_touch_activity.sql, view v_org_contact):
+  -- v7.10.24: Last Contact per organisation (sql/add_last_touch_activity.sql, view v_org_contact):
   -- the newest client-facing engagement on any of its leads, its deals or the group itself, with the
   -- record it sits on. The client shares it across the organisation family (leadLastContact).
   -- org_touches above stays for a client on the previous release.

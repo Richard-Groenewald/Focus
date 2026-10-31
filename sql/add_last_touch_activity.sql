@@ -1,4 +1,4 @@
--- sql/add_last_touch_activity.sql — v7.10.22, Richard 2026-10-31: TWO measures on a lead.
+-- sql/add_last_touch_activity.sql — v7.10.24, Richard 2026-10-31: TWO measures on a lead.
 --
 --   LAST CONTACT = the newest client-facing engagement with the prospect.
 --     • leads.last_touch_date keeps holding the lead's OWN newest contact (the app recomputes it from
@@ -172,7 +172,7 @@ DECLARE
   v_working jsonb := '[]'::jsonb;
   v_woke    jsonb := '[]'::jsonb;
 BEGIN
-  -- v7.10.22: the stage engine's writes are not a touch on the lead (trg_leads_touch).
+  -- v7.10.24: the stage engine's writes are not a touch on the lead (trg_leads_touch).
   PERFORM set_config('focus.system', 'sweep_leads', true);
 
   -- new_lead_waiting_minutes: the editable grace after a lead becomes Working.
@@ -288,7 +288,7 @@ begin
 
   else
     -- Only the fields that actually changed; updated_at alone is noise, skip it — and so is the
-    -- touch stamp (v7.10.22: last_touch_at / last_touch_by follow every child write).
+    -- touch stamp (v7.10.24: last_touch_at / last_touch_by follow every child write).
     -- Credential columns are dropped from the diff; a diff that held nothing
     -- else (a bare hash rewrite) is not recorded at all.
     insert into public.audit_log (actor_id, real_actor_id, table_name, row_id, op, changes)

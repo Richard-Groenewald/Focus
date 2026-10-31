@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.24 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.24 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2156,7 +2156,7 @@ function mockApi(table, method, body, params) {
     if (limit != null) out = out.slice(0, limit);
     return Promise.resolve(clone(out));
   }
-  // v7.10.22: Last Touch in mock mode — the database triggers' job
+  // v7.10.24: Last Touch in mock mode — the database triggers' job
   // (sql/add_last_touch_activity.sql), done here for the tables they watch: a
   // content change on the lead row, any write to one of its child records.
   const _hk = ['updated_at', 'last_touch_date', 'last_touch_at', 'last_touch_by', 'status', 'working_at',
@@ -2857,6 +2857,91 @@ function stopBusy() { _netBusy(false); }
 // Sort is client-side; filter is value-checkbox (Excel-style) with text search
 // inside the popup. Datasets are small (<1000 rows per list) so this is fast.
 
+// ── Excel export without a library (v7.10.23) ───────────────────────────────────────────────────
+// Richard 2026-10-31: "when listing contracts under contract management, i get a screen that spans
+// several pages. i need the content to be made available as an excel". A real .xlsx is a zip of
+// XML parts; this writes one by hand (stored entries, CRC-32, no compression — a list of a few
+// hundred rows is tens of KB) so the single-file app takes on no dependency. Cells are typed:
+//   text   → inline string (escaped)         number → a plain number
+//   money  → number, format #,##0.00         date   → Excel serial from 'YYYY-MM-DD', format yyyy-mm-dd
+// so Excel sorts, sums and filters the sheet without any "convert text to number" step.
+//   xlsxDownload({ filename, sheet, columns: [{ label, type, width }], rows: [[cell, …], …], total: [cell, …] })
+// `total` (optional) is written bold under the rows. Returns the Blob (the harness reads it back).
+const _XLSX_CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function _xlsxCrc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = _XLSX_CRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+// A stored (method 0) zip: local headers + data, then the central directory, then the end record.
+function _xlsxZip(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF], u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.text), crc = _xlsxCrc32(data);
+    const head = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...name]);
+    parts.push(head, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name]));
+    offset += head.length + data.length;
+  });
+  const cdSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  return new Blob([...parts, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+function _xlsxEsc(s) { return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _xlsxColName(i) { let n = ''; for (i++; i > 0; i = Math.floor((i - 1) / 26)) n = String.fromCharCode(65 + (i - 1) % 26) + n; return n; }
+// 'YYYY-MM-DD' (anything Date can parse, read as a calendar day) → Excel serial (days since 1899-12-30).
+function _xlsxDateSerial(v) {
+  if (!v) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v));
+  const d = m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : new Date(v).getTime();
+  return isNaN(d) ? null : Math.round((d - Date.UTC(1899, 11, 30)) / 86400000);
+}
+// Styles: 0 plain · 1 bold (header, total) · 2 money · 3 date · 4 bold money (total).
+const _XLSX_STYLES = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+  + '<numFmts count="2"><numFmt numFmtId="164" formatCode="#,##0.00"/><numFmt numFmtId="165" formatCode="yyyy-mm-dd"/></numFmts>'
+  + '<fonts count="2"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><name val="Arial"/></font></fonts>'
+  + '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+  + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+  + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+  + '<cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+  + '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+  + '<xf numFmtId="164" fontId="1" fillId="0" borderId="0" xfId="0" applyNumberFormat="1" applyFont="1"/></cellXfs>'
+  + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>';
+function xlsxBuild({ sheet, columns, rows, total }) {
+  const cell = (ref, v, type, bold) => {
+    if (v == null || v === '') return bold ? `<c r="${ref}" s="1"/>` : '';
+    if (type === 'number' || type === 'money') { const n = +v; if (isNaN(n)) return `<c r="${ref}" t="inlineStr" s="${bold ? 1 : 0}"><is><t>${_xlsxEsc(v)}</t></is></c>`; return `<c r="${ref}" s="${type === 'money' ? (bold ? 4 : 2) : (bold ? 1 : 0)}"><v>${n}</v></c>`; }
+    if (type === 'date') { const d = _xlsxDateSerial(v); if (d != null) return `<c r="${ref}" s="3"><v>${d}</v></c>`; }
+    return `<c r="${ref}" t="inlineStr" s="${bold ? 1 : 0}"><is><t xml:space="preserve">${_xlsxEsc(v)}</t></is></c>`;
+  };
+  const line = (vals, rowNo, bold) => `<row r="${rowNo}">` + vals.map((v, i) => cell(_xlsxColName(i) + rowNo, v, bold ? (columns[i] || {}).type : (columns[i] || {}).type, bold)).join('') + '</row>';
+  const out = [`<row r="1">` + columns.map((c, i) => cell(_xlsxColName(i) + 1, c.label, 'text', true)).join('') + '</row>'];
+  rows.forEach((r, i) => out.push(line(r, i + 2, false)));
+  if (total) out.push(line(total, rows.length + 2, true));
+  const last = _xlsxColName(columns.length - 1) + (rows.length + 1 + (total ? 1 : 0));
+  const cols = '<cols>' + columns.map((c, i) => `<col min="${i + 1}" max="${i + 1}" width="${+c.width || 14}" customWidth="1"/>`).join('') + '</cols>';
+  const sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+    + `<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>`
+    + cols + '<sheetData>' + out.join('') + '</sheetData>'
+    + `<autoFilter ref="A1:${_xlsxColName(columns.length - 1)}${rows.length + 1}"/>`
+    + '<pageMargins left="0.5" right="0.5" top="0.6" bottom="0.6" header="0.3" footer="0.3"/><pageSetup orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>';
+  const name = _xlsxEsc(String(sheet || 'Sheet1').replace(/[\\\/\?\*\[\]:]/g, ' ').slice(0, 31) || 'Sheet1');
+  return _xlsxZip([
+    { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${name}" sheetId="1" r:id="rId1"/></sheets><definedNames><definedName name="_xlnm._FilterDatabase" localSheetId="0" hidden="1">'${name.replace(/'/g, "''")}'!$A$1:$${_xlsxColName(columns.length - 1)}$${rows.length + 1}</definedName></definedNames></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/styles.xml', text: _XLSX_STYLES },
+    { name: 'xl/worksheets/sheet1.xml', text: sheetXml },
+  ]);
+}
+function xlsxDownload(spec) {
+  const blob = xlsxBuild(spec);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = spec.filename || 'export.xlsx';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  return blob;
+}
+
 const _tableState = {};
 
 function makeSortableFilterableTable(cfg) {
@@ -2877,10 +2962,12 @@ function _tblDisplay(col, row) {
   return String(v);
 }
 
-function _renderTable(tableId) {
+// The rows a table shows, after its column filters and its sort — the one rule, shared by the
+// render and by an export (v7.10.23), so a downloaded sheet always matches the screen.
+function _tblVisibleRows(tableId) {
   const s = _tableState[tableId];
-  if (!s) return;
-  const { columns, rows, rowRenderer, headRoot, bodyRoot, emptyMessage } = s;
+  if (!s) return [];
+  const { columns, rows } = s;
 
   // Filter
   let filtered = rows.filter(row => columns.every(col => {
@@ -2906,6 +2993,14 @@ function _renderTable(tableId) {
       });
     }
   }
+  return filtered;
+}
+
+function _renderTable(tableId) {
+  const s = _tableState[tableId];
+  if (!s) return;
+  const { columns, rows, rowRenderer, headRoot, bodyRoot, emptyMessage } = s;
+  const filtered = _tblVisibleRows(tableId);
 
   // Headers. When any column filter is active, a full-width banner row sits above
   // the column headers: impossible to miss, names the filtered columns, shows the
@@ -7244,6 +7339,10 @@ async function renderContractsPage() {
       + (unset ? ' · ' + unset + ' with the service type not set' : '');
     const money = n => n ? pgMoney(n) : '—';
     const date = s => s ? new Date(s).toLocaleDateString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+    // v7.10.23: Export to Excel — every contract the page lists (after the column filters and sort
+    // in force), one row each, as a real .xlsx (xlsxDownload); not just what fits on the screen.
+    const viewBar = document.getElementById('view-filter-bar');
+    if (viewBar && currentPage === 'cm_contracts') viewBar.innerHTML = '<button class="btn btn-secondary btn-sm" onclick="contractsExportXlsx()" title="Download the contracts listed here as an Excel workbook">⤓ Export to Excel</button>';
     makeSortableFilterableTable({
       tableId: 'cm_contracts',
       headRoot: head,
@@ -7278,6 +7377,42 @@ async function renderContractsPage() {
   } catch (e) {
     body.innerHTML = '<tr class="empty-row"><td>Could not load contracts: ' + escHtml(e.message) + '</td></tr>';
   }
+}
+
+// The Contracts list as a workbook (v7.10.23). Rows = what the table shows now (_tblVisibleRows:
+// column filters and sort applied, so a filtered page exports the filtered list — the status bar
+// says so), plus a Group column (the client's family parent), a Secured in Focus flag and the
+// service-type-not-set wording the screen uses; a bold total of This month under the rows. Dates
+// and money are typed cells, so Excel sums and sorts them as they are.
+function contractsExportXlsx() {
+  const s = _tableState['cm_contracts'];
+  if (!s || !s.rows) { showStatus('The contracts list has not loaded yet', 'error'); return; }
+  const rows = _tblVisibleRows('cm_contracts');
+  if (!rows.length) { showStatus('No contracts to export under the current filters', 'error'); return; }
+  const groupOf = orgId => { const r = _orgFamilyRole(orgId); return !r ? '' : r.role === 'child' ? '↳ ' + (r.top.name || '') : 'Group · ' + r.n + ' orgs'; };
+  const month = new Date().toLocaleDateString('en-ZA', { month: 'long', year: 'numeric' });
+  const columns = [
+    { label: 'Client', type: 'text', width: 30 },
+    { label: 'Group', type: 'text', width: 24 },
+    { label: 'Contract', type: 'text', width: 44 },
+    { label: 'Secured in Focus', type: 'text', width: 16 },
+    { label: 'Site', type: 'text', width: 26 },
+    { label: 'Service', type: 'text', width: 26 },
+    { label: 'Start', type: 'date', width: 12 },
+    { label: 'Ends', type: 'date', width: 12 },
+    { label: 'This month (' + month + ')', type: 'money', width: 20 },
+    { label: 'Pastel account', type: 'text', width: 16 },
+    { label: 'Owner', type: 'text', width: 20 },
+    { label: 'Extension', type: 'text', width: 20 },
+  ];
+  const data = rows.map(r => [
+    r.client, groupOf(r.d.org_id), r.name, r.inFocus ? 'Yes' : '', r.site, r.rt ? r.service : 'Service type not set',
+    r.start, r.end, r.monthly, r.account, r.owner, r.extension,
+  ]);
+  const total = ['Total', '', rows.length + ' contract' + (rows.length === 1 ? '' : 's'), '', '', '', '', '', rows.reduce((t, r) => t + (+r.monthly || 0), 0), '', '', ''];
+  const filtered = rows.length !== s.rows.length;
+  xlsxDownload({ filename: 'focus-contracts-' + new Date().toISOString().slice(0, 10) + '.xlsx', sheet: 'Contracts', columns, rows: data, total });
+  showStatus(rows.length + ' contract' + (rows.length === 1 ? '' : 's') + ' exported' + (filtered ? ' (the filters in force applied — ' + s.rows.length + ' listed in all)' : ''));
 }
 
 // ── Capture Time in a modal (v7.10.08) ──────────────────────────────────────────────────────────
@@ -18484,7 +18619,7 @@ function _dashSeedLookups(B) {
   if (Array.isArray(B.milestone_types))  allData['milestone_types']  = B.milestone_types;
   if (Array.isArray(B.red_flags)) allData['red_flags'] = B.red_flags;
   if (!allData['industry_sectors'] && Array.isArray(B.industry_sectors)) allData['industry_sectors'] = B.industry_sectors;
-  // v7.10.22: Last Contact per organisation (view v_org_contact via the bundle); a bundle from a
+  // v7.10.24: Last Contact per organisation (view v_org_contact via the bundle); a bundle from a
   // database that has not re-run perf_tier2_dashboard_summary.sql still carries org_touches only.
   const contacts = {};
   if (B.org_contacts && typeof B.org_contacts === 'object') {
@@ -18509,12 +18644,12 @@ function _dashSeedLookups(B) {
 // overlapped one with the bundle fetch.
 async function _attentionLeadItems(B, sweepP) {
   if (sweepP === undefined) sweepP = startLeadSweep({ wakeOnly: true });   // overlaps the read (v7.9.37)
-  // v7.10.22: the whole row — last_touch_at / last_touch_by ride along, and `*`
+  // v7.10.24: the whole row — last_touch_at / last_touch_by ride along, and `*`
   // names no column a database that has not run the migration lacks.
   const leads = B ? B.leads : await apiGet('leads', 'select=*,sites(name)');
   await applyLeadSweeps(leads, sweepP, { wakeOnly: true });   // wake due leads now, so their reminders show immediately
   const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
-  // Last Contact (v7.10.22): the family's contact quiets the aging nags too. Orgs
+  // Last Contact (v7.10.24): the family's contact quiets the aging nags too. Orgs
   // may not be cached on the dashboard — use a SLIM local list, never written to
   // allData (slim caches poisoned option lists before; see lead-org-name-autosave-wipe).
   if (!B) await _loadOrgContacts(true);   // the bundle seeds allData['_org_contacts'] itself; without one, read fresh
@@ -18532,7 +18667,7 @@ async function _attentionLeadItems(B, sweepP) {
   for (const l of leads) {
     if (l.status === 'Dead' || l.status === 'Promoted') continue;
     const label = leadEngLabel(l) || ('Lead #' + l.id);
-    // v7.10.22: both measures ride on the item, so the Workbench prints what the
+    // v7.10.24: both measures ride on the item, so the Workbench prints what the
     // banner judged (its renderer has no organisation list to recompute from).
     const contact = leadLastContact(l, _orgsForAging);
     const touch = leadLastTouch(l);
@@ -21466,7 +21601,7 @@ function _orgFamilyBannerHtml(orgId) {
   </div>`;
 }
 
-// ── Last Contact and Last Touch (v7.10.22) ────────────────────────────────────
+// ── Last Contact and Last Touch (v7.10.24) ────────────────────────────────────
 // Richard 2026-10-31: TWO measures on a lead.
 //   LAST CONTACT = contact with the prospect: the newest client-facing engagement.
 //     The lead's own is leads.last_touch_date (recomputed by bumpLeadLastTouch);
@@ -22044,7 +22179,7 @@ async function _phSaveGroupEngagement() {
       next_action_done: !!isNfa,
       created_by:       currentUser?.personId || null,
     }, 'select=*');
-    delete allData['_org_contacts'];   // a group engagement changed — the family's Last Contact recomputes (v7.10.22)
+    delete allData['_org_contacts'];   // a group engagement changed — the family's Last Contact recomputes (v7.10.24)
     showStatus('Group engagement logged');
     const pid = _phData.parentId;
     closeModal();
@@ -22107,7 +22242,7 @@ async function renderLeadsPage(opts) {
       ({ leads, sources, regions, services, people, orgs, campaigns, sites, sectors } = _leadsPageData);
     } else {
     const sweepP = startLeadSweep();   // server-side sweeps overlap the reads (v7.9.37)
-    const contactsP = _loadOrgContacts(true);   // v7.10.22: the family's Last Contact per organisation, overlapping the reads
+    const contactsP = _loadOrgContacts(true);   // v7.10.24: the family's Last Contact per organisation, overlapping the reads
     // Load lookups + leads in parallel
     [leads, sources, regions, services, people, orgs, campaigns, sites, sectors, dealRows, stageRows, stageCats, subRows] = await Promise.all([
       apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
@@ -22238,7 +22373,7 @@ async function renderLeadsPage(opts) {
       const o = l.target_org_id ? orgs.find(x => +x.id === +l.target_org_id) : null;
       return o?.name || l.target_org_name || '';
     };
-    // v7.10.22: Last Contact (the family's newest client-facing engagement — the
+    // v7.10.24: Last Contact (the family's newest client-facing engagement — the
     // one reader leadLastContact) and Last Touch (activity on the record). The
     // sort / filter getters read the same figures the cells show.
     const lastContactDays = (l) => _daysSinceDate(leadLastContact(l).date);
@@ -22404,7 +22539,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     // instead of a meaningless aging clock (Richard 2026-08-28).
     lastContactCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(l.promoted_deal_id)}`;
   } else {
-    // v7.10.22: the family's newest client-facing engagement when newer than the
+    // v7.10.24: the family's newest client-facing engagement when newer than the
     // lead's own — marked with where it sits, the lead's own date in the tooltip.
     const c = leadLastContact(l);
     if (c.date) {
@@ -22417,7 +22552,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
       lastContactCell = `<span style="${col}">${_agoHtml(days, _contactViaHtml(c))}</span>`;
     }
   }
-  // Last Touch (v7.10.22): the newest activity on this lead's record in Focus —
+  // Last Touch (v7.10.24): the newest activity on this lead's record in Focus —
   // trigger-maintained, per lead, never shared, uncoloured (aging runs on contact).
   const t = leadLastTouch(l);
   if (t.at) {
@@ -22503,7 +22638,7 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     </div>`;
   }
   // Last Contact: the band's most recent — each member's own contact or the
-  // family's, through the one reader leadLastContact (v7.10.22) — coloured by
+  // family's, through the one reader leadLastContact (v7.10.24) — coloured by
   // the owning lead's aging thresholds. Last Touch: the members' most recent
   // activity on their records. On the Promoted tab (every member promoted) the
   // milestone replaces the contact clock: the band's most recent promotion date.
@@ -25164,7 +25299,7 @@ async function revertLead() {
     await _revertChildAdditions('lead_description_log', id, snap.descLog);
     const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
     delete restore.id;
-    delete restore.last_touch_at; delete restore.last_touch_by;   // v7.10.22: the trigger's columns, never written by the client
+    delete restore.last_touch_at; delete restore.last_touch_by;   // v7.10.24: the trigger's columns, never written by the client
     const res = await api('leads', 'PATCH', restore, 'id=eq.' + id + '&select=*');
     if (res && res[0]) leadData = res[0];
     leadFormDirty = false;
@@ -26226,7 +26361,8 @@ function openLegacyNotes(kind) {
 // words): up to three notes per lead (1/3 · 2/3 · 3/3), each the fields of Les's form. Nothing is
 // required; a blank note saves.
 // Writes go straight to the table (POST / PATCH / DELETE), never through the lead autosave.
-const LEAD_RESEARCH_MAX = 3;
+// v7.10.22: no cap on the number of notes (was LEAD_RESEARCH_MAX = 3); Note # is the next number.
+// responsible_leadership needs sql/lead_notes_unlimited.sql (run on both databases with the release).
 const LEAD_RESEARCH_ANON = [['', '—'], ['full', 'Full'], ['partial', 'Partial'], ['quote_me', 'Quote me']];
 const LEAD_RESEARCH_FIELDS = [
   { key: 'participant',              label: 'Prospect name',                    hint: 'Name and research identifier' },
@@ -26268,7 +26404,8 @@ async function loadLeadResearchInterviews(leadId) {
   catch (e) { _leadResearch.rows = []; _leadResearch.missing = /404|PGRST205|does not exist/i.test(String(e && e.message)); }
 }
 function _lrPersonName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : ''; }
-function _lrNextNo() { const used = new Set(_leadResearch.rows.map(r => +r.interview_no)); for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) if (!used.has(n)) return n; return LEAD_RESEARCH_MAX; }
+function _lrNextNo() { return _leadResearch.rows.reduce((m, r) => Math.max(m, +r.interview_no || 0), 0) + 1; }
+function _lrRlTag(on) { return on ? '<span style="font-size:10px;font-weight:700;color:var(--navy, #003057);border:1px solid var(--navy, #003057);border-radius:3px;padding:0 4px;white-space:nowrap;">RESPONSIBLE LEADERSHIP</span>' : ''; }
 function renderLeadResearch() {
   const body = document.getElementById('lead-research-body');
   if (!body) return;
@@ -26279,7 +26416,7 @@ function renderLeadResearch() {
   const card = (r) => {
     const open = R.editing === r.id;
     const head = `<div style="display:flex;align-items:center;gap:10px;padding:8px 10px;cursor:pointer;" onclick="leadResearchToggle(${r.id})">
-        <strong style="font-size:13px;">Note ${r.interview_no || '?'}/${LEAD_RESEARCH_MAX}</strong>
+        <strong style="font-size:13px;">Note ${r.interview_no || '?'}</strong>${_lrRlTag(r.responsible_leadership)}
         <span style="font-size:12px;color:var(--text2);flex:1;">${escHtml([r.interview_date || '', r.participant || '', r.organisation || ''].filter(Boolean).join(' · '))}</span>
         <span style="font-size:11px;color:var(--text3);">${escHtml(_lrPersonName(r.interviewer_id))}</span>
         <span style="font-size:11px;color:var(--text3);">${open ? '▾' : '▸'}</span></div>`;
@@ -26288,14 +26425,14 @@ function renderLeadResearch() {
   let html = R.rows.map(card).join('');
   if (R.editing === 'new' && R.draft) html += `<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:#fff;"><div style="padding:8px 10px;"><strong style="font-size:13px;">New note</strong></div>${_lrEditorHtml()}</div>`;
   if (!R.rows.length && R.editing !== 'new') html += '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">No notes recorded yet.</div>';
-  if (canEdit && R.editing == null && R.rows.length < LEAD_RESEARCH_MAX) html += `<button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchAdd()">+ Add notes</button>`;
+  if (canEdit && R.editing == null) html += `<button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchAdd()">+ Add notes</button>`;
   body.innerHTML = html;
 }
 function _lrViewHtml(r) {
   const row = (label, val, long) => `<div style="margin-bottom:6px;"><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.04em;color:var(--text3);">${label}</div><div style="font-size:13px;white-space:${long ? 'pre-wrap' : 'normal'};">${escHtml(String(val || '')) || '<span style="color:var(--text3);">—</span>'}</div></div>`;
   const anon = (LEAD_RESEARCH_ANON.find(a => a[0] === (r.anonymity || '')) || ['', '—'])[1];
   return `<div style="padding:4px 10px 10px;border-top:1px solid var(--border);">
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">${row('Date', r.interview_date)}${row('Logged by', _lrPersonName(r.interviewer_id))}${row('Prospect anonymity', anon)}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 16px;">${row('Date', r.interview_date)}${row('Logged by', _lrPersonName(r.interviewer_id))}${row('Prospect anonymity', anon)}${row('Responsible leadership', r.responsible_leadership ? 'Yes' : 'No')}</div>
     ${LEAD_RESEARCH_FIELDS.map(f => row(f.label, r[f.key], f.long)).join('')}
     ${leadReadOnly ? '' : `<div style="display:flex;gap:8px;margin-top:4px;"><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchEdit(${r.id})">Edit</button><button type="button" class="btn btn-secondary btn-sm" style="color:var(--red);" onclick="leadResearchDelete(${r.id})">Delete</button></div>`}
   </div>`;
@@ -26305,11 +26442,10 @@ function _lrEditorHtml() {
   const inp = (key, label, hint, long) => `<div class="form-group" style="margin-bottom:8px;"><label class="form-label">${label}${hint ? ` <span style="font-weight:400;color:var(--text3);font-size:11px;">— ${hint}</span>` : ''}</label>
     ${long ? `<textarea class="form-control lr-f" data-key="${key}" rows="3" oninput="leadResearchTouch(this)">${escHtml(String(d[key] || ''))}</textarea>`
            : `<input type="text" class="form-control lr-f" data-key="${key}" value="${escAttr(String(d[key] || ''))}" oninput="leadResearchTouch(this)">`}</div>`;
-  const nos = []; for (let n = 1; n <= LEAD_RESEARCH_MAX; n++) nos.push(`<option value="${n}" ${+d.interview_no === n ? 'selected' : ''}>${n}/${LEAD_RESEARCH_MAX}</option>`);
   return `<div style="padding:6px 10px 10px;border-top:1px solid var(--border);">
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 12px;">
       <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Date</label><input type="date" class="form-control lr-f" data-key="interview_date" value="${escAttr(d.interview_date || '')}" onchange="leadResearchTouch(this)"></div>
-      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Note #</label><select class="form-control lr-f" data-key="interview_no" onchange="leadResearchTouch(this)">${nos.join('')}</select></div>
+      <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Note #</label><input type="text" class="form-control" value="${+d.interview_no || 1}" disabled title="Numbered in order"></div>
       <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Logged by</label><input type="text" class="form-control" value="${escAttr(_lrPersonName(d.interviewer_id))}" disabled title="The signed-in person"></div>
     </div>
     ${inp('participant', 'Prospect name', 'name and research identifier')}
@@ -26318,6 +26454,7 @@ function _lrEditorHtml() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 12px;">${inp('target_market', 'Xone target market')}${inp('target_segment', 'Target market segment')}</div>
     <div class="form-group" style="margin-bottom:8px;"><label class="form-label">Did the prospect request research anonymity?</label>
       <select class="form-control lr-f" data-key="anonymity" onchange="leadResearchTouch(this)">${LEAD_RESEARCH_ANON.map(a => `<option value="${a[0]}" ${(d.anonymity || '') === a[0] ? 'selected' : ''}>${a[1]}</option>`).join('')}</select></div>
+    <div class="form-group" style="margin-bottom:8px;"><label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;"><input type="checkbox" id="lr-rl" ${d.responsible_leadership ? 'checked' : ''} onchange="_leadResearch.draft && (_leadResearch.draft.responsible_leadership = this.checked)"> Responsible leadership</label></div>
     ${LEAD_RESEARCH_FIELDS.filter(f => f.long).map(f => inp(f.key, f.label, '', true)).join('')}
     <div style="display:flex;gap:8px;"><button type="button" class="btn btn-primary btn-sm" onclick="leadResearchSave()" ${_leadResearch.saving ? 'disabled' : ''}>Save note</button><button type="button" class="btn btn-secondary btn-sm" onclick="leadResearchCancel()">Cancel</button></div>
   </div>`;
@@ -26333,7 +26470,7 @@ function leadResearchAdd() {
   if (leadReadOnly || !leadData.id || _lrBusy()) return;
   const orgName = leadData.target_org_name || ((allData['organisations'] || []).find(o => +o.id === +leadData.target_org_id) || {}).name || '';
   _leadResearch.editing = 'new';
-  _leadResearch.draft = { interview_no: _lrNextNo(), interview_date: new Date().toISOString().slice(0, 10), interviewer_id: currentUser?.personId || null, organisation: orgName, anonymity: '' };
+  _leadResearch.draft = { interview_no: _lrNextNo(), interview_date: new Date().toISOString().slice(0, 10), interviewer_id: currentUser?.personId || null, organisation: orgName, anonymity: '', responsible_leadership: false };
   renderLeadResearch();
 }
 function leadResearchEdit(id) {
@@ -26344,7 +26481,7 @@ function leadResearchEdit(id) {
 function leadResearchCancel() { _leadResearch.draft = null; if (_leadResearch.editing === 'new') _leadResearch.editing = null; renderLeadResearch(); }
 async function leadResearchSave() {
   const R = _leadResearch, d = R.draft; if (!d || R.saving || !leadData.id) return;
-  const body = { interview_no: +d.interview_no || 1, interview_date: d.interview_date || null, interviewer_id: d.interviewer_id || null, anonymity: d.anonymity || null };
+  const body = { interview_no: +d.interview_no || 1, interview_date: d.interview_date || null, interviewer_id: d.interviewer_id || null, anonymity: d.anonymity || null, responsible_leadership: !!d.responsible_leadership };
   LEAD_RESEARCH_FIELDS.forEach(f => { body[f.key] = (d[f.key] || '').trim() || null; });
   R.saving = true; renderLeadResearch();
   try {
@@ -26359,7 +26496,10 @@ async function leadResearchSave() {
     R.rows.sort((a, b) => (+a.interview_no - +b.interview_no) || (+a.id - +b.id));
     R.editing = null; R.draft = null;
     showStatus('Note saved');
-  } catch (e) { showStatus('Note not saved: ' + (e && e.message ? e.message : 'error'), 'error'); }
+  } catch (e) {
+    const msg = e && e.message ? e.message : 'error';
+    showStatus(/responsible_leadership/.test(msg) ? 'Note not saved: this database needs sql/lead_notes_unlimited.sql' : 'Note not saved: ' + msg, 'error');
+  }
   R.saving = false; renderLeadResearch();
 }
 async function leadResearchDelete(id) {
@@ -31427,7 +31567,7 @@ async function applyLeadSweeps(leads, sweepP, opts) {
     flipped.forEach(l => { try { applyGroupStageCohesion(l, 'Working'); } catch (e) {} });
     return leads;
   }
-  // v7.10.22: the client sweeps run only where the database has no sweep_leads
+  // v7.10.24: the client sweeps run only where the database has no sweep_leads
   // (or in mock). A transient RPC failure must not wake or flip leads from the
   // browser under the viewer's name — the server job marks itself a system write,
   // a PATCH from here would count as that person's Last Touch. The next load retries.
@@ -34125,7 +34265,7 @@ function _liAutoStreamLabel() {
   return base + ' #' + n;
 }
 
-// Recompute a lead's last_touch_date — its own LAST CONTACT (v7.10.22 name;
+// Recompute a lead's last_touch_date — its own LAST CONTACT (v7.10.24 name;
 // Last Touch, activity on the record, is the database trigger's job) — from its
 // NEWEST client-facing engagement, rather than blindly stamping the saved
 // engagement's date — editing an old engagement
