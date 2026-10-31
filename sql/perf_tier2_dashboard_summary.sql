@@ -20,7 +20,11 @@
 --                    with sites:{name} in the PostgREST embed shape
 --   deals            id, name, stage_id, probability, owner/branch/region, org_id, service_sub_id
 --   orgs             id, parent_org_id, group_touch_soothes, sector_id
---   org_touches      object {"o<org_id>": "YYYY-MM-DD"} — latest non-internal touch (_loadOrgTouches)
+--   org_touches      object {"o<org_id>": "YYYY-MM-DD"} — latest non-internal GROUP engagement (v7.9.07;
+--                    kept for a client on the previous release)
+--   org_contacts     object {"o<org_id>": {d, k, id, label}} — v7.10.22 Last Contact per organisation from
+--                    v_org_contact (sql/add_last_touch_activity.sql must have run first); leads also carry
+--                    last_touch_at / last_touch_by (Last Touch = activity on the record)
 --   open_actions     engagements with an open, dated next action (v7.10.14: + next_action_id and
 --                    action_details, so Outstanding Actions prints a flagged action with its description —
 --                    re-run this file on both databases; the client reads the keys when present)
@@ -47,6 +51,7 @@ SELECT jsonb_build_object(
   'leads', (SELECT coalesce(jsonb_agg(jsonb_build_object(
       'id', l.id, 'owner_id', l.owner_id, 'branch_id', l.branch_id, 'region_id', l.region_id, 'status', l.status,
       'wake_date', l.wake_date, 'woke_at', l.woke_at, 'created_at', l.created_at, 'last_touch_date', l.last_touch_date,
+      'last_touch_at', l.last_touch_at, 'last_touch_by', l.last_touch_by,
       'promoted_at', l.promoted_at, 'dead_reason', l.dead_reason, 'working_at', l.working_at,
       'fit', l.fit, 'access', l.access, 'capacity', l.capacity, 'trigger_score', l.trigger_score,
       'service_major_id', l.service_major_id, 'qualification_demoted', l.qualification_demoted,
@@ -71,6 +76,14 @@ SELECT jsonb_build_object(
             FROM public.engagements
            WHERE org_id IS NOT NULL AND engagement_date IS NOT NULL AND work_mode IS DISTINCT FROM 'internal'
            GROUP BY org_id) t),
+
+  -- v7.10.22: Last Contact per organisation (sql/add_last_touch_activity.sql, view v_org_contact):
+  -- the newest client-facing engagement on any of its leads, its deals or the group itself, with the
+  -- record it sits on. The client shares it across the organisation family (leadLastContact).
+  -- org_touches above stays for a client on the previous release.
+  'org_contacts', (SELECT coalesce(jsonb_object_agg('o' || v.org_id,
+      jsonb_build_object('d', v.last_contact, 'k', v.via_kind, 'id', v.via_id, 'label', v.via_label)), '{}'::jsonb)
+    FROM public.v_org_contact v),
 
   'open_actions', (SELECT coalesce(jsonb_agg(jsonb_build_object(
       'id', e.id, 'lead_id', e.lead_id, 'deal_id', e.deal_id, 'next_action', e.next_action,

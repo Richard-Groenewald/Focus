@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.21 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.22 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2156,6 +2156,25 @@ function mockApi(table, method, body, params) {
     if (limit != null) out = out.slice(0, limit);
     return Promise.resolve(clone(out));
   }
+  // v7.10.22: Last Touch in mock mode — the database triggers' job
+  // (sql/add_last_touch_activity.sql), done here for the tables they watch: a
+  // content change on the lead row, any write to one of its child records.
+  const _hk = ['updated_at', 'last_touch_date', 'last_touch_at', 'last_touch_by', 'status', 'working_at',
+               'working_eligible_at', 'woke_at', 'first_engaged_at', 'qualified_at', 'cadence_started_at',
+               'nurture_cadence_days', 'promoted_deal_id'];
+  const _childOfLead = ['engagements', 'lead_description_log', 'lead_research_interviews', 'lead_service_estimates',
+                        'lead_red_flags', 'lead_strategic_decisions', 'lead_stage_requests', 'promotion_requests',
+                        'engagement_milestones'];
+  // a milestone's lead sits on the engagement it points at, like the trigger reads it
+  const _leadOf = (r) => table === 'engagement_milestones'
+    ? ((((db.engagements || []).find(e => +e.id === +r.engagement_id) || {}).lead_id) ?? null)
+    : (r.lead_id ?? null);
+  const _touchLead = (leadId) => {
+    const L = (db.leads || []).find(x => +x.id === +leadId);
+    if (!L) return;
+    L.last_touch_at = new Date().toISOString();
+    L.last_touch_by = (typeof currentUser !== 'undefined' && currentUser && currentUser.personId) || null;
+  };
   if (method === 'POST') {
     const items = Array.isArray(body) ? body : [body];
     const created = items.map(it => {
@@ -2165,17 +2184,28 @@ function mockApi(table, method, body, params) {
       rows.push(row);
       return row;
     });
+    if (table === 'leads') created.forEach(r => { if (!r.last_touch_at) { r.last_touch_at = r.created_at; r.last_touch_by = r.created_by || null; } });
+    if (_childOfLead.includes(table)) created.forEach(r => { const lid = _leadOf(r); if (lid != null) _touchLead(lid); });
     _mockPersist();
     return Promise.resolve(clone(created));
   }
   if (method === 'PATCH') {
-    const updated = [];
-    rows.forEach(r => { if (_mockMatch(r, filters)) { Object.assign(r, body, { updated_at: new Date().toISOString() }); updated.push(r); } });
+    const updated = [], touched = [];
+    rows.forEach(r => {
+      if (!_mockMatch(r, filters)) return;
+      // a content VALUE must change, as the trigger judges it (the lead autosave re-sends the whole form)
+      if (table === 'leads' && Object.keys(body || {}).some(k => !_hk.includes(k) && JSON.stringify(r[k] ?? null) !== JSON.stringify(body[k] ?? null))) touched.push(r.id);
+      Object.assign(r, body, { updated_at: new Date().toISOString() }); updated.push(r);
+    });
+    touched.forEach(id => _touchLead(id));
+    if (_childOfLead.includes(table)) updated.forEach(r => { const lid = _leadOf(r); if (lid != null) _touchLead(lid); });
     _mockPersist();
     return Promise.resolve(clone(updated));
   }
   if (method === 'DELETE') {
+    const gone = rows.filter(r => _mockMatch(r, filters));
     db[table] = rows.filter(r => !_mockMatch(r, filters));
+    if (_childOfLead.includes(table)) gone.forEach(r => { const lid = _leadOf(r); if (lid != null) _touchLead(lid); });
     _mockPersist();
     return Promise.resolve([]);
   }
@@ -5056,7 +5086,7 @@ const HELP_CONTENT = {
         { h: 'Hold & Nurture', body: 'Both live on the <strong>Lead Progression</strong> tab as <strong>direct actions</strong> for the owner or a manager — no approval; each entry is recorded on the audit trail. The entry bar matches the stage\'s meaning:<ul><li><strong>Hold</strong> — needs Fit, Access and Capacity all Strong and a mandatory <strong>wake date</strong>. A green Trigger drops to Weak on entry (holding a lead means its moment is not now). The lead stays live while held; on the wake date it returns to Working, and if the moment arrives early, re-greening everything flips it straight to Review.</li><li><strong>Nurture</strong> — needs Fit and Access Strong, with a mandatory per-lead <strong>touch cadence</strong>. Each logged touch pre-fills the next one a cadence out.</li></ul>Leaving works the same way: the owner or a manager releases the lead directly from the Lead Progression tab and it lands on <strong>Review</strong> or <strong>Working</strong> off its data.' },
         { h: 'Red flags', body: 'Raise a flag (Lead Progression tab or the promote wizard) the moment a disqualifying concern appears — payment risk, ethics, conflict, capacity. The lead <strong>stays where it is</strong> and keeps being worked, but <strong>cannot be promoted</strong> until an <strong>Executive</strong> rules: <strong>Kill</strong> (lead closes, flag preserved on record) or <strong>Ignore</strong> (lead continues; flag left visible or cleared). Reasons are mandatory.' },
         { h: 'Declining & Dead', body: '<strong>Decline…</strong> closes a lead immediately with a category + reason — but the death itself is reviewed: it sits in Dead <em>awaiting sales-management oversight</em> until confirmed, or rejected back to Working. A confirmed Dead can later be <strong>reopened</strong> by sales management or an Executive (reason required) — it lands in Working with its four gates reset.' },
-        { h: 'Nothing sleeps forgotten', body: 'Held leads wake automatically; woken leads and aging ones (Raw untouched or Working with no touch beyond the configured day limits — a Working lead with an open next action due today or later stays quiet until that action falls overdue) surface in the <strong>Leads needing attention</strong> banner on the dashboard — the owner sees their own, sales management sees everyone’s — and the full workable list lives on the <strong>Attention Workbench</strong> page (Sales Management). Approvers get an <strong>Approvals Outstanding</strong> dashboard card collecting everything awaiting their decision.' },
+        { h: 'Nothing sleeps forgotten', body: 'Held leads wake automatically; woken leads and aging ones (Raw or Working with no client contact beyond the configured day limits — measured on Last Contact, the family’s newest client-facing engagement, never on edits to the record; a Working lead with an open next action due today or later stays quiet until that action falls overdue) surface in the <strong>Leads needing attention</strong> banner on the dashboard — the owner sees their own, sales management sees everyone’s — and the full workable list lives on the <strong>Attention Workbench</strong> page (Sales Management). Approvers get an <strong>Approvals Outstanding</strong> dashboard card collecting everything awaiting their decision.' },
         { h: 'Contacts', body: 'One list — the <strong>first is the primary</strong>. Type a name and it is checked against people we already know:<ul><li><strong>New contact</strong> — nobody similar on file.</li><li><strong>Existing · Affiliated</strong> — already a contact at this organisation.</li><li><strong>Existing · not affiliated</strong> — known to us elsewhere; you are asked if they have <em>moved here</em> (applied on promote).</li></ul>Click a contact to expand it, then use <strong>Edit</strong>, <strong>Make primary</strong> or <strong>Delete</strong>.' },
         { h: 'Milestones', body: 'Mark an engagement that represents a <strong>significant event</strong> — tick its milestones in the engagement form (the list offers only types that apply to this area; admin curates them under Admin → Settings → Milestones). A designation is <strong>proposed</strong> (hollow amber ★) until <strong>sales management approves</strong> it (solid ★) — managers\' own tags apply immediately, declines carry a reason, and you can withdraw your own pending proposal by clicking its badge. Approved milestones light up the engagement lists, the Engagement History <strong>★ Milestones only</strong> filter and the <strong>Recent Milestones</strong> dashboard card.' },
         { h: 'Where things live', body: '<strong>Overview</strong> — the facts of the lead. <strong>Qualification</strong> — the four gates and readiness. <strong>Lead Progression</strong> — every lifecycle action (Hold / Nurture / Promote / Decline / Delete), the promotion approval panel, red flags and strategic decisions. <strong>Engagements</strong> — the touch history, next actions and milestone stars. What you can see and do is driven by your rights.' },
@@ -5091,9 +5121,9 @@ const HELP_CONTENT = {
       { h: 'The two bands', body: `The stages roll up into two umbrella bands, shown as headings over their own tabs, each carrying the band's total. <strong>In Qualification</strong> (${helpChip('Raw')} ${helpChip('Working')}) — the lead's fate is still being established. <strong>Qualified</strong> (${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')}) — a deliberate decision has been made: parked on purpose, awaiting promotion review, or promoted. The per-stage counts stay on the tabs, so a band total cannot hide thin leads parked in Nurture. Dead belongs to neither band.` },
       { h: 'The stage tabs', body: `The tabs mirror the map's columns, each with a live count, grouped so each band's stages sit together: ${helpChip('Raw')} ${helpChip('Working')} · ${helpChip('Nurture')} ${helpChip('Hold')} ${helpChip('Review')} ${helpChip('Promoted')} · ${helpChip('Dead')}. Tab colours match the stage badges used across Focus. <strong>Hold</strong> only appears while leads are actually held; <strong>Dead</strong> sits apart on the far right — the off-pipeline bucket, not a stage you work. (Raw is the stage formerly labelled New; Review the stage formerly labelled Qualified — the word Qualified now names the band.)` },
       { h: 'Whose leads you see', body: `<strong>Show Own</strong> is the default: the leads you own. If you have more to see, a view bar offers <strong>Show All</strong> (needs the view-all-leads right) and <strong>Team</strong> (managers holding the edit-all-records right: your own leads plus those in your regions or branches). With only your own leads to see, no bar is shown. View-only users who hold the view-all right land on Show All. The subtitle under the page title shows two figures — the leads on the tab you are looking at, and the total in your scope across all tabs.` },
-      { h: 'Working the list', body: `<ul><li><strong>Client groups.</strong> Leads sharing a client sit under a client heading row that shows the group's best gate dots, its soonest next action and the shared site. Clicking the heading opens or closes the group (open by default; <strong>Expand all / Collapse all</strong> above the table does them all). One-lead clients and clientless leads are plain rows.</li><li><strong>Click a lead's row</strong> to open it. A Promoted lead's row asks whether to view the lead read-only or open its opportunity.</li><li><strong>Column headers sort and filter</strong> — the ▾ opens a value picker — separately on each tab; an active filter shows a FILTERED banner with its own count and a clear button. Admin sets the default sort under Admin → Settings.</li><li><strong>Last Touch</strong> is the newest engagement on the lead. On Raw and Working it turns orange at half your aging limit and red at the limit; an engagement on the client group counts too ("· grp").</li><li><strong>+ New Lead</strong> (top right) captures one. Each field saves as you leave it; a typed organisation becomes a Prospect organisation; the estimates you enter under Primary Service Interest set the lead's estimated value.</li><li>Opening the register also does the housekeeping: eligible Raw leads flip to Working and held leads whose wake date has passed come back into play.</li></ul>` },
-      { h: 'Nothing sleeps forgotten', body: `Three things surface without anyone looking for them:<ul><li><strong>Raw leads untouched</strong> for longer than the Raw limit, and <strong>Working leads with no touch</strong> for longer than the Working limit. A Working lead with a next action due today or later is left alone until that action falls overdue. The limits live under Admin → Settings → Lead Lifecycle and a sales manager may override them per person; where a limit is not set, nothing ages. Yours today: Raw ${limit(agingNew)}, Working ${limit(agingWorking)}.</li><li><strong>Leads back from Hold</strong>, until they are picked up.</li><li><strong>Approvals owed</strong> — promotion requests and dead reviews for sales management, red flags for Executives, plus proposed milestones — in the <strong>Approvals Outstanding</strong> card, a per-role dashboard widget.</li></ul>The first two appear in the <strong>Leads needing attention</strong> banner on the dashboard — your own leads, or everyone's for sales management — and the full list is workable on the <strong>Attention Workbench</strong> under Sales Management. Nurture leads are deliberately not nagged: the cadence is yours to keep.` },
-      { h: 'Guidelines for working leads', body: `<ul><li><strong>Log every touch</strong> as an engagement with a next action and date. That is what moves a lead, what stops it aging, and what Last Touch reads.</li><li><strong>Rate the gates honestly.</strong> Strong means true today, not hoped for. Weak is information, not failure.</li><li><strong>Park on purpose.</strong> Hold when the profile is right but the moment is not — with a wake date you believe. Nurture when the relationship is worth the long game — with a cadence you will keep.</li><li><strong>Name the organisation early.</strong> It is needed to reach Review, and Focus keeps the same client together across leads.</li><li><strong>Raise a red flag at once.</strong> It does not stop the work; it stops a promotion nobody should make.</li><li><strong>Never abandon a lead.</strong> Decline it with a reason rather than let it age; a Dead lead with a record can always be reopened.</li><li><strong>Managers:</strong> read the Qualified band by its composition — the tab counts show whether "qualified" means Review or parked.</li></ul>For the stage-by-stage detail on one lead, open it and press the green <strong>?</strong> — the Lead Workflow Guide picks up where this page leaves off.` },
+      { h: 'Working the list', body: `<ul><li><strong>Client groups.</strong> Leads sharing a client sit under a client heading row that shows the group's best gate dots, its soonest next action and the shared site. Clicking the heading opens or closes the group (open by default; <strong>Expand all / Collapse all</strong> above the table does them all). One-lead clients and clientless leads are plain rows.</li><li><strong>Click a lead's row</strong> to open it. A Promoted lead's row asks whether to view the lead read-only or open its opportunity.</li><li><strong>Column headers sort and filter</strong> — the ▾ opens a value picker — separately on each tab; an active filter shows a FILTERED banner with its own count and a clear button. Admin sets the default sort under Admin → Settings.</li><li><strong>Last Contact</strong> is the newest client-facing engagement with the prospect — on this lead, or anywhere in the client's organisation family: the HQ lead, a sister site, an opportunity or the group itself (marked "· via &lt;lead&gt;", "· opp" for an opportunity or "· grp" for a group engagement when it sits elsewhere, with this lead's own date in the tooltip). On Raw and Working it turns orange at half your aging limit and red at the limit. <strong>Last Touch</strong> is the newest activity on the lead record itself in Focus — an edit, a note, any engagement including our own work — per lead, never shared.</li><li><strong>+ New Lead</strong> (top right) captures one. Each field saves as you leave it; a typed organisation becomes a Prospect organisation; the estimates you enter under Primary Service Interest set the lead's estimated value.</li><li>Opening the register also does the housekeeping: eligible Raw leads flip to Working and held leads whose wake date has passed come back into play.</li></ul>` },
+      { h: 'Nothing sleeps forgotten', body: `Three things surface without anyone looking for them:<ul><li><strong>Raw leads with no contact</strong> for longer than the Raw limit, and <strong>Working leads with no contact</strong> for longer than the Working limit — measured on Last Contact (a client-facing engagement on the lead or anywhere in its client's organisation family); editing the record is a touch, not contact. A Working lead with a next action due today or later is left alone until that action falls overdue. The limits live under Admin → Settings → Lead Lifecycle and a sales manager may override them per person; where a limit is not set, nothing ages. Yours today: Raw ${limit(agingNew)}, Working ${limit(agingWorking)}.</li><li><strong>Leads back from Hold</strong>, until they are picked up.</li><li><strong>Approvals owed</strong> — promotion requests and dead reviews for sales management, red flags for Executives, plus proposed milestones — in the <strong>Approvals Outstanding</strong> card, a per-role dashboard widget.</li></ul>The first two appear in the <strong>Leads needing attention</strong> banner on the dashboard — your own leads, or everyone's for sales management — and the full list is workable on the <strong>Attention Workbench</strong> under Sales Management. Nurture leads are deliberately not nagged: the cadence is yours to keep.` },
+      { h: 'Guidelines for working leads', body: `<ul><li><strong>Log every contact</strong> as an engagement with a next action and date. That is what moves a lead, what stops it aging, and what Last Contact reads.</li><li><strong>Rate the gates honestly.</strong> Strong means true today, not hoped for. Weak is information, not failure.</li><li><strong>Park on purpose.</strong> Hold when the profile is right but the moment is not — with a wake date you believe. Nurture when the relationship is worth the long game — with a cadence you will keep.</li><li><strong>Name the organisation early.</strong> It is needed to reach Review, and Focus keeps the same client together across leads.</li><li><strong>Raise a red flag at once.</strong> It does not stop the work; it stops a promotion nobody should make.</li><li><strong>Never abandon a lead.</strong> Decline it with a reason rather than let it age; a Dead lead with a record can always be reopened.</li><li><strong>Managers:</strong> read the Qualified band by its composition — the tab counts show whether "qualified" means Review or parked.</li></ul>For the stage-by-stage detail on one lead, open it and press the green <strong>?</strong> — the Lead Workflow Guide picks up where this page leaves off.` },
     ],
     };
   },
@@ -5103,9 +5133,9 @@ const HELP_CONTENT = {
     title: 'Internal Activity Guide',
     sub: 'Where our own work goes \u2014 the hours that have no prospect on the other end.',
     sections: [
-      { note: '<strong>Two kinds of work.</strong> A <strong>client-facing</strong> engagement is contact with someone: a call, a meeting, an email you sent them. <strong>Our own work</strong> is effort \u2014 preparing a proposal, doing the research, meeting internally. Focus records both, but only contact counts as a touch.' },
+      { note: '<strong>Two kinds of work.</strong> A <strong>client-facing</strong> engagement is contact with someone: a call, a meeting, an email you sent them. <strong>Our own work</strong> is effort \u2014 preparing a proposal, doing the research, meeting internally. Focus records both. Either is a touch on the record (Last Touch), but only contact counts as Last Contact.' },
       { h: 'What belongs here', body: 'Work with <strong>no prospect behind it at all</strong>: the Bus Dev project, sessions on Focus itself, admin. Pick the <strong>project</strong> to log against, press <strong>+ Log Activity</strong>, and record it exactly like any other engagement \u2014 date, type, people, details, time spent. Projects are maintained under <strong>Site Admin \u2192 Lookups \u2192 Work Projects</strong>.' },
-      { h: 'Work ON a client goes on the client', body: 'Preparing a proposal for a real prospect is <em>not</em> internal activity \u2014 it belongs on that lead or opportunity. Log it there and mark it <strong>Our own work</strong> in the engagement modal. It joins the record\'s history and its time count, but it does <strong>not</strong> move Last Touch, satisfy a cadence step, or pose as contact you never made. That is the whole point of the distinction: your prep is visible without inflating your outreach.' },
+      { h: 'Work ON a client goes on the client', body: 'Preparing a proposal for a real prospect is <em>not</em> internal activity \u2014 it belongs on that lead or opportunity. Log it there and mark it <strong>Our own work</strong> in the engagement modal. It joins the record\'s history, its time count and its Last Touch, but it does <strong>not</strong> move Last Contact, satisfy a cadence step, or pose as contact you never made. That is the whole point of the distinction: your prep is visible without inflating your outreach.' },
       { h: 'Time spent', body: 'Optional on every engagement, anywhere in Focus. Type the minutes or use the <strong>30m / 1h / 1\u00bdh / 2h</strong> chips. Totals roll up here (overall and per project) and on Engagement History, where a time badge sits on each row and the header carries the total for the current filter.' },
       { h: 'Reading the page', body: '<strong>From/To</strong> bound the window (it opens on the last full month onward), <strong>Project</strong> narrows to one, and <strong>Mine / Everyone</strong> switches scope where you have the right to see other people\'s. Click any row to open the entry and edit it.' },
       { h: 'What comes later', body: 'This is deliberately narrow. A fuller timesheet module \u2014 hours against contracts and delivery projects across the whole business \u2014 will build on these same structures rather than replace them, so nothing recorded here is throwaway.' },
@@ -10907,7 +10937,7 @@ async function pgIssue() {
   } catch (e) { showStatus('Could not issue: ' + e.message, 'error'); renderQuoteEditor(); }
 }
 // The ledger: an engagement on the deal (client-facing — a proposal IS contact,
-// so Last Touch moves) and the offer to advance to the Proposal stage.
+// so Last Contact moves) and the offer to advance to the Proposal stage.
 async function pgLedgerAfterIssue(row, ctx) {
   if (!pbQ.deal_id) return;
   try {
@@ -18454,7 +18484,21 @@ function _dashSeedLookups(B) {
   if (Array.isArray(B.milestone_types))  allData['milestone_types']  = B.milestone_types;
   if (Array.isArray(B.red_flags)) allData['red_flags'] = B.red_flags;
   if (!allData['industry_sectors'] && Array.isArray(B.industry_sectors)) allData['industry_sectors'] = B.industry_sectors;
-  allData['_org_touches'] = (B.org_touches && typeof B.org_touches === 'object') ? B.org_touches : {};
+  // v7.10.22: Last Contact per organisation (view v_org_contact via the bundle); a bundle from a
+  // database that has not re-run perf_tier2_dashboard_summary.sql still carries org_touches only.
+  const contacts = {};
+  if (B.org_contacts && typeof B.org_contacts === 'object') {
+    Object.keys(B.org_contacts).forEach(k => {
+      const c = B.org_contacts[k];
+      if (c && c.d) contacts[k] = { d: String(c.d).slice(0, 10), k: c.k, id: c.id, label: c.label || '' };
+    });
+  } else if (B.org_touches && typeof B.org_touches === 'object') {
+    Object.keys(B.org_touches).forEach(k => {
+      const d = B.org_touches[k];
+      if (d) contacts[k] = { d: String(d).slice(0, 10), k: 'group', id: +String(k).slice(1), label: '' };
+    });
+  }
+  allData['_org_contacts'] = contacts;
 }
 
 // Shared collector for the dashboard banner and the Attention Workbench page:
@@ -18465,15 +18509,18 @@ function _dashSeedLookups(B) {
 // overlapped one with the bundle fetch.
 async function _attentionLeadItems(B, sweepP) {
   if (sweepP === undefined) sweepP = startLeadSweep({ wakeOnly: true });   // overlaps the read (v7.9.37)
-  const leads = B ? B.leads : await apiGet('leads',
-    'select=id,owner_id,branch_id,region_id,status,wake_date,woke_at,created_at,last_touch_date,promoted_at,dead_reason,working_at,fit,access,capacity,trigger_score,service_major_id,qualification_demoted,target_org_name,target_org_id,description,site_id,site_name,next_action_date,sites(name)');
+  // v7.10.22: the whole row — last_touch_at / last_touch_by ride along, and `*`
+  // names no column a database that has not run the migration lacks.
+  const leads = B ? B.leads : await apiGet('leads', 'select=*,sites(name)');
   await applyLeadSweeps(leads, sweepP, { wakeOnly: true });   // wake due leads now, so their reminders show immediately
   const daysSince = d => d ? Math.floor((Date.now() - new Date(d).getTime()) / 86400000) : null;
-  // Soothing (v7.9.07): a group touch quiets the aging nags too. Orgs may not be
-  // cached on the dashboard — use a SLIM local list, never written to allData
-  // (slim caches poisoned option lists before; see lead-org-name-autosave-wipe).
-  if (!B) await _loadOrgTouches();   // the bundle seeds allData['_org_touches'] itself
-  let _orgsForAging = allData['organisations'];
+  // Last Contact (v7.10.22): the family's contact quiets the aging nags too. Orgs
+  // may not be cached on the dashboard — use a SLIM local list, never written to
+  // allData (slim caches poisoned option lists before; see lead-org-name-autosave-wipe).
+  if (!B) await _loadOrgContacts(true);   // the bundle seeds allData['_org_contacts'] itself; without one, read fresh
+  // The bundle's orgs are the whole table, fresh this render; the session cache is
+  // the fallback (it may predate a switch flip or hold a slim list).
+  let _orgsForAging = (B && Array.isArray(B.orgs) && B.orgs.length) ? B.orgs : allData['organisations'];
   if (!_orgsForAging || !_orgsForAging.length) {
     if (B) _orgsForAging = B.orgs || [];
     else {
@@ -18485,25 +18532,33 @@ async function _attentionLeadItems(B, sweepP) {
   for (const l of leads) {
     if (l.status === 'Dead' || l.status === 'Promoted') continue;
     const label = leadEngLabel(l) || ('Lead #' + l.id);
+    // v7.10.22: both measures ride on the item, so the Workbench prints what the
+    // banner judged (its renderer has no organisation list to recompute from).
+    const contact = leadLastContact(l, _orgsForAging);
+    const touch = leadLastTouch(l);
+    const base = { lead: l, id: l.id, label, contact: contact.date, contactOwn: contact.own,
+                   contactShared: contact.shared, contactVia: contact.via, touchAt: touch.at };
     if (l.woke_at) {
-      items.push({ lead: l, id: l.id, label, kind: 'wake', wokeAt: String(l.woke_at).slice(0, 10),
-        msg: 'Back from Hold (woke ' + String(l.woke_at).slice(0, 10) + ') — pick it up', wake: true, order: 0 });
+      items.push(Object.assign(base, { kind: 'wake', wokeAt: String(l.woke_at).slice(0, 10),
+        msg: 'Back from Hold (woke ' + String(l.woke_at).slice(0, 10) + ') — pick it up', wake: true, order: 0 }));
       continue;
     }
+    // Aging runs on LAST CONTACT (contact with the prospect, family-shared): a
+    // lead nobody has spoken to is neglected however often its record is edited.
     if (l.status === 'New') {
       const x = agingDaysFor(l.owner_id, 'new');
-      const days = daysSince(leadEffectiveTouch(l, _orgsForAging).date || l.created_at);
-      if (x > 0 && days != null && days >= x) items.push({ lead: l, id: l.id, label, kind: 'new', days, limit: x,
-        msg: 'Raw lead untouched for ' + days + ' days (limit ' + x + ')', order: 1 });
+      const days = daysSince(contact.date || l.created_at);
+      if (x > 0 && days != null && days >= x) items.push(Object.assign(base, { kind: 'new', days, limit: x,
+        msg: 'Raw lead with no contact for ' + days + ' days (limit ' + x + ')', order: 1 }));
     } else if (l.status === 'Working') {
       // A future-dated open next action is a committed plan, not neglect — the
       // aging nag stays quiet until the due date passes (Outstanding Actions
       // then reports the overdue action, and this escalation resumes).
       const planned = l.next_action_date && String(l.next_action_date).slice(0, 10) >= new Date().toISOString().slice(0, 10);
       const y = agingDaysFor(l.owner_id, 'working');
-      const days = daysSince(leadEffectiveTouch(l, _orgsForAging).date || l.created_at);
-      if (!planned && y > 0 && days != null && days >= y) items.push({ lead: l, id: l.id, label, kind: 'working', days, limit: y,
-        msg: 'Working lead with no touch for ' + days + ' days (limit ' + y + ')', order: 1 });
+      const days = daysSince(contact.date || l.created_at);
+      if (!planned && y > 0 && days != null && days >= y) items.push(Object.assign(base, { kind: 'working', days, limit: y,
+        msg: 'Working lead with no contact for ' + days + ' days (limit ' + y + ')', order: 1 }));
     }
   }
   items.sort((a, b) => a.order - b.order || (b.days || 0) - (a.days || 0));
@@ -21411,50 +21466,161 @@ function _orgFamilyBannerHtml(orgId) {
   </div>`;
 }
 
-// ── Group touches & aging (v7.9.07) ───────────────────────────────────────────
-// A collective engagement soothes every member lead's aging clock by default
-// (Richard 2026-08-31); a collective can opt out via organisations.
-// group_touch_soothes (the toggle lives inside the group view — zero form ink).
-// Internal-mode work never counts as a touch, mirroring the lead rule.
-async function _loadOrgTouches(force) {
-  if (allData['_org_touches'] && !force) return allData['_org_touches'];
+// ── Last Contact and Last Touch (v7.10.22) ────────────────────────────────────
+// Richard 2026-10-31: TWO measures on a lead.
+//   LAST CONTACT = contact with the prospect: the newest client-facing engagement.
+//     The lead's own is leads.last_touch_date (recomputed by bumpLeadLastTouch);
+//     the organisation FAMILY's is shared across sibling leads — an engagement on
+//     the HQ "PARENT" lead, on a sister site's lead, on a deal of the family or on
+//     the group itself all count, contact is contact — gated by the family's one
+//     "Group acts as one" switch (group_touch_soothes on the ultimate parent, the
+//     gate stage cohesion uses). Supersedes the v7.9.07 rule, which shared only
+//     group engagements (engagements.org_id) — a path nobody had used.
+//   LAST TOUCH = activity on the lead RECORD in Focus: leads.last_touch_at /
+//     last_touch_by, kept by database triggers (sql/add_last_touch_activity.sql)
+//     on a content change to the lead and on any write to its child records.
+//     Per lead, never shared. "Our own work" is a touch but never a contact.
+// allData['_org_contacts'] = { 'o<orgId>': { d: 'YYYY-MM-DD', k: lead|deal|group, id, label } }
+// — one row per organisation from the view v_org_contact; the dashboard bundle
+// carries the same rows as org_contacts. A database without the view falls back
+// to the v7.9.07 group engagements, so the register still renders.
+async function _loadOrgContacts(force) {
+  if (allData['_org_contacts'] && !force) return allData['_org_contacts'];
   const map = {};
   try {
-    const rows = await apiGet('engagements', 'org_id=not.is.null&select=org_id,engagement_date,work_mode');
+    const rows = MOCK ? _mockOrgContacts() : await apiGet('v_org_contact', 'select=*');
     rows.forEach(r => {
-      if (r.work_mode === 'internal' || !r.engagement_date) return;
-      const k = 'o' + r.org_id;
-      if (!map[k] || r.engagement_date > map[k]) map[k] = r.engagement_date;
+      if (!r.last_contact) return;
+      map['o' + r.org_id] = { d: String(r.last_contact).slice(0, 10), k: r.via_kind, id: r.via_id, label: r.via_label || '' };
     });
-  } catch (e) { /* soothing degrades to own-touch aging */ }
-  allData['_org_touches'] = map;
+  } catch (e) {
+    try {   // pre-migration database: the collective's own group engagements only (v7.9.07)
+      const rows = await apiGet('engagements', 'org_id=not.is.null&select=org_id,engagement_date,work_mode');
+      rows.forEach(r => {
+        if (r.work_mode === 'internal' || !r.engagement_date) return;
+        const k = 'o' + r.org_id;
+        if (!map[k] || r.engagement_date > map[k].d) map[k] = { d: String(r.engagement_date).slice(0, 10), k: 'group', id: +r.org_id, label: '' };
+      });
+    } catch (e2) { /* contact degrades to the lead's own */ }
+  }
+  allData['_org_contacts'] = map;
   return map;
 }
-// Latest soothing group touch for an org, walking its ancestor chain — each
-// node contributes only while its own group_touch_soothes isn't false.
-function _groupTouchFor(orgId, orgsArr) {
-  const map = allData['_org_touches'];
+// Mock mode has no views: the same rows, computed from the store (client-facing,
+// not in the future, the automatic deal rows left out).
+function _mockOrgContacts() {
+  const db = _mockStore();
+  const today = new Date().toISOString().slice(0, 10);
+  const leadsById = Object.fromEntries((db.leads || []).map(l => [+l.id, l]));
+  const dealsById = Object.fromEntries((db.deals || []).map(d => [+d.id, d]));
+  const sitesById = Object.fromEntries((db.sites || []).map(s => [+s.id, s]));
+  const orgsById  = Object.fromEntries((db.organisations || []).map(o => [+o.id, o]));
+  const sys = ['Promotion', 'Suspended', 'Restored', 'Suspension lifted', 'Proposal withdrawn'];
+  const best = {};
+  (db.engagements || []).forEach(e => {
+    const d = String(e.engagement_date || '').slice(0, 10);
+    if (!d || d > today || e.work_mode === 'internal') return;
+    let orgId = null, k = null, id = null, label = '';
+    if (e.lead_id != null) {
+      const l = leadsById[+e.lead_id]; if (!l) return;
+      orgId = l.target_org_id || (l.site_id && sitesById[+l.site_id]?.organisation_id) || null;
+      k = 'lead'; id = +l.id; label = l.site_name || l.target_org_name || (orgsById[+orgId]?.name) || ('Lead #' + l.id);
+    } else if (e.deal_id != null) {
+      if (sys.includes(e.engagement_type)) return;
+      const dl = dealsById[+e.deal_id]; if (!dl) return;
+      orgId = dl.org_id; k = 'deal'; id = +dl.id; label = dl.name || ('Deal #' + dl.id);
+    } else if (e.org_id != null) {
+      orgId = e.org_id; k = 'group'; id = +e.org_id; label = orgsById[+e.org_id]?.name || '';
+    }
+    if (orgId == null) return;
+    const cur = best[+orgId];
+    const newer = !cur || d > cur.last_contact || (d === cur.last_contact && String(e.created_at || '') > String(cur._c || ''));
+    if (newer) best[+orgId] = { org_id: +orgId, last_contact: d, via_kind: k, via_id: id, via_label: label, _c: e.created_at };
+  });
+  return Object.values(best);
+}
+// The family's newest contact for an organisation: the ultimate parent and every
+// organisation under it, while the family's switch is on (off = the family
+// neither breathes nor moves together — the lead's own contact only). Returns
+// { d, k, id, label } or null. orgsArr: a slim list when the full one is not cached.
+function _familyContactFor(orgId, orgsArr) {
+  const map = allData['_org_contacts'];
   if (!map || orgId == null) return null;
   const O = orgsArr || allData['organisations'] || [];
-  let cur = O.find(o => +o.id === +orgId), best = null;
-  const seen = new Set();
-  while (cur && !seen.has(+cur.id)) {
-    seen.add(+cur.id);
-    if (cur.group_touch_soothes !== false) {
-      const d = map['o' + cur.id];
-      if (d && (!best || d > best)) best = d;
-    }
-    cur = cur.parent_org_id ? O.find(x => +x.id === +cur.parent_org_id) : null;
-  }
+  const org = O.find(o => +o.id === +orgId);
+  if (!org) return map['o' + orgId] || null;   // organisation not in the list: its own row at most
+  const top = _ultimateParentOrg(org, O);
+  if (top.group_touch_soothes === false) return null;   // the one switch
+  const ids = new Set([+top.id, +org.id]);
+  O.forEach(o => { if (+_ultimateParentOrg(o, O).id === +top.id) ids.add(+o.id); });
+  let best = null;
+  ids.forEach(id => { const c = map['o' + id]; if (c && c.d && (!best || c.d > best.d)) best = c; });
   return best;
 }
-// A lead's EFFECTIVE last touch: its own, or the family's group touch if newer.
-function leadEffectiveTouch(l, orgsArr) {
-  const own = l.last_touch_date || null;
+// A lead's LAST CONTACT: its own newest client-facing engagement, or the
+// family's when newer. { date, own, shared, via } — shared = the date sits on
+// another record (via = { k, id, label }: the HQ lead, a sister site, a deal or
+// the group). The ONE reader: the register cell, its sort and filter, the band
+// row, the dashboard banner and the Attention Workbench all read this.
+function leadLastContact(l, orgsArr) {
+  const today = new Date().toISOString().slice(0, 10);
+  let own = l.last_touch_date ? String(l.last_touch_date).slice(0, 10) : null;
+  // A client engagement dated in the future is a plan, not contact — the view
+  // caps the family side at today, so the own side must too; it starts counting
+  // on its day. (bumpLeadLastTouch still stores it: nothing else re-bumps the
+  // lead when that day arrives.)
+  if (own && own > today) own = null;
   const orgId = l.target_org_id
     || ((allData['sites'] || []).find(s => +s.id === +l.site_id)?.organisation_id) || null;
-  const grp = _groupTouchFor(orgId, orgsArr);
-  return (grp && (!own || grp > own)) ? { date: grp, group: true } : { date: own, group: false };
+  const fam = _familyContactFor(orgId, orgsArr);
+  if (fam && fam.k === 'lead' && +fam.id === +l.id) {
+    // The family's newest contact is this lead's own row in the view — the same
+    // fact last_touch_date holds, read fresh (that column is written by a separate
+    // PATCH after the engagement lands, so the view can be ahead of it).
+    if (fam.d && (!own || fam.d > own)) own = fam.d;
+    return { date: own, own, shared: false, via: null };
+  }
+  if (fam && fam.d && (!own || fam.d > own)) return { date: fam.d, own, shared: true, via: fam };
+  return { date: own, own, shared: false, via: null };
+}
+// A lead's LAST TOUCH: activity on the record in Focus. at = null on a database
+// that has not run sql/add_last_touch_activity.sql (the column is absent).
+function leadLastTouch(l) {
+  return { at: l.last_touch_at || null, by: l.last_touch_by || null };
+}
+// Days since a date / timestamp (calendar days for a YYYY-MM-DD, elapsed days
+// for a timestamp); null when there is none.
+function _daysSinceDate(d) {
+  if (!d) return null;
+  const t = new Date(d).getTime();
+  if (isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86400000));
+}
+// "Today" / "3d ago" with an optional marker; '—' when there is nothing.
+function _agoHtml(days, markerHtml) {
+  if (days == null) return '—';
+  return (days === 0 ? 'Today' : days + 'd ago') + (markerHtml || '');
+}
+// The marker a shared contact wears: where the contact sits (the HQ lead, a
+// sister site, a deal, the group), with the lead's own contact in the tooltip.
+function _contactViaHtml(c) {
+  if (!c || !c.shared || !c.via) return '';
+  const v = c.via;
+  const what = v.k === 'group' ? 'a group engagement' : v.k === 'deal' ? 'the opportunity "' + (v.label || '#' + v.id) + '"' : 'the lead "' + (v.label || '#' + v.id) + '"';
+  const title = 'Most recent contact with this client is on ' + what + (c.own ? '; this lead’s own last contact was ' + c.own : '; this lead has none of its own');
+  const short = v.k === 'group' ? 'grp' : v.k === 'deal' ? 'opp' : 'via';
+  // A long lead label is cut at a word boundary with an ellipsis; the full label
+  // sits in the tooltip.
+  const lab = String(v.label || '');
+  const shortLab = lab.length > 28 ? lab.slice(0, 27).replace(/\s+\S*$/, '').replace(/[\s\-–—:;,(]+$/, '') + '…' : lab;
+  return ' <span style="font-size:10px;color:#8A6D3B;font-weight:700;" title="' + escAttr(title) + '">· ' + short + (v.k === 'lead' ? ' ' + escHtml(shortLab) : '') + '</span>';
+}
+// A timestamp as the viewer's local calendar day, YYYY-MM-DD (a bare slice of the
+// serialised value would print the UTC day).
+function _localYmd(ts) {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts || '').slice(0, 10);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 
 // ── Group birth (v7.9.09) ─────────────────────────────────────────────────────
@@ -21718,9 +21884,9 @@ async function openParentHistory(parentId, pickOrgId) {
           <div class="modal-body" style="max-height:70vh;overflow-y:auto;">
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap;">
               <button class="btn btn-primary btn-sm" onclick="_phShowLogForm()">+ Log group engagement</button>
-              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;" title="On: a group engagement resets every member's aging clock, and one member entering Working or ${LEAD_STAGE_X} pulls the whole group with it. Off: members age and move individually; group rows stay visible as context.">
+              <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);cursor:pointer;" title="On: contact with any organisation in this family — on its leads, its opportunities or a group engagement — counts as every member lead's Last Contact and quiets their aging, and one member entering Working or ${LEAD_STAGE_X} pulls the whole group with it. Off: each lead's own contact only; members age and move individually; group rows stay visible as context.">
                 <input type="checkbox" ${parent.group_touch_soothes !== false ? 'checked' : ''} onchange="_phToggleSoothe(${+parentId}, this.checked)">
-                Group acts as one — aging & stage moves
+                Group acts as one — contact, aging & stage moves
               </label>
             </div>
             <div style="background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;">
@@ -21829,7 +21995,9 @@ function _phShowLogForm() {
 async function _phToggleSoothe(orgId, on) {
   try {
     await api('organisations', 'PATCH', { group_touch_soothes: !!on }, 'id=eq.' + (+orgId));
-    showStatus(on ? 'Group touches now count for members’ aging' : 'Members now age on their own touches only');
+    const cached = (allData['organisations'] || []).find(o => +o.id === +orgId);
+    if (cached) cached.group_touch_soothes = !!on;   // the register and the banner read this row until the next full load
+    showStatus(on ? 'Family contact now counts as every member’s Last Contact' : 'Members now run on their own contact only');
   } catch (e) { showStatus('Could not save the aging setting: ' + e.message, 'error'); }
 }
 // The group form's two text boxes say when the picked type / next action asks for them (v7.10.12).
@@ -21876,7 +22044,7 @@ async function _phSaveGroupEngagement() {
       next_action_done: !!isNfa,
       created_by:       currentUser?.personId || null,
     }, 'select=*');
-    delete allData['_org_touches'];   // group touch changed — soothing recomputes
+    delete allData['_org_contacts'];   // a group engagement changed — the family's Last Contact recomputes (v7.10.22)
     showStatus('Group engagement logged');
     const pid = _phData.parentId;
     closeModal();
@@ -21939,6 +22107,7 @@ async function renderLeadsPage(opts) {
       ({ leads, sources, regions, services, people, orgs, campaigns, sites, sectors } = _leadsPageData);
     } else {
     const sweepP = startLeadSweep();   // server-side sweeps overlap the reads (v7.9.37)
+    const contactsP = _loadOrgContacts(true);   // v7.10.22: the family's Last Contact per organisation, overlapping the reads
     // Load lookups + leads in parallel
     [leads, sources, regions, services, people, orgs, campaigns, sites, sectors, dealRows, stageRows, stageCats, subRows] = await Promise.all([
       apiGetAll('leads', 'select=*&order=created_at.desc'),   // paged: survives the 1000-row cap
@@ -21968,7 +22137,7 @@ async function renderLeadsPage(opts) {
     allData['research_campaigns'] = campaigns;
     allData['sites']              = sites;
     allData['industry_sectors']   = sectors;
-    await _loadOrgTouches(true);   // group touches for the soothing aging rule (v7.9.07)
+    await contactsP;   // settled before the rows paint — sort, filter and band rows read the map
 
     // App-layer sweeps: flip eligible New leads to Working, and wake held leads
     // whose wake date has arrived (replaces the retired DB status triggers).
@@ -22069,10 +22238,11 @@ async function renderLeadsPage(opts) {
       const o = l.target_org_id ? orgs.find(x => +x.id === +l.target_org_id) : null;
       return o?.name || l.target_org_name || '';
     };
-    const lastTouchDays = (l) => {
-      if (!l.last_touch_date) return null;
-      return Math.floor((Date.now() - new Date(l.last_touch_date).getTime()) / 86400000);
-    };
+    // v7.10.22: Last Contact (the family's newest client-facing engagement — the
+    // one reader leadLastContact) and Last Touch (activity on the record). The
+    // sort / filter getters read the same figures the cells show.
+    const lastContactDays = (l) => _daysSinceDate(leadLastContact(l).date);
+    const lastTouchDays = (l) => _daysSinceDate(leadLastTouch(l).at);
 
     const cols = [
       { key: 'source', label: 'Source',      get: l => (sources.find(s => +s.id === +l.source_id)?.name) || '' },
@@ -22084,11 +22254,12 @@ async function renderLeadsPage(opts) {
       { key: 'qual',   label: 'F A C T',     get: l => (+l.fit||0)+(+l.trigger_score||0)+(+l.access||0)+(+l.capacity||0), align: 'center' },
       { key: 'owner',  label: 'Owner',       get: l => ownerName(l) },
       { key: 'nxt',    label: 'Next Action', get: l => l.next_action || '' },
-      // Promoted leads sort/filter this column by days since PROMOTION — the
-      // cell shows "Promoted <date>" there, not the touch clock.
-      { key: 'touch',  label: 'Last Touch',  get: l => (l.status === 'Promoted' && l.promoted_at)
+      // Promoted leads sort/filter the contact column by days since PROMOTION —
+      // the cell shows "Promoted <date>" there, not the contact clock.
+      { key: 'contact', label: 'Last Contact', get: l => (l.status === 'Promoted' && l.promoted_at)
           ? Math.floor((Date.now() - new Date(l.promoted_at).getTime()) / 86400000)
-          : lastTouchDays(l) },
+          : lastContactDays(l) },
+      { key: 'touch',   label: 'Last Touch',   get: l => lastTouchDays(l) },
     ];
 
     // Client roll-up, always on: leads sharing a client band under a client
@@ -22220,30 +22391,40 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     </div>`;
   }
 
-  // Last touch — colour TIED to the owner's aging escalation thresholds
+  // Last Contact — colour TIED to the owner's aging escalation thresholds
   // (Admin → Settings → Lead Lifecycle, per-user overrides included): orange
   // from HALF the limit, red from the limit — so the register's colour language
   // always agrees with what the attention banner/workbench will escalate.
   // Was hardcoded 14/30 until v7.8.89. Only Raw and Working age; other stages
   // stay neutral (Nurture/Hold run on their own clocks), as does aging = off.
+  let lastContactCell = '—';
   let lastTouchCell = '—';
   if (l.status === 'Promoted' && l.promoted_at) {
-    // Promoted leads are done being touched — the column shows the milestone
+    // Promoted leads are done being contacted — the column shows the milestone
     // instead of a meaningless aging clock (Richard 2026-08-28).
-    lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(l.promoted_deal_id)}`;
+    lastContactCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(l.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(l.promoted_deal_id)}`;
   } else {
-    // Effective touch (v7.9.07): the family's group engagement soothes the clock
-    // when newer than the lead's own touch — marked "· grp" so the source shows.
-    const eff = leadEffectiveTouch(l);
-    if (eff.date) {
-      const days = Math.floor((Date.now() - new Date(eff.date).getTime()) / 86400000);
+    // v7.10.22: the family's newest client-facing engagement when newer than the
+    // lead's own — marked with where it sits, the lead's own date in the tooltip.
+    const c = leadLastContact(l);
+    if (c.date) {
+      const days = _daysSinceDate(c.date);
       const kind = l.status === 'New' ? 'new' : l.status === 'Working' ? 'working' : null;
       const limit = kind ? agingDaysFor(l.owner_id, kind) : 0;
       const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
                 : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
                 : '';
-      lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}${eff.group ? ' <span style="font-size:10px;color:#8A6D3B;font-weight:700;" title="Most recent touch is a group engagement">· grp</span>' : ''}</span>`;
+      lastContactCell = `<span style="${col}">${_agoHtml(days, _contactViaHtml(c))}</span>`;
     }
+  }
+  // Last Touch (v7.10.22): the newest activity on this lead's record in Focus —
+  // trigger-maintained, per lead, never shared, uncoloured (aging runs on contact).
+  const t = leadLastTouch(l);
+  if (t.at) {
+    const by = t.by ? people.find(p => +p.id === +t.by) : null;
+    const byName = by ? [by.first_name, by.last_name].filter(Boolean).join(' ') : '';
+    const when = new Date(t.at);
+    lastTouchCell = `<span title="${escAttr('Last activity on this lead in Focus: ' + (isNaN(when.getTime()) ? String(t.at) : when.toLocaleString('en-ZA')) + (byName ? ' by ' + byName : ''))}">${_agoHtml(_daysSinceDate(t.at))}</span>`;
   }
 
   // Edit-grace countdown: Working leads still in their editable window show the
@@ -22272,6 +22453,7 @@ function renderLeadRow(l, sources, regions, people, orgs) {
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
+    <td style="padding:10px 12px;font-size:13px;">${lastContactCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
   </tr>`;
 }
@@ -22320,35 +22502,39 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
       ${na.next_action}${dateLabel ? `<div style="font-size:11px;opacity:0.7;">${dateLabel}</div>` : ''}
     </div>`;
   }
-  // Last touch: the band's most recent, coloured by THAT lead's aging thresholds.
-  // On the Promoted tab (every member promoted) the milestone replaces the clock:
-  // show the band's most recent promotion date instead.
-  const touched = rows.filter(l => l.last_touch_date)
-                      .sort((x, y) => new Date(y.last_touch_date) - new Date(x.last_touch_date));
+  // Last Contact: the band's most recent — each member's own contact or the
+  // family's, through the one reader leadLastContact (v7.10.22) — coloured by
+  // the owning lead's aging thresholds. Last Touch: the members' most recent
+  // activity on their records. On the Promoted tab (every member promoted) the
+  // milestone replaces the contact clock: the band's most recent promotion date.
+  let lastContactCell = '—';
   let lastTouchCell = '—';
   const promotedAll = rows.every(l => l.status === 'Promoted');
   if (promotedAll) {
     const latestPromo = rows.filter(l => l.promoted_at)
                             .sort((x, y) => new Date(y.promoted_at) - new Date(x.promoted_at))[0];
-    if (latestPromo) lastTouchCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(latestPromo.promoted_deal_id)}`;
+    if (latestPromo) lastContactCell = `<span style="color:#155e75;font-weight:600;">Promoted ${new Date(latestPromo.promoted_at).toLocaleDateString('en-ZA')}</span>${_leadPromotedTag(latestPromo.promoted_deal_id)}`;
   } else {
-    // Band's most recent touch: the members' own touches vs the collective's
-    // group touch (v7.9.07) — whichever is newer wears the cell, "· grp" marked.
-    const t = touched[0] || null;
-    const grp = b.key && b.key[0] === 'o' ? _groupTouchFor(+b.key.slice(1)) : null;
-    const ownDate = t ? t.last_touch_date : null;
-    const useGrp = !!(grp && (!ownDate || grp > ownDate));
-    const effDate = useGrp ? grp : ownDate;
-    if (effDate) {
-      const days = Math.floor((Date.now() - new Date(effDate).getTime()) / 86400000);
+    // On a tie a member's OWN contact wins over a shared one, so a band whose HQ
+    // lead holds the newest contact reads plainly rather than "via" itself.
+    let bestC = null, bestLead = null;
+    rows.forEach(l => {
+      const c = leadLastContact(l);
+      if (c.date && (!bestC || c.date > bestC.date || (c.date === bestC.date && bestC.shared && !c.shared))) { bestC = c; bestLead = l; }
+    });
+    if (bestC) {
+      const days = _daysSinceDate(bestC.date);
+      const t = bestLead;
       const kind = t ? (t.status === 'New' ? 'new' : t.status === 'Working' ? 'working' : null) : null;
       const limit = (kind && t) ? agingDaysFor(t.owner_id, kind) : 0;
       const col = (limit > 0 && days >= limit) ? 'color:var(--red);'
                 : (limit > 0 && days >= Math.ceil(limit / 2)) ? 'color:#f59e0b;'
                 : '';
-      lastTouchCell = `<span style="${col}">${days === 0 ? 'Today' : days + 'd ago'}${useGrp ? ' <span style="font-size:10px;color:#8A6D3B;font-weight:700;" title="Most recent touch is a group engagement">· grp</span>' : ''}</span>`;
+      lastContactCell = `<span style="${col}">${_agoHtml(days, _contactViaHtml(bestC))}</span>`;
     }
   }
+  const touchedAt = rows.map(l => leadLastTouch(l).at).filter(Boolean).map(String).sort().reverse()[0] || null;
+  if (touchedAt) lastTouchCell = _agoHtml(_daysSinceDate(touchedAt));
   const enc = encodeURIComponent(b.key).replace(/'/g, '%27');
   return `<tr onclick="toggleClientBand('leads','${enc}')" style="cursor:pointer;background:var(--bg);${open ? 'box-shadow:inset 3px 0 0 0 #003057;' : ''}">
     <td style="padding:10px 12px;font-size:13px;">${source?.name || '—'}</td>
@@ -22360,6 +22546,7 @@ function _leadBandRowHtml(b, open, sources, regions, people, orgs) {
     <td style="padding:10px 12px;text-align:center;white-space:nowrap;">${qualDots}</td>
     <td style="padding:10px 12px;font-size:13px;">${ownerDisplay}</td>
     <td style="padding:10px 12px;font-size:13px;">${nextActionCell}</td>
+    <td style="padding:10px 12px;font-size:13px;">${lastContactCell}</td>
     <td style="padding:10px 12px;font-size:13px;">${lastTouchCell}</td>
   </tr>`;
 }
@@ -24155,7 +24342,7 @@ function _engHistApply() {
     // Internal work sits on the record but is not contact with the client — say so
     // plainly, or the history reads as more client contact than actually happened.
     const modeBadge = e.work_mode === 'internal'
-      ? `<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#FEF3C7;color:#92400E;" title="Our own work on this record — not a touch">OUR WORK</span>`
+      ? `<span style="font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;background:#FEF3C7;color:#92400E;" title="Our own work on this record — a touch on the record, not contact with the client">OUR WORK</span>`
       : '';
     return `
       <div style="padding:10px 12px;border-bottom:1px solid var(--border);">
@@ -24977,6 +25164,7 @@ async function revertLead() {
     await _revertChildAdditions('lead_description_log', id, snap.descLog);
     const restore = Object.assign({}, snap.lead, { updated_at: new Date().toISOString() });
     delete restore.id;
+    delete restore.last_touch_at; delete restore.last_touch_by;   // v7.10.22: the trigger's columns, never written by the client
     const res = await api('leads', 'PATCH', restore, 'id=eq.' + id + '&select=*');
     if (res && res[0]) leadData = res[0];
     leadFormDirty = false;
@@ -31239,6 +31427,11 @@ async function applyLeadSweeps(leads, sweepP, opts) {
     flipped.forEach(l => { try { applyGroupStageCohesion(l, 'Working'); } catch (e) {} });
     return leads;
   }
+  // v7.10.22: the client sweeps run only where the database has no sweep_leads
+  // (or in mock). A transient RPC failure must not wake or flip leads from the
+  // browser under the viewer's name — the server job marks itself a system write,
+  // a PATCH from here would count as that person's Last Touch. The next load retries.
+  if (!MOCK && !_sweepRpcMissing) return leads;
   if (flip) leads = await sweepNewToWorking(leads);
   return sweepHoldWake(leads);
 }
@@ -31964,13 +32157,14 @@ function _attnApply() {
       const l = i.lead;
       const reason = i.kind === 'wake'
         ? pill('Back from Hold', 'background:#E0F2FE;color:#075985;') + ` <span style="color:var(--text3);">woke ${i.wokeAt}</span>`
-        : pill('Untouched ' + i.days + 'd', 'background:#FEE2E2;color:#991B1B;') + ` <span style="color:var(--text3);">limit ${i.limit}d</span>`;
+        : pill('No contact ' + i.days + 'd', 'background:#FEE2E2;color:#991B1B;') + ` <span style="color:var(--text3);">limit ${i.limit}d</span>`;
       return `<tr>
         ${td(`<span style="font-weight:700;color:var(--navy);">${esc(i.label)}</span>`)}
         ${td(esc(pName(l.owner_id)))}
         ${td(pill(leadStageLabel(l.status || 'New'), LEAD_STATUS_STYLES[l.status] || LEAD_STATUS_STYLES['New']))}
         ${td(reason)}
-        ${td(l.last_touch_date ? String(l.last_touch_date).slice(0, 10) : '—', 'white-space:nowrap;')}
+        ${td(i.contact ? String(i.contact).slice(0, 10) + _contactViaHtml({ shared: i.contactShared, via: i.contactVia, own: i.contactOwn }) : '—', 'white-space:nowrap;')}
+        ${td(i.touchAt ? `<span title="${escAttr('Last activity on this lead in Focus: ' + new Date(i.touchAt).toLocaleString('en-ZA'))}">${_localYmd(i.touchAt)}</span>` : '—', 'white-space:nowrap;')}
         ${td(`<button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="openLeadForm(${i.id})">Open</button>` +
              (i.kind === 'wake' ? ` <button class="btn btn-ghost btn-sm" style="padding:2px 8px;font-size:11px;" onclick="dismissWokeReminder(${i.id})" title="Clear this reminder">✕</button>` : ''), 'white-space:nowrap;text-align:right;')}
       </tr>`;
@@ -31981,14 +32175,14 @@ function _attnApply() {
       leadsAll.forEach(i => { const k = +i.lead.owner_id || 0; if (!byOwner.has(k)) byOwner.set(k, []); byOwner.get(k).push(i); });
       const groups = [...byOwner.entries()].sort((a, b) => pName(a[0]).localeCompare(pName(b[0])));
       rowsHtml = groups.map(([oid, list]) =>
-        `<tr><td colspan="6" style="padding:12px 12px 6px;font-size:12px;font-weight:800;color:var(--navy);border-bottom:1px solid var(--border);background:var(--bg2);">${esc(pName(oid))} (${list.length})</td></tr>` + list.map(row).join('')).join('');
+        `<tr><td colspan="7" style="padding:12px 12px 6px;font-size:12px;font-weight:800;color:var(--navy);border-bottom:1px solid var(--border);background:var(--bg2);">${esc(pName(oid))} (${list.length})</td></tr>` + list.map(row).join('')).join('');
     } else rowsHtml = leadsAll.map(row).join('');
     out.innerHTML = `<div class="card" style="padding:16px;">
       <div style="display:flex;gap:26px;flex-wrap:wrap;margin-bottom:4px;">${kpi('Back from Hold', wake.length)}${kpi('Aging Raw', aNew.length, aNew.length > 0)}${kpi('Aging Working', aWork.length, aWork.length > 0)}</div>
       ${leadsAll.length ? `<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;">
-          <thead><tr>${th('Lead')}${th('Owner')}${th('Stage')}${th("Why it's here")}${th('Last touch')}${th('')}</tr></thead>
+          <thead><tr>${th('Lead')}${th('Owner')}${th('Stage')}${th("Why it's here")}${th('Last contact')}${th('Last touch')}${th('')}</tr></thead>
           <tbody>${rowsHtml}</tbody></table></div>
-        <div style="margin-top:10px;font-size:11px;color:var(--text3);">Logging an engagement bumps a lead's last touch and clears it from this list; a Working lead with a future-dated next action stays off it until that action falls overdue.</div>`
+        <div style="margin-top:10px;font-size:11px;color:var(--text3);">Logging a client-facing engagement — on the lead, or anywhere in its client's organisation family — moves a lead's last contact and clears it from this list; a Working lead with a future-dated next action stays off it until that action falls overdue. Last touch is the newest activity on the lead record itself.</div>`
       : `<div style="padding:28px 0 12px;color:var(--text3);font-size:13px;">Nothing needs attention — you're clear.</div>`}
     </div>`;
   } else {
@@ -33081,7 +33275,8 @@ function openLeadInteractionRow(interactionId) {
 // 'client' is an outward touch (a call, a meeting, an email TO someone), while
 // 'internal' is our own effort on the record — proposal prep, research, a session
 // with our own people. Internal work belongs to the record it advances and shows
-// in its history, but it is NOT a touch: it must not move Last Touch or satisfy a
+// in its history — a TOUCH on the record (Last Touch, kept by the database
+// trigger) — but it is NOT contact: it must not move Last Contact or satisfy a
 // cadence step. Without that distinction the only safe place to log prep work was
 // a fake lead, which is exactly what happened (see sql/add_engagement_time.sql).
 function fmtMinutes(m) {
@@ -33120,7 +33315,7 @@ function renderLiModeHint() {
   wrap.style.display = mode === 'internal' ? 'block' : 'none';
   wrap.innerHTML = mode === 'internal'
     ? `<div style="margin:-6px 0 12px;padding:8px 12px;background:#FEF7E6;border:1px solid #E9C46A;border-radius:var(--radius);font-size:12px;color:#7A5B10;">
-         <strong>Our own work.</strong> It stays on this record and counts toward time spent, but it is not contact with the client — Last Touch and the follow-up clock are unaffected.
+         <strong>Our own work.</strong> It stays on this record, counts toward time spent and as a touch on the record, but it is not contact with the client — Last Contact and the follow-up clock are unaffected.
        </div>`
     : '';
 }
@@ -33930,9 +34125,11 @@ function _liAutoStreamLabel() {
   return base + ' #' + n;
 }
 
-// Recompute a lead's last_touch_date from its NEWEST engagement, rather than
-// blindly stamping the saved engagement's date — editing an old engagement
-// (e.g. ticking its next action done) must not rewind Last Touch. extraPatch
+// Recompute a lead's last_touch_date — its own LAST CONTACT (v7.10.22 name;
+// Last Touch, activity on the record, is the database trigger's job) — from its
+// NEWEST client-facing engagement, rather than blindly stamping the saved
+// engagement's date — editing an old engagement
+// (e.g. ticking its next action done) must not rewind Last Contact. extraPatch
 // rides along on the same PATCH (woke_at clearing). Historical rows that
 // pre-date last-touch bookkeeping are backfilled by sql/backfill_last_touch.sql.
 async function bumpLeadLastTouch(leadId, extraPatch, knownTouchDate) {
@@ -34329,7 +34526,7 @@ async function saveLeadInteraction(editId) {
       return;
     }
     // Bump last_touch_date on the lead (create and edit — recomputed from the
-    // newest engagement so editing an OLD engagement can't rewind Last Touch).
+    // newest engagement so editing an OLD engagement can't rewind Last Contact).
     // woke_at: null — a logged touch clears the wake reminder.
     // v7.9.36: a new client-facing engagement is the newest touch by construction
     // (no re-read), and the PATCH hands back the lead row for the reload below.
@@ -34357,7 +34554,7 @@ async function saveLeadInteraction(editId) {
           confirmLabel: 'Decline lead…',
           cancelLabel: 'Keep working',
           message: 'You logged No Further Action. The lead stays in ' + leadStageLabel(leadData.status)
-            + ' with no open obligation, and will surface again through aging if it goes untouched.\n\n'
+            + ' with no open obligation, and will surface again through aging if nobody makes contact.\n\n'
             + 'If it is actually going nowhere, decline it instead — category and reason; sales management reviews the death.',
         });
         if (decline) openDeclineModal();
@@ -35364,12 +35561,12 @@ async function renderSettingsPage() {
           <div class="form-group">
             <label class="form-label">Raw-lead aging escalation (days)</label>
             <input type="number" id="setting-aging-new" class="form-control" min="0" step="1" value="${appSettings['lead_aging_new_days']||''}">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A Raw lead untouched for this many days is escalated on the dashboard to its owner and the sales manager. Empty = off.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A Raw lead with no client contact for this many days is escalated on the dashboard to its owner and the sales manager. Measured on Last Contact — a client-facing engagement on the lead or anywhere in its client's organisation family; editing the record does not count. Empty = off.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Working-lead aging escalation (days)</label>
             <input type="number" id="setting-aging-working" class="form-control" min="0" step="1" value="${appSettings['lead_aging_working_days']||''}">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A Working lead with no touch for this many days is escalated the same way — unless it has an open next action due today or later (a scheduled follow-up isn't neglect; escalation resumes once the action falls overdue). Empty = off.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">A Working lead with no client contact for this many days is escalated the same way — unless it has an open next action due today or later (a scheduled follow-up isn't neglect; escalation resumes once the action falls overdue). Empty = off.</div>
           </div>
         </div>
         <details style="margin-top:2px;">
@@ -35420,8 +35617,8 @@ async function renderSettingsPage() {
           <div class="form-group">
             <label class="form-label">Count promotion engagements?</label>
             <select id="setting-int-count-promo" class="form-control">
-              <option value="true" ${(appSettings['interactions_count_promotion']||'true')==='true'?'selected':''}>Yes — promotions count as touches</option>
-              <option value="false" ${(appSettings['interactions_count_promotion']||'true')!=='true'?'selected':''}>No — manually logged only</option>
+              <option value="true" ${(appSettings['interactions_count_promotion']||'true')==='true'?'selected':''}>Yes — count them in interaction totals</option>
+              <option value="false" ${(appSettings['interactions_count_promotion']||'true')!=='true'?'selected':''}>No — manually logged engagements only</option>
             </select>
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether the engagement written automatically by the Promote flow counts toward interaction totals.</div>
           </div>
@@ -35434,7 +35631,7 @@ async function renderSettingsPage() {
           <div class="form-group">
             <label class="form-label">Leads register — sort by</label>
             <select id="setting-leads-sort-key" class="form-control">
-              ${[['', 'Created (newest first)'], ['target', 'Site'], ['source', 'Source'], ['region', 'Region'], ['branch', 'Branch'], ['qual', 'F A C T score'], ['owner', 'Owner'], ['nxt', 'Next Action'], ['touch', 'Last Touch (days since)']]
+              ${[['', 'Created (newest first)'], ['target', 'Site'], ['source', 'Source'], ['region', 'Region'], ['branch', 'Branch'], ['qual', 'F A C T score'], ['owner', 'Owner'], ['nxt', 'Next Action'], ['contact', 'Last Contact (days since)'], ['touch', 'Last Touch (days since)']]
                 .map(([v, l]) => `<option value="${v}" ${(appSettings['leads_default_sort_key'] || '') === v ? 'selected' : ''}>${escHtml(l)}</option>`).join('')}
             </select>
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">Applies to every status tab on the Leads Register. "Created (newest first)" is the classic behaviour.</div>
@@ -35445,7 +35642,7 @@ async function renderSettingsPage() {
               <option value="asc"  ${(appSettings['leads_default_sort_dir'] || 'asc') !== 'desc' ? 'selected' : ''}>Ascending</option>
               <option value="desc" ${(appSettings['leads_default_sort_dir'] || 'asc') === 'desc' ? 'selected' : ''}>Descending</option>
             </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Ignored for "Created (newest first)". For Last Touch: ascending puts the most recently touched on top, descending the most neglected.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Ignored for "Created (newest first)". For Last Contact and Last Touch: ascending puts the most recent on top, descending the most neglected.</div>
           </div>
         </div>
       </div>
