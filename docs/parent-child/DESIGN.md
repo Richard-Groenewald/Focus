@@ -2,7 +2,7 @@
 
 Richard, 1 November 2026: "we need to rethink parent/child relationships. 1. Parents will mostly be an actual organisation and not just a grouping. grouping should still be allowed by request. 2. If parent is actual company, it should be listed first when displaying."
 
-Status: DESIGN, not built. A 50-agent critique against the code and production data (1 November) confirmed 43 corrections, all folded in. Decisions for Richard are marked **Decide** and collected in section 8.
+Status: DESIGN AGREED 1 November 2026 (all eleven decisions settled, section 8), not yet built. A 50-agent critique against the code and production data confirmed 43 corrections, all folded in. **Decide n** marks in the text refer to section 8.
 
 ## 1. Where we are
 
@@ -106,19 +106,21 @@ The company-level lead cannot be derived from `sites` rows (section 1): `is_hq B
 - Her 32 pointer engagements ("See PARENT" / "See all engagement under SAB - HQ": Clover 4379–4393, Premier 4831–4842, Sasol 4795–4797 and 4843–4847, SAB 4260–4269) are Notes with `work_mode` client, so each counts as that site lead's own contact; the family switch masks them today, and they would resurface as stale contact if Decide 2 lands on off. **Decide 10**: after she confirms, retype them to `work_mode` internal (a touch, never a contact) and recompute `last_touch_date` on those leads in one attributed, system-marked transaction.
 - Group engagements she never used become "an engagement with &lt;organisation&gt;" and stop being the only way to engage the company.
 
-## 8. Decisions for Richard
+## 8. Decisions — settled by Richard, 1 November 2026
 
-1. **Pan African Resources PLC** becomes a grouping (it owns nothing), or stays a company you might one day sell to?
-2. **"Family acts as one" default** for a company parent with subsidiaries. The switch gates three things at once — a subsidiary's or sister site's contact counting as every member's Last Contact and quieting its aging nag, and one member entering Working or Nurture pulling the others. On today, for every family. Off would be a per-row write on 4001 and 4084 plus a rule for parents created later.
-3. **Revenue Pipeline "Client family"** grouping — wanted?
-4. **HQ**: tag wording ("HQ", "Head office", "PARENT"), and is a one-lead organisation's only lead HQ by default?
-5. **Inside a band**: pin the root's rows first and leave the rest in the user's sort (recommended), or re-sort per organisation (parent's rows, then each child's)?
-6. **Who may declare a grouping** — `manage_organisations` (Admin and Sales Manager) or Admin only?
-7. **May a grouping carry contacts** (a Group Risk Manager, group procurement)? Recommended yes.
-8. **Seeded family notes**: clear the 15 of 23 that are backfill text?
-9. **Manage Clients default order**: hierarchical (parent, ↳ children) or keep the current order?
-10. **The 32 pointer engagements**: retype to internal after Lesley-Anne confirms?
-11. Out of scope but to state: no single-organisation family's sites become child organisations; that stays a hand decision.
+All eleven went with the recommendation:
+
+1. **Pan African Resources PLC becomes a grouping** (`org_kind = 'grouping'`, `is_client = false`).
+2. **"Family acts as one" stays on by default** for every family; switched off per family by hand when a subsidiary is a separate pursuit.
+3. **Revenue Pipeline gains a "Client family" group-by** as a second option beside Client.
+4. **HQ**: the tag reads **HQ**; nothing is HQ by default — the tick is for a company-level lead that sits beside site leads. Seed: 4064, 4067, 4188, 4059, 4156.
+5. **Inside a band the parent's own rows are pinned first; every other row keeps the user's sort.** No per-organisation re-sort.
+6. **Only Admin may declare a grouping** (`currentUser.isAdmin` or the `all` permission, like the lead-origin unlock).
+7. **A grouping may carry contacts**; leads, deals, sites and quotes it may not. `person_organisation_roles` is outside the guard.
+8. **Seeded family notes**: the 15 backfill texts are cleared in the migration; the 8 real ones stay.
+9. **Manage Clients and Admin → Organisations default to family order** (parent, ↳ children), the user's column sort still available.
+10. **Lesley-Anne's 32 pointer notes are retyped to our own work** (`work_mode = 'internal'`) and those leads' own contact dates recomputed — after she confirms, as the last step of the release.
+11. **Sites stay sites.** No site becomes a child organisation unless it needs its own Pastel account or contract.
 
 ## 9. Release shape
 
