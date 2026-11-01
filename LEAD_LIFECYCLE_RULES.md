@@ -151,6 +151,21 @@ future approval types join the same widget.
 - Nurture leads kept under the new semantics (owners set cadences); Hold started empty.
 - Dormant fully retired.
 
+## Family cohesion (v7.9.11, gate changed v7.10.25)
+
+Leads on organisations of one FAMILY — a parent company or a grouping and the organisations linked under it
+(`organisations.parent_org_id`) — move together through the early stages when the family's one switch,
+**Family acts as one** (`organisations.group_touch_soothes` on the family's root, default on), is on:
+
+- One member entering **Working** or **Nurture** pulls every sibling below that stage up to it (Raw → Working →
+  Nurture, never down; Hold, Review, Promoted and Dead members are left alone). A sibling needs a site, nothing more.
+- A NEW lead on a family that has already reached Working or Nurture joins at that stage.
+- Waking from Hold is not cohesive — a lead wakes alone.
+- The same switch shares **Last Contact** across the family (contact with any member counts for every member).
+
+The switch is the only gate (v7.10.25; until then a family also had to be "born" by a second pursuit or be
+multi-organisation). A family of one has nothing to pull. Switch it off on the family page for a subsidiary
+that is pursued on its own.
 ## Supersedes
 
 - Hold/Nurture entry approval + declined-Hold/Nurture path (2026-08-12 — entry is direct)
