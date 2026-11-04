@@ -22,14 +22,15 @@
 --     deals have none today — and the owner collaborator row where it is missing;
 --   • one INTERNAL 'Note' engagement on each lead recording the backfill (work_mode internal: our own
 --     bookkeeping, never a client contact, so Last Contact is untouched).
--- Timestamps (Option A, recommended): the lead is born two minutes before its deal and promoted ten
--- seconds after it — the shape of a lead created and promoted in one sitting, which is what happened in
--- substance. Nothing is pre-dated to August.
+-- Timestamps (Richard 2026-11-04: "1. pre-dated 2. Rudzani 3. keep"): each lead is born beside its sibling
+-- lead 4157 on 2026-08-04 (one and two minutes after it), enters Working and Qualified at 4157's own
+-- moments that day (the Matla site-visit chain), and is promoted ten seconds after its deal was captured
+-- on 2026-10-01 — the same ten-second gap 4157's own promotion shows.
 -- Idempotent: every statement is guarded by the state it expects (a deal that already has a lead is
 -- skipped). PROD only — DEV holds neither deal (it was cloned on 2026-09-30, the deals were captured on
 -- 2026-10-01). Dry run on PROD in a rolled-back transaction by Claude 2026-11-04: leads 4252 / 4253,
 -- promotion engagements 4899 / 4900, trails and streams as intended, 14 audit rows, nothing kept.
--- NOT RUN LIVE — awaiting Richard's approval of the plan.
+-- RUN ON PROD by Claude 2026-11-04 on Richard's "1. pre-dated 2. Rudzani 3. keep — run it on prod" (the dated form below).
 
 BEGIN;
 SELECT set_config('request.headers', '{"x-actor-id":"4128","x-real-actor-id":"1"}', true);
@@ -51,7 +52,7 @@ WITH ins AS (
                      working_at, first_engaged_at, qualified_at, promoted_at, promoted_deal_id,
                      last_touch_date, last_touch_at, last_touch_by,
                      contacts, additional_contacts, is_hq)
-  SELECT 'Promoted', d.owner_id, d.created_by, d.created_at - interval '2 minutes', d.created_at + interval '10 seconds',
+  SELECT 'Promoted', d.owner_id, d.created_by, s.created_at + (d.id - 4293) * interval '1 minute', d.created_at + interval '10 seconds',
          3003, 1,
          d.org_id, d.site_id, 4117,
          d.region_id, d.branch_id, d.service_major_id, d.service_sub_id, ARRAY[d.service_major_id],
@@ -59,11 +60,12 @@ WITH ins AS (
          nullif(d.notes, ''),
          (SELECT sum(m.opportunity_revenue) FROM revenue_streams s JOIN revenue_stream_months m ON m.stream_id = s.id
            WHERE s.deal_id = d.id AND s.stream_type = 'opportunity'),
-         d.created_at - interval '2 minutes', d.created_at - interval '2 minutes', d.created_at - interval '2 minutes',
+         s.working_at, s.first_engaged_at, s.qualified_at,
          d.created_at + interval '10 seconds', d.id,
          d.created_at::date, d.created_at + interval '10 seconds', d.owner_id,
          '[]'::jsonb, '[]'::jsonb, false
     FROM deals d
+    JOIN leads s ON s.id = 4157 AND s.promoted_deal_id = 4287   -- the sibling whose dates these follow
    WHERE d.id IN (4294, 4295) AND d.org_id = 4173
      AND NOT EXISTS (SELECT 1 FROM leads l WHERE l.promoted_deal_id = d.id)
   RETURNING id, promoted_deal_id, promoted_at)
@@ -71,14 +73,14 @@ INSERT INTO t_map (deal_id, lead_id, t0) SELECT promoted_deal_id, id, promoted_a
 
 ALTER TABLE leads ENABLE TRIGGER leads_log_stage_event;
 
--- 2. The reconstructed stage trail (the same four steps lead 4157 shows)
+-- 2. The reconstructed stage trail (the same four steps lead 4157 shows, at the lead's own column dates)
 INSERT INTO lead_stage_events (lead_id, from_status, to_status, at, actor_id, source)
-SELECT m.lead_id, v.from_s, v.to_s, m.t0 + v.off, 4105, 'backfill'
-  FROM t_map m
-  CROSS JOIN LATERAL (VALUES (NULL,        'New',       interval '-2 minutes'),
-                             ('New',       'Working',   interval '-2 minutes' + interval '1 second'),
-                             ('Working',   'Qualified', interval '-2 minutes' + interval '2 seconds'),
-                             ('Qualified', 'Promoted',  interval '10 seconds')) AS v(from_s, to_s, off)
+SELECT m.lead_id, v.from_s, v.to_s, v.at, 4105, 'backfill'
+  FROM t_map m JOIN leads l ON l.id = m.lead_id
+  CROSS JOIN LATERAL (VALUES (NULL,        'New',       l.created_at),
+                             ('New',       'Working',   l.working_at),
+                             ('Working',   'Qualified', l.qualified_at),
+                             ('Qualified', 'Promoted',  l.promoted_at)) AS v(from_s, to_s, at)
 ON CONFLICT DO NOTHING;
 
 -- 3. The Promotion engagement on each deal, then made the head of its Sales stream
@@ -121,7 +123,7 @@ INSERT INTO engagements (lead_id, engagement_date, engagement_type, activity_typ
 SELECT m.lead_id, current_date, 'Note', 7,
        'Lead record backfilled by Richard Groenewald on ' || to_char(current_date, 'YYYY-MM-DD') || ' (recorded by Claude Code): '
        || 'opportunity #' || m.deal_id || ' "' || d.name || '" was captured directly in Opportunities on '
-       || to_char(d.created_at, 'YYYY-MM-DD') || '; this lead and its promotion were reconstructed so the Exxaro record reads as its sibling lead 4157 does.',
+       || to_char(d.created_at, 'YYYY-MM-DD') || '; this lead and its promotion were reconstructed, dated beside its sibling lead 4157, so the Exxaro record reads as that one does.',
        true, 1, now(), 'internal', '[]'::jsonb
   FROM t_map m JOIN deals d ON d.id = m.deal_id;
 
