@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.25 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.26 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.25 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.26 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -4155,20 +4155,8 @@ function showPage(page) {
   _logActivity(page);   // v7.9.85: pages visited
   applyViewerScopeDefaults();
 
-  // Update nav highlight
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  const activeNav = document.getElementById('nav-' + page);
-  if (activeNav) activeNav.classList.add('active');
-
-  // Sidebar accordion: collapse all sections/subgroups, then open only the
-  // active page's section (and its subgroup, if any).
-  document.querySelectorAll('.nav-section-items,.nav-subsection-items').forEach(el => el.classList.add('collapsed'));
-  document.querySelectorAll('.nav-section-collapsible,.nav-subsection').forEach(el => el.classList.add('collapsed'));
-  if (activeNav) {
-    const openWrap = w => { if (!w) return; w.classList.remove('collapsed'); const b = w.previousElementSibling; if (b) b.classList.remove('collapsed'); };
-    openWrap(activeNav.closest('.nav-subsection-items'));
-    openWrap(activeNav.closest('.nav-section-items'));
-  }
+  // Update nav highlight and the sidebar accordion
+  navHighlight(page);
 
   // Update topbar
   document.getElementById('page-title').textContent = cfg.title;
@@ -5970,12 +5958,41 @@ const MENU = [
 
 ];
 
+// ── Hidden menu items (v7.10.26, Richard 2026-11-04: "for a demo tomorrow log in as Richard and not see
+// Capture time and outreach in prod"). settings.nav_hidden holds comma-separated keys — a page key
+// ('leads'), 'capture_time', or 'section:<section name>' ('section:Outreach Activities'). The sidebar
+// skips those entries for EVERY login, Admin included, which permissions cannot do (an Admin passes
+// every can() check). Nothing else changes: the pages stay reachable by a direct link and the user's
+// rights are untouched. Edited at Site Admin → Settings → Hidden menu items; the key is upserted, so
+// no SQL is needed and an absent key hides nothing.
+function navHiddenSet() {
+  return new Set(String(appSettings['nav_hidden'] || '').split(',').map(k => k.trim()).filter(Boolean));
+}
+// The sidebar's highlight + accordion for one page (split out of showPage so a rebuilt sidebar can
+// restore it without re-rendering the page).
+function navHighlight(page) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const activeNav = document.getElementById('nav-' + page);
+  if (activeNav) activeNav.classList.add('active');
+  // Sidebar accordion: collapse all sections/subgroups, then open only the
+  // active page's section (and its subgroup, if any).
+  document.querySelectorAll('.nav-section-items,.nav-subsection-items').forEach(el => el.classList.add('collapsed'));
+  document.querySelectorAll('.nav-section-collapsible,.nav-subsection').forEach(el => el.classList.add('collapsed'));
+  if (activeNav) {
+    const openWrap = w => { if (!w) return; w.classList.remove('collapsed'); const b = w.previousElementSibling; if (b) b.classList.remove('collapsed'); };
+    openWrap(activeNav.closest('.nav-subsection-items'));
+    openWrap(activeNav.closest('.nav-section-items'));
+  }
+}
+
 function buildNav(navigate = true) {
   const nav = document.getElementById('sidebar-nav');
   if (!nav) return;
   let html = '';
   let firstPage = null;
   let subgroupCounter = 0;
+  const hidden = navHiddenSet();   // v7.10.26: entries switched off in Settings, for everyone
+  const shown = item => can(item.permission) && !hidden.has(item.page);
 
   // Helper: render one item button
   const renderItem = (item) => {
@@ -5990,7 +6007,7 @@ function buildNav(navigate = true) {
   html += renderItem({ page: 'dashboard', label: 'Dashboard', icon: '<path d="M1 1h6v6H1zM9 1h6v6H9zM1 9h6v6H1zM9 9h6v6H9z"/>' });
   // v7.9.98: the mobile timesheet is its own page (/time); v7.10.08: it opens in a modal over the page
   // (openTimeCapture) for anyone who captures time — the modal's header still offers a tab of its own.
-  if (can('capture_time')) html += `<button class="nav-item" id="nav-open-time" onclick="openTimeCapture()">
+  if (can('capture_time') && !hidden.has('capture_time')) html += `<button class="nav-item" id="nav-open-time" onclick="openTimeCapture()">
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="M8 4.5V8l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
       Capture Time
     </button>`;
@@ -6012,12 +6029,13 @@ function buildNav(navigate = true) {
   for (const section of sections) {
     // Section-level show/hide permission gates the whole section (admins bypass via can()).
     if (section.permission && !can(section.permission)) continue;
+    if (hidden.has('section:' + section.section)) continue;   // v7.10.26
     // Sections with subgroups: filter visible items per subgroup, skip empty subgroups.
     // A section may ALSO carry direct top-level items (rendered above the subgroups).
     if (section.subgroups) {
-      const directItems = (section.items || []).filter(item => can(item.permission));
+      const directItems = (section.items || []).filter(shown);
       const visibleSubgroups = section.subgroups
-        .map(sg => ({ ...sg, items: sg.items.filter(item => can(item.permission)) }))
+        .map(sg => ({ ...sg, items: sg.items.filter(shown) }))
         .filter(sg => sg.items.length);
       if (!visibleSubgroups.length && !directItems.length) continue;
       const secId = 'sec-' + (sectionCounter++);
@@ -6040,7 +6058,7 @@ function buildNav(navigate = true) {
       continue;
     }
     // Legacy sections with flat items list
-    const visibleItems = section.items.filter(item => can(item.permission));
+    const visibleItems = section.items.filter(shown);
     if (!visibleItems.length) continue;
     const secId = 'sec-' + (sectionCounter++);
     html += `<button class="nav-section-collapsible collapsed" onclick="toggleSection('${secId}', this)"><span>${section.section}</span><span class="nav-section-chevron"></span></button><div class="nav-section-items collapsed" id="${secId}">`;
@@ -36040,6 +36058,11 @@ async function renderSettingsPage() {
         </div>
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Hidden menu items</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Tick an entry to take it off the sidebar for <strong>everyone, Admins included</strong> — for a demo, or a part of Focus not in use yet. Permissions are unchanged: this hides the menu entry and nothing else. Untick to bring it back. The Dashboard is always shown.</div>
+        ${navHiddenSettingHtml()}
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Interactions Widget</div>
         <div class="form-row-3">
           <div class="form-group">
@@ -36215,6 +36238,27 @@ async function runOrgMerge() {
   } finally { if (btn) btn.disabled = false; }
 }
 
+// v7.10.26: the tick list behind Settings → Hidden menu items — one tick per sidebar section, item and
+// the Capture Time button, drawn from MENU so a new page is offered without touching this list.
+function navHiddenSettingHtml() {
+  const hidden = navHiddenSet();
+  const tick = (key, label, style) => `<label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;${style || ''}">
+      <input type="checkbox" class="setting-nav-hidden" value="${escAttr(key)}" ${hidden.has(key) ? 'checked' : ''} style="accent-color:var(--red);">${escHtml(label)}</label>`;
+  let html = `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;">`;
+  html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;">${tick('capture_time', 'Capture Time', 'font-weight:700;')}</div>`;
+  for (const section of MENU) {
+    html += `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:8px 12px;min-width:200px;">`;
+    html += tick('section:' + section.section, section.section, 'font-weight:700;');
+    for (const item of (section.items || [])) html += tick(item.page, item.label, 'margin-left:18px;');
+    for (const sg of (section.subgroups || [])) {
+      html += `<div style="font-size:11px;color:var(--text3);margin:6px 0 2px 18px;text-transform:uppercase;letter-spacing:0.04em;">${escHtml(sg.label)}</div>`;
+      for (const item of sg.items) html += tick(item.page, item.label, 'margin-left:30px;');
+    }
+    html += `</div>`;
+  }
+  return html + `</div>`;
+}
+
 async function saveSettings() {
   try {
     const fyStart = document.getElementById('setting-fy-start').value;
@@ -36254,6 +36298,7 @@ async function saveSettings() {
       proposal_default_validity_days: numSetting('setting-validity-days', 1, 365, 30, true),
       proposal_xone_psira_no:         (document.getElementById('setting-psira-no')?.value || '').trim(),
       legacy_notes_viewers:           [...document.querySelectorAll('.setting-legacy-viewer:checked')].map(cb => cb.value).join(','),   // v7.10.16
+      nav_hidden:                     [...document.querySelectorAll('.setting-nav-hidden:checked')].map(cb => cb.value).join(','),      // v7.10.26
     };
     const upsertSetting = async (key, value) => {
       const r = await api('settings', 'PATCH', { value, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
@@ -36280,6 +36325,7 @@ async function saveSettings() {
     ]);
 
     Object.assign(appSettings, commercial);
+    buildNav(false); navHighlight(currentPage);   // v7.10.26: the sidebar shows the new hidden set at once
     // Show what was stored: numSetting clamps, rounds and fills a blank box, so the typed value may differ.
     const commercialInputs = { rsg_probability_cap: 'setting-early-prob', default_margin_no_service: 'setting-fallback-margin', default_term_annuity: 'setting-term-annuity', default_term_project: 'setting-term-project', proposal_vat_pct: 'setting-vat-pct', proposal_default_validity_days: 'setting-validity-days', proposal_xone_psira_no: 'setting-psira-no' };
     Object.entries(commercialInputs).forEach(([k, id]) => { const el = document.getElementById(id); if (el) el.value = commercial[k]; });
