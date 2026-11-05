@@ -321,11 +321,12 @@ async function handleFiles(req: Request, url: URL): Promise<Response> {
 // Sign-in is by TYPED username (= first name, case-insensitive); nothing pre-login
 // enumerates accounts. Never returns a hash, a salt, or any hint about which half
 // of a wrong pair was wrong. Failures are deliberately uniform.
-// MAINTENANCE MODE (2026-10-07): Focus is on-line for the system_users ids below only
-// (4 = Richard, 12 = Lesley-Anne); everyone else is turned away at sign-in and on every
-// proxied call, and the client sends them to /maintenance.html. To open Focus to all,
-// set MAINTENANCE_ON to false and redeploy this function (prod AND test).
-const MAINTENANCE_ON = true;
+// MAINTENANCE MODE: while MAINTENANCE_ON is true, Focus is on-line for the system_users
+// ids in MAINTENANCE_ALLOW only (4 = Richard, 12 = Lesley-Anne); everyone else is turned
+// away at sign-in and on every proxied call, and the client sends them to /maintenance.html.
+// Switched on 2026-10-07; switched OFF 2026-11-05 on Richard's "take away maintenance
+// screen for everyone" (v7.10.27). Flip it and redeploy this function (prod AND test).
+const MAINTENANCE_ON = false;
 const MAINTENANCE_ALLOW = [4, 12];
 const maintenanceBlocks = (userId: unknown) => MAINTENANCE_ON && !MAINTENANCE_ALLOW.includes(+(userId as any));
 

@@ -301,7 +301,7 @@ async function handleFiles(event, key) {
 // (4 = Richard, 12 = Lesley-Anne); everyone else is turned away at sign-in and on every
 // proxied call, and the client sends them to /maintenance.html. To open Focus to all,
 // set MAINTENANCE_ON to false (or delete this block and its three uses).
-const MAINTENANCE_ON = true;
+const MAINTENANCE_ON = false;   // off since 2026-11-05 (v7.10.27); see supabase/functions/sb/index.ts
 const MAINTENANCE_ALLOW = [4, 12];
 function maintenanceBlocks(userId) { return MAINTENANCE_ON && !MAINTENANCE_ALLOW.includes(+userId); }
 
