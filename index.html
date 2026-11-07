@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.28 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.29 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.28 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.29 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -11755,23 +11755,37 @@ function renderPbPlaceholderTab(title, blurb) {
 }
 
 function renderBasicInfoTab() {
+  // v7.10.29 layout (Richard's Quote Layout Designer spec, 2026-11-07): one 560px block at the left —
+  // row 1 name · quote date · valid until; row 2 client (sandbox) · start date · duration;
+  // row 3 margin · shifts/day · status; then Notes as a tall box the width of the block.
   const q = pbQ;
-  return '<div class="pb-qheader"><div style="display:grid;grid-template-columns:repeat(6, minmax(0,1fr));gap:10px;">' +
-      '<div class="form-group"><label class="form-label">Contract name</label><input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Quote date</label><input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Start date</label><input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Duration (mo)</label><input class="form-control" type="number" min="1" value="' + pbEsc(q.contract_duration_months) + '" onchange="pbSaveQuoteField(\'contract_duration_months\', +this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Shifts/day</label><select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
-        [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select></div>' +
-      '<div class="form-group"><label class="form-label">Margin %</label><input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)"></div>' +
-    '</div><div style="display:grid;grid-template-columns:' + (q.is_sandbox ? '1fr 1fr 1fr 1fr' : '1fr 1fr 2fr') + ';gap:10px;margin-top:10px;">' +
-      (q.is_sandbox ? '<div class="form-group"><label class="form-label">Client (label only)</label><input class="form-control" type="text" placeholder="Free text — links to nothing" value="' + pbEsc(q.sandbox_client_name || '') + '" onchange="pbSaveQuoteField(\'sandbox_client_name\', this.value || null)"></div>' : '') +
-      (q.is_sandbox
-        ? '<div class="form-group"><label class="form-label">Status</label><input class="form-control" type="text" value="Sandbox" readonly style="background:var(--bg);color:var(--text2);cursor:default;"></div>'
-        : '<div class="form-group"><label class="form-label">Status</label><select class="form-control" onchange="pbSaveQuoteField(\'status\', this.value)">' +
-          ['draft','sent','accepted','rejected','lost','expired'].map(s => '<option value="' + s + '" ' + (s===q.status?'selected':'') + '>' + s + '</option>').join('') + '</select></div>') +
-      '<div class="form-group"><label class="form-label">Valid until</label><input class="form-control" type="date" value="' + pbEsc(q.valid_until || '') + '" onchange="pbSaveQuoteField(\'valid_until\', this.value || null)"></div>' +
-      '<div class="form-group"><label class="form-label">Notes</label><input class="form-control" type="text" value="' + pbEsc(q.notes || '') + '" onchange="pbSaveQuoteField(\'notes\', this.value)"></div>' +
+  const fg = (label, control) => '<div class="form-group" style="margin:0;"><label class="form-label">' + label + '</label>' + control + '</div>';
+  const row = (cols, cells) => '<div style="display:grid;grid-template-columns:' + cols + ';gap:10px;margin-bottom:10px;">' + cells.join('') + '</div>';
+  const clientCell = q.is_sandbox
+    ? fg('Client (label only)', '<input class="form-control" type="text" placeholder="Free text — links to nothing" value="' + pbEsc(q.sandbox_client_name || '') + '" onchange="pbSaveQuoteField(\'sandbox_client_name\', this.value || null)">')
+    : '<div></div>';
+  const statusCell = q.is_sandbox
+    ? fg('Status', '<input class="form-control" type="text" value="Sandbox" readonly style="background:var(--bg);color:var(--text2);cursor:default;">')
+    : fg('Status', '<select class="form-control" onchange="pbSaveQuoteField(\'status\', this.value)">' +
+        ['draft','sent','accepted','rejected','lost','expired'].map(s => '<option value="' + s + '" ' + (s===q.status?'selected':'') + '>' + s + '</option>').join('') + '</select>');
+  return '<div class="pb-qheader"><div style="width:560px;max-width:100%;">' +
+    row('290px 120px 130px', [
+      fg('Contract name', '<input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)">'),
+      fg('Quote date', '<input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)">'),
+      fg('Valid until', '<input class="form-control" type="date" value="' + pbEsc(q.valid_until || '') + '" onchange="pbSaveQuoteField(\'valid_until\', this.value || null)">'),
+    ]) +
+    row('290px 120px 130px', [
+      clientCell,
+      fg('Start date', '<input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)">'),
+      fg('Duration (mo)', '<input class="form-control" type="number" min="1" value="' + pbEsc(q.contract_duration_months) + '" onchange="pbSaveQuoteField(\'contract_duration_months\', +this.value)">'),
+    ]) +
+    row('70px 70px 150px', [
+      fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)">'),
+      fg('Shifts/day', '<select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
+        [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select>'),
+      statusCell,
+    ]) +
+    fg('Notes', '<textarea class="form-control" style="height:240px;resize:vertical;" onchange="pbSaveQuoteField(\'notes\', this.value)">' + pbEsc(q.notes || '') + '</textarea>') +
     '</div></div>';
 }
 
