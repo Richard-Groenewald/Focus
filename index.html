@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.28 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.30 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.28 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.30 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2443,6 +2443,16 @@ function _mockSeed() {
     quote_training_costs: [],
     quote_contract_accessories: [],
     quote_workforce_adjustments: [],
+    // v7.10.30 Site Mobility: types, dated supplier rates (36-month quotes, plus a 48-month one for the bakkie), fuel prices, extras.
+    quote_vehicle_types: [['Light patrol car (1.0 - 1.2 hatchback)','petrol',4.9],['Single cab bakkie (2.4 diesel)','diesel',8.1],['14-seater staff transport','diesel',9.8],['Quad bike (estate perimeter)','petrol',6.5]]
+      .map((x, i) => ({ id: i + 1, name: x[0], fuel_type: x[1], fuel_economy: x[2], display_order: i + 1, active: true, in_use_date: '2025-01-01', retired_date: null, created_at: now })),
+    quote_vehicle_rates: [[1,36,1500,5890,640,199,2.10],[1,36,2500,6650,640,199,2.10],[2,36,2000,12450,1180,199,3.20],[2,36,3000,13900,1180,199,3.20],[3,36,3000,17800,1620,199,3.90],[4,36,800,3450,410,149,1.80],[2,48,2000,13100,1180,199,3.20]]
+      .map((x, i) => ({ id: i + 1, vehicle_type_id: x[0], effective_date: '2025-01-01', contract_months: x[1], inclusive_km: x[2], monthly_rate: x[3], rate_incl_vat: false, insurance_monthly: x[4], tracking_monthly: x[5], excess_km_rate: x[6], supplier: 'Avis Fleet', note: '', created_at: now })),
+    quote_fuel_prices: [{ id: 1, effective_date: '2025-01-01', fuel_type: 'petrol', price_per_litre: 22.10, created_at: now }, { id: 2, effective_date: '2025-01-01', fuel_type: 'diesel', price_per_litre: 20.85, created_at: now }],
+    quote_vehicle_extras: [['Dash camera',2850,36,15.83],['Roof light bar',1440,36,0],['Two-way radio (vehicle)',3200,48,0]]
+      .map((x, i) => ({ id: i + 1, name: x[0], effective_date: '2025-01-01', acquisition_cost: x[1], life_months: x[2], monthly_cost: x[3], retired_date: null, display_order: i + 1, created_at: now })),
+    quote_vehicles: [],
+    quote_vehicle_extra_lines: [],
     quote_condition_rules: [],
     quote_condition_rule_members: [],
     quote_annual_escalations: [2025, 2026, 2027].flatMap((y, i) => [
@@ -3320,6 +3330,7 @@ const PAGES = {
   pb_conditional_criteria:  { title: 'Proposal Builder — Conditions & Rules', custom: true, readOnly: true, columns: [], fields: [] },
   pb_standard_names:        { title: 'Proposal Builder — Standard Posts & Headings', custom: true, readOnly: true, columns: [], fields: [] },   /* v7.9.74: one page, two tabs */
   pb_uniform_types:         { title: 'Proposal Builder — Uniform Types',    custom: true, readOnly: true, columns: [], fields: [] },
+  pb_site_mobility:         { title: 'Proposal Builder — Site Mobility',    custom: true, readOnly: true, columns: [], fields: [] },   /* v7.10.30: vehicle types, supplier rates, fuel prices, extras */
   pb_support_items:         { title: 'Proposal Builder — Support Items',    custom: true, readOnly: true, columns: [], fields: [] },   /* v7.9.74: Workforce / Contract / Service as tabs */
   pb_training_courses:      { title: 'Proposal Builder — Training Courses',  custom: true, readOnly: true, columns: [], fields: [] },
   pb_proposal_templates:    { title: 'Proposal Builder — Proposal Templates', custom: true, readOnly: true, columns: [], fields: [] },
@@ -4314,6 +4325,7 @@ async function loadTable(page) {
     if (page === 'pb_conditional_criteria')   { await renderPbConditionalCriteriaPage(); return; }
     if (page === 'pb_standard_names')         { await renderPbStandardNamesPage(); return; }   // v7.9.74: Standard Posts + Standard Headings on one page
     if (page === 'pb_uniform_types')          { await renderPbItemCatalogPage('uniform'); return; }
+    if (page === 'pb_site_mobility')          { await renderPbSiteMobilityPage(); return; }   // v7.10.30
     if (page === 'pb_support_items')          { await renderPbSupportItemsPage(); return; }   // v7.9.74: workforce / contract / service as tabs
     if (page === 'pb_training_courses')       { await renderPbItemCatalogPage('training');  return; }
     if (page === 'pb_proposal_templates')     { await renderPgTemplatesPage(); return; }
@@ -5890,6 +5902,8 @@ const MENU = [
             icon: '<path d="M5 2l3 2 3-2 2 3-2 1.5V14H5V6.5L3 5z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>' },
           { page: 'pb_support_items',         label: 'Support Items',               permission: 'administer_quote_rates',
             icon: '<rect x="3" y="2" width="10" height="12" rx="2"/><path d="M6 6h4M6 9h4" stroke="white" stroke-width="1.2" stroke-linecap="round"/>' },
+          { page: 'pb_site_mobility',         label: 'Site Mobility',               permission: 'administer_quote_rates',
+            icon: '<path d="M2 10h1l1.5-4h7L13 10h1v3h-1.5a1.5 1.5 0 0 1-3 0h-3a1.5 1.5 0 0 1-3 0H2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/>' },
           { page: 'pb_training_courses',      label: 'Training Courses',            permission: 'administer_quote_rates',
             icon: '<path d="M2 6l6-3 6 3-6 3-6-3z"/><path d="M5 8v3c0 1 1.5 2 3 2s3-1 3-2V8" fill="none" stroke="currentColor" stroke-width="1.4"/>' },
           { page: 'pb_proposal_templates',    label: 'Proposal Templates',          permission: 'administer_quote_rates',
@@ -9034,7 +9048,14 @@ async function openQuote(id) {
       apiGet('quote_uniform_types', 'select=*&order=display_order,id').catch(() => []),          // v7.9.65
       apiGet('quote_uniform_type_costs', 'select=*').catch(() => []),                            // v7.9.65
       apiGet('quote_support_subcategories', 'select=*&order=display_order,id').catch(() => []),  // v7.9.71 (absent table → none)
-    ]).catch(() => [[], [], [], [], [], [], [], [], []]);
+      // v7.10.30 Site Mobility: the vehicle catalogues (types, dated supplier rates, fuel prices, extras) and
+      // this quote's vehicle lines. An absent table (sql/add_site_mobility.sql not run) reads as none and the tab says so.
+      apiGet('quote_vehicle_types', 'select=*&order=display_order,id').then(r => { _pbMobilityMissing = false; return r; }).catch(e => { if (/^404\b|PGRST205/.test((e && e.message) || '')) _pbMobilityMissing = true; return []; }),
+      apiGet('quote_vehicle_rates', 'select=*').catch(() => []),
+      apiGet('quote_fuel_prices', 'select=*').catch(() => []),
+      apiGet('quote_vehicle_extras', 'select=*&order=display_order,id').catch(() => []),
+      apiGet('quote_vehicles', 'quote_id=eq.' + id + '&select=*&order=display_order,id').catch(() => []),
+    ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], []]);
     // v7.10.28: the rate cards the labour engine prices off, whole (judged as at the contract start
     // date in the browser), and the quote's site for the posts' default area. An absent table
     // reads as no rates: the engine then says what is missing.
@@ -9084,6 +9105,15 @@ async function openQuote(id) {
     allData['quote_uniform_types'] = cats[6] || [];        // v7.9.65
     allData['quote_uniform_type_costs'] = cats[7] || [];   // v7.9.65
     allData['quote_support_subcategories'] = cats[8] || [];   // v7.9.71
+    allData['quote_vehicle_types'] = cats[9] || [];           // v7.10.30
+    allData['quote_vehicle_rates'] = cats[10] || [];
+    allData['quote_fuel_prices'] = cats[11] || [];
+    allData['quote_vehicle_extras'] = cats[12] || [];
+    pbVehicles = (cats[13] || []).map(v => Object.assign({}, v, { extras: [] }));
+    if (pbVehicles.length) {
+      const xl = await apiGet('quote_vehicle_extra_lines', 'quote_vehicle_id=in.(' + pbVehicles.map(v => v.id).join(',') + ')&select=*&order=id').catch(() => []);
+      xl.forEach(x => { const v = pbVehicles.find(q => +q.id === +x.quote_vehicle_id); if (v) v.extras.push(x); });
+    }
     allData['quote_statutory_allowances'] = statAllow;
     allData['quote_discretionary_allowances'] = discAllow;
     allData['quote_discretionary_incentives'] = discInc;
@@ -9135,6 +9165,8 @@ async function openQuote(id) {
     pbViewMode = 'editor'; pbExpandedPosts = new Set(); pbDetailToggled = new Set(); pbPromptShown = {};
     _wfState.editing = null; _wfState.open = new Set();   // v7.9.70: a quote's expanded/editing workforce rows never carry into the next quote
     _ctState.editing = null; _ctState.open = new Set(); _pbContractOvrPending = null;   // v7.9.77: the Contract tab's rows and reason row likewise
+    _svState.editing = null; _svState.open = new Set();                                 // v7.10.30: the Service tab's rows
+    _mobState = { editing: null, open: new Set(), draft: null, busy: false };          // v7.10.30: Site Mobility's open rows and form
     renderQuoteEditor();
   } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
 }
@@ -9174,8 +9206,8 @@ function renderQuoteEditorTabContent() {
     case 'shifts':    return renderShiftScheduleTab();
     case 'workforce': return renderWorkforceTab();
     case 'contract':  return renderContractItemsTab();
-    case 'service':   return renderPbPlaceholderTab('Service Support Items',   'Service overhead and operational support items.');
-    case 'mobility':  return renderPbPlaceholderTab('Site Mobility',           'Vehicles, fuel, tracking, vehicle extras (lease + km + fuel surcharges).');
+    case 'service':   return renderServiceItemsTab();   // v7.10.30
+    case 'mobility':  return renderSiteMobilityTab();   // v7.10.30
     case 'pricing':   return renderPricingTab();
     case 'proposal':  return renderProposalTab();
     default: return '';
@@ -10516,23 +10548,31 @@ function pbCtGuard() {
   if (_pbContractOvrPending != null) { showStatus('Confirm or cancel the reason first', 'error'); return true; }
   return false;
 }
-function pbCtToggle(id) {
+function pbCtToggle(id, k) {
   id = +id;
   if (_pbContractOvrPending === id) return;   // the reason row is open in this row: a header click must not re-render away typed input
   if (pbCtGuard()) return;
-  const s = _ctState.open; if (s.has(id)) s.delete(id); else s.add(id); renderQuoteEditor();
+  const s = pbCtStateFor(k).open; if (s.has(id)) s.delete(id); else s.add(id); renderQuoteEditor();
 }
 function pbCtTick(id, on, qty) { if (pbCtGuard()) return; pbToggleContractAcc(id, on, qty); }
-function pbCtShowAll(cb) { if (pbCtGuard()) { cb.checked = !cb.checked; return; } _ctState.showAll = cb.checked; renderQuoteEditor(); }
-function renderContractItemsTab() {
-  const asAt = pbQuoteAsAt();
-  const rows = pbContractRollup(_ctState.showAll);
+function pbCtShowAll(cb, k) { if (pbCtGuard()) { cb.checked = !cb.checked; return; } pbCtStateFor(k).showAll = cb.checked; renderQuoteEditor(); }
+// v7.10.30 (Richard: "build and push all" after the mock-up): the Service Support Items tab is the same
+// shape as this one, over the service family only — one renderer, two tabs, each with its own open
+// rows and "show every item" switch (_ctState / _svState). Ticks, quantities and overrides share the
+// same quote_contract_accessories rows and handlers; only the listing is split.
+let _svState = { editing: null, showAll: false, open: new Set() };
+function pbCtStateFor(k) { return k === 'sv' ? _svState : _ctState; }
+function renderContractItemsTab() { return pbSupportTabHtml('ct'); }
+function renderServiceItemsTab() { return pbSupportTabHtml('sv'); }
+function pbSupportTabHtml(k) {
+  const asAt = pbQuoteAsAt(), st = pbCtStateFor(k), svc = k === 'sv';
+  const rows = pbContractRollup(st.showAll).filter(r => svc ? r.cat === 'service' : r.cat !== 'service');
   const tot = rows.reduce((a, r) => { a.m += r.money.monthly; a.o += r.money.onceOff; if (r.level === 'bad') a.bad++; if (r.overridden) a.ovr++; if (r.on && r.auto) a.auto++; return a; }, { m: 0, o: 0, bad: 0, ovr: 0, auto: 0 });
   const badge = (level, text) => '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:' + PB_WF_LEVEL[level].badge + ';color:' + PB_WF_LEVEL[level].fg + ';">' + pbEsc(text) + '</span>';
   const field = (label, value) => '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text3);margin-bottom:2px;">' + label + '</div><div style="color:var(--text);">' + value + '</div></div>';
   const rowOf = (r, indent) => {
-    const L = PB_WF_LEVEL[r.level], id = +r.item.id, open = _ctState.open.has(id) || _pbContractOvrPending === id;
-    let html = '<tr style="cursor:pointer;' + (L.bg ? 'background:' + L.bg + ';' : '') + '" onclick="pbCtToggle(' + id + ')">' +
+    const L = PB_WF_LEVEL[r.level], id = +r.item.id, open = st.open.has(id) || _pbContractOvrPending === id;
+    let html = '<tr style="cursor:pointer;' + (L.bg ? 'background:' + L.bg + ';' : '') + '" onclick="pbCtToggle(' + id + ', \'' + k + '\')">' +
       '<td>' + (indent ? '<span style="display:inline-block;width:' + indent + 'px;"></span>' : '') + '<span style="display:inline-block;width:16px;color:var(--text3);">' + (open ? '▾' : '▸') + '</span><strong>' + pbEsc(r.item.name) + '</strong></td>' +
       '<td style="text-align:right;font-weight:700;">' + (r.on ? r.qty : '<span class="pg-muted">—</span>') + '</td>' +
       '<td style="text-align:right;">' + (!r.on ? '<span class="pg-muted">—</span>' : r.cost && r.cost.recovery === 'absorbed' ? '<span class="pg-muted">absorbed</span>' : pbRand(r.money.monthly)) + '</td>' +
@@ -10579,9 +10619,9 @@ function renderContractItemsTab() {
       : list.map(r => rowOf(r, 0)).join('');
     return sectionRow(title) + inner;
   };
-  const body = section('Contract support items', rows.filter(r => r.cat === 'contract'), 'contract') +
-    section('Workforce support items priced per contract', rows.filter(r => r.cat === 'workforce'), 'workforce') +
-    section('Service support items', rows.filter(r => r.cat === 'service'), 'service');
+  const body = svc ? section('Service support items', rows, 'service')
+    : section('Contract support items', rows.filter(r => r.cat === 'contract'), 'contract') +
+      section('Workforce support items priced per contract', rows.filter(r => r.cat === 'workforce'), 'workforce');
   const sum = pbAccSummary();
   return '<div class="pb-qheader">' +
     '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:6px;">' +
@@ -10592,14 +10632,14 @@ function renderContractItemsTab() {
       '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
       '<span style="flex:1;"></span>' +
       (tot.bad ? badge('bad', tot.bad + (tot.bad === 1 ? ' needs attention' : ' need attention')) : '') + (tot.ovr ? badge('warn', tot.ovr + ' switched off') : '') + (tot.auto ? badge('info', tot.auto + ' auto') : '') +
-      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (_ctState.showAll ? 'checked' : '') + ' onchange="pbCtShowAll(this)"> show every item in use, ticked or not</label>' +
+      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (st.showAll ? 'checked' : '') + ' onchange="pbCtShowAll(this, \'' + k + '\')"> show every item in use, ticked or not</label>' +
     '</div>' +
-    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">Ticked once per quote, regardless of posts. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); switching it off asks for a reason. ' +
+    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">' + (svc ? 'Service things a contract needs to be delivered, ticked' : 'Ticked') + ' once per quote, regardless of posts. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); switching it off asks for a reason. ' +
       'Whole quote, every support item and uniform: ' + pbRand(sum.monthly) + '/mo and ' + pbRand(sum.onceOff) + ' once-off — the proposal prints the once-off as one "Setup and equipment" line.' + (sum.absorbed ? ' Absorbed, not itemised: ' + pbRand(sum.absorbed) + '/mo.' : '') + '</div>' +
     (rows.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th style="text-align:right;">Units</th><th style="text-align:right;">Monthly</th><th>Status</th></tr></thead><tbody>' + body + '</tbody></table>'
-      : '<div class="pb-placeholder-text">' + (_ctState.showAll
-          ? 'No contract or service support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Support Items (Contract / Service tabs).'
-          : 'No contract or service support item is ticked on this quote yet. Show every item above to tick one.') + '</div>') +
+      : '<div class="pb-placeholder-text">' + (st.showAll
+          ? 'No ' + (svc ? 'service' : 'contract') + ' support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Support Items (' + (svc ? 'Service' : 'Contract') + ' tab).'
+          : 'No ' + (svc ? 'service' : 'contract') + ' support item is ticked on this quote yet. Show every item above to tick one.') + '</div>') +
   '</div>';
 }
 let _pbContractOvrPending = null;   // accessory id whose inline reason row is open
@@ -10634,6 +10674,308 @@ async function pbContractAccOverrideConfirm(id) {
   renderQuoteEditor();
 }
 function pbContractAccOverrideCancel() { _pbContractOvrPending = null; renderQuoteEditor(); }
+
+
+// ── Site Mobility (v7.10.30, Richard 2026-11-07: "build and push all" after the mock-up) ─────────
+// One line per vehicle type on the quote (quote_vehicles) with the extras ticked or typed on it
+// (quote_vehicle_extra_lines). Priced as the old Xone tool's CalculateVehicle did, every figure as at
+// the contract start date: the supplier rate is the dated quote for the type whose contract period
+// covers the quote's duration (the shortest that does; else the longest there is, with a warning) and
+// whose inclusive km is the largest at or below the monthly km (else the smallest band); monthly cost
+// = that rate (VAT stripped when the row says it is included) + insurance + tracking + fuel (km ×
+// economy ÷ 100 × the litre price, wet lines only) + the extras (acquisition ÷ life + running);
+// price = cost ÷ (1 − markup) + excess km × the rate per km, which passes through unmarked. The
+// markup is the line's own, else the quote's margin. pbMobilityAll() is the ONE reader: the tab,
+// pbLivePricing (a 'Site mobility' group, so the snapshot, the Pricing tab and the proposal carry it),
+// pgRenderScope and the Pricing tab's vehicle table.
+let pbVehicles = [];                 // this quote's lines, each with .extras (the quote_vehicle_extra_lines rows)
+let _pbMobilityMissing = false;      // sql/add_site_mobility.sql not run on this database
+let _mobState = { editing: null, open: new Set(), draft: null, busy: false };   // editing: null | 'new' | a line id
+const PB_FUEL_LABEL = { petrol: 'petrol', diesel: 'diesel' };
+function pbVehicleType(id) { return (allData['quote_vehicle_types'] || []).find(t => +t.id === +id) || null; }
+function pbFuelPrice(fuel, asAt) {
+  let best = null;
+  (allData['quote_fuel_prices'] || []).forEach(r => { if (r.fuel_type !== fuel || String(r.effective_date) > asAt) return; if (!best || String(r.effective_date) > String(best.effective_date)) best = r; });
+  return best;
+}
+// The supplier rate for a type: dated rows, the latest per (contract period, km band) as at the date.
+function pbVehicleRateFor(typeId, km, months, asAt) {
+  const byKey = new Map();
+  (allData['quote_vehicle_rates'] || []).forEach(r => {
+    if (+r.vehicle_type_id !== +typeId || String(r.effective_date) > asAt) return;
+    const key = (+r.contract_months || 0) + '|' + (+r.inclusive_km || 0), cur = byKey.get(key);
+    if (!cur || String(r.effective_date) > String(cur.effective_date)) byKey.set(key, r);
+  });
+  const rows = [...byKey.values()];
+  if (!rows.length) return { rate: null, warnings: [] };
+  const periods = [...new Set(rows.map(r => +r.contract_months))].sort((a, b) => a - b);
+  let period = periods.find(p => p >= months), warnings = [];
+  if (period == null) { period = periods[periods.length - 1]; warnings.push('No supplier rate covers ' + months + ' months; the ' + period + '-month rate is used.'); }
+  const bands = rows.filter(r => +r.contract_months === period).sort((a, b) => +a.inclusive_km - +b.inclusive_km);
+  const rate = bands.filter(r => +r.inclusive_km <= km).pop() || bands[0];
+  return { rate, warnings };
+}
+// An extra's current row: the latest effective row of that name at the date, not retired.
+function pbVehicleExtraCurrent(extraId, asAt) {
+  const all = allData['quote_vehicle_extras'] || [], row = all.find(x => +x.id === +extraId);
+  if (!row) return null;
+  const name = String(row.name || '').trim().toLowerCase();
+  let best = null;
+  all.forEach(x => {
+    if (String(x.name || '').trim().toLowerCase() !== name || String(x.effective_date) > asAt) return;
+    if (x.retired_date && String(x.retired_date) < asAt) return;
+    if (!best || String(x.effective_date) > String(best.effective_date)) best = x;
+  });
+  return best;
+}
+function pbVehicleExtraMonthly(x) { return (x.life_months > 0 ? (+x.acquisition_cost || 0) / +x.life_months : 0) + (+x.monthly_cost || 0); }
+// The catalogue extras offered on a line: one entry per name, the current row's price, as at the date.
+function pbVehicleExtraOptions(asAt) {
+  const seen = new Map();
+  (allData['quote_vehicle_extras'] || []).slice().sort((a, b) => (+a.display_order || 0) - (+b.display_order || 0) || +a.id - +b.id).forEach(x => {
+    const key = String(x.name || '').trim().toLowerCase(); if (!key || seen.has(key)) return;
+    const cur = pbVehicleExtraCurrent(x.id, asAt); if (cur) seen.set(key, cur);
+  });
+  return [...seen.values()];
+}
+function pbVehicleCalc(v) {
+  const asAt = pbQuoteAsAt(), months = +pbQ.contract_duration_months || 0, vatPct = +(appSettings['proposal_vat_pct'] || 15);
+  const t = pbVehicleType(v.vehicle_type_id), qty = Math.max(1, +v.quantity || 1), km = Math.max(0, +v.monthly_km || 0), wet = v.fuel_included !== false;
+  const markup = v.markup_pct != null && v.markup_pct !== '' ? +v.markup_pct : (+pbQ.margin_pct || 0);
+  const out = { id: v.id, type: t, qty, km, wet, markup, errors: [], warnings: [], rate: null, rateExVat: 0, insurance: 0, tracking: 0, excessKm: 0, excess: 0, litres: 0, fuelPrice: 0, fuelCost: 0, extras: [], extrasMonthly: 0, cost: 0, each: 0, monthly: 0 };
+  out.label = (t ? t.name : 'Vehicle type ' + v.vehicle_type_id) + (qty > 1 ? ' × ' + qty : '');
+  if (!t) { out.errors.push('Site Mobility: a line refers to a vehicle type that no longer exists.'); return out; }
+  if (!pbItemInWindow(t, asAt)) out.warnings.push(t.retired_date && String(t.retired_date) < asAt ? 'This vehicle type is retired as at ' + asAt + '.' : 'This vehicle type is not yet in use at ' + asAt + '.');
+  const R = pbVehicleRateFor(t.id, km, months, asAt);
+  out.warnings.push(...R.warnings);
+  if (!R.rate) out.errors.push('Site Mobility: no supplier rate for "' + t.name + '" as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Supplier rates).');
+  else {
+    out.rate = R.rate;
+    out.rateExVat = pbRound2(R.rate.rate_incl_vat ? (+R.rate.monthly_rate || 0) / (1 + vatPct / 100) : (+R.rate.monthly_rate || 0));
+    out.insurance = +R.rate.insurance_monthly || 0; out.tracking = +R.rate.tracking_monthly || 0;
+    out.excessKm = Math.max(0, km - (+R.rate.inclusive_km || 0)); out.excess = pbRound2(out.excessKm * (+R.rate.excess_km_rate || 0));
+  }
+  if (wet) {
+    const fp = pbFuelPrice(t.fuel_type, asAt);
+    if (!fp) out.errors.push('Site Mobility: no ' + (PB_FUEL_LABEL[t.fuel_type] || t.fuel_type) + ' price as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Fuel prices).');
+    else if (!(+t.fuel_economy > 0)) out.errors.push('Site Mobility: "' + t.name + '" has no fuel economy (litres per 100 km) on its vehicle type.');
+    else { out.fuelPrice = +fp.price_per_litre; out.litres = km * +t.fuel_economy / 100; out.fuelCost = pbRound2(out.litres * out.fuelPrice); }
+  }
+  (v.extras || []).forEach(x => {
+    if (x.extra_id) {
+      const cur = pbVehicleExtraCurrent(x.extra_id, asAt);
+      if (!cur) { out.errors.push('Site Mobility: the extra "' + (x.name || ('#' + x.extra_id)) + '" has no price as at ' + asAt + '.'); return; }
+      out.extras.push({ name: cur.name, monthly: pbRound2(pbVehicleExtraMonthly(cur)), extra_id: +x.extra_id });
+    } else out.extras.push({ name: x.name || 'Extra', monthly: pbRound2(+x.monthly_amount || 0), extra_id: null });
+  });
+  out.extrasMonthly = pbRound2(out.extras.reduce((a, x) => a + x.monthly, 0));
+  if (out.errors.length) return out;
+  out.cost = pbRound2(out.rateExVat + out.insurance + out.tracking + out.fuelCost + out.extrasMonthly);
+  out.each = pbRound2(out.cost / (1 - markup / 100) + out.excess);
+  out.monthly = pbRound2(out.each * qty);
+  out.scopeText = (wet ? 'fuel included for ' : 'excluding fuel, ') + km.toLocaleString('en-US') + ' km a month' +
+    (out.rate && out.excessKm ? ' (' + (+out.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + pgMoney(+out.rate.excess_km_rate) + ' per km beyond)' : out.rate ? ' (' + (+out.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + pgMoney(+out.rate.excess_km_rate) + ' per km beyond)' : '') +
+    (out.extras.length ? ', with ' + out.extras.map(x => x.name).join(', ') : '');
+  return out;
+}
+function pbMobilityAll() {
+  const lines = pbVehicles.map(pbVehicleCalc);
+  return { lines, monthly: pbRound2(lines.reduce((a, l) => a + l.monthly, 0)), errors: lines.flatMap(l => l.errors), warnings: lines.flatMap(l => l.warnings) };
+}
+// ── the tab ──
+function renderSiteMobilityTab() {
+  const asAt = pbQuoteAsAt(), months = +pbQ.contract_duration_months || 0, M = pbMobilityAll(), st = _mobState;
+  const types = allData['quote_vehicle_types'] || [], fuel = ['petrol', 'diesel'].map(f => { const r = pbFuelPrice(f, asAt); return f + ' ' + (r ? pgMoney(+r.price_per_litre) + ' / l' : '<span style="color:#991B1B;">no price</span>'); });
+  const money = n => pgMoney(n);
+  const lab = (l, v) => '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;color:var(--text3);margin-bottom:2px;">' + l + '</div><div>' + v + '</div></div>';
+  let rows = '';
+  M.lines.forEach(l => {
+    const open = st.open.has(+l.id), bad = l.errors.length, v = pbVehicles.find(x => +x.id === +l.id);
+    rows += '<tr style="cursor:pointer;' + (bad ? 'background:#FEF2F2;' : l.warnings.length ? 'background:#FFFBEB;' : '') + '" onclick="pbMobToggle(' + l.id + ')">' +
+      '<td><span style="display:inline-block;width:16px;color:var(--text3);">' + (open ? '▾' : '▸') + '</span><strong>' + pbEsc(l.type ? l.type.name : l.label) + '</strong>' +
+        '<div style="font-size:11px;color:var(--text3);">' + (l.wet ? 'Wet — fuel included' : 'Dry — client fuels') + (l.type ? ' · ' + pbEsc(PB_FUEL_LABEL[l.type.fuel_type] || l.type.fuel_type) : '') +
+        (l.rate ? ' · ' + (+l.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + money(+l.rate.excess_km_rate) + '/km beyond' : '') + (l.extras.length ? ' · ' + l.extras.map(x => pbEsc(x.name)).join(', ') : '') + '</div>' +
+        (bad ? '<div style="font-size:11px;color:#991B1B;">' + l.errors.map(pbEsc).join('<br>') + '</div>' : '') + '</td>' +
+      '<td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + l.km.toLocaleString('en-US') + '</td><td>' + (l.wet ? 'Wet' : 'Dry') + '</td><td style="text-align:right;">' + pbEsc(l.markup) + '%</td>' +
+      '<td style="text-align:right;">' + (l.rate ? money(l.rateExVat) : '<span class="pg-muted">—</span>') + '</td><td style="text-align:right;">' + (l.rate ? money(l.insurance) : '—') + '</td><td style="text-align:right;">' + (l.rate ? money(l.tracking) : '—') + '</td>' +
+      '<td style="text-align:right;">' + (l.excessKm ? money(l.excess) + '<div style="font-size:11px;color:var(--text3);">' + l.excessKm.toLocaleString('en-US') + ' km</div>' : '<span class="pg-muted">—</span>') + '</td>' +
+      '<td style="text-align:right;">' + (l.wet && l.fuelCost ? money(l.fuelCost) + '<div style="font-size:11px;color:var(--text3);">' + l.litres.toFixed(1) + ' l</div>' : '<span class="pg-muted">—</span>') + '</td>' +
+      '<td style="text-align:right;"><strong>' + (bad ? '<span class="pg-muted">—</span>' : money(l.monthly)) + '</strong>' + (!bad && l.qty > 1 ? '<div style="font-size:11px;color:var(--text3);font-weight:400;">' + money(l.each) + ' each</div>' : '') + '</td></tr>';
+    if (open) {
+      const b = (k, val) => '<div style="color:var(--text2);">' + k + '</div><div style="text-align:right;font-variant-numeric:tabular-nums;">' + val + '</div>';
+      rows += '<tr><td colspan="11" style="background:#F7F8FA;padding:10px 14px 12px 30px;" onclick="event.stopPropagation()">' +
+        (bad ? '' : '<div style="display:grid;grid-template-columns:1fr auto;gap:3px 16px;font-size:12px;max-width:520px;">' +
+          b('Supplier rate (' + (+l.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + l.rate.contract_months + '-month contract' + (l.rate.rate_incl_vat ? ', VAT stripped' : '') + (l.rate.supplier ? ', ' + pbEsc(l.rate.supplier) : '') + ')', money(l.rateExVat)) +
+          b('Insurance', money(l.insurance)) + b('Tracking', money(l.tracking)) +
+          b('Fuel: ' + (l.wet ? l.km.toLocaleString('en-US') + ' km × ' + pbEsc(l.type.fuel_economy) + ' l/100 km = ' + l.litres.toFixed(1) + ' l × ' + money(l.fuelPrice) : 'dry, none'), money(l.fuelCost)) +
+          b('Vehicle extras' + (l.extras.length ? ' (' + l.extras.map(x => pbEsc(x.name) + ' ' + money(x.monthly)).join(', ') + ')' : ''), money(l.extrasMonthly)) +
+          b('Cost before markup', money(l.cost)) + b('÷ (1 − ' + pbEsc(l.markup) + '%)', money(pbRound2(l.cost / (1 - l.markup / 100)))) +
+          b('Excess km, at the supplier\'s rate, no markup', money(l.excess)) +
+          '<div style="font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">Per vehicle per month</div><div style="text-align:right;font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">' + money(l.each) + '</div>' +
+          (l.qty > 1 ? '<div style="font-weight:700;color:var(--navy);">× ' + l.qty + ' vehicles</div><div style="text-align:right;font-weight:700;color:var(--navy);">' + money(l.monthly) + '</div>' : '') + '</div>') +
+        (l.warnings.length ? '<div style="font-size:11px;color:#7A5B10;margin-top:8px;">' + l.warnings.map(pbEsc).join('<br>') + '</div>' : '') +
+        (v && v.note ? '<div style="font-size:12px;margin-top:8px;">' + pbEsc(v.note) + '</div>' : '') +
+        '<div style="display:flex;gap:10px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border);">' +
+          '<button class="btn btn-ghost btn-sm" onclick="pbMobEdit(' + l.id + ')">Edit</button><button class="btn btn-ghost btn-sm" onclick="pbMobDuplicate(' + l.id + ')">Duplicate</button><button class="btn btn-danger btn-sm" onclick="pbMobRemove(' + l.id + ')">Remove</button>' +
+        '</div></td></tr>';
+    }
+  });
+  const n = M.lines.reduce((a, l) => a + l.qty, 0), wet = M.lines.filter(l => l.wet).length;
+  return '<div class="pb-qheader" style="display:block;overflow-x:auto;">' +
+    '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:6px;">' +
+      '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);">Monthly total</div>' +
+        '<div style="font-size:20px;font-weight:700;color:var(--navy);line-height:1.2;">' + money(M.monthly) + '<span style="font-size:12px;font-weight:400;color:var(--text3);"> /mo</span></div>' +
+        '<div style="font-size:11px;color:var(--text3);">' + (n ? n + ' vehicle' + (n === 1 ? '' : 's') + ' on ' + M.lines.length + ' line' + (M.lines.length === 1 ? '' : 's') + ' · the proposal prints them under "Site mobility"' : 'no vehicles on this quote') + '</div></div>' +
+      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date, over ' + months + ' months.</div>' +
+      '<span style="flex:1;"></span>' +
+      (M.errors.length ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:#FEE2E2;color:#991B1B;">' + M.errors.length + (M.errors.length === 1 ? ' needs attention' : ' need attention') + '</span>' : '') +
+      (wet ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:#DBEAFE;color:#1E40AF;">' + wet + ' wet</span>' : '') +
+      '<button class="btn btn-primary btn-sm" onclick="pbMobAdd()"' + (_pbMobilityMissing || !types.length ? ' disabled' : '') + '>+ Add vehicle</button>' +
+    '</div>' +
+    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">One line per vehicle type on the site. The supplier rate is the dated quote whose contract period covers the quote\'s duration and whose inclusive km is the largest at or below the monthly km; fuel is km × economy × the fuel price as at the start date (wet lines only); extras are priced as support items are (acquisition ÷ life + running). The markup goes on everything except the excess-km charge, which passes through at the supplier\'s rate per km.' +
+      (_pbMobilityMissing ? ' <strong>sql/add_site_mobility.sql has not been run on this database.</strong>' : !types.length ? ' <strong>No vehicle type is set up yet — Admin → Proposal Builder → Site Mobility.</strong>' : '') + '</div>' +
+    (M.lines.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Vehicle type</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Monthly km</th><th>Fuel</th><th style="text-align:right;">Markup %</th><th style="text-align:right;">Supplier rate</th><th style="text-align:right;">Insurance</th><th style="text-align:right;">Tracking</th><th style="text-align:right;">Excess km</th><th style="text-align:right;">Fuel cost</th><th style="text-align:right;">Monthly</th></tr></thead>' +
+      '<tbody>' + rows + '</tbody><tbody><tr style="font-weight:700;color:var(--navy);"><td colspan="10" style="border-top:2px solid var(--navy);">Site mobility, per month</td><td style="text-align:right;border-top:2px solid var(--navy);">' + money(M.monthly) + '</td></tr></tbody></table>'
+      : (st.editing ? '' : '<div class="pb-placeholder-text">No vehicle on this quote yet. Add one above.</div>')) +
+    '<div style="font-size:11px;color:var(--text3);margin-top:10px;"><strong>Fuel price as at the start date:</strong> ' + fuel.join(' · ') + ' <span class="pg-muted">(Admin → Proposal Builder → Site Mobility → Fuel prices)</span></div>' +
+    (st.editing != null ? pbMobFormHtml() : '') +
+  '</div>';
+}
+// ── the add / edit form: every keystroke writes the draft, so a repaint loses nothing ──
+function pbMobFormHtml() {
+  const d = _mobState.draft, asAt = pbQuoteAsAt(), types = (allData['quote_vehicle_types'] || []).filter(t => t.active !== false && (pbItemInWindow(t, asAt) || +t.id === +d.vehicle_type_id));
+  const opts = pbVehicleExtraOptions(asAt), prev = pbVehicleCalc(Object.assign({ id: 0 }, d, { extras: pbMobDraftExtras() }));
+  const money = n => pgMoney(n);
+  const b = (k, val) => '<div style="color:var(--text2);">' + k + '</div><div style="text-align:right;font-variant-numeric:tabular-nums;">' + val + '</div>';
+  return '<div style="background:#F7F8FA;border:1px solid var(--border);border-radius:4px;padding:12px 14px;margin-top:12px;" id="pb-mob-form">' +
+    '<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:10px;">' + (_mobState.editing === 'new' ? 'Add a vehicle' : 'Edit vehicle line') + '</div>' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 14px;">' +
+      '<div class="form-group"><label class="form-label">Vehicle type</label><select class="form-control" id="mob-type" onchange="pbMobTouch()">' + types.map(t => '<option value="' + t.id + '"' + (+t.id === +d.vehicle_type_id ? ' selected' : '') + '>' + pbEsc(t.name) + ' — ' + pbEsc(PB_FUEL_LABEL[t.fuel_type] || t.fuel_type) + ', ' + pbEsc(t.fuel_economy) + ' l/100 km</option>').join('') + '</select></div>' +
+      '<div class="form-group"><label class="form-label">Quantity</label><input type="number" class="form-control" id="mob-qty" min="1" step="1" value="' + pbEsc(d.quantity) + '" oninput="pbMobTouch()"></div>' +
+      '<div class="form-group"><label class="form-label">Monthly km</label><input type="number" class="form-control" id="mob-km" min="0" step="100" value="' + pbEsc(d.monthly_km) + '" oninput="pbMobTouch()"></div>' +
+      '<div class="form-group"><label class="form-label">Fuel included</label><select class="form-control" id="mob-fuel" onchange="pbMobTouch()"><option value="wet"' + (d.fuel_included !== false ? ' selected' : '') + '>Wet (fuel included)</option><option value="dry"' + (d.fuel_included === false ? ' selected' : '') + '>Dry</option></select></div>' +
+      '<div class="form-group"><label class="form-label">Markup % <span class="pg-muted">(blank = the quote\'s ' + pbEsc(+pbQ.margin_pct || 0) + '%)</span></label><input type="number" class="form-control" id="mob-mk" min="0" max="99" step="0.5" value="' + pbEsc(d.markup_pct == null ? '' : d.markup_pct) + '" placeholder="' + pbEsc(+pbQ.margin_pct || 0) + '" oninput="pbMobTouch()"></div>' +
+      '<div class="form-group" style="grid-column:span 2;"><label class="form-label">Vehicle extras</label><div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">' +
+        (opts.length ? opts.map(x => '<label style="display:flex;gap:7px;align-items:center;"><input type="checkbox" class="mob-x" data-id="' + x.id + '" data-name="' + pbEsc(x.name) + '"' + (d.extraIds.has(+x.id) ? ' checked' : '') + ' onchange="pbMobTouch()"> ' + pbEsc(x.name) + '<span style="margin-left:auto;color:var(--text3);font-size:11px;white-space:nowrap;">' + money(pbVehicleExtraMonthly(x)) + ' /mo</span></label>').join('') : '<span class="pg-muted">No extras priced as at ' + pbEsc(asAt) + '.</span>') +
+        '<label style="display:flex;gap:7px;align-items:center;flex-wrap:wrap;"><input type="checkbox" id="mob-adhoc-on"' + (d.adhoc_on ? ' checked' : '') + ' onchange="pbMobTouch()"> <input type="text" class="form-control" id="mob-adhoc-name" placeholder="Ad hoc extra, e.g. Branding" style="width:170px;padding:2px 6px;" value="' + pbEsc(d.adhoc_name || '') + '" oninput="pbMobTouch()"> <input type="number" class="form-control" id="mob-adhoc-amt" min="0" step="10" style="width:90px;padding:2px 6px;" value="' + pbEsc(d.adhoc_amount == null ? '' : d.adhoc_amount) + '" oninput="pbMobTouch()"> <span class="pg-muted">/mo</span></label>' +
+      '</div></div>' +
+      '<div class="form-group" style="grid-column:span 2;"><label class="form-label">Note (optional)</label><input type="text" class="form-control" id="mob-note" value="' + pbEsc(d.note || '') + '" oninput="pbMobTouch()"></div>' +
+    '</div>' +
+    (prev.errors.length ? '<div style="font-size:11px;color:#991B1B;margin-top:10px;">' + prev.errors.map(pbEsc).join('<br>') + '</div>'
+      : '<div style="display:grid;grid-template-columns:1fr auto;gap:3px 16px;font-size:12px;max-width:480px;margin-top:12px;">' +
+        b('Supplier rate, ' + (+prev.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + prev.rate.contract_months + ' months', money(prev.rateExVat)) + b('Insurance + tracking', money(prev.insurance + prev.tracking)) +
+        b('Fuel' + (prev.wet ? ' (' + prev.litres.toFixed(1) + ' l ' + pbEsc(PB_FUEL_LABEL[prev.type.fuel_type] || '') + ')' : ' — dry'), money(prev.fuelCost)) + b('Extras', money(prev.extrasMonthly)) +
+        b('Marked up ' + pbEsc(prev.markup) + '%', money(pbRound2(prev.cost / (1 - prev.markup / 100)))) + b('Excess km' + (prev.excessKm ? ' (' + prev.excessKm.toLocaleString('en-US') + ' km × ' + money(+prev.rate.excess_km_rate) + ')' : ''), money(prev.excess)) +
+        '<div style="font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">Per vehicle</div><div style="text-align:right;font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">' + money(prev.each) + '</div>' +
+        '<div style="font-weight:700;color:var(--navy);">× ' + prev.qty + ' per month</div><div style="text-align:right;font-weight:700;color:var(--navy);">' + money(prev.monthly) + '</div></div>') +
+    (prev.warnings.length ? '<div style="font-size:11px;color:#7A5B10;margin-top:6px;">' + prev.warnings.map(pbEsc).join('<br>') + '</div>' : '') +
+    '<div style="display:flex;gap:10px;align-items:center;margin-top:12px;">' +
+      '<button class="btn btn-primary btn-sm" onclick="pbMobSave()"' + (_mobState.busy ? ' disabled' : '') + '>' + (_mobState.editing === 'new' ? 'Add this vehicle' : 'Save changes') + '</button>' +
+      '<button class="btn btn-ghost btn-sm" onclick="pbMobCancel()">Cancel</button>' +
+      '<span class="pg-muted" style="font-size:11px;">The Pricing tab and the proposal\'s "Site mobility" lines read the total.</span>' +
+    '</div></div>';
+}
+function pbMobDraftExtras() {
+  const d = _mobState.draft, out = [];
+  d.extraIds.forEach(id => out.push({ extra_id: id, name: null, monthly_amount: null }));
+  if (d.adhoc_on && String(d.adhoc_name || '').trim()) out.push({ extra_id: null, name: String(d.adhoc_name).trim(), monthly_amount: +d.adhoc_amount || 0 });
+  return out;
+}
+// Read the form into the draft and redraw only the preview block (the whole tab re-renders on save).
+function pbMobTouch() {
+  const d = _mobState.draft, g = id => document.getElementById(id);
+  if (!d || !g('mob-type')) return;
+  d.vehicle_type_id = +g('mob-type').value || null; d.quantity = Math.max(1, Math.round(+g('mob-qty').value || 1)); d.monthly_km = Math.max(0, Math.round(+g('mob-km').value || 0));
+  d.fuel_included = g('mob-fuel').value !== 'dry'; d.markup_pct = g('mob-mk').value === '' ? null : Math.min(99, Math.max(0, +g('mob-mk').value || 0));
+  d.extraIds = new Set([...document.querySelectorAll('.mob-x:checked')].map(x => +x.dataset.id));
+  d.adhoc_on = !!g('mob-adhoc-on').checked; d.adhoc_name = g('mob-adhoc-name').value; d.adhoc_amount = g('mob-adhoc-amt').value === '' ? null : +g('mob-adhoc-amt').value; d.note = g('mob-note').value;
+  const form = g('pb-mob-form'); if (!form) return;
+  const focus = document.activeElement && document.activeElement.id, pos = document.activeElement && document.activeElement.selectionStart;
+  form.outerHTML = pbMobFormHtml();
+  if (focus) { const el = g(focus); if (el) { el.focus(); try { if (pos != null && el.setSelectionRange) el.setSelectionRange(pos, pos); } catch (e) {} } }
+}
+function pbMobGuard() { if (_mobState.editing != null) { showStatus('Save or cancel the vehicle form first', 'error'); return true; } return false; }
+function pbMobToggle(id) { id = +id; if (_mobState.editing != null) return; const s = _mobState.open; if (s.has(id)) s.delete(id); else s.add(id); renderQuoteEditor(); }
+function pbMobAdd() {
+  if (pbMobGuard()) return;
+  const t = (allData['quote_vehicle_types'] || []).find(x => x.active !== false && pbItemInWindow(x, pbQuoteAsAt())) || (allData['quote_vehicle_types'] || [])[0];
+  if (!t) { showStatus('Set up a vehicle type first (Admin → Proposal Builder → Site Mobility)', 'error'); return; }
+  _mobState.editing = 'new'; _mobState.draft = { vehicle_type_id: t.id, quantity: 1, monthly_km: 2000, fuel_included: true, markup_pct: null, extraIds: new Set(), adhoc_on: false, adhoc_name: '', adhoc_amount: null, note: '' };
+  renderQuoteEditor(); setTimeout(() => { const f = document.getElementById('pb-mob-form'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 0);
+}
+function pbMobEdit(id) {
+  if (pbMobGuard()) return;
+  const v = pbVehicles.find(x => +x.id === +id); if (!v) return;
+  const adhoc = v.extras.find(x => !x.extra_id);
+  _mobState.editing = +id; _mobState.draft = { vehicle_type_id: v.vehicle_type_id, quantity: +v.quantity || 1, monthly_km: +v.monthly_km || 0, fuel_included: v.fuel_included !== false, markup_pct: v.markup_pct == null ? null : +v.markup_pct,
+    extraIds: new Set(v.extras.filter(x => x.extra_id).map(x => +x.extra_id)), adhoc_on: !!adhoc, adhoc_name: adhoc ? adhoc.name : '', adhoc_amount: adhoc ? +adhoc.monthly_amount || 0 : null, note: v.note || '' };
+  renderQuoteEditor();
+}
+function pbMobCancel() { _mobState.editing = null; _mobState.draft = null; renderQuoteEditor(); }
+async function pbMobSave() {
+  if (_mobState.busy || !_mobState.draft) return;
+  pbMobTouch();   // the draft is current, but a keystroke may not have fired input yet
+  const d = _mobState.draft;
+  if (!d.vehicle_type_id) { showStatus('Pick a vehicle type', 'error'); return; }
+  if (d.adhoc_on && !String(d.adhoc_name || '').trim()) { showStatus('Name the ad hoc extra, or untick it', 'error'); return; }
+  const row = { quote_id: pbQ.id, vehicle_type_id: d.vehicle_type_id, quantity: d.quantity, monthly_km: d.monthly_km, fuel_included: d.fuel_included, markup_pct: d.markup_pct, note: String(d.note || '').trim() || null };
+  _mobState.busy = true;
+  try {
+    let v;
+    if (_mobState.editing === 'new') {
+      row.display_order = pbVehicles.length + 1;
+      const saved = await api('quote_vehicles', 'POST', row, ''); v = Object.assign({}, (Array.isArray(saved) ? saved[0] : saved) || row, { extras: [] });
+      pbVehicles.push(v);
+    } else {
+      const saved = await api('quote_vehicles', 'PATCH', row, 'id=eq.' + _mobState.editing);
+      v = pbVehicles.find(x => +x.id === +_mobState.editing); Object.assign(v, (Array.isArray(saved) ? saved[0] : saved) || row);
+      if (v.extras.length) await api('quote_vehicle_extra_lines', 'DELETE', null, 'quote_vehicle_id=eq.' + v.id);
+      v.extras = [];
+    }
+    const lines = pbMobDraftExtras().map(x => Object.assign({ quote_vehicle_id: v.id }, x));
+    if (lines.length) { const saved = await api('quote_vehicle_extra_lines', 'POST', lines, ''); v.extras = Array.isArray(saved) && saved.length ? saved : lines; }
+    _mobState.open.add(+v.id); _mobState.editing = null; _mobState.draft = null;
+    showStatus('Vehicle saved', 'success');
+  } catch (e) { showStatus('Could not save the vehicle: ' + e.message, 'error'); }
+  _mobState.busy = false;
+  renderQuoteEditor();
+}
+async function pbMobDuplicate(id) {
+  if (pbMobGuard()) return;
+  const v = pbVehicles.find(x => +x.id === +id); if (!v) return;
+  try {
+    const row = { quote_id: pbQ.id, vehicle_type_id: v.vehicle_type_id, quantity: v.quantity, monthly_km: v.monthly_km, fuel_included: v.fuel_included, markup_pct: v.markup_pct, note: v.note || null, display_order: pbVehicles.length + 1 };
+    const saved = await api('quote_vehicles', 'POST', row, ''); const nv = Object.assign({}, (Array.isArray(saved) ? saved[0] : saved) || row, { extras: [] });
+    const lines = v.extras.map(x => ({ quote_vehicle_id: nv.id, extra_id: x.extra_id || null, name: x.name || null, monthly_amount: x.monthly_amount == null ? null : +x.monthly_amount }));
+    if (lines.length) { const sx = await api('quote_vehicle_extra_lines', 'POST', lines, ''); nv.extras = Array.isArray(sx) && sx.length ? sx : lines; }
+    pbVehicles.push(nv);
+  } catch (e) { showStatus('Could not duplicate: ' + e.message, 'error'); }
+  renderQuoteEditor();
+}
+async function pbMobRemove(id) {
+  if (pbMobGuard()) return;
+  const v = pbVehicles.find(x => +x.id === +id); if (!v) return;
+  if (!await confirmDialog({ title: 'Remove vehicle', message: 'Remove ' + ((pbVehicleType(v.vehicle_type_id) || {}).name || 'this vehicle') + (v.quantity > 1 ? ' × ' + v.quantity : '') + ' from the quote?', confirmLabel: 'Remove', danger: true })) return;
+  try {
+    await api('quote_vehicle_extra_lines', 'DELETE', null, 'quote_vehicle_id=eq.' + v.id).catch(() => {});   // the FK cascades; the mock does not
+    await api('quote_vehicles', 'DELETE', null, 'id=eq.' + v.id);
+    pbVehicles = pbVehicles.filter(x => +x.id !== +v.id); _mobState.open.delete(+v.id);
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+  renderQuoteEditor();
+}
+// The Pricing tab's vehicle table: the live build-up per line (a current snapshot carries the same figures).
+function pbMobilityTableHtml(pr) {
+  const M = pr.mobility || pbMobilityAll();
+  if (!M.lines.length) return '';
+  let rows = '';
+  M.lines.forEach(l => {
+    rows += '<tr' + (l.errors.length ? ' style="color:#FA0A11;"' : '') + '><td>' + pbEsc(l.label) + (l.errors.length ? ' <span title="' + pbEsc(l.errors.join(' ')) + '">⚠ not priced</span>' : '') + '</td>' +
+      '<td>' + (l.wet ? 'Wet' : 'Dry') + '</td><td class="num">' + l.km.toLocaleString('en-US') + '</td><td class="num">' + pgMoney(l.rateExVat + l.insurance + l.tracking) + '</td><td class="num">' + pgMoney(l.fuelCost) + '</td>' +
+      '<td class="num">' + pgMoney(l.extrasMonthly) + '</td><td class="num">' + pbEsc(l.markup) + '%</td><td class="num">' + pgMoney(l.excess) + '</td><td class="num">' + pgMoney(l.each) + '</td><td class="num">' + pgMoney(l.monthly) + '</td></tr>';
+  });
+  return '<h3>Site mobility</h3><table class="pg-table"><thead><tr><th>Vehicle</th><th>Fuel</th><th class="num">km / month</th><th class="num">Rate + ins. + tracking</th><th class="num">Fuel</th><th class="num">Extras</th><th class="num">Markup</th><th class="num">Excess km</th><th class="num">Per vehicle</th><th class="num">Monthly</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+    '<p class="pg-muted">Per vehicle = (rate + insurance + tracking + fuel + extras) ÷ (1 − markup) + excess km at the supplier\'s rate per km. The Site Mobility tab shows each line\'s build-up.</p>';
+}
 
 // ── Per-post checklists: Workforce Support Items and Training (v7.9.41) ─────────
 // Both lists are dynamic: site admin maintains them under Admin → Proposal
@@ -10884,6 +11226,9 @@ function pbLivePricing() {
   if (wfAdjMonthly) { groups.push({ name: 'Workforce support items', other: true, posts: [{ name: 'Adjustment to the per-post provision', officers: '', monthly: wfAdjMonthly }], sub: wfAdjMonthly }); monthly += wfAdjMonthly; }
   const contractMonthly = pbRound2(acc.lines.filter(l => l.where === 'Contract').reduce((a, l) => a + l.monthly, 0));
   if (contractMonthly) { groups.push({ name: 'Contract equipment', other: true, posts: [{ name: 'Site equipment (amortised)', officers: '', monthly: contractMonthly }], sub: contractMonthly }); monthly += contractMonthly; }
+  // v7.10.30: vehicles ride as their own group, one line per vehicle type (quantity in the name).
+  const mob = pbMobilityAll();
+  if (mob.lines.length) { groups.push({ name: 'Site mobility', other: true, posts: mob.lines.map(l => ({ name: l.label, officers: '', monthly: l.monthly })), sub: mob.monthly }); monthly += mob.monthly; }
   monthly = pbRound2(monthly);
   const asAt = pbQuoteAsAt();
   // What a snapshot must match to still be current: the figures as printed, nothing more — the post
@@ -10891,7 +11236,7 @@ function pbLivePricing() {
   // leaves the price alone still changes the printed schedule).
   const fingerprint = PB_LABOUR_ENGINE + '|' + asAt + '|' + JSON.stringify(groups.map(g => [g.name, !!g.other, g.posts.map(p => [p.name, p.officers, p.monthly,
     (p.shiftRows || []).map(r => [r.label, r.start, r.end, r.officers, r.days.join(','), r.ph, r.phText]), p.phOnly || []])])) + '|' + pbRound2(acc.onceOff);
-  return { groups, monthly, setupOnceOff: acc.onceOff, errors: L.errors, labour: L.byPost, fingerprint, asAt };
+  return { groups, monthly, setupOnceOff: acc.onceOff, errors: L.errors.concat(mob.errors), labour: L.byPost, mobility: mob, fingerprint, asAt };
 }
 function pbSnapshotFresh(live) {
   const s = pgState.snapshot;
@@ -10916,6 +11261,8 @@ async function pbCalcTake() {
           needed: p.needed, general: p.general, ph_only: p.phOnly, shift_rows: p.shiftRows || null, price_per_officer: p.pricePerOfficer, cost_per_officer: p.costPerOfficer, margin_pct: p.marginPct, support: p.support })) })),
         monthly: live.monthly, setup_once_off: pbRound2(live.setupOnceOff),
       },
+      mobility: live.mobility.lines.map(l => ({ quote_vehicle_id: l.id, label: l.label, quantity: l.qty, monthly_km: l.km, wet: l.wet, markup_pct: l.markup, rate: l.rate ? { monthly_rate: l.rateExVat, inclusive_km: l.rate.inclusive_km, contract_months: l.rate.contract_months, excess_km_rate: l.rate.excess_km_rate } : null,
+        insurance: l.insurance, tracking: l.tracking, excess_km: l.excessKm, excess: l.excess, litres: l.litres, fuel_price: l.fuelPrice, fuel_cost: l.fuelCost, extras: l.extras, cost: l.cost, each: l.each, monthly: l.monthly })),   // v7.10.30
       labour: Object.fromEntries(Object.entries(live.labour).map(([id, c]) => [id, { ok: c.ok, cost: c.cost, margin_pct: c.marginPct, price: c.price, officers: c.officers, fixed: c.fixed,
         grade: c.grade ? c.grade.code : null, area: c.area ? c.area.code : null, lines: c.lines, warnings: c.warnings }])),
       rates: { ratios: Object.fromEntries(Object.entries(R.ratios).map(([k, v]) => [k, v.value])), extraordinary: R.extra, shared: Object.fromEntries(Object.entries(R.shared).map(([k, v]) => [k, v.employer])),
@@ -10935,14 +11282,14 @@ function pbCalcStatusHtml(pr) {
   const s = pgState.snapshot, taken = s && s.rate_data && s.rate_data.taken_at;
   const when = taken ? new Date(taken).toLocaleString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : (s ? pgFmtDate(s.snapshot_at) : '');
   let state, cls;
-  if (pr.errors.length) { state = '<strong>Cannot be priced yet.</strong> ' + pbEsc(pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' problems — open the posts\' Costing sections.'); cls = 'border:1px solid #FA0A11;background:#fff0f0;'; }
+  if (pr.errors.length) { state = '<strong>Cannot be priced yet.</strong> ' + pbEsc(pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' problems — open the posts\' Costing sections and the Site Mobility tab.'); cls = 'border:1px solid #FA0A11;background:#fff0f0;'; }
   else if (!s) { state = '<strong>Not calculated yet.</strong> The figures below are live; Calculate freezes them as the rates in force on ' + pbEsc(pgFmtDate(pr.liveAsAt)) + ' so the proposal can be issued.'; cls = 'border:1px solid #E0B252;background:#FFF8E6;'; }
   else if (pr.stale) { state = '<strong>Out of date.</strong> The quote changed since it was calculated on ' + pbEsc(when) + '; the live figures are shown. Recalculate before issuing.'; cls = 'border:1px solid #E0B252;background:#FFF8E6;'; }
   else { state = '<strong>Calculated</strong> on ' + pbEsc(when) + ' with the rates in force on ' + pbEsc(pgFmtDate(pr.asOf)) + '. The proposal prints these figures.'; cls = 'border:1px solid #9bd3ae;background:#eef9f1;'; }
   const canCalc = !pr.errors.length && !pr.fresh;
   return '<div style="display:flex;gap:12px;align-items:center;padding:8px 10px;border-radius:4px;font-size:12px;margin-bottom:12px;' + cls + '">' +
     '<div style="flex:1;">' + state + '</div>' +
-    '<button class="btn btn-secondary" id="pb-calc-btn" onclick="pbCalcTake()"' + (canCalc ? '' : ' disabled') + ' title="' + (pr.errors.length ? 'Fix the posts first' : pr.fresh ? 'The calculation is current' : 'Freeze the rates as at the contract start date') + '">' + (s ? 'Recalculate' : 'Calculate') + '</button></div>';
+    '<button class="btn btn-secondary" id="pb-calc-btn" onclick="pbCalcTake()"' + (canCalc ? '' : ' disabled') + ' title="' + (pr.errors.length ? 'Fix the problems first' : pr.fresh ? 'The calculation is current' : 'Freeze the rates as at the contract start date') + '">' + (s ? 'Recalculate' : 'Calculate') + '</button></div>';
 }
 function pbLabourTableHtml(pr) {
   const areas = allData['quote_areas'] || [];
@@ -11145,7 +11492,7 @@ function pbPriceBasisField(label) {
 // Pricing tab: both views of the same prices, always (so it works before the SQL has run), the
 // basis select, a tie-out of the shift rows against the monthly total, and warnings.
 function renderPricingTab() {
-  if (!pbHeadings.some(h => h.posts.length)) return '<div class="pb-qheader" style="display:block;color:var(--text3);font-size:13px;">Add posts on the Posts tab; their prices appear here per month and per shift.</div>';
+  if (!pbHeadings.some(h => h.posts.length)) return '<div class="pb-qheader" style="display:block;color:var(--text3);font-size:13px;">Add posts on the Posts tab; their prices appear here per month and per shift.' + (pbVehicles.length ? ' The vehicles on the Site Mobility tab are priced with them.' : '') + '</div>';
   const pr = pgPricing(), rec = pgShiftReconcile(pr), warn = [];
   pr.groups.forEach(g => { if (g.other) return; g.posts.forEach(p => {
     if (!Array.isArray(p.shiftRows)) return;   // a calculation without per-shift rows: the 'not available' line already says so
@@ -11172,7 +11519,7 @@ function renderPricingTab() {
     '</div>' +
     pbCalcStatusHtml(pr) +   /* v7.10.28 */
     '<style>' + PG_DOC_CSS + '</style><div class="pg-doc" style="max-width:none;padding:0;margin:0;">' +
-      pgPricingBannerHtml(pr) + pbLabourTableHtml(pr) + pgPricingMonthlyHtml(pr) + '<h3>Rates per shift</h3>' +
+      pgPricingBannerHtml(pr) + pbLabourTableHtml(pr) + pbMobilityTableHtml(pr) + pgPricingMonthlyHtml(pr) + '<h3>Rates per shift</h3>' +
       (pr.perShift ? pbShiftRatesHtml(pr, { full: false, editor: true }) : '<p class="pg-unknown">Per-shift rates are not available from this calculation.</p>') +
     '</div>' +
     (pr.perShift ? '<div style="margin-top:10px;padding:8px 10px;border-radius:4px;font-size:12px;border:1px solid ' + (rec.ok ? '#9bd3ae' : '#FA0A11') + ';background:' + (rec.ok ? '#eef9f1' : '#fff0f0') + ';">' +
@@ -11213,12 +11560,15 @@ function pgRenderScope() {
     const names = [...pbContractAcc.entries()].map(([id, qty]) => { const i = acc.find(x => +x.id === +id); return i ? pbEsc(i.name) + (qty > 1 ? ' × ' + qty : '') : ''; }).filter(Boolean);
     if (names.length) html += '<p><strong>Site equipment:</strong> ' + names.join(', ') + '</p>';
   }
+  // v7.10.30: the vehicles on the quote, with the wet / dry wording and the per-km rate beyond the cap.
+  const mobLines = pbMobilityAll().lines;
+  if (mobLines.length) html += '<p><strong>Site mobility:</strong> ' + mobLines.map(l => pbEsc(l.label) + ' — ' + pbEsc(l.scopeText)).join('; ') + '.</p>';
   if (anyInc) html += '<p class="pg-muted"><em>' + pbEsc(PB_PERF_INCENTIVE_NOTE) + '</em></p>';
   return html || '<p class="pg-muted">No posts on this quote yet.</p>';
 }
 function pgPricingBannerHtml(pr) {
   // v7.10.28: four states — cannot be priced, out of date, not yet calculated, calculated.
-  if (pr.errors && pr.errors.length) return '<div class="pg-indicative">CANNOT BE PRICED — ' + pbEsc(pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' posts have costing problems; open their Costing sections on the Posts tab.') + '</div>';
+  if (pr.errors && pr.errors.length) return '<div class="pg-indicative">CANNOT BE PRICED — ' + pbEsc(pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' costing problems; open the posts\' Costing sections and the Site Mobility tab.') + '</div>';
   if (pr.stale) return '<div class="pg-indicative">OUT OF DATE — the quote changed since it was last calculated. The figures below are live; recalculate on the Pricing tab before issuing.</div>';
   if (pr.indicative) return '<div class="pg-indicative">NOT YET CALCULATED — live figures from the rates in force on ' + pbEsc(pgFmtDate(pr.liveAsAt)) + '. Press Calculate on the Pricing tab to freeze them; the proposal cannot be issued until then.</div>';
   return '<p class="pg-muted">Rates as at ' + pbEsc(pgFmtDate(pr.asOf)) + '.</p>';
@@ -11450,7 +11800,7 @@ function pgIssueBlockers() {
   if (!can('issue_proposal')) why.push('you do not have the issue_proposal permission');
   if (_pgRpcMissing) why.push('sql/proposal_generator_inc2.sql is not installed on this database');
   { const pr = pgPricing();   // v7.10.28: the calculation must exist, be current and be clean
-    if (pr.errors.length) why.push(pr.errors.length === 1 ? 'a post cannot be priced: ' + pr.errors[0] : pr.errors.length + ' posts cannot be priced (see their Costing sections)');
+    if (pr.errors.length) why.push(pr.errors.length === 1 ? 'cannot be priced: ' + pr.errors[0] : pr.errors.length + ' costing problems (see the posts\' Costing sections and the Site Mobility tab)');
     if (!pgState.snapshot) why.push('the quote has not been calculated yet (Pricing tab → Calculate)');
     else if (pr.stale) why.push('the quote changed since it was calculated (Pricing tab → Recalculate)');
     else if (pbPriceBasis() !== 'monthly' && !pr.perShift) why.push('per-shift pricing is selected but the calculation carries no per-shift rates'); }
@@ -11755,23 +12105,37 @@ function renderPbPlaceholderTab(title, blurb) {
 }
 
 function renderBasicInfoTab() {
+  // v7.10.29 layout (Richard's Quote Layout Designer spec, 2026-11-07): one 560px block at the left —
+  // row 1 name · quote date · valid until; row 2 client (sandbox) · start date · duration;
+  // row 3 margin · shifts/day · status; then Notes as a tall box the width of the block.
   const q = pbQ;
-  return '<div class="pb-qheader"><div style="display:grid;grid-template-columns:repeat(6, minmax(0,1fr));gap:10px;">' +
-      '<div class="form-group"><label class="form-label">Contract name</label><input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Quote date</label><input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Start date</label><input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Duration (mo)</label><input class="form-control" type="number" min="1" value="' + pbEsc(q.contract_duration_months) + '" onchange="pbSaveQuoteField(\'contract_duration_months\', +this.value)"></div>' +
-      '<div class="form-group"><label class="form-label">Shifts/day</label><select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
-        [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select></div>' +
-      '<div class="form-group"><label class="form-label">Margin %</label><input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)"></div>' +
-    '</div><div style="display:grid;grid-template-columns:' + (q.is_sandbox ? '1fr 1fr 1fr 1fr' : '1fr 1fr 2fr') + ';gap:10px;margin-top:10px;">' +
-      (q.is_sandbox ? '<div class="form-group"><label class="form-label">Client (label only)</label><input class="form-control" type="text" placeholder="Free text — links to nothing" value="' + pbEsc(q.sandbox_client_name || '') + '" onchange="pbSaveQuoteField(\'sandbox_client_name\', this.value || null)"></div>' : '') +
-      (q.is_sandbox
-        ? '<div class="form-group"><label class="form-label">Status</label><input class="form-control" type="text" value="Sandbox" readonly style="background:var(--bg);color:var(--text2);cursor:default;"></div>'
-        : '<div class="form-group"><label class="form-label">Status</label><select class="form-control" onchange="pbSaveQuoteField(\'status\', this.value)">' +
-          ['draft','sent','accepted','rejected','lost','expired'].map(s => '<option value="' + s + '" ' + (s===q.status?'selected':'') + '>' + s + '</option>').join('') + '</select></div>') +
-      '<div class="form-group"><label class="form-label">Valid until</label><input class="form-control" type="date" value="' + pbEsc(q.valid_until || '') + '" onchange="pbSaveQuoteField(\'valid_until\', this.value || null)"></div>' +
-      '<div class="form-group"><label class="form-label">Notes</label><input class="form-control" type="text" value="' + pbEsc(q.notes || '') + '" onchange="pbSaveQuoteField(\'notes\', this.value)"></div>' +
+  const fg = (label, control) => '<div class="form-group" style="margin:0;"><label class="form-label">' + label + '</label>' + control + '</div>';
+  const row = (cols, cells) => '<div style="display:grid;grid-template-columns:' + cols + ';gap:10px;margin-bottom:10px;">' + cells.join('') + '</div>';
+  const clientCell = q.is_sandbox
+    ? fg('Client (label only)', '<input class="form-control" type="text" placeholder="Free text — links to nothing" value="' + pbEsc(q.sandbox_client_name || '') + '" onchange="pbSaveQuoteField(\'sandbox_client_name\', this.value || null)">')
+    : '<div></div>';
+  const statusCell = q.is_sandbox
+    ? fg('Status', '<input class="form-control" type="text" value="Sandbox" readonly style="background:var(--bg);color:var(--text2);cursor:default;">')
+    : fg('Status', '<select class="form-control" onchange="pbSaveQuoteField(\'status\', this.value)">' +
+        ['draft','sent','accepted','rejected','lost','expired'].map(s => '<option value="' + s + '" ' + (s===q.status?'selected':'') + '>' + s + '</option>').join('') + '</select>');
+  return '<div class="pb-qheader"><div style="width:560px;max-width:100%;">' +
+    row('290px 120px 130px', [
+      fg('Contract name', '<input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)">'),
+      fg('Quote date', '<input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)">'),
+      fg('Valid until', '<input class="form-control" type="date" value="' + pbEsc(q.valid_until || '') + '" onchange="pbSaveQuoteField(\'valid_until\', this.value || null)">'),
+    ]) +
+    row('290px 120px 130px', [
+      clientCell,
+      fg('Start date', '<input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)">'),
+      fg('Duration (mo)', '<input class="form-control" type="number" min="1" value="' + pbEsc(q.contract_duration_months) + '" onchange="pbSaveQuoteField(\'contract_duration_months\', +this.value)">'),
+    ]) +
+    row('70px 70px 150px', [
+      fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)">'),
+      fg('Shifts/day', '<select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
+        [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select>'),
+      statusCell,
+    ]) +
+    fg('Notes', '<textarea class="form-control" style="height:240px;resize:vertical;" onchange="pbSaveQuoteField(\'notes\', this.value)">' + pbEsc(q.notes || '') + '</textarea>') +
     '</div></div>';
 }
 
@@ -13224,6 +13588,65 @@ const PB_SCHEMAS = {
     ]
   },
 };
+// v7.10.30 Site Mobility catalogues — four generic grids on one sidebar page (tab strip). A vehicle
+// type's economy is litres per 100 km; a supplier rate is dated, per km band and contract period;
+// an extra is a dated row per price change (a new row when the price changes, same name).
+PB_SCHEMAS['vehicle-types'] = {
+  title: 'Vehicle Types', table: 'quote_vehicle_types', sortBy: 'display_order',
+  columns: [
+    { key:'name',          label:'Vehicle type',        type:'text' },
+    { key:'fuel_type',     label:'Fuel',                type:'enum', options:[{value:'petrol',label:'Petrol'},{value:'diesel',label:'Diesel'}] },
+    { key:'fuel_economy',  label:'Economy (l / 100 km)', type:'decimal' },
+    { key:'in_use_date',   label:'In use from',         type:'date' },
+    { key:'retired_date',  label:'Retired Date',        type:'date' },
+    { key:'display_order', label:'Display Order',       type:'int' },
+    { key:'active',        label:'Active',              type:'bool' }
+  ]
+};
+PB_SCHEMAS['vehicle-rates'] = {
+  title: 'Supplier Rates', table: 'quote_vehicle_rates', sortBy: 'effective_date.desc,vehicle_type_id,contract_months,inclusive_km',
+  columns: [
+    { key:'effective_date',    label:'Effective Date',     type:'date' },
+    { key:'vehicle_type_id',   label:'Vehicle type',       type:'lookup', lookup:'quote_vehicle_types', lookupLabel:'name' },
+    { key:'contract_months',   label:'Contract (months)',  type:'int', default: 36 },
+    { key:'inclusive_km',      label:'Inclusive km / month', type:'int' },
+    { key:'monthly_rate',      label:'Monthly rate',       type:'decimal', prefix:'R ' },
+    { key:'rate_incl_vat',     label:'Rate incl. VAT',     type:'bool', default: false },
+    { key:'insurance_monthly', label:'Insurance / month',  type:'decimal', prefix:'R ' },
+    { key:'tracking_monthly',  label:'Tracking / month',   type:'decimal', prefix:'R ' },
+    { key:'excess_km_rate',    label:'Excess km rate',     type:'decimal', prefix:'R ' },
+    { key:'supplier',          label:'Supplier',           type:'text' },
+    { key:'note',              label:'Note',               type:'text' }
+  ]
+};
+PB_SCHEMAS['fuel-prices'] = {
+  title: 'Fuel Prices', table: 'quote_fuel_prices', sortBy: 'effective_date.desc,fuel_type',
+  columns: [
+    { key:'effective_date',  label:'Effective Date',  type:'date' },
+    { key:'fuel_type',       label:'Fuel',            type:'enum', options:[{value:'petrol',label:'Petrol'},{value:'diesel',label:'Diesel'}] },
+    { key:'price_per_litre', label:'Price per litre', type:'decimal', prefix:'R ' },
+    { key:'note',            label:'Note',            type:'text' }
+  ]
+};
+PB_SCHEMAS['vehicle-extras'] = {
+  title: 'Vehicle Extras', table: 'quote_vehicle_extras', sortBy: 'display_order,name,effective_date.desc',
+  columns: [
+    { key:'name',             label:'Extra',               type:'text' },
+    { key:'effective_date',   label:'Effective Date',      type:'date' },
+    { key:'acquisition_cost', label:'Acquisition cost',    type:'decimal', prefix:'R ' },
+    { key:'life_months',      label:'Life (months)',       type:'int' },
+    { key:'monthly_cost',     label:'Running cost / month', type:'decimal', prefix:'R ' },
+    { key:'retired_date',     label:'Retired Date',        type:'date' },
+    { key:'display_order',    label:'Display Order',       type:'int' }
+  ]
+};
+const PB_MOBILITY_TABS = [{ key: 'vehicle-types', label: 'Vehicle types' }, { key: 'vehicle-rates', label: 'Supplier rates' }, { key: 'fuel-prices', label: 'Fuel prices' }, { key: 'vehicle-extras', label: 'Vehicle extras' }];
+let pbMobSchema = 'vehicle-types';
+async function renderPbSiteMobilityPage() {
+  pbCatalogTabs = PB_MOBILITY_TABS;
+  pbActiveSchema = pbMobSchema; pbEditingRowId = null;
+  await renderPbEditor(pbActiveSchema, { withBack: false });
+}
 const PB_CATALOG_SCHEMA_BY_TABLE = {
   quote_standard_post_names:    'standard-posts',
   quote_standard_heading_names: 'standard-headings',
@@ -13269,7 +13692,7 @@ async function renderPbStandardNamesPage() {
   pbActiveSchema = pbStdNamesSchema; pbEditingRowId = null;
   await renderPbEditor(pbActiveSchema, { withBack: false });
 }
-function pbCatalogTab(key) { pbStdNamesSchema = key; pbActiveSchema = key; pbEditingRowId = null; renderPbEditor(key, { withBack: false }); }
+function pbCatalogTab(key) { if (PB_MOBILITY_TABS.some(t => t.key === key)) pbMobSchema = key; else pbStdNamesSchema = key; pbActiveSchema = key; pbEditingRowId = null; renderPbEditor(key, { withBack: false }); }
 // v7.9.74 (Richard: "put all support items categories under one heading Support Items"): one entry,
 // three tabs; the page remembers the last category. The separate Support Item Subcategories page is
 // gone — each tab's tree editor creates, renames, orders and retires its own groups and subcategories.
@@ -14918,7 +15341,7 @@ async function pbAddRow() {
   if (!schema) return;
   const payload = {};
   schema.columns.forEach(c => {
-    if (c.type === 'bool') payload[c.key] = true;
+    if (c.type === 'bool') payload[c.key] = c.default !== undefined ? !!c.default : true;
     else if (c.type === 'date') payload[c.key] = c.key === 'retired_date' ? null : new Date().toISOString().slice(0, 10);
     else if (c.default !== undefined) payload[c.key] = c.default;
     else if (c.type === 'lookup') payload[c.key] = null;
@@ -14956,6 +15379,7 @@ async function pbSaveRow(rowId) {
   });
   try {
     await apiPatch(schema.table, rowId, updates);
+    if (schema.table === 'quote_vehicle_types') delete allData['quote_vehicle_types'];   // v7.10.30: the Supplier rates tab's lookup must see the rename
     pbEditingRowId = null;
     await renderPbEditor(pbActiveSchema, { withBack: pbActiveSchema in {'salary-rates':1,'discretionary-allowances':1,'extraordinary-hours-rates':1,'statutory-allowances':1,'discretionary-incentives':1,'leave-allocation':1,'health-insurance':1,'provident-fund':1,'bargaining-council':1,'compensation-commissioner':1,'uif-recovery':1,'sdl-recovery':1,'replacement-pool':1,'area-management-overhead':1,'hr-calculation-ratios':1} });
     showStatus('Saved', 'success');
