@@ -824,7 +824,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.30 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.31 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +863,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.30 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.31 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -9166,6 +9166,7 @@ async function openQuote(id) {
     _wfState.editing = null; _wfState.open = new Set();   // v7.9.70: a quote's expanded/editing workforce rows never carry into the next quote
     _ctState.editing = null; _ctState.open = new Set(); _pbContractOvrPending = null;   // v7.9.77: the Contract tab's rows and reason row likewise
     _svState.editing = null; _svState.open = new Set();                                 // v7.10.30: the Service tab's rows
+    pbSupportViewLoad();                                                                 // v7.10.31: the remembered show-all / collapsed view per tab
     _mobState = { editing: null, open: new Set(), draft: null, busy: false };          // v7.10.30: Site Mobility's open rows and form
     renderQuoteEditor();
   } catch (e) { showStatus('Could not open quote: ' + e.message, 'error'); }
@@ -10318,7 +10319,71 @@ function pbAccSummary() {
 // posts, blue = added here / here only, amber = reduced here, red = no price / retired / not in
 // use, grey = not ticked. The adjustment prices as its own line; the posts keep their ticks.
 let pbWorkforceAdj = new Map();   // accessory_id → { mode, quantity, reason }
-let _wfState = { editing: null, showAll: false, open: new Set() };   // open: item ids whose detail row is expanded (v7.9.70)
+let _wfState = { editing: null, showAll: false, open: new Set(), collapsed: new Set() };   // open: item ids whose detail row is expanded (v7.9.70); collapsed: group / subcategory keys (v7.10.31)
+// ── Support tab view (v7.10.31) ───────────────────────────────────────────────────
+// Richard 2026-11-08: "Make the categories collapsable. For workforce, show only items selected under
+// posts by default, others to open on tick button. For the other two, default to show all categories.
+// Thereafter remember the view for next time." The view = the show-every-item switch and the set of
+// collapsed group ('g:<group>') and subcategory ('s:<id>') keys, per tab (wf / ct / sv), kept in the
+// browser per signed-in person (localStorage) — a preference, not quote data, so no table.
+const PB_SUPPORT_VIEW_DEFAULT = { wf: false, ct: true, sv: true };
+function pbSupportViewKey() { return 'focus_pb_support_view_' + ((typeof currentUser !== 'undefined' && currentUser && (currentUser.personId || currentUser.id)) || 'anon'); }
+function pbSupportViewLoad() {
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(pbSupportViewKey()) || 'null'); } catch (e) { v = null; }
+  ['wf', 'ct', 'sv'].forEach(k => {
+    const st = pbCtStateFor(k), saved = v && v[k] ? v[k] : null;
+    st.showAll = saved && typeof saved.showAll === 'boolean' ? saved.showAll : PB_SUPPORT_VIEW_DEFAULT[k];
+    st.collapsed = new Set(saved && Array.isArray(saved.collapsed) ? saved.collapsed.map(String) : []);
+  });
+}
+function pbSupportViewSave() {
+  const v = {};
+  ['wf', 'ct', 'sv'].forEach(k => { const st = pbCtStateFor(k); v[k] = { showAll: !!st.showAll, collapsed: [...(st.collapsed || [])] }; });
+  try { localStorage.setItem(pbSupportViewKey(), JSON.stringify(v)); } catch (e) {}
+}
+function pbSupportCollapse(k, key) {
+  if (k === 'wf' ? _wfState.editing != null : pbCtGuard()) { if (k === 'wf') showStatus('Apply or cancel the adjustment first', 'error'); return; }
+  const st = pbCtStateFor(k); if (!st.collapsed) st.collapsed = new Set();
+  if (st.collapsed.has(key)) st.collapsed.delete(key); else st.collapsed.add(key);
+  pbSupportViewSave(); renderQuoteEditor();
+}
+function pbSupportCollapseAll(k, on, keys) {
+  if (k === 'wf' ? _wfState.editing != null : pbCtGuard()) { if (k === 'wf') showStatus('Apply or cancel the adjustment first', 'error'); return; }
+  const st = pbCtStateFor(k); st.collapsed = on ? new Set(keys) : new Set();
+  pbSupportViewSave(); renderQuoteEditor();
+}
+// The grouped body of a support tab: GROUP → subcategory → item rows, every group and subcategory a
+// click to collapse. Returns { html, keys } — keys = every collapsible key drawn, for Collapse all.
+function pbSupportTreeHtml(k, list, family, rowOf) {
+  const st = pbCtStateFor(k), coll = st.collapsed || new Set(), keys = [];
+  const caret = c => '<span style="display:inline-block;width:14px;">' + (c ? '▸' : '▾') + '</span>';
+  const countTxt = n => ' <span style="font-weight:400;opacity:.75;">· ' + n + ' item' + (n === 1 ? '' : 's') + '</span>';
+  const groupRow = (t, key, c, n) => '<tr style="cursor:pointer;" data-ckey="' + pbEsc(key) + '" onclick="pbSupportCollapse(\'' + k + '\', this.dataset.ckey)"><td colspan="4" style="background:var(--navy);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:5px 12px;">' + caret(c) + pbEsc(t) + (c ? countTxt(n) : '') + '</td></tr>';
+  const subRow = (sub, key, c, n) => '<tr style="cursor:pointer;" data-ckey="' + pbEsc(key) + '" onclick="pbSupportCollapse(\'' + k + '\', this.dataset.ckey)"><td colspan="4" style="background:var(--bg);font-size:11px;font-weight:700;color:var(--navy);padding:4px 12px 4px 28px;">' + caret(c) + pbEsc(pbSubName(sub)) + (c ? countTxt(n) : '') + '</td></tr>';
+  const byId = new Map(list.map(r => [+r.item.id, r]));
+  if (!pbSubcats(family, true).length) return { html: list.map(r => rowOf(r, 0)).join(''), keys };
+  const html = pbSubcatTree(list.map(r => r.item), family).map(n => {
+    const gkey = 'g:' + (n.groupName || 'unfiled'); keys.push(gkey);
+    const gc = coll.has(gkey), total = n.subs.reduce((a, sn) => a + sn.items.length, 0);
+    let out = groupRow(n.group, gkey, gc, total);
+    if (gc) return out;
+    n.subs.forEach(sn => {
+      if (n.single) { out += sn.items.map(it => rowOf(byId.get(+it.id), 16)).join(''); return; }
+      const skey = 's:' + (sn.sub ? sn.sub.id : 'unfiled'); keys.push(skey);
+      const sc = coll.has(skey);
+      out += subRow(sn.sub, skey, sc, sn.items.length);
+      if (!sc) out += sn.items.map(it => rowOf(byId.get(+it.id), 32)).join('');
+    });
+    return out;
+  }).join('');
+  return { html, keys };
+}
+function pbSupportCollapseLinks(k, keys) {
+  if (!keys.length) return '';
+  const st = pbCtStateFor(k), anyOpen = keys.some(x => !(st.collapsed || new Set()).has(x));
+  return '<a href="#" style="font-size:11px;padding-bottom:3px;" onclick="event.preventDefault();pbSupportCollapseAll(\'' + k + '\', ' + (anyOpen ? 'true' : 'false') + ', ' + pbEsc(JSON.stringify(keys)) + ')">' + (anyOpen ? 'Collapse all' : 'Expand all') + '</a>';
+}
 const PB_WF_LEVEL = {
   ok:   { bg: '',        badge: '#DCFCE7', fg: '#166534' },
   info: { bg: '#EFF6FF', badge: '#DBEAFE', fg: '#1E40AF' },
@@ -10439,13 +10504,9 @@ function renderWorkforceTab() {
     }
     return html;
   };
-  // v7.9.71: rows sit under their subcategory (Offensive · Lethal …); unfiled items last.
-  const groupRow = t => '<tr><td colspan="4" style="background:var(--navy);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:5px 12px;">' + pbEsc(t) + '</td></tr>';
-  const subRow = s => '<tr><td colspan="4" style="background:var(--bg);font-size:11px;font-weight:700;color:var(--navy);padding:4px 12px 4px 28px;">' + pbEsc(pbSubName(s)) + '</td></tr>';
-  const byId = new Map(rows.map(r => [+r.item.id, r]));
-  const body = pbSubcats('workforce', true).length
-    ? pbSubcatTree(rows.map(r => r.item), 'workforce').map(n => groupRow(n.group) + n.subs.map(sn => (n.single ? '' : subRow(sn.sub)) + sn.items.map(it => rowOf(byId.get(+it.id), n.single ? 16 : 32)).join('')).join('')).join('')
-    : rows.map(r => rowOf(r, 0)).join('');
+  // v7.9.71: rows sit under their subcategory (Offensive · Lethal …); unfiled items last. v7.10.31: groups
+  // and subcategories collapse on a click, the view remembered (pbSupportTreeHtml).
+  const tree = pbSupportTreeHtml('wf', rows, 'workforce', rowOf), body = tree.html;
   return '<div class="pb-qheader">' +
     '<div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:10px;">' +
       '<div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--text3);">Monthly total</div>' +
@@ -10455,7 +10516,8 @@ function renderWorkforceTab() {
       '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
       '<span style="flex:1;"></span>' +
       (tot.bad ? badge('bad', tot.bad + ' not priced') : '') + (tot.warn ? badge('warn', tot.warn + ' reduced') : '') + (tot.adj ? badge('info', tot.adj + ' adjusted') : '') +
-      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (_wfState.showAll ? 'checked' : '') + ' onchange="_wfState.showAll=this.checked;renderQuoteEditor()"> show every item in use, ticked or not</label>' +
+      pbSupportCollapseLinks('wf', tree.keys) +
+      '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (_wfState.showAll ? 'checked' : '') + ' onchange="_wfState.showAll=this.checked;pbSupportViewSave();renderQuoteEditor()"> show every item in use, ticked or not</label>' +
     '</div>' +
     (rows.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th style="text-align:right;">Units</th><th style="text-align:right;">Monthly</th><th>Status</th></tr></thead><tbody>' + body + '</tbody></table>'
       : '<div class="pb-placeholder-text">No workforce support item is ticked on any post yet. Tick them under each post\'s "Workforce Support Items and Training", or show every item above to add one here.</div>') +
@@ -10513,7 +10575,7 @@ async function pbWfAdjustClear(id) {
 // stays: these items are ticked HERE, once per quote, with a quantity — so the open row carries
 // Tick / quantity / Untick instead of an adjustment, and an item a condition ticked is switched
 // off with a recorded reason (the same override rows as before, pbToggleContractAcc & co.).
-let _ctState = { editing: null, showAll: false, open: new Set() };   // open: item ids whose detail row is expanded
+let _ctState = { editing: null, showAll: true, open: new Set(), collapsed: new Set() };   // open: item ids whose detail row is expanded; showAll default true (v7.10.31), collapsed group / subcategory keys
 function pbContractRollup(includeAll) {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
   const eff = pbContractAccMap(), imp = pbSupportEval().contract;
@@ -10555,13 +10617,13 @@ function pbCtToggle(id, k) {
   const s = pbCtStateFor(k).open; if (s.has(id)) s.delete(id); else s.add(id); renderQuoteEditor();
 }
 function pbCtTick(id, on, qty) { if (pbCtGuard()) return; pbToggleContractAcc(id, on, qty); }
-function pbCtShowAll(cb, k) { if (pbCtGuard()) { cb.checked = !cb.checked; return; } pbCtStateFor(k).showAll = cb.checked; renderQuoteEditor(); }
+function pbCtShowAll(cb, k) { if (pbCtGuard()) { cb.checked = !cb.checked; return; } pbCtStateFor(k).showAll = cb.checked; pbSupportViewSave(); renderQuoteEditor(); }
 // v7.10.30 (Richard: "build and push all" after the mock-up): the Service Support Items tab is the same
 // shape as this one, over the service family only — one renderer, two tabs, each with its own open
 // rows and "show every item" switch (_ctState / _svState). Ticks, quantities and overrides share the
 // same quote_contract_accessories rows and handlers; only the listing is split.
-let _svState = { editing: null, showAll: false, open: new Set() };
-function pbCtStateFor(k) { return k === 'sv' ? _svState : _ctState; }
+let _svState = { editing: null, showAll: true, open: new Set(), collapsed: new Set() };
+function pbCtStateFor(k) { return k === 'sv' ? _svState : k === 'wf' ? _wfState : _ctState; }
 function renderContractItemsTab() { return pbSupportTabHtml('ct'); }
 function renderServiceItemsTab() { return pbSupportTabHtml('sv'); }
 function pbSupportTabHtml(k) {
@@ -10608,16 +10670,12 @@ function pbSupportTabHtml(k) {
     }
     return html;
   };
-  const groupRow = t => '<tr><td colspan="4" style="background:var(--navy);color:#fff;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:5px 12px;">' + pbEsc(t) + '</td></tr>';
-  const subRow = s => '<tr><td colspan="4" style="background:var(--bg);font-size:11px;font-weight:700;color:var(--navy);padding:4px 12px 4px 28px;">' + pbEsc(pbSubName(s)) + '</td></tr>';
   const sectionRow = t => '<tr><td colspan="4" style="background:#fff;color:var(--navy);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:10px 12px 4px;border-bottom:2px solid var(--navy);">' + t + '</td></tr>';
-  const byId = new Map(rows.map(r => [+r.item.id, r]));
+  const keys = [];   // v7.10.31: every collapsible group / subcategory drawn, for Collapse all
   const section = (title, list, family) => {
     if (!list.length) return '';
-    const inner = pbSubcats(family, true).length
-      ? pbSubcatTree(list.map(r => r.item), family).map(n => groupRow(n.group) + n.subs.map(sn => (n.single ? '' : subRow(sn.sub)) + sn.items.map(it => rowOf(byId.get(+it.id), n.single ? 16 : 32)).join('')).join('')).join('')
-      : list.map(r => rowOf(r, 0)).join('');
-    return sectionRow(title) + inner;
+    const tree = pbSupportTreeHtml(k, list, family, rowOf); keys.push(...tree.keys);
+    return sectionRow(title) + tree.html;
   };
   const body = svc ? section('Service support items', rows, 'service')
     : section('Contract support items', rows.filter(r => r.cat === 'contract'), 'contract') +
@@ -10632,6 +10690,7 @@ function pbSupportTabHtml(k) {
       '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
       '<span style="flex:1;"></span>' +
       (tot.bad ? badge('bad', tot.bad + (tot.bad === 1 ? ' needs attention' : ' need attention')) : '') + (tot.ovr ? badge('warn', tot.ovr + ' switched off') : '') + (tot.auto ? badge('info', tot.auto + ' auto') : '') +
+      pbSupportCollapseLinks(k, keys) +
       '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (st.showAll ? 'checked' : '') + ' onchange="pbCtShowAll(this, \'' + k + '\')"> show every item in use, ticked or not</label>' +
     '</div>' +
     '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">' + (svc ? 'Service things a contract needs to be delivered, ticked' : 'Ticked') + ' once per quote, regardless of posts. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); switching it off asks for a reason. ' +
@@ -12118,16 +12177,19 @@ function renderBasicInfoTab() {
     ? fg('Status', '<input class="form-control" type="text" value="Sandbox" readonly style="background:var(--bg);color:var(--text2);cursor:default;">')
     : fg('Status', '<select class="form-control" onchange="pbSaveQuoteField(\'status\', this.value)">' +
         ['draft','sent','accepted','rejected','lost','expired'].map(s => '<option value="' + s + '" ' + (s===q.status?'selected':'') + '>' + s + '</option>').join('') + '</select>');
-  return '<div class="pb-qheader"><div style="width:560px;max-width:100%;">' +
-    row('290px 120px 130px', [
+  // v7.10.31 (Richard 2026-11-08): name fields 10 characters wider (290 → 370), dates wide enough for a
+  // written-out month (120/130 → 170) and shown that way (pbDateField), Duration a 12/24/36/48/60 pick
+  // that still takes any other figure (pbDurationField).
+  return '<div class="pb-qheader"><div style="width:730px;max-width:100%;">' +
+    row('370px 170px 170px', [
       fg('Contract name', '<input class="form-control" type="text" value="' + pbEsc(q.contract_name) + '" onchange="pbSaveQuoteField(\'contract_name\', this.value)">'),
-      fg('Quote date', '<input class="form-control" type="date" value="' + pbEsc(q.quote_date || '') + '" onchange="pbSaveQuoteField(\'quote_date\', this.value)">'),
-      fg('Valid until', '<input class="form-control" type="date" value="' + pbEsc(q.valid_until || '') + '" onchange="pbSaveQuoteField(\'valid_until\', this.value || null)">'),
+      fg('Quote date', pbDateField('quote_date', q.quote_date, false)),
+      fg('Valid until', pbDateField('valid_until', q.valid_until, true)),
     ]) +
-    row('290px 120px 130px', [
+    row('370px 170px 170px', [
       clientCell,
-      fg('Start date', '<input class="form-control" type="date" value="' + pbEsc(q.contract_start_date || '') + '" onchange="pbSaveQuoteField(\'contract_start_date\', this.value)">'),
-      fg('Duration (mo)', '<input class="form-control" type="number" min="1" value="' + pbEsc(q.contract_duration_months) + '" onchange="pbSaveQuoteField(\'contract_duration_months\', +this.value)">'),
+      fg('Start date', pbDateField('contract_start_date', q.contract_start_date, false)),
+      fg('Duration', pbDurationField(q.contract_duration_months)),
     ]) +
     row('70px 70px 150px', [
       fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)">'),
@@ -12137,6 +12199,83 @@ function renderBasicInfoTab() {
     ]) +
     fg('Notes', '<textarea class="form-control" style="height:240px;resize:vertical;" onchange="pbSaveQuoteField(\'notes\', this.value)">' + pbEsc(q.notes || '') + '</textarea>') +
     '</div></div>';
+}
+
+// ── Basic info field helpers (v7.10.31) ───────────────────────────────────────────
+// Dates are SHOWN written out ("8 November 2026") in a text box the user may type into — ISO
+// (2026-11-08), day-first (8/11/2026, 8-11-2026), "8 Nov 2026", "8 November 2026" or
+// "November 8, 2026" all parse — with a calendar button that opens the browser's native picker
+// through a hidden date input (showPicker; focus as the fallback). The saved value stays
+// YYYY-MM-DD, so nothing downstream (pbQuoteAsAt, the proposal, the engine) changes.
+const PB_MONTHS = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+function pbParseDate(text) {
+  const t = String(text || '').trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
+  if (!t) return null;
+  const pad = n => String(n).padStart(2, '0');
+  const mk = (y, m, d) => { y = +y; m = +m; d = +d; if (y < 1900 || y > 2200 || m < 1 || m > 12 || d < 1 || d > 31) return null; const dt = new Date(y, m - 1, d); return dt.getMonth() === m - 1 && dt.getDate() === d ? y + '-' + pad(m) + '-' + pad(d) : null; };
+  const month = w => { const i = PB_MONTHS.findIndex(mn => mn.startsWith(w.toLowerCase().slice(0, 3))); return i < 0 || w.length < 3 ? 0 : i + 1; };
+  let m;
+  if ((m = t.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/))) return mk(m[1], m[2], m[3]);
+  if ((m = t.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/))) return mk(m[3], m[2], m[1]);
+  if ((m = t.match(/^(\d{1,2})(?:st|nd|rd|th)? ([A-Za-z]+) (\d{4})$/))) return month(m[2]) ? mk(m[3], month(m[2]), m[1]) : null;
+  if ((m = t.match(/^([A-Za-z]+) (\d{1,2})(?:st|nd|rd|th)? (\d{4})$/))) return month(m[1]) ? mk(m[3], month(m[1]), m[2]) : null;
+  return null;
+}
+function pbDateField(field, value, nullable) {
+  const iso = value || '';
+  return '<div style="position:relative;">' +
+    '<input class="form-control pb-date-text" type="text" data-field="' + field + '" data-iso="' + pbEsc(iso) + '" value="' + pbEsc(pgFmtDate(iso)) + '" placeholder="e.g. 8 November 2026" style="padding-right:30px;" onchange="pbDateTyped(this, ' + (nullable ? 'true' : 'false') + ')">' +
+    '<input type="date" tabindex="-1" aria-hidden="true" value="' + pbEsc(iso) + '" style="position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;" onchange="pbDatePicked(this, ' + (nullable ? 'true' : 'false') + ')">' +
+    '<button type="button" tabindex="-1" title="Pick a date" onclick="pbDateOpenPicker(this)" style="position:absolute;right:4px;top:50%;transform:translateY(-50%);border:0;background:transparent;cursor:pointer;font-size:14px;line-height:1;padding:2px 4px;color:var(--text3);">&#128197;</button>' +
+  '</div>';
+}
+function pbDateOpenPicker(btn) {
+  const d = btn.parentElement.querySelector('input[type=date]');
+  if (!d) return;
+  try { d.showPicker(); } catch (e) { d.style.pointerEvents = 'auto'; d.style.opacity = '0.01'; d.style.width = '24px'; d.style.height = '24px'; d.focus(); d.click(); }
+}
+async function pbDateSet(wrap, iso, nullable) {
+  const text = wrap.querySelector('.pb-date-text'), d = wrap.querySelector('input[type=date]');
+  const field = text.dataset.field;
+  if (!iso && !nullable) { showStatus('A date is needed here', 'error'); text.value = pgFmtDate(text.dataset.iso); return; }
+  await pbSaveQuoteField(field, iso || null);
+  const saved = pbQ && pbQ[field] ? pbQ[field] : '';
+  text.dataset.iso = saved; text.value = pgFmtDate(saved); d.value = saved;
+}
+function pbDateTyped(input, nullable) {
+  const wrap = input.parentElement, raw = input.value.trim();
+  if (!raw) { pbDateSet(wrap, '', nullable); return; }
+  const iso = pbParseDate(raw);
+  if (!iso) { showStatus('Could not read "' + raw + '" as a date — try 8 November 2026 or 2026-11-08', 'error'); input.value = pgFmtDate(input.dataset.iso); return; }
+  pbDateSet(wrap, iso, nullable);
+}
+function pbDatePicked(input, nullable) { pbDateSet(input.parentElement, input.value, nullable); }
+// Duration: the usual contract terms as a pick list, any other figure through "Other…" (a number box
+// that becomes the select again once saved — the typed figure then sits in the list as its own option).
+const PB_DURATIONS = [12, 24, 36, 48, 60];
+function pbDurationField(months) {
+  const cur = +months || 0;
+  const opts = PB_DURATIONS.slice(); if (cur && !opts.includes(cur)) opts.push(cur); opts.sort((a, b) => a - b);
+  return '<div id="pb-dur-wrap"><select class="form-control" onchange="pbDurationPick(this)">' +
+    (cur ? '' : '<option value="" selected disabled>Choose…</option>') +
+    opts.map(n => '<option value="' + n + '"' + (n === cur ? ' selected' : '') + '>' + n + ' months</option>').join('') +
+    '<option value="other">Other…</option></select></div>';
+}
+function pbDurationPick(sel) {
+  if (sel.value === 'other') {
+    const wrap = sel.parentElement, cur = +pbQ.contract_duration_months || '';
+    wrap.innerHTML = '<input class="form-control" type="number" min="1" step="1" value="' + cur + '" placeholder="months" onchange="pbDurationSave(this.value)" onkeydown="if(event.key===\'Escape\'){event.preventDefault();pbDurationSave(\'\')}">';
+    const inp = wrap.firstChild; inp.focus(); inp.select();
+    return;
+  }
+  pbDurationSave(sel.value);
+}
+async function pbDurationSave(v) {
+  const n = Math.round(+v);
+  const wrap = document.getElementById('pb-dur-wrap');
+  if (n >= 1) await pbSaveQuoteField('contract_duration_months', n);
+  else if (String(v).trim() !== '') showStatus('Duration must be a whole number of months, 1 or more', 'error');
+  if (wrap) wrap.outerHTML = pbDurationField(pbQ.contract_duration_months);
 }
 
 function renderPeopleSection() {
