@@ -568,6 +568,15 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pb-editor-topbar .meta { font-size:12px; color:var(--text3); font-weight:normal; margin-left:6px; }
 .pb-editor-tabs { background:var(--bg2); padding:0 28px; border-bottom:1px solid var(--border); display:flex; gap:0; align-items:flex-end; }
 .pb-editor-tabs .opp-tab { margin-bottom:-1px; }
+/* v7.10.32 project plan page */
+.pp-table th, .pp-table td { padding:6px 8px; border-bottom:1px solid var(--border); vertical-align:top; font-size:13px; }
+.pp-table th { font-size:11px; font-weight:700; }
+.pp-table tr.pp-editor td { background:#F4F7FB; }
+.pp-ms-row.pp-drop-above td { box-shadow:inset 0 2px 0 var(--red); }
+.pp-ms-row.pp-drop-below td { box-shadow:inset 0 -2px 0 var(--red); }
+.pp-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; margin-bottom:8px; }
+.pp-card.pp-dragging { opacity:0.5; }
+.pp-col.pp-drop { outline:2px dashed var(--red); outline-offset:-2px; background:#FFF5F5; }
 .pb-editor-tab-content { padding:20px 28px; display:flex; flex-direction:column; min-height:calc(100vh - 100px); }
 .pb-editor-tab-content > * { flex:0 0 auto; }
 /* Summary pinned to the bottom of the editor: margin-top:auto pushes it down when
@@ -824,7 +833,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.31 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.32 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -863,7 +872,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.31 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.32 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -904,6 +913,9 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
 </div>
 
 
+<!-- Project plan page (v7.10.32): a full-screen overlay above the deal page, drawn by ppPaint() -->
+<div class="opp-page" id="pp-page" style="z-index:1001;"><div id="pp-root" style="display:flex;flex-direction:column;flex:1;min-height:0;"></div></div>
+
 <!-- Opportunity Form Page -->
 <div class="opp-page" id="opp-page">
   <div class="opp-topbar">
@@ -943,6 +955,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       <button class="opp-tab" onclick="switchOppTab('collaborators', this)">Collaborators</button>
       <button class="opp-tab" onclick="switchOppTab('engagement', this)">Engagement</button>
       <button class="opp-tab" id="opp-files-tab-btn" onclick="switchOppTab('files', this)">Files</button>
+      <button class="opp-tab" id="opp-plan-tab-btn" onclick="switchOppTab('plan', this)" style="display:none;">Project Plan</button>
       <button class="opp-tab" id="lost-tab" onclick="switchOppTab('lost', this)" style="display:none;">Lost</button>
     </div>
 
@@ -1161,6 +1174,11 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <!-- Files Tab (v7.9.82) -->
     <div class="opp-tab-content" id="opp-tab-files">
       <div id="opp-files"></div>
+    </div>
+
+    <!-- Project Plan Tab (v7.10.32): a secured deal only — the build card, else the plan's summary -->
+    <div class="opp-tab-content" id="opp-tab-plan">
+      <div id="opp-plan"></div>
     </div>
 
     <!-- Opportunity Contacts Tab -->
@@ -2381,6 +2399,8 @@ function _mockSeed() {
     deal_probability_answers: [],
     forecast_snapshots: [],
     forecast_snapshot_lines: [],
+    // v7.10.32 project planning: empty — a plan is built from a secured deal (the harness injects deals).
+    project_plans: [], project_milestones: [], project_tasks: [], project_plan_members: [],
     settings: [
       { id: 1, key: 'environment',            value: 'Development' },
       { id: 2, key: 'fy_start_month',         value: 'July' },
@@ -3313,6 +3333,7 @@ const PAGES = {
   ts_report:                { title: 'Work Labour Report',                 custom: true, readOnly: true, columns: [], fields: [] },
   ts_jobs:                  { title: 'Job Numbers',                        custom: true, readOnly: true, columns: [], fields: [] },
   pm_overview:              { title: 'Project Management — Overview',      custom: true, columns: [], fields: [] },
+  pm_projects:              { title: 'Projects',                           custom: true, readOnly: true, columns: [], fields: [] },   // v7.10.32: every project plan with its health
 
   // ── Engagement History (read-only) — one view, four category-preset doorways ──
   eng_hist_outreach: { title: 'Engagement History — Outreach', custom: true, readOnly: true, columns: [], fields: [] },
@@ -4312,6 +4333,7 @@ async function loadTable(page) {
     if (page === 'ts_report')                 { await renderTsReportPage(); return; }
     if (page === 'ts_jobs')                   { await renderTsJobsPage(); return; }
     if (page === 'pm_overview')               { await renderPbPlaceholderPage('Project Management'); return; }
+    if (page === 'pm_projects')               { await renderProjectsPage(); return; }
     if (page === 'eng_hist_outreach') { await renderEngagementHistory('Outreach'); return; }
     if (page === 'eng_hist_sales')    { await renderEngagementHistory('Sales');    return; }
     if (page === 'eng_hist_contract') { await renderEngagementHistory('Contract'); return; }
@@ -5794,6 +5816,8 @@ const MENU = [
     items: [
       { page: 'pm_overview',     label: 'Overview',     permission: 'manage_opportunities',
         icon: '<path d="M2 4h12M2 8h12M2 12h7" stroke="white" stroke-width="1.5" stroke-linecap="round"/>' },
+      { page: 'pm_projects',     label: 'Projects',     permission: 'manage_opportunities',
+        icon: '<rect x="2" y="3" width="12" height="10" rx="1.5" stroke="white" stroke-width="1.4" fill="none"/><path d="M5 7h3M5 10h5" stroke="white" stroke-width="1.3" stroke-linecap="round"/><path d="M10 6.5l1 1 2-2" stroke="white" stroke-width="1.3" fill="none" stroke-linecap="round"/>' },
       { page: 'ts_approvals', label: 'Timesheet Approvals', permission: 'approve_timesheets',
         icon: '<circle cx="8" cy="8" r="6" stroke="white" stroke-width="1.5" fill="none"/><path d="M5.2 8.2l2 2 3.6-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>' },
       { page: 'ts_report', label: 'Work Labour Report', permission: 'view_labour_report',
@@ -6207,6 +6231,7 @@ async function openNewOpportunity() {
   }
 
   document.getElementById('opp-page-title').textContent = 'New Opportunity';
+  oppPlanTabRefresh(false);   // v7.10.32: no plan tab on a new deal
   document.getElementById('opp-page').classList.add('active');
   switchOppTab('general', document.querySelector('.opp-tab'));
   buildRevGrid();
@@ -6284,6 +6309,7 @@ async function openOpportunity(id, adminMode = false) {
     setupOppOwnerReassign();
     applyOppReadOnly(level, { secured });
     oppFilesLoad();   // background: fills the Files tab and its count
+    oppPlanTabRefresh(secured);   // v7.10.32: the Project Plan tab, a secured deal only (background)
     await oppSuspensionOnOpen();
     oppScoreRefresh();   // the stage, the edit level and any suspension are settled now
     oppIdentRefresh();
@@ -7321,6 +7347,691 @@ function switchOppTab(tab, btn) {
   if (btn) btn.classList.add('active');
   const el = document.getElementById('opp-tab-' + tab);
   if (el) el.classList.add('active');
+}
+
+// ── Project planning, phase 1 (v7.10.32) ─────────────────────────────────────
+// Richard 2026-11-13: "projects are distinct from contracts. when a project is secured, the
+// assigned project owner will be given the option to build a project plan" — "in contracts, the
+// start up phase may well be defined as a project" — "build, make sales person pm".
+//
+// A PLAN (project_plans, sql/add_project_plans.sql) hangs off ONE secured deal: a project-revenue
+// deal (kind 'project') or the start-up phase of a contract (kind 'startup'). Never created by
+// itself: the project manager — the deal's sales owner when the plan is built, held on the plan
+// so it can be handed over — presses "Build project plan" on the deal page's Project Plan tab
+// and the plan starts empty. Milestones (due date, owner, optional billing %), tasks (assignee,
+// start / due, status To do · In progress · Blocked · Done, estimated hours) under a milestone
+// or none, and the project team (people rows, login or not — a resource IS a person, the way
+// labour_rates already key on people). Health is derived from due dates, never stored.
+//
+// Surfaces: the deal page tab (`oppPlanTabRefresh`: the build card, else a summary card and
+// "Open project plan"), Project Management → Projects (`renderProjectsPage`, every plan with its
+// health), and the plan page itself (`openProjectPlan`, a full-screen overlay like the deal
+// page: header, milestones, tasks as a list or a Kanban board, the team). Every edit saves at
+// once through `api` and splices the row back into `_pp` — there is no Save button.
+//
+// Rights: `ppCanEdit()` = manage_project_plans, the plan's project manager, or the deal's
+// editor (canEditRecord); a team member may move and re-date their OWN tasks (`ppCanTouchTask`);
+// anyone who can open the deal reads the plan. Tables absent (404 / PGRST205) → `_ppMissing`,
+// the tab and the page name the SQL file. NOT in phase 1: dependencies and a Gantt, capacity
+// and resource load, budget vs actual, time logged against tasks (timesheet_entries untouched).
+
+let _ppMissing = false;
+let _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: 'list', edit: null, from: null, busy: false };
+const PP_TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
+const PP_PLAN_STATUS = [['planning', 'Planning'], ['active', 'Active'], ['on_hold', 'On hold'], ['complete', 'Complete']];
+const PP_HEALTH = { ontrack: ['On track', '#DCFCE7', '#166534'], atrisk: ['At risk', '#FEF3C7', '#92400E'], late: ['Late', '#FEE2E2', '#991B1B'], complete: ['Complete', '#E0E7FF', '#3730A3'], hold: ['On hold', '#F1F5F9', '#475569'] };
+const PP_MISSING_MSG = 'Project plans are not installed on this database yet — run sql/add_project_plans.sql.';
+const PP_AT_RISK_DAYS = 7;
+
+function _ppIsMissingErr(e) { return /^404\b|PGRST205/.test(String((e && e.message) || '')); }
+function ppStatusLabel(list, key) { const r = list.find(x => x[0] === key); return r ? r[1] : (key || ''); }
+function ppDate(s) {
+  if (!s) return '';
+  const d = new Date(String(s).slice(0, 10) + 'T00:00:00');
+  return isNaN(d) ? String(s) : d.toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function ppPersonName(id, people) {
+  people = people || (_pp.people && _pp.people.length ? _pp.people : allData['people']) || [];
+  const p = people.find(x => +x.id === +id);
+  return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
+}
+// Health, one rule for the list, the deal tab and the plan page: Complete when the plan says so,
+// On hold when it says so, Late when an OPEN milestone or task is past its due date, At risk when
+// one falls due within PP_AT_RISK_DAYS, else On track.
+function ppHealth(plan, milestones, tasks) {
+  if (!plan) return null;
+  if (plan.status === 'complete') return { key: 'complete', label: 'Complete' };
+  if (plan.status === 'on_hold') return { key: 'hold', label: 'On hold' };
+  const today = _today();
+  const soon = new Date(today + 'T00:00:00'); soon.setDate(soon.getDate() + PP_AT_RISK_DAYS);
+  const soonISO = soon.toISOString().slice(0, 10);
+  const dues = [];
+  (milestones || []).forEach(m => { if (m.status !== 'done' && m.due_date) dues.push(String(m.due_date).slice(0, 10)); });
+  (tasks || []).forEach(t => { if (t.status !== 'done' && t.due_date) dues.push(String(t.due_date).slice(0, 10)); });
+  if (dues.some(d => d < today)) return { key: 'late', label: 'Late' };
+  if (dues.some(d => d <= soonISO)) return { key: 'atrisk', label: 'At risk' };
+  return { key: 'ontrack', label: 'On track' };
+}
+function ppHealthTag(h) {
+  if (!h) return '';
+  const c = PP_HEALTH[h.key] || PP_HEALTH.ontrack;
+  return `<span class="pp-health" style="display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:${c[1]};color:${c[2]};white-space:nowrap;">${escHtml(h.label)}</span>`;
+}
+function ppKindLabel(kind) { return kind === 'startup' ? 'Start-up' : 'Project'; }
+function ppCanEdit() {
+  if (!currentUser || !_pp.plan) return false;
+  if (can('manage_project_plans')) return true;
+  if (+_pp.plan.owner_id === +currentUser.personId) return true;
+  return !!_pp.deal && canEditRecord(_pp.deal);
+}
+function ppCanTouchTask(t) { return ppCanEdit() || (t && currentUser && +t.assignee_id === +currentUser.personId); }
+
+// ── The deal page tab ─────────────────────────────────────────────────────────
+// Shown on a secured deal only (`secured` from openOpportunity). The build card is offered to
+// the deal's editor (the sales owner, a manager in scope, an admin) and manage_project_plans
+// holders; everyone else sees "no plan yet". Once a plan exists the tab summarises it.
+async function oppPlanTabRefresh(secured) {
+  const btn = document.getElementById('opp-plan-tab-btn'), box = document.getElementById('opp-plan');
+  if (!btn || !box) return;
+  const dealId = oppData && +oppData.id;
+  if (!secured || !dealId) { btn.style.display = 'none'; box.innerHTML = ''; return; }
+  btn.style.display = '';
+  box.innerHTML = '<div style="padding:20px;color:var(--text3);">Loading…</div>';
+  const kind = dealRevenueType(oppData) === 'project' ? 'project' : 'startup';
+  let plan = null, ms = [], ts = [];
+  try {
+    const [plans, people] = await Promise.all([
+      apiGet('project_plans', 'deal_id=eq.' + dealId + '&select=*'),
+      allData['people'] ? Promise.resolve(allData['people']) : apiGet('people', 'select=id,first_name,last_name'),
+    ]);
+    allData['people'] = people;
+    plan = plans[0] || null;
+    _ppMissing = false;
+    if (plan) [ms, ts] = await Promise.all([
+      apiGet('project_milestones', 'plan_id=eq.' + plan.id + '&select=id,status,due_date,name,sort_order&order=sort_order,id'),
+      apiGet('project_tasks', 'plan_id=eq.' + plan.id + '&select=id,status,due_date'),
+    ]);
+  } catch (e) {
+    if (_ppIsMissingErr(e)) { _ppMissing = true; box.innerHTML = '<div class="opp-section" style="color:#9A3412;">' + escHtml(PP_MISSING_MSG) + '</div>'; return; }
+    box.innerHTML = '<div class="opp-section" style="color:var(--red);">Could not load the project plan: ' + escHtml(e.message) + '</div>'; return;
+  }
+  if (!oppData || +oppData.id !== dealId) return;   // another deal opened meanwhile
+  const mayBuild = can('manage_project_plans') || canEditRecord(oppData);
+  const buildLabel = kind === 'startup' ? 'Build start-up project plan' : 'Build project plan';
+  if (!plan) {
+    box.innerHTML = `<div class="opp-section" id="opp-plan-build" style="text-align:center;padding:36px 20px;">
+      <div style="font-size:15px;font-weight:700;color:var(--navy);margin-bottom:6px;">No project plan yet</div>
+      <div style="font-size:13px;color:var(--text2);max-width:520px;margin:0 auto 16px;">${kind === 'startup'
+        ? 'This is a contract: its start-up phase can be planned as a project — milestones, tasks and the team that delivers it.'
+        : 'This is a project: plan it with milestones, tasks and the team that delivers it.'}
+        The plan starts empty and belongs to the project manager — ${escHtml(ppPersonName(oppData.owner_id) || 'the deal owner')}.</div>
+      ${mayBuild ? `<button class="btn btn-primary" onclick="oppPlanBuild('${kind}')">${buildLabel}</button>`
+                 : '<div style="font-size:12px;color:var(--text3);">Only the deal owner or a project-plan administrator can build it.</div>'}
+    </div>`;
+    return;
+  }
+  const h = ppHealth(plan, ms, ts);
+  const mDone = ms.filter(m => m.status === 'done').length, tDone = ts.filter(t => t.status === 'done').length;
+  const next = ms.filter(m => m.status !== 'done' && m.due_date).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))[0];
+  box.innerHTML = `<div class="opp-section" id="opp-plan-summary">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+      <div style="font-size:15px;font-weight:700;color:var(--navy);">${escHtml(plan.name)}</div>
+      <span class="badge" style="background:var(--bg);color:var(--text2);">${escHtml(ppKindLabel(plan.kind))}</span>
+      <span class="badge" style="background:var(--bg);color:var(--text2);">${escHtml(ppStatusLabel(PP_PLAN_STATUS, plan.status))}</span>
+      ${ppHealthTag(h)}
+      <div style="flex:1;"></div>
+      <button class="btn btn-primary btn-sm" onclick="openProjectPlan(${+plan.id}, 'deal')">Open project plan →</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;font-size:13px;">
+      <div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Project manager</div><div>${escHtml(ppPersonName(plan.owner_id) || '—')}</div></div>
+      <div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Milestones</div><div>${mDone} of ${ms.length} done</div></div>
+      <div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Tasks</div><div>${tDone} of ${ts.length} done</div></div>
+      <div><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--text3);">Next milestone</div><div>${next ? escHtml(next.name) + ' · ' + ppDate(next.due_date) : '—'}</div></div>
+    </div>
+  </div>`;
+}
+function oppShortDealNameForPlan(deal) {
+  const org = (allData['organisations'] || []).find(o => +o.id === +deal.org_id);
+  try { return oppShortDealName(deal.name || '', org ? org.name : '', deal.opportunity_type) || deal.name || 'Project'; } catch (e) { return deal.name || 'Project'; }
+}
+async function oppPlanBuild(kind) {
+  if (!oppData || !oppData.id) return;
+  if (!(can('manage_project_plans') || canEditRecord(oppData))) { showStatus('Only the deal owner or a project-plan administrator can build the plan', 'error'); return; }
+  const name = oppShortDealNameForPlan(oppData) + (kind === 'startup' ? ' — start-up' : '');
+  const body = { deal_id: +oppData.id, kind, name, status: 'planning', owner_id: oppData.owner_id || currentUser.personId,
+                 planned_start: oppData.start_date || null, created_by: currentUser.personId, updated_by: currentUser.personId };
+  try {
+    const rows = await api('project_plans', 'POST', body);
+    const plan = rows && rows[0];
+    if (!plan) throw new Error('nothing returned');
+    showStatus('Project plan built — it starts empty');
+    await openProjectPlan(+plan.id, 'deal');
+  } catch (e) {
+    showStatus('The plan was not built: ' + (_ppIsMissingErr(e) ? PP_MISSING_MSG : /23505/.test(e.message) ? 'this deal already has a plan — reopen the deal' : e.message), 'error');
+  }
+}
+
+// ── Project Management → Projects ─────────────────────────────────────────────
+async function renderProjectsPage() {
+  const head = document.getElementById('table-head'), body = document.getElementById('table-body');
+  head.innerHTML = '';
+  body.innerHTML = '<tr class="empty-row"><td>Loading…</td></tr>';
+  try {
+    const [plans, orgs, people] = await Promise.all([
+      apiGetAll('project_plans', 'select=*&order=updated_at.desc'),
+      allData['organisations'] ? Promise.resolve(allData['organisations']) : apiGetAll('organisations', 'select=*'),
+      allData['people'] ? Promise.resolve(allData['people']) : apiGet('people', 'select=id,first_name,last_name'),
+    ]);
+    _ppMissing = false;
+    allData['organisations'] = orgs; allData['people'] = people;
+    const ids = plans.map(p => +p.id), dealIds = plans.map(p => +p.deal_id);
+    const [ms, ts, deals] = await Promise.all([
+      ids.length ? apiGetAll('project_milestones', 'plan_id=in.(' + ids.join(',') + ')&select=id,plan_id,name,status,due_date') : [],
+      ids.length ? apiGetAll('project_tasks', 'plan_id=in.(' + ids.join(',') + ')&select=id,plan_id,status,due_date') : [],
+      dealIds.length ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,org_id,job_number,owner_id') : [],
+    ]);
+    const rows = plans.map(p => {
+      const d = deals.find(x => +x.id === +p.deal_id) || {};
+      const org = orgs.find(o => +o.id === +d.org_id) || {};
+      const pm = ms.filter(m => +m.plan_id === +p.id), pt = ts.filter(t => +t.plan_id === +p.id);
+      const next = pm.filter(m => m.status !== 'done' && m.due_date).sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))[0];
+      const h = ppHealth(p, pm, pt);
+      return { p, client: org.name || '—', name: p.name || d.name || '—', kind: ppKindLabel(p.kind), owner: ppPersonName(p.owner_id, people),
+               status: ppStatusLabel(PP_PLAN_STATUS, p.status), msDone: pm.filter(m => m.status === 'done').length, msTotal: pm.length,
+               tsDone: pt.filter(t => t.status === 'done').length, tsTotal: pt.length, next: next ? next.due_date : '', nextName: next ? next.name : '',
+               health: h, job: d.job_number || '' };
+    });
+    const sub = document.getElementById('page-sub');
+    if (sub) sub.textContent = rows.length + ' project plan' + (rows.length === 1 ? '' : 's') + (rows.length ? ' · ' + rows.filter(r => r.health.key === 'late').length + ' late · ' + rows.filter(r => r.health.key === 'atrisk').length + ' at risk' : '');
+    const HEALTH_ORDER = { late: 0, atrisk: 1, ontrack: 2, hold: 3, complete: 4 };
+    makeSortableFilterableTable({
+      tableId: 'pm_projects', headRoot: head, bodyRoot: body,
+      columns: [
+        { key: 'client', label: 'Client',          get: r => r.client, sortGet: r => familySortKeyOf(r.p.deal_id && (deals.find(x => +x.id === +r.p.deal_id) || {}).org_id, r.client) },
+        { key: 'name',   label: 'Project',         get: r => r.name },
+        { key: 'kind',   label: 'Kind',            get: r => r.kind },
+        { key: 'job',    label: 'Job number',      get: r => r.job },
+        { key: 'owner',  label: 'Project manager', get: r => r.owner },
+        { key: 'status', label: 'Status',          get: r => r.status },
+        { key: 'ms',     label: 'Milestones',      get: r => r.msTotal ? r.msDone + ' / ' + r.msTotal : '', sortGet: r => r.msTotal ? r.msDone / r.msTotal : -1 },
+        { key: 'ts',     label: 'Tasks',           get: r => r.tsTotal ? r.tsDone + ' / ' + r.tsTotal : '', sortGet: r => r.tsTotal ? r.tsDone / r.tsTotal : -1 },
+        { key: 'next',   label: 'Next milestone',  get: r => r.next },
+        { key: 'health', label: 'Health',          get: r => r.health.label, sortGet: r => HEALTH_ORDER[r.health.key] ?? 9 },
+      ],
+      rows: rows.sort((a, b) => (HEALTH_ORDER[a.health.key] ?? 9) - (HEALTH_ORDER[b.health.key] ?? 9) || a.client.localeCompare(b.client)),
+      rowRenderer: r => `<tr onclick="openProjectPlan(${+r.p.id}, 'list')" style="cursor:pointer;" data-plan-id="${+r.p.id}">
+        <td style="font-weight:600;color:#003057;white-space:nowrap;">${escHtml(r.client)}</td>
+        <td>${escHtml(r.name)}</td>
+        <td style="white-space:nowrap;"><span class="badge" style="background:var(--bg);color:var(--text2);">${escHtml(r.kind)}</span></td>
+        <td style="white-space:nowrap;">${escHtml(r.job || '—')}</td>
+        <td style="white-space:nowrap;">${escHtml(r.owner || '—')}</td>
+        <td style="white-space:nowrap;">${escHtml(r.status)}</td>
+        <td style="white-space:nowrap;">${r.msTotal ? r.msDone + ' of ' + r.msTotal + ' done' : '<span style="color:var(--text3);">none yet</span>'}</td>
+        <td style="white-space:nowrap;">${r.tsTotal ? r.tsDone + ' of ' + r.tsTotal + ' done' : '<span style="color:var(--text3);">none yet</span>'}</td>
+        <td style="white-space:nowrap;">${r.next ? escHtml(r.nextName) + ' · ' + ppDate(r.next) : '—'}</td>
+        <td>${ppHealthTag(r.health)}</td>
+      </tr>`,
+      emptyMessage: 'No project plans yet — a plan is built from a secured project or contract on its deal page (Project Plan tab)',
+    });
+  } catch (e) {
+    if (_ppIsMissingErr(e)) { _ppMissing = true; body.innerHTML = '<tr class="empty-row"><td>' + escHtml(PP_MISSING_MSG) + '</td></tr>'; return; }
+    body.innerHTML = '<tr class="empty-row"><td>Could not load the projects: ' + escHtml(e.message) + '</td></tr>';
+  }
+}
+
+// ── The plan page ─────────────────────────────────────────────────────────────
+async function openProjectPlan(planId, from) {
+  _logActivity('project_plan', planId);
+  const page = document.getElementById('pp-page'), root = document.getElementById('pp-root');
+  if (!page || !root) return;
+  _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: _pp.view || 'list', edit: null, from: from || null, busy: false };
+  root.innerHTML = '<div style="padding:40px;color:var(--text3);">Loading…</div>';
+  page.classList.add('active');
+  try {
+    const [plans, ms, ts, mem, people] = await Promise.all([
+      apiGet('project_plans', 'id=eq.' + planId + '&select=*'),
+      apiGet('project_milestones', 'plan_id=eq.' + planId + '&select=*&order=sort_order,id'),
+      apiGet('project_tasks', 'plan_id=eq.' + planId + '&select=*&order=sort_order,id'),
+      apiGet('project_plan_members', 'plan_id=eq.' + planId + '&select=*&order=id'),
+      allData['people'] ? Promise.resolve(allData['people']) : apiGet('people', 'select=id,first_name,last_name'),
+      ensureHomeOrgMembers(),
+    ]);
+    const plan = plans[0];
+    if (!plan) throw new Error('Plan ' + planId + ' was not found');
+    const deals = await apiGet('deals', 'id=eq.' + plan.deal_id + '&select=*');
+    const deal = deals[0] || null;
+    let org = null;
+    if (deal && deal.org_id) {
+      org = (allData['organisations'] || []).find(o => +o.id === +deal.org_id) || null;
+      if (!org) { try { org = (await apiGet('organisations', 'id=eq.' + deal.org_id + '&select=id,name'))[0] || null; } catch (e) {} }
+    }
+    allData['people'] = people;
+    Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people });
+    ppPaint();
+  } catch (e) {
+    root.innerHTML = '<div style="padding:40px;color:var(--red);">' + (_ppIsMissingErr(e) ? escHtml(PP_MISSING_MSG) : 'Could not open the plan: ' + escHtml(e.message)) + '</div>';
+  }
+}
+function ppClose() {
+  const page = document.getElementById('pp-page');
+  if (page) page.classList.remove('active');
+  const from = _pp.from;
+  _pp.plan = null; _pp.edit = null;
+  if (from === 'deal' && oppData && oppData.id) oppPlanTabRefresh(true);                 // the tab's summary follows the edits
+  else if (typeof currentPage !== 'undefined' && currentPage === 'pm_projects') loadTable('pm_projects');
+}
+function ppPaint() {
+  const root = document.getElementById('pp-root');
+  if (!root || !_pp.plan) return;
+  const p = _pp.plan, h = ppHealth(p, _pp.milestones, _pp.tasks), edit = ppCanEdit();
+  const client = _pp.org ? _pp.org.name : '';
+  const pm = _pp.people.filter(x => homeOrgPeople([x], [p.owner_id]).length);
+  root.innerHTML = `
+    <div class="opp-topbar">
+      <button class="btn btn-ghost btn-sm" onclick="ppClose()">← Back</button>
+      <div class="opp-topbar-title" style="flex:0 0 auto;white-space:nowrap;">${escHtml(ppKindLabel(p.kind))} plan</div>
+      <div style="display:flex;align-items:center;gap:8px;min-width:0;margin-left:16px;font-size:13px;">
+        <span style="font-weight:700;color:var(--navy);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(client || '—')}</span>
+        <span style="color:var(--text3);">›</span>
+        <span id="pp-title" style="font-weight:600;max-width:380px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escAttr(p.name)}">${escHtml(p.name)}</span>
+        ${_pp.deal && _pp.deal.job_number ? `<span class="badge" style="background:var(--bg);color:var(--text2);">${escHtml(_pp.deal.job_number)}</span>` : ''}
+        <span id="pp-health">${ppHealthTag(h)}</span>
+      </div>
+      <div style="flex:1;"></div>
+      <button class="btn btn-secondary btn-sm" onclick="ppClose()">Close</button>
+    </div>
+    <div class="opp-body">
+      ${edit ? '' : '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:var(--radius);padding:8px 14px;font-size:12px;color:#92400E;margin-bottom:14px;">You can view this plan' + (_pp.tasks.some(t => +t.assignee_id === +currentUser.personId) ? ' and move your own tasks' : '') + '. The project manager and project-plan administrators edit it.</div>'}
+      <div class="opp-section" id="pp-head">
+        <div style="display:grid;grid-template-columns:minmax(220px,2fr) repeat(4,minmax(140px,1fr));gap:14px;align-items:end;">
+          <div><label class="form-label">Plan name</label><input class="form-control" id="pp-name" value="${escAttr(p.name)}" ${edit ? '' : 'disabled'} onchange="ppPlanField('name', this.value)"></div>
+          <div><label class="form-label">Project manager</label><select class="form-control" id="pp-owner" ${edit ? '' : 'disabled'} onchange="ppPlanField('owner_id', this.value ? +this.value : null)">
+            ${ppPeopleOptions(p.owner_id, true)}</select></div>
+          <div><label class="form-label">Status</label><select class="form-control" id="pp-status" ${edit ? '' : 'disabled'} onchange="ppPlanField('status', this.value)">
+            ${PP_PLAN_STATUS.map(s => `<option value="${s[0]}" ${p.status === s[0] ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></div>
+          <div><label class="form-label">Planned start</label><input type="date" class="form-control" id="pp-start" value="${escAttr(p.planned_start || '')}" ${edit ? '' : 'disabled'} onchange="ppPlanField('planned_start', this.value || null)"></div>
+          <div><label class="form-label">Planned end</label><input type="date" class="form-control" id="pp-end" value="${escAttr(p.planned_end || '')}" ${edit ? '' : 'disabled'} onchange="ppPlanField('planned_end', this.value || null)"></div>
+        </div>
+        <div style="margin-top:10px;"><label class="form-label">Notes</label><textarea class="form-control" id="pp-notes" rows="2" ${edit ? '' : 'disabled'} onchange="ppPlanField('notes', this.value.trim() || null)">${escHtml(p.notes || '')}</textarea></div>
+      </div>
+      <div class="opp-section" id="pp-milestones">${ppMilestonesHtml(edit)}</div>
+      <div class="opp-section" id="pp-tasks">${ppTasksHtml(edit)}</div>
+      <div class="opp-section" id="pp-team">${ppTeamHtml(edit)}</div>
+    </div>`;
+  const focus = root.querySelector('[data-autofocus]'); if (focus) focus.focus();
+}
+function ppPeopleOptions(selectedId, homeOnly) {
+  const members = new Set(_pp.members.map(m => +m.person_id));
+  const home = homeOrgPeople(_pp.people, [selectedId]);
+  const label = x => escHtml([x.first_name, x.last_name].filter(Boolean).join(' '));
+  const opt = x => `<option value="${+x.id}" ${+x.id === +selectedId ? 'selected' : ''}>${label(x)}</option>`;
+  if (homeOnly) return '<option value="">—</option>' + home.map(opt).join('');
+  const team = home.filter(x => members.has(+x.id)), rest = home.filter(x => !members.has(+x.id));
+  return '<option value="">Unassigned</option>'
+    + (team.length ? '<optgroup label="Project team">' + team.map(opt).join('') + '</optgroup>' : '')
+    + (rest.length ? '<optgroup label="Other people">' + rest.map(opt).join('') + '</optgroup>' : '');
+}
+async function ppPlanField(col, value) {
+  if (!ppCanEdit()) return;
+  const p = _pp.plan;
+  if (col === 'name' && !String(value || '').trim()) { showStatus('The plan needs a name', 'error'); const el = document.getElementById('pp-name'); if (el) el.value = p.name; return; }
+  if (col === 'planned_end' && value && p.planned_start && value < p.planned_start) { showStatus('The planned end cannot be before the planned start', 'error'); const el = document.getElementById('pp-end'); if (el) el.value = p.planned_end || ''; return; }
+  if (col === 'planned_start' && value && p.planned_end && value > p.planned_end) { showStatus('The planned start cannot be after the planned end', 'error'); const el = document.getElementById('pp-start'); if (el) el.value = p.planned_start || ''; return; }
+  const body = { [col]: col === 'name' ? String(value).trim() : value, updated_at: new Date().toISOString(), updated_by: currentUser.personId };
+  try {
+    const rows = await api('project_plans', 'PATCH', body, 'id=eq.' + p.id);
+    Object.assign(p, rows && rows[0] ? rows[0] : body);
+    const t = document.getElementById('pp-title'); if (t) { t.textContent = p.name; t.title = p.name; }
+    const hh = document.getElementById('pp-health'); if (hh) hh.innerHTML = ppHealthTag(ppHealth(p, _pp.milestones, _pp.tasks));
+  } catch (e) { showStatus('Not saved: ' + e.message, 'error'); ppPaint(); }
+}
+function ppRepaintSection(id, html) { const el = document.getElementById(id); if (el) el.innerHTML = html; const hh = document.getElementById('pp-health'); if (hh) hh.innerHTML = ppHealthTag(ppHealth(_pp.plan, _pp.milestones, _pp.tasks)); }
+function ppBusy() { if (_pp.edit) { showStatus('Save or cancel the open row first', 'error'); return true; } return false; }
+
+// ── Milestones ────────────────────────────────────────────────────────────────
+function ppMilestonesHtml(edit) {
+  const ms = _pp.milestones, today = _today();
+  const billing = ms.reduce((t, m) => t + (+m.billing_pct || 0), 0);
+  const tasksOf = id => _pp.tasks.filter(t => +t.milestone_id === +id);
+  const row = m => {
+    if (_pp.edit && _pp.edit.kind === 'milestone' && +_pp.edit.id === +m.id) return ppMilestoneEditorRow(m);
+    const tl = tasksOf(m.id), done = tl.filter(t => t.status === 'done').length;
+    const late = m.status !== 'done' && m.due_date && String(m.due_date).slice(0, 10) < today;
+    return `<tr class="pp-ms-row" data-ms-id="${+m.id}" draggable="${edit ? 'true' : 'false'}" ondragstart="ppMsDragStart(event, ${+m.id})" ondragover="ppMsDragOver(event, ${+m.id})" ondragleave="ppMsDragLeave(event)" ondrop="ppMsDrop(event, ${+m.id})" ondragend="ppMsDragEnd(event)" style="${m.status === 'done' ? 'color:var(--text3);' : ''}">
+      <td style="width:22px;color:var(--text3);cursor:${edit ? 'grab' : 'default'};" title="${edit ? 'Drag to reorder' : ''}">${edit ? '⠿' : ''}</td>
+      <td style="font-weight:600;${m.status === 'done' ? 'text-decoration:line-through;' : ''}">${escHtml(m.name)}${m.notes ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;white-space:pre-wrap;">' + escHtml(m.notes) + '</div>' : ''}</td>
+      <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${m.due_date ? ppDate(m.due_date) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
+      <td>${escHtml(ppPersonName(m.owner_id) || '—')}</td>
+      <td style="text-align:right;">${m.billing_pct != null ? (+m.billing_pct).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '%' : '—'}</td>
+      <td style="white-space:nowrap;">${tl.length ? done + ' of ' + tl.length + ' done' : '<span style="color:var(--text3);">none</span>'}</td>
+      <td style="white-space:nowrap;">${m.status === 'done' ? '<span class="badge" style="background:#DCFCE7;color:#166534;">Done' + (m.completed_at ? ' · ' + ppDate(m.completed_at) : '') + '</span>' : '<span class="badge" style="background:#DBEAFE;color:#1E40AF;">Open</span>'}</td>
+      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppMilestoneEdit(${+m.id})">Edit</button>
+        <button class="btn btn-ghost btn-sm" onclick="ppMilestoneToggleDone(${+m.id})">${m.status === 'done' ? 'Reopen' : 'Mark done'}</button>` : ''}</td>
+    </tr>`;
+  };
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);">Milestones</div>
+      <span style="font-size:12px;color:var(--text3);">${ms.filter(m => m.status === 'done').length} of ${ms.length} done</span>
+      <div style="flex:1;"></div>
+      ${edit ? '<button class="btn btn-secondary btn-sm" id="pp-ms-add" onclick="ppMilestoneAdd()">+ Milestone</button>' : ''}
+    </div>
+    <table class="pp-table" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);text-align:left;">
+        <th></th><th>Milestone</th><th>Due</th><th>Owner</th><th style="text-align:right;">Billing %</th><th>Tasks</th><th>Status</th><th></th></tr></thead>
+      <tbody>${ms.map(row).join('')}${_pp.edit && _pp.edit.kind === 'milestone' && !_pp.edit.id ? ppMilestoneEditorRow(null) : ''}
+        ${!ms.length && !_pp.edit ? '<tr><td colspan="8" style="padding:18px;text-align:center;color:var(--text3);">No milestones yet' + (edit ? ' — add the first one' : '') + '.</td></tr>' : ''}</tbody>
+    </table>
+    <div id="pp-billing-total" style="margin-top:8px;font-size:12px;color:${billing > 100 ? 'var(--red)' : 'var(--text3)'};">Billing percentages add to ${billing.toLocaleString('en-US', { maximumFractionDigits: 2 })}%${billing > 100 ? ' — more than 100%, check the milestones' : billing > 0 && billing < 100 ? ' of 100%' : ''}</div>`;
+}
+function ppMilestoneEditorRow(m) {
+  const d = _pp.edit.draft;
+  return `<tr class="pp-editor" data-editor="milestone">
+    <td></td>
+    <td><input class="form-control" id="pp-ms-name" placeholder="Milestone name" value="${escAttr(d.name || '')}" data-autofocus oninput="_pp.edit.draft.name=this.value"><input class="form-control" id="pp-ms-notes" placeholder="Notes (optional)" style="margin-top:4px;font-size:12px;" value="${escAttr(d.notes || '')}" oninput="_pp.edit.draft.notes=this.value"></td>
+    <td><input type="date" class="form-control" id="pp-ms-due" value="${escAttr(d.due_date || '')}" onchange="_pp.edit.draft.due_date=this.value"></td>
+    <td><select class="form-control" id="pp-ms-owner" onchange="_pp.edit.draft.owner_id=this.value?+this.value:null">${ppPeopleOptions(d.owner_id, true)}</select></td>
+    <td><input type="number" class="form-control" id="pp-ms-billing" min="0" max="100" step="0.01" style="text-align:right;width:90px;" placeholder="—" value="${d.billing_pct != null ? escAttr(d.billing_pct) : ''}" oninput="_pp.edit.draft.billing_pct=this.value===''?null:+this.value"></td>
+    <td colspan="2" style="color:var(--text3);font-size:12px;">${m ? '' : 'New milestone'}</td>
+    <td style="white-space:nowrap;text-align:right;">
+      <button class="btn btn-primary btn-sm" onclick="ppMilestoneSave()">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="ppEditCancel()">Cancel</button>
+      ${m ? `<button class="btn btn-danger btn-sm" onclick="ppMilestoneDelete(${+m.id})">Delete</button>` : ''}
+    </td></tr>`;
+}
+function ppMilestoneAdd() { if (!ppCanEdit() || ppBusy()) return; _pp.edit = { kind: 'milestone', id: null, draft: { name: '', due_date: '', owner_id: _pp.plan.owner_id || null, billing_pct: null, notes: '' } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
+function ppMilestoneEdit(id) { if (!ppCanEdit() || ppBusy()) return; const m = _pp.milestones.find(x => +x.id === +id); if (!m) return; _pp.edit = { kind: 'milestone', id: +id, draft: { name: m.name, due_date: m.due_date || '', owner_id: m.owner_id, billing_pct: m.billing_pct, notes: m.notes || '' } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
+function ppEditCancel() { _pp.edit = null; ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
+async function ppMilestoneSave() {
+  if (!_pp.edit || _pp.edit.kind !== 'milestone' || _pp.busy) return;
+  const d = _pp.edit.draft, name = String(d.name || '').trim();
+  if (!name) { showStatus('The milestone needs a name', 'error'); return; }
+  if (d.billing_pct != null && (isNaN(d.billing_pct) || d.billing_pct < 0 || d.billing_pct > 100)) { showStatus('Billing % must be between 0 and 100', 'error'); return; }
+  const body = { name, due_date: d.due_date || null, owner_id: d.owner_id || null, billing_pct: d.billing_pct == null ? null : +d.billing_pct, notes: String(d.notes || '').trim() || null, updated_at: new Date().toISOString() };
+  _pp.busy = true;
+  try {
+    if (_pp.edit.id) {
+      const rows = await api('project_milestones', 'PATCH', body, 'id=eq.' + _pp.edit.id);
+      const m = _pp.milestones.find(x => +x.id === +_pp.edit.id); Object.assign(m, rows && rows[0] ? rows[0] : body);
+    } else {
+      const sort = _pp.milestones.reduce((mx, m) => Math.max(mx, +m.sort_order || 0), 0) + 1;
+      const rows = await api('project_milestones', 'POST', { ...body, plan_id: +_pp.plan.id, status: 'open', sort_order: sort, created_by: currentUser.personId });
+      _pp.milestones.push(rows[0]);
+    }
+    _pp.edit = null;
+    showStatus('Milestone saved');
+    ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
+  } catch (e) { showStatus('Milestone not saved: ' + e.message, 'error'); }
+  finally { _pp.busy = false; }
+}
+async function ppMilestoneToggleDone(id) {
+  if (!ppCanEdit() || ppBusy()) return;
+  const m = _pp.milestones.find(x => +x.id === +id); if (!m) return;
+  const open = _pp.tasks.filter(t => +t.milestone_id === +id && t.status !== 'done').length;
+  if (m.status !== 'done' && open) {
+    const ok = await confirmDialog({ title: 'Mark the milestone done?', message: open + ' of its tasks ' + (open === 1 ? 'is' : 'are') + ' not done yet. Mark the milestone done anyway? The tasks stay as they are.', confirmLabel: 'Mark done' });
+    if (!ok) return;
+  }
+  const body = m.status === 'done' ? { status: 'open', completed_at: null, updated_at: new Date().toISOString() } : { status: 'done', completed_at: new Date().toISOString(), updated_at: new Date().toISOString() };
+  try { const rows = await api('project_milestones', 'PATCH', body, 'id=eq.' + id); Object.assign(m, rows && rows[0] ? rows[0] : body); ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); }
+  catch (e) { showStatus('Not saved: ' + e.message, 'error'); }
+}
+async function ppMilestoneDelete(id) {
+  if (!ppCanEdit()) return;
+  const m = _pp.milestones.find(x => +x.id === +id); if (!m) return;
+  const tl = _pp.tasks.filter(t => +t.milestone_id === +id);
+  const ok = await confirmDialog({ title: 'Delete the milestone?', danger: true, confirmLabel: 'Delete',
+    message: tl.length ? '"' + m.name + '" has ' + tl.length + ' task' + (tl.length === 1 ? '' : 's') + '. Deleting it moves ' + (tl.length === 1 ? 'that task' : 'them') + ' to "No milestone"; nothing else is lost.' : 'Delete "' + m.name + '"?' });
+  if (!ok) return;
+  try {
+    if (tl.length) await api('project_tasks', 'PATCH', { milestone_id: null, updated_at: new Date().toISOString() }, 'milestone_id=eq.' + id);
+    await api('project_milestones', 'DELETE', null, 'id=eq.' + id);
+    tl.forEach(t => { t.milestone_id = null; });
+    _pp.milestones = _pp.milestones.filter(x => +x.id !== +id);
+    _pp.edit = null;
+    showStatus('Milestone deleted');
+    ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
+  } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
+}
+// Drag a milestone row above or below another (same ⠿ pattern as the quote editor); the new
+// order is persisted as sort_order 1..N with one PATCH per row that moved.
+let _ppMsDrag = null;
+function ppMsDragStart(ev, id) { if (!ppCanEdit() || _pp.edit) { ev.preventDefault(); return; } _ppMsDrag = +id; ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', String(id)); } catch (e) {} }
+function ppMsDragOver(ev, id) { if (_ppMsDrag == null || +id === _ppMsDrag) return; ev.preventDefault(); const r = ev.currentTarget.getBoundingClientRect(); ev.currentTarget.classList.toggle('pp-drop-above', ev.clientY < r.top + r.height / 2); ev.currentTarget.classList.toggle('pp-drop-below', ev.clientY >= r.top + r.height / 2); }
+function ppMsDragLeave(ev) { ev.currentTarget.classList.remove('pp-drop-above', 'pp-drop-below'); }
+function ppMsDragEnd() { _ppMsDrag = null; document.querySelectorAll('.pp-drop-above,.pp-drop-below').forEach(el => el.classList.remove('pp-drop-above', 'pp-drop-below')); }
+async function ppMsDrop(ev, targetId) {
+  ev.preventDefault();
+  const above = ev.currentTarget.classList.contains('pp-drop-above');
+  ppMsDragEnd();
+  const fromId = _ppMsDrag != null ? _ppMsDrag : +(ev.dataTransfer && ev.dataTransfer.getData('text/plain'));
+  await ppMilestoneMove(fromId, +targetId, above);
+}
+async function ppMilestoneMove(fromId, targetId, above) {
+  if (!ppCanEdit() || !fromId || +fromId === +targetId) return;
+  const list = _pp.milestones.slice(), from = list.findIndex(m => +m.id === +fromId), to = list.findIndex(m => +m.id === +targetId);
+  if (from < 0 || to < 0) return;
+  const [m] = list.splice(from, 1);
+  let at = list.findIndex(x => +x.id === +targetId); if (!above) at += 1;
+  list.splice(at, 0, m);
+  const changed = list.map((x, i) => ({ x, order: i + 1 })).filter(o => +o.x.sort_order !== o.order);
+  try {
+    await Promise.all(changed.map(o => api('project_milestones', 'PATCH', { sort_order: o.order }, 'id=eq.' + o.x.id)));
+    changed.forEach(o => { o.x.sort_order = o.order; });
+    _pp.milestones = list;
+    ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
+  } catch (e) { showStatus('Order not saved: ' + e.message, 'error'); }
+}
+
+// ── Tasks: list and board ─────────────────────────────────────────────────────
+function ppTasksHtml(edit) {
+  const ts = _pp.tasks, done = ts.filter(t => t.status === 'done').length, hours = ts.reduce((s, t) => s + (+t.est_hours || 0), 0);
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);">Tasks</div>
+      <span style="font-size:12px;color:var(--text3);">${done} of ${ts.length} done${hours ? ' · ' + hours.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' h estimated' : ''}</span>
+      <div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-left:8px;">
+        <button class="btn btn-sm ${_pp.view === 'list' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-list" style="border:none;border-radius:0;" onclick="ppSetView('list')">List</button>
+        <button class="btn btn-sm ${_pp.view === 'board' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-board" style="border:none;border-radius:0;" onclick="ppSetView('board')">Board</button>
+      </div>
+      <div style="flex:1;"></div>
+      ${edit ? '<button class="btn btn-secondary btn-sm" id="pp-task-add" onclick="ppTaskAdd()">+ Task</button>' : ''}
+    </div>
+    ${_pp.view === 'board' ? ppBoardHtml(edit) : ppTaskListHtml(edit)}`;
+}
+function ppSetView(v) { if (ppBusy()) return; _pp.view = v; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
+function ppTaskStatusSelect(t, cls) {
+  const may = ppCanTouchTask(t);
+  return `<select class="form-control ${cls || ''}" style="padding:3px 6px;font-size:12px;" ${may ? '' : 'disabled'} onchange="ppTaskSetStatus(${+t.id}, this.value)">${PP_TASK_STATUS.map(s => `<option value="${s[0]}" ${t.status === s[0] ? 'selected' : ''}>${s[1]}</option>`).join('')}</select>`;
+}
+function ppTaskListHtml(edit) {
+  const today = _today();
+  const groups = _pp.milestones.map(m => ({ id: +m.id, name: m.name, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
+  groups.push({ id: null, name: 'No milestone', tasks: _pp.tasks.filter(t => t.milestone_id == null) });
+  const row = t => {
+    if (_pp.edit && _pp.edit.kind === 'task' && +_pp.edit.id === +t.id) return ppTaskEditorRow(t);
+    const late = t.status !== 'done' && t.due_date && String(t.due_date).slice(0, 10) < today;
+    return `<tr class="pp-task-row" data-task-id="${+t.id}" style="${t.status === 'done' ? 'color:var(--text3);' : ''}">
+      <td style="padding-left:22px;${t.status === 'done' ? 'text-decoration:line-through;' : 'font-weight:600;'}">${escHtml(t.name)}${t.description ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;text-decoration:none;white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}</td>
+      <td>${escHtml(ppPersonName(t.assignee_id) || '—')}</td>
+      <td style="white-space:nowrap;">${t.start_date ? ppDate(t.start_date) : '—'}</td>
+      <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${t.due_date ? ppDate(t.due_date) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
+      <td style="text-align:right;">${t.est_hours != null ? (+t.est_hours).toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—'}</td>
+      <td>${ppTaskStatusSelect(t)}</td>
+      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppTaskEdit(${+t.id})">Edit</button>` : ''}</td>
+    </tr>`;
+  };
+  const newRow = _pp.edit && _pp.edit.kind === 'task' && !_pp.edit.id ? ppTaskEditorRow(null) : '';
+  const body = groups.map(g => (g.tasks.length || (g.id == null && newRow) || (newRow && +_pp.edit.draft.milestone_id === g.id))
+    ? `<tr class="pp-task-group"><td colspan="7" style="background:var(--bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);padding:6px 8px;">${escHtml(g.name)} <span style="font-weight:normal;color:var(--text3);text-transform:none;letter-spacing:0;">· ${g.tasks.filter(t => t.status === 'done').length} of ${g.tasks.length} done</span></td></tr>`
+      + g.tasks.map(row).join('') + (newRow && ((g.id == null && _pp.edit.draft.milestone_id == null) || +_pp.edit.draft.milestone_id === g.id) ? newRow : '')
+    : '').join('');
+  return `<table class="pp-table" style="width:100%;border-collapse:collapse;font-size:13px;">
+      <thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);text-align:left;">
+        <th>Task</th><th>Assignee</th><th>Start</th><th>Due</th><th style="text-align:right;">Est. h</th><th>Status</th><th></th></tr></thead>
+      <tbody>${body}${!_pp.tasks.length && !newRow ? '<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--text3);">No tasks yet' + (edit ? ' — add the first one' : '') + '.</td></tr>' : ''}</tbody></table>`;
+}
+function ppTaskEditorRow(t) {
+  const d = _pp.edit.draft;
+  return `<tr class="pp-editor" data-editor="task">
+    <td style="padding-left:22px;"><input class="form-control" id="pp-task-name" placeholder="Task name" value="${escAttr(d.name || '')}" oninput="_pp.edit.draft.name=this.value">
+      <input class="form-control" id="pp-task-desc" placeholder="Description (optional)" style="margin-top:4px;font-size:12px;" value="${escAttr(d.description || '')}" oninput="_pp.edit.draft.description=this.value">
+      <select class="form-control" id="pp-task-ms" style="margin-top:4px;font-size:12px;" onchange="_pp.edit.draft.milestone_id=this.value?+this.value:null"><option value="">No milestone</option>${_pp.milestones.map(m => `<option value="${+m.id}" ${+d.milestone_id === +m.id ? 'selected' : ''}>${escHtml(m.name)}</option>`).join('')}</select></td>
+    <td><select class="form-control" id="pp-task-assignee" onchange="_pp.edit.draft.assignee_id=this.value?+this.value:null">${ppPeopleOptions(d.assignee_id, false)}</select></td>
+    <td><input type="date" class="form-control" id="pp-task-start" value="${escAttr(d.start_date || '')}" onchange="_pp.edit.draft.start_date=this.value"></td>
+    <td><input type="date" class="form-control" id="pp-task-due" value="${escAttr(d.due_date || '')}" onchange="_pp.edit.draft.due_date=this.value"></td>
+    <td><input type="number" class="form-control" id="pp-task-hours" min="0" step="0.5" style="text-align:right;width:80px;" placeholder="—" value="${d.est_hours != null ? escAttr(d.est_hours) : ''}" oninput="_pp.edit.draft.est_hours=this.value===''?null:+this.value"></td>
+    <td><select class="form-control" id="pp-task-status" style="font-size:12px;" onchange="_pp.edit.draft.status=this.value">${PP_TASK_STATUS.map(s => `<option value="${s[0]}" ${d.status === s[0] ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></td>
+    <td style="white-space:nowrap;text-align:right;">
+      <button class="btn btn-primary btn-sm" onclick="ppTaskSave()">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="ppEditCancel()">Cancel</button>
+      ${t ? `<button class="btn btn-danger btn-sm" onclick="ppTaskDelete(${+t.id})">Delete</button>` : ''}
+    </td></tr>`;
+}
+function ppTaskAdd(milestoneId) {
+  if (!ppCanEdit() || ppBusy()) return;
+  if (_pp.view !== 'list') _pp.view = 'list';
+  _pp.edit = { kind: 'task', id: null, draft: { name: '', description: '', milestone_id: milestoneId || null, assignee_id: null, start_date: '', due_date: '', est_hours: null, status: 'todo' } };
+  ppRepaintSection('pp-tasks', ppTasksHtml(true)); const el = document.getElementById('pp-task-name'); if (el) el.focus();
+}
+function ppTaskEdit(id) {
+  if (!ppCanEdit() || ppBusy()) return;
+  const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
+  if (_pp.view !== 'list') _pp.view = 'list';
+  _pp.edit = { kind: 'task', id: +id, draft: { name: t.name, description: t.description || '', milestone_id: t.milestone_id, assignee_id: t.assignee_id, start_date: t.start_date || '', due_date: t.due_date || '', est_hours: t.est_hours, status: t.status } };
+  ppRepaintSection('pp-tasks', ppTasksHtml(true)); const el = document.getElementById('pp-task-name'); if (el) el.focus();
+}
+async function ppTaskSave() {
+  if (!_pp.edit || _pp.edit.kind !== 'task' || _pp.busy) return;
+  const d = _pp.edit.draft, name = String(d.name || '').trim();
+  if (!name) { showStatus('The task needs a name', 'error'); return; }
+  if (d.start_date && d.due_date && d.due_date < d.start_date) { showStatus('The due date cannot be before the start date', 'error'); return; }
+  if (d.est_hours != null && (isNaN(d.est_hours) || d.est_hours < 0)) { showStatus('Estimated hours cannot be negative', 'error'); return; }
+  const now = new Date().toISOString();
+  const body = { name, description: String(d.description || '').trim() || null, milestone_id: d.milestone_id || null, assignee_id: d.assignee_id || null,
+                 start_date: d.start_date || null, due_date: d.due_date || null, est_hours: d.est_hours == null ? null : +d.est_hours, status: d.status || 'todo', updated_at: now };
+  _pp.busy = true;
+  try {
+    if (_pp.edit.id) {
+      const t = _pp.tasks.find(x => +x.id === +_pp.edit.id);
+      if (body.status === 'done' && t.status !== 'done') body.completed_at = now;
+      if (body.status !== 'done') body.completed_at = null;
+      const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + _pp.edit.id);
+      Object.assign(t, rows && rows[0] ? rows[0] : body);
+    } else {
+      const sort = _pp.tasks.reduce((mx, t) => Math.max(mx, +t.sort_order || 0), 0) + 1;
+      const rows = await api('project_tasks', 'POST', { ...body, plan_id: +_pp.plan.id, sort_order: sort, completed_at: body.status === 'done' ? now : null, created_by: currentUser.personId });
+      _pp.tasks.push(rows[0]);
+    }
+    _pp.edit = null;
+    showStatus('Task saved');
+    ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
+  } catch (e) { showStatus('Task not saved: ' + e.message, 'error'); }
+  finally { _pp.busy = false; }
+}
+async function ppTaskDelete(id) {
+  if (!ppCanEdit()) return;
+  const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
+  const ok = await confirmDialog({ title: 'Delete the task?', message: 'Delete "' + t.name + '"?', danger: true, confirmLabel: 'Delete' });
+  if (!ok) return;
+  try {
+    await api('project_tasks', 'DELETE', null, 'id=eq.' + id);
+    _pp.tasks = _pp.tasks.filter(x => +x.id !== +id); _pp.edit = null;
+    showStatus('Task deleted');
+    ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
+  } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
+}
+// The ONE status writer: the list's select, the board's drag, a member moving their own task.
+async function ppTaskSetStatus(id, status) {
+  const t = _pp.tasks.find(x => +x.id === +id);
+  if (!t || !PP_TASK_STATUS.some(s => s[0] === status)) return;
+  if (!ppCanTouchTask(t)) { showStatus('Only the project manager, an administrator or the assignee can move this task', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); return; }
+  if (t.status === status) return;
+  const now = new Date().toISOString();
+  const body = { status, completed_at: status === 'done' ? now : null, updated_at: now };
+  const was = { status: t.status, completed_at: t.completed_at };
+  Object.assign(t, body);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit()));
+  try { const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + id); if (rows && rows[0]) Object.assign(t, rows[0]); }
+  catch (e) { Object.assign(t, was); showStatus('Not saved: ' + e.message, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
+}
+function ppBoardHtml(edit) {
+  const today = _today();
+  const card = t => {
+    const late = t.status !== 'done' && t.due_date && String(t.due_date).slice(0, 10) < today;
+    const ms = t.milestone_id ? (_pp.milestones.find(m => +m.id === +t.milestone_id) || {}).name : '';
+    const may = ppCanTouchTask(t);
+    return `<div class="pp-card" data-task-id="${+t.id}" draggable="${may ? 'true' : 'false'}" ondragstart="ppCardDragStart(event, ${+t.id})" ondragend="ppCardDragEnd(event)" ${edit ? `ondblclick="ppTaskEdit(${+t.id})" title="Double-click to edit"` : ''} style="cursor:${may ? 'grab' : 'default'};">
+      <div style="font-weight:600;font-size:13px;${t.status === 'done' ? 'color:var(--text3);text-decoration:line-through;' : ''}">${escHtml(t.name)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px;display:flex;gap:8px;flex-wrap:wrap;">
+        ${t.assignee_id ? '<span>' + escHtml(ppPersonName(t.assignee_id)) + '</span>' : '<span>Unassigned</span>'}
+        ${t.due_date ? '<span style="' + (late ? 'color:var(--red);font-weight:700;' : '') + '">due ' + ppDate(t.due_date) + '</span>' : ''}
+        ${t.est_hours != null ? '<span>' + (+t.est_hours).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' h</span>' : ''}
+      </div>
+      ${ms ? '<div style="font-size:10px;color:var(--navy);margin-top:4px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;">' + escHtml(ms) + '</div>' : ''}
+    </div>`;
+  };
+  return `<div class="pp-board" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;">${PP_TASK_STATUS.map(s => {
+    const list = _pp.tasks.filter(t => t.status === s[0]);
+    return `<div class="pp-col" data-status="${s[0]}" ondragover="ppColDragOver(event)" ondragleave="ppColDragLeave(event)" ondrop="ppColDrop(event, '${s[0]}')" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;min-height:160px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);margin-bottom:8px;display:flex;justify-content:space-between;"><span>${s[1]}</span><span style="color:var(--text3);">${list.length}</span></div>
+      ${list.map(card).join('') || '<div style="font-size:12px;color:var(--text3);text-align:center;padding:14px 0;">—</div>'}
+    </div>`; }).join('')}</div>`;
+}
+let _ppCardDrag = null;
+function ppCardDragStart(ev, id) { const t = _pp.tasks.find(x => +x.id === +id); if (!t || !ppCanTouchTask(t)) { ev.preventDefault(); return; } _ppCardDrag = +id; ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', String(id)); } catch (e) {} ev.currentTarget.classList.add('pp-dragging'); }
+function ppCardDragEnd(ev) { _ppCardDrag = null; if (ev && ev.currentTarget) ev.currentTarget.classList.remove('pp-dragging'); document.querySelectorAll('.pp-col.pp-drop').forEach(c => c.classList.remove('pp-drop')); }
+function ppColDragOver(ev) { if (_ppCardDrag == null) return; ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; ev.currentTarget.classList.add('pp-drop'); }
+function ppColDragLeave(ev) { if (!ev.currentTarget.contains(ev.relatedTarget)) ev.currentTarget.classList.remove('pp-drop'); }
+function ppColDrop(ev, status) { ev.preventDefault(); const id = _ppCardDrag != null ? _ppCardDrag : +(ev.dataTransfer && ev.dataTransfer.getData('text/plain')); ppCardDragEnd(); if (id) ppTaskSetStatus(id, status); }
+
+// ── The team ──────────────────────────────────────────────────────────────────
+function ppTeamHtml(edit) {
+  const members = _pp.members.slice().sort((a, b) => ppPersonName(a.person_id).localeCompare(ppPersonName(b.person_id)));
+  const taskCount = pid => _pp.tasks.filter(t => +t.assignee_id === +pid).length;
+  const taken = new Set(members.map(m => +m.person_id));
+  const candidates = homeOrgPeople(_pp.people, []).filter(p => !taken.has(+p.id));
+  return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:700;color:var(--navy);">Team</div>
+      <span style="font-size:12px;color:var(--text3);">${members.length} ${members.length === 1 ? 'person' : 'people'} · the project manager is ${escHtml(ppPersonName(_pp.plan.owner_id) || '—')}</span>
+    </div>
+    ${members.length ? `<table class="pp-table" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:10px;">
+      <thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);text-align:left;"><th>Person</th><th>Role on the project</th><th>Tasks</th><th></th></tr></thead>
+      <tbody>${members.map(m => `<tr class="pp-member-row" data-member-id="${+m.id}">
+        <td style="font-weight:600;">${escHtml(ppPersonName(m.person_id) || ('Person ' + m.person_id))}</td>
+        <td>${edit ? `<input class="form-control" style="max-width:260px;" value="${escAttr(m.role || '')}" placeholder="Role" onchange="ppMemberRole(${+m.id}, this.value)">` : escHtml(m.role || '—')}</td>
+        <td>${taskCount(m.person_id) || '<span style="color:var(--text3);">none</span>'}</td>
+        <td style="text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppMemberRemove(${+m.id})">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<div style="font-size:13px;color:var(--text3);margin-bottom:10px;">Nobody on the team yet' + (edit ? ' — add the people who deliver this project; a task can be assigned to any home-organisation person, team or not.' : '.') + '</div>'}
+    ${edit ? `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <select class="form-control" id="pp-member-pick" style="max-width:260px;"><option value="">Add a person…</option>${candidates.map(p => `<option value="${+p.id}">${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}</select>
+      <input class="form-control" id="pp-member-role" style="max-width:220px;" placeholder="Role (e.g. Technician)">
+      <button class="btn btn-secondary btn-sm" id="pp-member-add" onclick="ppMemberAdd()">+ Add to team</button>
+    </div>` : ''}`;
+}
+async function ppMemberAdd() {
+  if (!ppCanEdit()) return;
+  const pick = document.getElementById('pp-member-pick'), roleEl = document.getElementById('pp-member-role');
+  const pid = pick && +pick.value; if (!pid) { showStatus('Pick a person first', 'error'); return; }
+  if (_pp.members.some(m => +m.person_id === pid)) { showStatus('Already on the team', 'error'); return; }
+  try {
+    const rows = await api('project_plan_members', 'POST', { plan_id: +_pp.plan.id, person_id: pid, role: String(roleEl ? roleEl.value : '').trim() || null, created_by: currentUser.personId });
+    _pp.members.push(rows[0]);
+    showStatus('Added to the team');
+    ppRepaintSection('pp-team', ppTeamHtml(true));
+  } catch (e) { showStatus('Not added: ' + (/23505/.test(e.message) ? 'already on the team' : e.message), 'error'); }
+}
+async function ppMemberRole(id, role) {
+  if (!ppCanEdit()) return;
+  const m = _pp.members.find(x => +x.id === +id); if (!m) return;
+  try { const rows = await api('project_plan_members', 'PATCH', { role: String(role || '').trim() || null }, 'id=eq.' + id); Object.assign(m, rows && rows[0] ? rows[0] : { role: role || null }); }
+  catch (e) { showStatus('Not saved: ' + e.message, 'error'); ppRepaintSection('pp-team', ppTeamHtml(true)); }
+}
+async function ppMemberRemove(id) {
+  if (!ppCanEdit()) return;
+  const m = _pp.members.find(x => +x.id === +id); if (!m) return;
+  const held = _pp.tasks.filter(t => +t.assignee_id === +m.person_id).length;
+  if (held) { showStatus(ppPersonName(m.person_id) + ' still holds ' + held + ' task' + (held === 1 ? '' : 's') + ' — reassign ' + (held === 1 ? 'it' : 'them') + ' first', 'error'); return; }
+  try { await api('project_plan_members', 'DELETE', null, 'id=eq.' + id); _pp.members = _pp.members.filter(x => +x.id !== +id); ppRepaintSection('pp-team', ppTeamHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true)); }
+  catch (e) { showStatus('Not removed: ' + e.message, 'error'); }
 }
 
 // ── Contract Management → Contracts (v7.9.88) ────────────────────────────────
