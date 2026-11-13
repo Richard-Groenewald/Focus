@@ -577,6 +577,32 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pp-card { background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; margin-bottom:8px; }
 .pp-card.pp-dragging { opacity:0.5; }
 .pp-col.pp-drop { outline:2px dashed var(--red); outline-offset:-2px; background:#FFF5F5; }
+/* v7.10.33 schedule view: grid + Gantt side by side, one vertical scroll, the Gantt scrolls sideways */
+.pp-sched { display:flex; align-items:flex-start; border:1px solid var(--border); border-radius:var(--radius); background:#fff; max-height:calc(100vh - 260px); overflow:auto; }
+.pp-sched-grid { flex:0 0 auto; border-right:2px solid var(--border); position:sticky; left:0; background:#fff; z-index:2; }
+.pp-sched-gantt { flex:1 1 auto; min-width:0; overflow-x:auto; }
+.pp-grid { border-collapse:collapse; font-size:12px; table-layout:fixed; }
+.pp-grid th { height:40px; padding:0 5px; font-size:10px; font-weight:700; color:var(--text3); text-transform:uppercase; text-align:left; vertical-align:bottom; border-bottom:1px solid var(--border); white-space:nowrap; background:var(--bg2); position:sticky; top:0; z-index:1; }
+.pp-grid td { padding:0 4px; border-bottom:1px solid #F1F5F9; white-space:nowrap; overflow:hidden; vertical-align:middle; }
+.pp-grid tr.pp-grid-ms td { background:#F8FAFC; }
+.pp-grid tr.pp-crit td:nth-child(2) { box-shadow:inset 3px 0 0 #DC2626; }
+.pp-grid tr.pp-done td { color:var(--text3); }
+.pp-grid tr.pp-done td input { color:var(--text3); }
+.pp-grid tr.pp-drop-above td { box-shadow:inset 0 2px 0 var(--red); }
+.pp-grid tr.pp-drop-below td { box-shadow:inset 0 -2px 0 var(--red); }
+.pp-cell { width:100%; box-sizing:border-box; border:1px solid transparent; background:transparent; font:inherit; padding:2px 3px; border-radius:3px; color:inherit; }
+.pp-cell:hover { border-color:var(--border); background:#fff; }
+.pp-cell:focus { outline:none; border-color:var(--navy); background:#fff; }
+select.pp-cell { appearance:auto; }
+.pp-cell-ro { display:inline-block; padding:2px 3px; }
+.pp-pin { cursor:pointer; font-size:11px; margin-right:2px; }
+.pp-ic { cursor:pointer; color:var(--text3); font-size:11px; padding:0 3px; }
+.pp-ic:hover { color:var(--navy); }
+.pp-bar-live .pp-bar-body { cursor:grab; }
+.pp-bar-resize { cursor:ew-resize; }
+.pp-bar-link { cursor:crosshair; }
+.pp-bar.pp-link-target .pp-bar-body { stroke:#FA0A11; stroke-width:2; }
+.pp-link:hover { stroke-width:2.5; }
 .pb-editor-tab-content { padding:20px 28px; display:flex; flex-direction:column; min-height:calc(100vh - 100px); }
 .pb-editor-tab-content > * { flex:0 0 auto; }
 /* Summary pinned to the bottom of the editor: margin-top:auto pushes it down when
@@ -833,7 +859,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.32 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.33 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -872,7 +898,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.32 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.33 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2401,6 +2427,8 @@ function _mockSeed() {
     forecast_snapshot_lines: [],
     // v7.10.32 project planning: empty — a plan is built from a secured deal (the harness injects deals).
     project_plans: [], project_milestones: [], project_tasks: [], project_plan_members: [],
+    project_task_links: [],   // v7.10.33
+    public_holidays: [ { id: 1, holiday_date: '2026-12-16', name: 'Day of Reconciliation', active: true }, { id: 2, holiday_date: '2026-12-25', name: 'Christmas Day', active: true }, { id: 3, holiday_date: '2026-12-26', name: 'Day of Goodwill', active: true }, { id: 4, holiday_date: '2027-01-01', name: "New Year's Day", active: true }, { id: 5, holiday_date: '2027-03-22', name: 'Human Rights Day (observed)', active: true } ],
     settings: [
       { id: 1, key: 'environment',            value: 'Development' },
       { id: 2, key: 'fy_start_month',         value: 'July' },
@@ -7376,7 +7404,8 @@ function switchOppTab(tab, btn) {
 // and resource load, budget vs actual, time logged against tasks (timesheet_entries untouched).
 
 let _ppMissing = false;
-let _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: 'list', edit: null, from: null, busy: false };
+let _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: 'list', edit: null, from: null, busy: false,
+            links: [], holidays: new Set(), sched: null, schedTab: 'gantt', zoom: 'week', critOn: true };   // v7.10.33 schedule
 const PP_TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
 const PP_PLAN_STATUS = [['planning', 'Planning'], ['active', 'Active'], ['on_hold', 'On hold'], ['complete', 'Complete']];
 const PP_HEALTH = { ontrack: ['On track', '#DCFCE7', '#166534'], atrisk: ['At risk', '#FEF3C7', '#92400E'], late: ['Late', '#FEE2E2', '#991B1B'], complete: ['Complete', '#E0E7FF', '#3730A3'], hold: ['On hold', '#F1F5F9', '#475569'] };
@@ -7584,17 +7613,21 @@ async function openProjectPlan(planId, from) {
   _logActivity('project_plan', planId);
   const page = document.getElementById('pp-page'), root = document.getElementById('pp-root');
   if (!page || !root) return;
-  _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: _pp.view || 'list', edit: null, from: from || null, busy: false };
+  _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: _pp.view || 'list', edit: null, from: from || null, busy: false,
+          links: [], holidays: new Set(), sched: null, schedTab: _pp.schedTab || 'gantt', zoom: _pp.zoom || 'week', critOn: _pp.critOn !== false };
   root.innerHTML = '<div style="padding:40px;color:var(--text3);">Loading…</div>';
   page.classList.add('active');
   try {
-    const [plans, ms, ts, mem, people] = await Promise.all([
+    const [plans, ms, ts, mem, people, , links, hols] = await Promise.all([
       apiGet('project_plans', 'id=eq.' + planId + '&select=*'),
       apiGet('project_milestones', 'plan_id=eq.' + planId + '&select=*&order=sort_order,id'),
       apiGet('project_tasks', 'plan_id=eq.' + planId + '&select=*&order=sort_order,id'),
       apiGet('project_plan_members', 'plan_id=eq.' + planId + '&select=*&order=id'),
       allData['people'] ? Promise.resolve(allData['people']) : apiGet('people', 'select=id,first_name,last_name'),
       ensureHomeOrgMembers(),
+      // v7.10.33: dependencies (table absent → the Schedule view runs with predecessors switched off) and the working calendar
+      apiGet('project_task_links', 'plan_id=eq.' + planId + '&select=*&order=id').then(r => { _ppLinksMissing = false; return r; }).catch(e => { _ppLinksMissing = _ppIsMissingErr(e); return []; }),
+      apiGet('public_holidays', 'select=holiday_date,active').catch(() => []),
     ]);
     const plan = plans[0];
     if (!plan) throw new Error('Plan ' + planId + ' was not found');
@@ -7606,7 +7639,8 @@ async function openProjectPlan(planId, from) {
       if (!org) { try { org = (await apiGet('organisations', 'id=eq.' + deal.org_id + '&select=id,name'))[0] || null; } catch (e) {} }
     }
     allData['people'] = people;
-    Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people });
+    Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people, links: links || [], sched: null,
+                         holidays: new Set((hols || []).filter(h => h.active !== false).map(h => String(h.holiday_date).slice(0, 10))) });
     ppPaint();
   } catch (e) {
     root.innerHTML = '<div style="padding:40px;color:var(--red);">' + (_ppIsMissingErr(e) ? escHtml(PP_MISSING_MSG) : 'Could not open the plan: ' + escHtml(e.message)) + '</div>';
@@ -7787,7 +7821,7 @@ async function ppMilestoneDelete(id) {
     await api('project_milestones', 'DELETE', null, 'id=eq.' + id);
     tl.forEach(t => { t.milestone_id = null; });
     _pp.milestones = _pp.milestones.filter(x => +x.id !== +id);
-    _pp.edit = null;
+    _pp.edit = null; ppSchedDirty();
     showStatus('Milestone deleted');
     ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
   } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
@@ -7831,13 +7865,19 @@ function ppTasksHtml(edit) {
       <div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-left:8px;">
         <button class="btn btn-sm ${_pp.view === 'list' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-list" style="border:none;border-radius:0;" onclick="ppSetView('list')">List</button>
         <button class="btn btn-sm ${_pp.view === 'board' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-board" style="border:none;border-radius:0;" onclick="ppSetView('board')">Board</button>
+        <button class="btn btn-sm ${_pp.view === 'schedule' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-schedule" style="border:none;border-radius:0;" onclick="ppSetView('schedule')">Schedule</button>
       </div>
       <div style="flex:1;"></div>
       ${edit ? '<button class="btn btn-secondary btn-sm" id="pp-task-add" onclick="ppTaskAdd()">+ Task</button>' : ''}
     </div>
-    ${_pp.view === 'board' ? ppBoardHtml(edit) : ppTaskListHtml(edit)}`;
+    ${_pp.view === 'schedule' ? ppScheduleHtml(edit) : _pp.view === 'board' ? ppBoardHtml(edit) : ppTaskListHtml(edit)}`;
 }
-function ppSetView(v) { if (ppBusy()) return; _pp.view = v; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
+function ppSetView(v) {
+  if (ppBusy()) return;
+  _pp.view = v; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+  // v7.10.33: opening the Schedule as an editor writes the scheduled dates onto the rows, so the List, Board and health read the same dates
+  if (v === 'schedule' && ppCanEdit()) ppSchedCommit({ quiet: true });
+}
 function ppTaskStatusSelect(t, cls) {
   const may = ppCanTouchTask(t);
   return `<select class="form-control ${cls || ''}" style="padding:3px 6px;font-size:12px;" ${may ? '' : 'disabled'} onchange="ppTaskSetStatus(${+t.id}, this.value)">${PP_TASK_STATUS.map(s => `<option value="${s[0]}" ${t.status === s[0] ? 'selected' : ''}>${s[1]}</option>`).join('')}</select>`;
@@ -7923,6 +7963,7 @@ async function ppTaskSave() {
     }
     _pp.edit = null;
     showStatus('Task saved');
+    ppSchedDirty();
     ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
   } catch (e) { showStatus('Task not saved: ' + e.message, 'error'); }
   finally { _pp.busy = false; }
@@ -7934,7 +7975,7 @@ async function ppTaskDelete(id) {
   if (!ok) return;
   try {
     await api('project_tasks', 'DELETE', null, 'id=eq.' + id);
-    _pp.tasks = _pp.tasks.filter(x => +x.id !== +id); _pp.edit = null;
+    _pp.tasks = _pp.tasks.filter(x => +x.id !== +id); _pp.links = (_pp.links || []).filter(l => +l.from_task !== +id && +l.to_task !== +id); _pp.edit = null; ppSchedDirty();
     showStatus('Task deleted');
     ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
   } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
@@ -7948,7 +7989,7 @@ async function ppTaskSetStatus(id, status) {
   const now = new Date().toISOString();
   const body = { status, completed_at: status === 'done' ? now : null, updated_at: now };
   const was = { status: t.status, completed_at: t.completed_at };
-  Object.assign(t, body);
+  Object.assign(t, body); ppSchedDirty();
   ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit()));
   try { const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + id); if (rows && rows[0]) Object.assign(t, rows[0]); }
   catch (e) { Object.assign(t, was); showStatus('Not saved: ' + e.message, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
@@ -8032,6 +8073,580 @@ async function ppMemberRemove(id) {
   if (held) { showStatus(ppPersonName(m.person_id) + ' still holds ' + held + ' task' + (held === 1 ? '' : 's') + ' — reassign ' + (held === 1 ? 'it' : 'them') + ' first', 'error'); return; }
   try { await api('project_plan_members', 'DELETE', null, 'id=eq.' + id); _pp.members = _pp.members.filter(x => +x.id !== +id); ppRepaintSection('pp-team', ppTeamHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true)); }
   catch (e) { showStatus('Not removed: ' + e.message, 'error'); }
+}
+
+// ── Project planning, phase 2: the Schedule view (v7.10.33) ──────────────────
+// Richard 2026-11-13: "would like an interface similar to MS Project? and have gantt and pert
+// charts". A third view on the plan page beside List and Board: an MS Project-style task grid on
+// the left (tasks indented under their milestones; # · Task · Duration · Start · Finish ·
+// Predecessors · Resource · % done · Hours, every cell edited in place), a Gantt on the right (bars,
+// milestone diamonds, dependency arrows, today line, non-working days shaded, drag to move / stretch
+// / link, critical path in red) and a PERT network chart. ONE scheduling engine, ppSchedCompute():
+// a forward pass from the plan's start over the working calendar (Mon–Fri less public_holidays)
+// honouring FS / SS / FF / SF links with lag, then a backward pass for slack and the critical path.
+// ppSchedCommit() writes the scheduled dates back onto project_tasks.start_date / due_date (and
+// slack_days) so every phase 1 reader sees them. Rules: a done task never moves; a task whose
+// constraint is must_start_on is pinned to its start_date; a task with predecessors hugs them; a
+// task without predecessors keeps its own start_date, else starts at the plan's planned start.
+// Links live in project_task_links (sql/add_project_schedule.sql); a database without the table
+// shows the view with predecessors switched off (_ppLinksMissing).
+let _ppLinksMissing = false;
+const PP_LINK_TYPES = ['FS', 'SS', 'FF', 'SF'];
+const PP_ZOOM = { day: 26, week: 7, month: 2.4 };          // px per calendar day
+const PP_ROW_H = 26, PP_HEAD_H = 40;
+const PP_SCHED_MISSING_MSG = 'Dependencies are not installed on this database yet — run sql/add_project_schedule.sql. Durations, dates and the Gantt still work.';
+
+// ── Calendar ──────────────────────────────────────────────────────────────────
+function ppHolidaySet() { return _pp.holidays instanceof Set ? _pp.holidays : new Set(); }
+function ppIsoAdd(s, n) { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function ppIsWorking(s) { const w = new Date(s + 'T00:00:00Z').getUTCDay(); return w !== 0 && w !== 6 && !ppHolidaySet().has(s); }
+function ppNextWorking(s) { let d = s, g = 0; while (!ppIsWorking(d) && g++ < 60) d = ppIsoAdd(d, 1); return d; }
+function ppPrevWorking(s) { let d = s, g = 0; while (!ppIsWorking(d) && g++ < 60) d = ppIsoAdd(d, -1); return d; }
+// Move n working days from a working day s (n may be negative; 0 returns s unchanged).
+function ppShift(s, n) {
+  let d = s, left = Math.abs(n), step = n < 0 ? -1 : 1, g = 0;
+  while (left > 0 && g++ < 5000) { d = ppIsoAdd(d, step); if (ppIsWorking(d)) left--; }
+  return d;
+}
+// Working days strictly after a up to and including b (negative when b is before a).
+function ppWorkDaysBetween(a, b) {
+  if (a === b) return 0;
+  const sign = b > a ? 1 : -1; let d = a, n = 0, g = 0;
+  while (d !== b && g++ < 5000) { d = ppIsoAdd(d, sign); if (ppIsWorking(d)) n += sign; }
+  return n;
+}
+// Working days from a to b, both included.
+function ppWorkDaysIncl(a, b) { return b < a ? 0 : ppWorkDaysBetween(ppIsoAdd(a, -1), b); }
+// Duration in working days of a task, as scheduled: the typed figure, else counted from its dates, else 1.
+function ppTaskDur(t) {
+  if (t.duration_days != null && t.duration_days !== '') return Math.max(0, +t.duration_days);
+  if (t.start_date && t.due_date && t.due_date >= t.start_date) return Math.max(1, ppWorkDaysIncl(t.start_date, t.due_date));
+  return 1;
+}
+function ppFinishFrom(start, dur) { return dur > 0 ? ppShift(start, dur - 1) : start; }
+function ppPct(t) { return t.status === 'done' ? 100 : Math.max(0, Math.min(100, +t.pct_done || 0)); }
+
+// ── The engine ────────────────────────────────────────────────────────────────
+// ppSchedCompute(tasks, links, planStart) → { byId: { id: { es, ef, ls, lf, slack, critical, dur, cyclic } }, end, start, order }
+function ppSchedCompute(tasks, links, planStart) {
+  const byId = {}, ids = new Set(tasks.map(t => +t.id));
+  const L = (links || []).filter(l => ids.has(+l.from_task) && ids.has(+l.to_task) && +l.from_task !== +l.to_task);
+  const preds = {}, succs = {}, indeg = {};
+  tasks.forEach(t => { preds[+t.id] = []; succs[+t.id] = []; indeg[+t.id] = 0; });
+  L.forEach(l => { preds[+l.to_task].push(l); succs[+l.from_task].push(l); indeg[+l.to_task]++; });
+  // Kahn's order; anything left over sits in a cycle and is scheduled as if unlinked (flagged).
+  const order = [], q = tasks.filter(t => indeg[+t.id] === 0).map(t => +t.id), deg = { ...indeg };
+  while (q.length) { const id = q.shift(); order.push(id); succs[id].forEach(l => { if (--deg[+l.to_task] === 0) q.push(+l.to_task); }); }
+  const cyclic = new Set(tasks.map(t => +t.id).filter(id => !order.includes(id)));
+  cyclic.forEach(id => order.push(id));
+  const start0 = ppNextWorking(planStart || _today());
+  const tById = {}; tasks.forEach(t => { tById[+t.id] = t; });
+  // forward pass
+  order.forEach(id => {
+    const t = tById[id], dur = ppTaskDur(t), fixed = t.status === 'done' && t.start_date && t.due_date;
+    let es;
+    if (fixed) { es = t.start_date; byId[id] = { es, ef: t.due_date, dur, fixed: true, cyclic: cyclic.has(id) }; return; }
+    if (t.constraint_type === 'must_start_on' && t.start_date) es = ppNextWorking(t.start_date);
+    else {
+      const cands = [];
+      if (!cyclic.has(id)) preds[id].forEach(l => {
+        const p = byId[+l.from_task]; if (!p) return;
+        const lag = +l.lag_days || 0, type = l.link_type || 'FS';
+        if (type === 'FS') cands.push(ppShift(p.ef, 1 + lag));
+        else if (type === 'SS') cands.push(ppShift(p.es, lag));
+        else if (type === 'FF') { const f = ppShift(p.ef, lag); cands.push(dur > 0 ? ppShift(f, -(dur - 1)) : f); }
+        else if (type === 'SF') { const f = ppShift(p.es, lag); cands.push(dur > 0 ? ppShift(f, -(dur - 1)) : f); }
+      });
+      es = cands.length ? cands.reduce((m, c) => c > m ? c : m) : (t.start_date ? ppNextWorking(t.start_date) : start0);
+    }
+    byId[id] = { es, ef: ppFinishFrom(es, dur), dur, fixed: false, cyclic: cyclic.has(id) };
+  });
+  const all = Object.values(byId);
+  const end = all.length ? all.reduce((m, s) => s.ef > m ? s.ef : m, all[0].ef) : start0;
+  const start = all.length ? all.reduce((m, s) => s.es < m ? s.es : m, all[0].es) : start0;
+  // backward pass
+  order.slice().reverse().forEach(id => {
+    const s = byId[id], dur = s.dur, cands = [];
+    if (!cyclic.has(id)) succs[id].forEach(l => {
+      const n = byId[+l.to_task]; if (!n || n.ls == null) return;
+      const lag = +l.lag_days || 0, type = l.link_type || 'FS';
+      if (type === 'FS') cands.push(ppShift(n.ls, -(1 + lag)));
+      else if (type === 'SS') { const ls = ppShift(n.ls, -lag); cands.push(dur > 0 ? ppShift(ls, dur - 1) : ls); }
+      else if (type === 'FF') cands.push(ppShift(n.lf, -lag));
+      else if (type === 'SF') { const ls = ppShift(n.lf, -lag); cands.push(dur > 0 ? ppShift(ls, dur - 1) : ls); }
+    });
+    s.lf = cands.length ? cands.reduce((m, c) => c < m ? c : m) : end;
+    if (s.lf < s.ef) s.lf = s.ef;                       // a pinned or done task can be later than its successors allow
+    s.ls = dur > 0 ? ppShift(s.lf, -(dur - 1)) : s.lf;
+    s.slack = Math.max(0, ppWorkDaysBetween(s.es, s.ls));
+    s.critical = !s.fixed && s.slack === 0;
+  });
+  return { byId, end, start, order, cyclic };
+}
+function ppSched() { if (!_pp.sched) _pp.sched = ppSchedCompute(_pp.tasks, _pp.links || [], _pp.plan && _pp.plan.planned_start); return _pp.sched; }
+function ppSchedDirty() { _pp.sched = null; }
+
+// Compute, write every changed date / slack back, repaint. The one path from a schedule change to the rows.
+async function ppSchedCommit(opts) {
+  ppSchedDirty();
+  const S = ppSched(), writes = [];
+  _pp.tasks.forEach(t => {
+    const s = S.byId[+t.id]; if (!s || s.fixed) return;
+    const slack = s.slack == null ? null : s.slack;
+    if (t.start_date !== s.es || t.due_date !== s.ef || (t.slack_days == null ? null : +t.slack_days) !== slack) {
+      const body = { start_date: s.es, due_date: s.ef, updated_at: new Date().toISOString() };
+      if (!_ppSchedNoSlack) body.slack_days = slack;
+      writes.push({ t, body });
+    }
+  });
+  if (writes.length) {
+    try {
+      await Promise.all(writes.map(w => api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id).then(rows => Object.assign(w.t, rows && rows[0] ? rows[0] : w.body))
+        .catch(async e => {
+          if (/42703/.test(e.message) && 'slack_days' in w.body) { _ppSchedNoSlack = true; delete w.body.slack_days; const rows = await api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id); Object.assign(w.t, rows && rows[0] ? rows[0] : w.body); }
+          else throw e;
+        })));
+      if (!(opts && opts.quiet)) showStatus(writes.length === 1 ? 'Rescheduled 1 task' : 'Rescheduled ' + writes.length + ' tasks');
+    } catch (e) { showStatus('Not all tasks were rescheduled: ' + e.message, 'error'); }
+  }
+  ppSchedDirty();
+  if (!(opts && opts.noPaint)) { ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
+}
+let _ppSchedNoSlack = false;   // a database on the phase 1 tables only: dates still write, slack is not stored
+
+// ── Grid rows and numbering ───────────────────────────────────────────────────
+// Tasks are numbered 1..n in grid order (under their milestones, then No milestone); predecessors are typed by that number.
+function ppGridRows() {
+  const rows = [], groups = _pp.milestones.map(m => ({ ms: m, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
+  const loose = _pp.tasks.filter(t => t.milestone_id == null || !_pp.milestones.some(m => +m.id === +t.milestone_id));
+  if (loose.length || !groups.length) groups.push({ ms: null, tasks: loose });
+  let n = 0;
+  groups.forEach(g => { rows.push({ kind: 'ms', ms: g.ms, tasks: g.tasks }); g.tasks.forEach(t => rows.push({ kind: 'task', t, n: ++n })); });
+  return rows;
+}
+function ppTaskNo(id) { const r = ppGridRows().find(r => r.kind === 'task' && +r.t.id === +id); return r ? r.n : null; }
+function ppTaskByNo(n) { const r = ppGridRows().find(r => r.kind === 'task' && r.n === +n); return r ? r.t : null; }
+function ppPredText(t) {
+  return (_pp.links || []).filter(l => +l.to_task === +t.id).map(l => {
+    const n = ppTaskNo(l.from_task); if (!n) return null;
+    const lag = +l.lag_days || 0;
+    return n + ((l.link_type || 'FS') === 'FS' && !lag ? '' : (l.link_type || 'FS')) + (lag ? (lag > 0 ? '+' : '') + lag + 'd' : '');
+  }).filter(Boolean).join(', ');
+}
+// "3, 5FS+2d, 7SS-1d" → [{ no, type, lag }] or { error }
+function ppParsePreds(text) {
+  const out = [], seen = new Set();
+  for (const part of String(text || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
+    const m = /^(\d+)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*d?$/i.exec(part);
+    if (!m) return { error: 'Cannot read "' + part + '" — write the task number, then FS / SS / FF / SF and a lag, like 3FS+2d' };
+    const no = +m[1]; if (seen.has(no)) return { error: 'Task ' + no + ' is listed twice' };
+    seen.add(no);
+    out.push({ no, type: (m[2] || 'FS').toUpperCase(), lag: m[3] ? +m[3].replace(/\s+/g, '') : 0 });
+  }
+  return out;
+}
+function ppLinkWouldLoop(fromId, toId, links) {
+  const succs = {}; (links || []).forEach(l => { (succs[+l.from_task] = succs[+l.from_task] || []).push(+l.to_task); });
+  const seen = new Set(), stack = [+toId];
+  while (stack.length) { const id = stack.pop(); if (id === +fromId) return true; if (seen.has(id)) continue; seen.add(id); (succs[id] || []).forEach(s => stack.push(s)); }
+  return false;
+}
+async function ppLinkAdd(fromId, toId, type, lag, opts) {
+  if (!ppCanEdit()) return false;
+  if (_ppLinksMissing) { showStatus(PP_SCHED_MISSING_MSG, 'error'); return false; }
+  if (+fromId === +toId) { showStatus('A task cannot depend on itself', 'error'); return false; }
+  if ((_pp.links || []).some(l => +l.from_task === +fromId && +l.to_task === +toId)) { showStatus('That link already exists', 'error'); return false; }
+  if (ppLinkWouldLoop(fromId, toId, _pp.links)) { showStatus('That link would make a loop: task ' + ppTaskNo(toId) + ' already leads to task ' + ppTaskNo(fromId), 'error'); return false; }
+  try {
+    const rows = await api('project_task_links', 'POST', { plan_id: +_pp.plan.id, from_task: +fromId, to_task: +toId, link_type: type || 'FS', lag_days: +lag || 0, created_by: currentUser.personId });
+    _pp.links.push(rows[0]);
+    if (!(opts && opts.noCommit)) await ppSchedCommit({ quiet: true });
+    return true;
+  } catch (e) { showStatus('Link not saved: ' + (_ppIsMissingErr(e) ? PP_SCHED_MISSING_MSG : e.message), 'error'); return false; }
+}
+async function ppLinkRemove(linkId, opts) {
+  if (!ppCanEdit()) return;
+  try { await api('project_task_links', 'DELETE', null, 'id=eq.' + linkId); _pp.links = _pp.links.filter(l => +l.id !== +linkId); if (!(opts && opts.noCommit)) await ppSchedCommit({ quiet: true }); }
+  catch (e) { showStatus('Link not removed: ' + e.message, 'error'); }
+}
+
+// ── Grid cell edits ───────────────────────────────────────────────────────────
+// Every editable cell lands here. A date or duration change reschedules; a predecessor change rewrites the links by difference.
+async function ppGridSet(id, col, value) {
+  const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
+  const may = ppCanTouchTask(t), full = ppCanEdit();
+  if (!may) { showStatus('Only the project manager, an administrator or the assignee can change this task', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(false)); return; }
+  const now = new Date().toISOString();
+  let body = null, reschedule = false;
+  if (col === 'name') { if (!full) return; const v = String(value || '').trim(); if (!v) { showStatus('The task needs a name', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; } body = { name: v }; }
+  else if (col === 'duration') {
+    const n = value === '' || value == null ? null : Math.round(+value);
+    if (n != null && (isNaN(n) || n < 0)) { showStatus('Duration is a number of working days', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    body = { duration_days: n }; reschedule = true;
+  }
+  else if (col === 'start') {
+    if (!value) { showStatus('A task needs a start date in the schedule — clear its predecessors or set a date', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    const d = ppNextWorking(value), hasPreds = (_pp.links || []).some(l => +l.to_task === +t.id);
+    if (d !== value) showStatus(ppDate(value) + ' is not a working day — moved to ' + ppDate(d));
+    body = { start_date: d, duration_days: ppTaskDur(t) };               // keep the length: the finish follows
+    if (hasPreds || t.status === 'done') body.constraint_type = hasPreds ? 'must_start_on' : (t.constraint_type || 'asap');
+    if (t.status === 'done') body.due_date = ppFinishFrom(d, ppTaskDur(t));
+    reschedule = true;
+  }
+  else if (col === 'finish') {
+    const S = ppSched(), s = S.byId[+t.id], start = (s && s.es) || t.start_date;
+    if (!value || !start) { showStatus('Set a start date first', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    const f = ppPrevWorking(value);
+    if (f < start) { showStatus('The finish cannot be before the start', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    body = { duration_days: Math.max(1, ppWorkDaysIncl(start, f)) };
+    if (t.status === 'done') body.due_date = f;
+    reschedule = true;
+  }
+  else if (col === 'pin') { body = { constraint_type: value ? 'must_start_on' : 'asap' }; reschedule = true; }
+  else if (col === 'preds') {
+    if (!full) return;
+    if (_ppLinksMissing) { showStatus(PP_SCHED_MISSING_MSG, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    const parsed = ppParsePreds(value);
+    if (parsed.error) { showStatus(parsed.error, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    const want = [];
+    for (const p of parsed) { const pt = ppTaskByNo(p.no); if (!pt) { showStatus('There is no task ' + p.no, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; } if (+pt.id === +t.id) { showStatus('A task cannot depend on itself', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; } want.push({ from: +pt.id, type: p.type, lag: p.lag }); }
+    const have = (_pp.links || []).filter(l => +l.to_task === +t.id);
+    const links = _pp.links.filter(l => +l.to_task !== +t.id);
+    for (const w of want) if (ppLinkWouldLoop(w.from, t.id, links)) { showStatus('Task ' + ppTaskNo(w.from) + ' already depends on task ' + ppTaskNo(t.id) + ' — that would be a loop', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    _pp.busy = true;
+    try {
+      for (const h of have) {
+        const w = want.find(x => x.from === +h.from_task);
+        if (!w) await ppLinkRemove(h.id, { noCommit: true });
+        else if (w.type !== (h.link_type || 'FS') || w.lag !== (+h.lag_days || 0)) { const rows = await api('project_task_links', 'PATCH', { link_type: w.type, lag_days: w.lag }, 'id=eq.' + h.id); Object.assign(h, rows && rows[0] ? rows[0] : { link_type: w.type, lag_days: w.lag }); }
+      }
+      for (const w of want) if (!have.some(h => +h.from_task === w.from)) { if (!(await ppLinkAdd(w.from, t.id, w.type, w.lag, { noCommit: true }))) break; }
+    } finally { _pp.busy = false; }
+    await ppSchedCommit({ quiet: true });
+    return;
+  }
+  else if (col === 'assignee') { if (!full) return; body = { assignee_id: value ? +value : null }; }
+  else if (col === 'pct') {
+    const n = Math.max(0, Math.min(100, Math.round(+value || 0)));
+    if (n >= 100 && t.status !== 'done') { await ppTaskSetStatus(t.id, 'done'); body = { pct_done: 100 }; }
+    else if (n < 100 && t.status === 'done') { await ppTaskSetStatus(t.id, n > 0 ? 'in_progress' : 'todo'); body = { pct_done: n }; }
+    else body = { pct_done: n, status: n > 0 && t.status === 'todo' ? 'in_progress' : t.status };
+  }
+  else if (col === 'hours') { if (!full) return; const n = value === '' ? null : +value; if (n != null && (isNaN(n) || n < 0)) { showStatus('Hours cannot be negative', 'error'); return; } body = { est_hours: n }; }
+  else if (col === 'milestone') { if (!full) return; body = { milestone_id: value ? +value : null }; }
+  else if (col === 'pert') { body = value; }           // { pert_optimistic, pert_likely, pert_pessimistic }
+  else return;
+  body.updated_at = now;
+  const was = { ...t };
+  Object.assign(t, body);
+  try {
+    const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + t.id);
+    Object.assign(t, rows && rows[0] ? rows[0] : body);
+  } catch (e) {
+    Object.assign(t, was);
+    if (/42703/.test(e.message)) showStatus('Not saved: this database has not run sql/add_project_schedule.sql', 'error'); else showStatus('Not saved: ' + e.message, 'error');
+    ppRepaintSection('pp-tasks', ppTasksHtml(full)); return;
+  }
+  if (reschedule) await ppSchedCommit({ quiet: true });
+  else { ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(full)); ppRepaintSection('pp-milestones', ppMilestonesHtml(full)); }
+}
+// Indent = file the task under the milestone above it in the grid; outdent = No milestone.
+async function ppGridIndent(id, dir) {
+  if (!ppCanEdit()) return;
+  const rows = ppGridRows(), i = rows.findIndex(r => r.kind === 'task' && +r.t.id === +id); if (i < 0) return;
+  if (dir < 0) { await ppGridSet(id, 'milestone', null); return; }
+  let ms = null; for (let j = i - 1; j >= 0; j--) if (rows[j].kind === 'ms' && rows[j].ms) { ms = rows[j].ms; break; }
+  if (!ms) { showStatus('No milestone above this task to indent under', 'error'); return; }
+  await ppGridSet(id, 'milestone', ms.id);
+}
+// Enter moves down a row, staying in the column; Escape reverts the cell.
+function ppGridKey(ev, el) {
+  if (ev.key === 'Enter' && el.tagName !== 'SELECT') { ev.preventDefault(); el.blur(); const col = el.dataset.col, tr = el.closest('tr'); let n = tr && tr.nextElementSibling; while (n && !n.querySelector('[data-col="' + col + '"]')) n = n.nextElementSibling; const nx = n && n.querySelector('[data-col="' + col + '"]'); if (nx) { nx.focus(); if (nx.select) nx.select(); } }
+  else if (ev.key === 'Escape') { el.value = el.defaultValue; el.blur(); }
+}
+// Drag a grid row onto another: lands before / after it and takes that task's milestone.
+let _ppRowDrag = null;
+function ppRowDragStart(ev, id) { if (!ppCanEdit()) { ev.preventDefault(); return; } _ppRowDrag = +id; ev.dataTransfer.effectAllowed = 'move'; try { ev.dataTransfer.setData('text/plain', String(id)); } catch (e) {} }
+function ppRowDragOver(ev) { if (_ppRowDrag == null) return; ev.preventDefault(); const r = ev.currentTarget.getBoundingClientRect(); ev.currentTarget.classList.toggle('pp-drop-above', ev.clientY < r.top + r.height / 2); ev.currentTarget.classList.toggle('pp-drop-below', ev.clientY >= r.top + r.height / 2); }
+function ppRowDragEnd() { _ppRowDrag = null; document.querySelectorAll('.pp-drop-above,.pp-drop-below').forEach(el => el.classList.remove('pp-drop-above', 'pp-drop-below')); }
+async function ppRowDrop(ev, targetId) {
+  ev.preventDefault();
+  const above = ev.currentTarget.classList.contains('pp-drop-above'), from = _ppRowDrag;
+  ppRowDragEnd();
+  if (from == null || +from === +targetId) return;
+  const src = _pp.tasks.find(t => +t.id === +from), dst = _pp.tasks.find(t => +t.id === +targetId); if (!src || !dst) return;
+  const order = ppGridRows().filter(r => r.kind === 'task').map(r => r.t).filter(t => +t.id !== +from);
+  const at = order.findIndex(t => +t.id === +targetId);
+  order.splice(above ? at : at + 1, 0, src);
+  const writes = [];
+  order.forEach((t, i) => { const ms = +t.id === +from ? (dst.milestone_id || null) : (t.milestone_id || null); if ((+t.sort_order || 0) !== i + 1 || (t.milestone_id || null) !== ms) writes.push({ t, body: { sort_order: i + 1, milestone_id: ms } }); });
+  try { await Promise.all(writes.map(w => api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id).then(rows => Object.assign(w.t, rows && rows[0] ? rows[0] : w.body)))); }
+  catch (e) { showStatus('Not reordered: ' + e.message, 'error'); }
+  _pp.tasks.sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || +a.id - +b.id);
+  ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
+}
+
+// ── The Schedule view ─────────────────────────────────────────────────────────
+function ppScheduleHtml(edit) {
+  const S = ppSched(), tab = _pp.schedTab || 'gantt';
+  const crit = Object.values(S.byId).filter(s => s.critical).length;
+  const base = _pp.plan.baseline_set_at ? 'Baseline ' + ppDate(_pp.plan.baseline_set_at) : 'No baseline';
+  const btn = (id, label, on, fn, title) => `<button class="btn btn-sm ${on ? 'btn-primary' : 'btn-ghost'}" id="${id}" style="border:none;border-radius:0;" onclick="${fn}" ${title ? 'title="' + escAttr(title) + '"' : ''}>${label}</button>`;
+  return `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:12px;">
+      <div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">${btn('pp-sched-gantt', 'Gantt', tab === 'gantt', "ppSchedTab('gantt')")}${btn('pp-sched-pert', 'PERT', tab === 'pert', "ppSchedTab('pert')")}</div>
+      ${tab === 'gantt' ? `<div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">${['day', 'week', 'month'].map(z => btn('pp-zoom-' + z, z[0].toUpperCase() + z.slice(1), (_pp.zoom || 'week') === z, "ppSchedZoom('" + z + "')")).join('')}</div>` : ''}
+      <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="pp-crit" ${_pp.critOn !== false ? 'checked' : ''} onchange="_pp.critOn=this.checked;ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()))"> Critical path <span style="color:var(--text3);">(${crit})</span></label>
+      <span style="color:var(--text3);">${S.order.length ? ppDate(S.start) + ' → ' + ppDate(S.end) + ' · ' + ppWorkDaysIncl(S.start, S.end) + ' working days' : 'nothing scheduled yet'}</span>
+      <span style="color:var(--text3);">· ${base}</span>
+      <div style="flex:1;"></div>
+      ${edit ? `<button class="btn btn-ghost btn-sm" id="pp-baseline" onclick="ppBaselineSet()">${_pp.plan.baseline_set_at ? 'Reset baseline' : 'Set baseline'}</button>` : ''}
+      <button class="btn btn-ghost btn-sm" id="pp-sched-print" onclick="ppSchedPrint()">Print</button>
+    </div>
+    ${_ppLinksMissing ? '<div style="background:#FEF3C7;border:1px solid #F59E0B;border-radius:var(--radius);padding:6px 12px;font-size:12px;color:#92400E;margin-bottom:8px;">' + escHtml(PP_SCHED_MISSING_MSG) + '</div>' : ''}
+    ${S.cyclic.size ? '<div style="background:#FEE2E2;border:1px solid #FCA5A5;border-radius:var(--radius);padding:6px 12px;font-size:12px;color:#991B1B;margin-bottom:8px;">Tasks ' + [...S.cyclic].map(ppTaskNo).join(', ') + ' depend on each other in a loop and are scheduled as if unlinked — fix their predecessors.</div>' : ''}
+    ${tab === 'pert' ? ppPertHtml(edit) : ppGanttHtml(edit)}`;
+}
+function ppSchedTab(t) { _pp.schedTab = t; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
+function ppSchedZoom(z) { _pp.zoom = z; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
+
+function ppGridHtml(edit, print) {
+  const S = ppSched(), rows = ppGridRows(), base = !!_pp.plan.baseline_set_at, today = _today();
+  const inp = (t, col, type, value, extra, may) => may && !print
+    ? `<input class="pp-cell" data-col="${col}" type="${type}" value="${escAttr(value == null ? '' : value)}" ${extra || ''} onchange="ppGridSet(${+t.id}, '${col}', this.value)" onkeydown="ppGridKey(event, this)">`
+    : `<span class="pp-cell-ro">${escHtml(type === 'date' && value ? ppDate(value) : (value == null ? '' : String(value)))}</span>`;
+  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 52 + 122 + 122 + (predsCol ? 90 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
+  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:52px;" title="Working days">Dur</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:90px;" title="Task numbers, e.g. 3FS+2d">Pred.</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
+  const body = rows.map(r => {
+    if (r.kind === 'ms') {
+      const m = r.ms, ts = r.tasks, ss = ts.map(t => S.byId[+t.id]).filter(Boolean);
+      const es = ss.length ? ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es) : null, ef = ss.length ? ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef) : null;
+      const pct = ts.length ? Math.round(ts.reduce((a, t) => a + ppPct(t), 0) / ts.length) : 0;
+      const late = m && m.status !== 'done' && m.due_date && m.due_date < today;
+      return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td><td colspan="${print ? 1 : 1}" style="font-weight:700;color:var(--navy);">${m ? escHtml(m.name) : 'No milestone'}${m && m.due_date ? ' <span style="font-weight:normal;color:' + (late ? 'var(--red)' : 'var(--text3)') + ';">· due ' + ppDate(m.due_date) + '</span>' : ''}</td><td style="text-align:right;">${es && ef ? ppWorkDaysIncl(es, ef) : ''}</td><td>${es ? ppDate(es) : ''}</td><td>${ef ? ppDate(ef) : ''}</td>${_ppLinksMissing && print ? '' : '<td></td>'}<td>${m ? escHtml(ppPersonName(m.owner_id) || '') : ''}</td><td style="text-align:right;">${ts.length ? pct + '%' : ''}</td><td style="text-align:right;">${ts.reduce((a, t) => a + (+t.est_hours || 0), 0) || ''}</td>${base ? '<td></td>' : ''}${print ? '' : '<td></td>'}</tr>`;
+    }
+    const t = r.t, s = S.byId[+t.id] || {}, may = ppCanTouchTask(t), done = t.status === 'done', crit = _pp.critOn !== false && s.critical;
+    const slip = base && t.baseline_end && s.ef ? ppWorkDaysBetween(t.baseline_end, s.ef) : null;
+    const pin = t.constraint_type === 'must_start_on';
+    return `<tr class="pp-grid-task ${crit ? 'pp-crit' : ''} ${done ? 'pp-done' : ''}" data-task-id="${+t.id}" style="height:${PP_ROW_H}px;" ${edit && !print ? `draggable="true" ondragstart="ppRowDragStart(event, ${+t.id})" ondragover="ppRowDragOver(event)" ondragleave="ppRowDragEnd()" ondrop="ppRowDrop(event, ${+t.id})" ondragend="ppRowDragEnd()"` : ''}>
+      <td style="color:var(--text3);text-align:right;cursor:${edit && !print ? 'grab' : 'default'};">${r.n}</td>
+      <td style="padding-left:18px;">${inp(t, 'name', 'text', t.name, 'style="font-weight:600;"', edit)}</td>
+      <td>${inp(t, 'duration', 'number', ppTaskDur(t), 'min="0" step="1" style="text-align:right;"', may)}</td>
+      <td>${pin && !print ? '<span class="pp-pin" title="Pinned to this date — click to let it follow its predecessors" onclick="ppGridSet(' + (+t.id) + ", 'pin', false)\">📌</span>" : ''}${inp(t, 'start', 'date', s.es || t.start_date || '', '', may && !done)}</td>
+      <td>${inp(t, 'finish', 'date', s.ef || t.due_date || '', '', may && !done)}</td>
+      ${_ppLinksMissing && print ? '' : '<td>' + inp(t, 'preds', 'text', ppPredText(t), 'placeholder="—" ' + (_ppLinksMissing ? 'disabled' : ''), edit) + '</td>'}
+      <td>${edit && !print ? `<select class="pp-cell" data-col="assignee" onchange="ppGridSet(${+t.id}, 'assignee', this.value)">${ppPeopleOptions(t.assignee_id, false)}</select>` : '<span class="pp-cell-ro">' + escHtml(ppPersonName(t.assignee_id) || '') + '</span>'}</td>
+      <td>${inp(t, 'pct', 'number', ppPct(t), 'min="0" max="100" step="5" style="text-align:right;"', may)}</td>
+      <td>${inp(t, 'hours', 'number', t.est_hours != null ? +t.est_hours : '', 'min="0" step="0.5" style="text-align:right;"', edit)}</td>
+      ${base ? '<td style="text-align:right;' + (slip > 0 ? 'color:var(--red);font-weight:700;' : slip < 0 ? 'color:#166534;' : '') + '">' + (slip == null ? '' : (slip > 0 ? '+' : '') + slip) + '</td>' : ''}
+      ${print ? '' : `<td style="white-space:nowrap;">${edit ? `<span class="pp-ic" title="Outdent (no milestone)" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent under the milestone above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>` : ''}</td>`}
+    </tr>`;
+  }).join('');
+  return `<table class="pp-grid" id="pp-grid" style="width:${tw}px;"><thead>${head}</thead><tbody>${body}${!rows.some(r => r.kind === 'task') ? `<tr style="height:${PP_ROW_H}px;"><td colspan="12" style="color:var(--text3);text-align:center;">No tasks yet${edit ? ' — add one with + Task' : ''}.</td></tr>` : ''}</tbody></table>`;
+}
+
+// ── Gantt ─────────────────────────────────────────────────────────────────────
+function ppGanttRange() {
+  const S = ppSched(), dates = [];
+  if (S.order.length) { dates.push(S.start, S.end); }
+  if (_pp.plan.planned_start) dates.push(_pp.plan.planned_start);
+  if (_pp.plan.planned_end) dates.push(_pp.plan.planned_end);
+  _pp.milestones.forEach(m => { if (m.due_date) dates.push(m.due_date); });
+  _pp.tasks.forEach(t => { if (t.baseline_start) dates.push(t.baseline_start); if (t.baseline_end) dates.push(t.baseline_end); });
+  dates.push(_today());
+  const min = dates.reduce((a, d) => d < a ? d : a), max = dates.reduce((a, d) => d > a ? d : a);
+  let from = ppIsoAdd(min, -3), to = ppIsoAdd(max, 8);
+  const z = _pp.zoom || 'week';
+  if (z === 'week') { const d = new Date(from + 'T00:00:00Z'); from = ppIsoAdd(from, -((d.getUTCDay() + 6) % 7)); }
+  if (z === 'month') from = from.slice(0, 8) + '01';
+  const days = Math.max(28, Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 86400000) + 1);
+  return { from, to: ppIsoAdd(from, days - 1), days, dayW: PP_ZOOM[z], zoom: z };
+}
+function ppGanttHtml(edit) {
+  const S = ppSched(), rows = ppGridRows(), R = ppGanttRange(), W = Math.round(R.days * R.dayW), H = PP_HEAD_H + rows.length * PP_ROW_H + 8, today = _today();
+  const x = d => Math.round((new Date(d + 'T00:00:00Z') - new Date(R.from + 'T00:00:00Z')) / 86400000 * R.dayW);
+  const parts = [], defs = `<defs><marker id="pp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748B"/></marker><marker id="pp-arrow-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker></defs>`;
+  // non-working days and the header
+  const months = [], weeks = [];
+  for (let i = 0, d = R.from; i < R.days; i++, d = ppIsoAdd(d, 1)) {
+    if (!ppIsWorking(d)) parts.push(`<rect x="${i * R.dayW}" y="${PP_HEAD_H}" width="${R.dayW}" height="${H - PP_HEAD_H}" fill="${ppHolidaySet().has(d) ? '#FDE68A' : '#F1F5F9'}" opacity="0.7"/>`);
+    const dt = new Date(d + 'T00:00:00Z');
+    if (dt.getUTCDate() === 1 || i === 0) months.push({ i, label: dt.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' }) });
+    if (dt.getUTCDay() === 1 || i === 0) weeks.push({ i, label: dt.getUTCDate() + ' ' + dt.toLocaleDateString('en-GB', { month: 'short', timeZone: 'UTC' }), d });
+    if (R.zoom === 'day') parts.push(`<text x="${i * R.dayW + R.dayW / 2}" y="${PP_HEAD_H - 6}" font-size="9" text-anchor="middle" fill="${ppIsWorking(d) ? '#475569' : '#94A3B8'}">${dt.getUTCDate()}</text>`);
+  }
+  months.forEach((m, k) => { const next = months[k + 1] ? months[k + 1].i : R.days; parts.push(`<line x1="${m.i * R.dayW}" y1="0" x2="${m.i * R.dayW}" y2="${H}" stroke="#CBD5E1"/><text x="${m.i * R.dayW + 4}" y="13" font-size="10" font-weight="700" fill="#003057">${(next - m.i) * R.dayW > 40 ? m.label : ''}</text>`); });
+  if (R.zoom !== 'month') weeks.forEach(w => parts.push(`<line x1="${w.i * R.dayW}" y1="18" x2="${w.i * R.dayW}" y2="${H}" stroke="#E2E8F0"/>` + (R.zoom === 'week' ? `<text x="${w.i * R.dayW + 3}" y="${PP_HEAD_H - 6}" font-size="9" fill="#64748B">${w.label}</text>` : '')));
+  rows.forEach((r, i) => parts.push(`<line x1="0" y1="${PP_HEAD_H + (i + 1) * PP_ROW_H}" x2="${W}" y2="${PP_HEAD_H + (i + 1) * PP_ROW_H}" stroke="#F1F5F9"/>`));
+  // bars
+  const pos = {};
+  rows.forEach((r, i) => {
+    const y = PP_HEAD_H + i * PP_ROW_H;
+    if (r.kind === 'ms') {
+      const ss = r.tasks.map(t => S.byId[+t.id]).filter(Boolean);
+      if (ss.length) { const es = ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es), ef = ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef); parts.push(`<rect x="${x(es)}" y="${y + 9}" width="${Math.max(2, x(ppIsoAdd(ef, 1)) - x(es))}" height="6" fill="#003057" rx="1"/>`); }
+      if (r.ms && r.ms.due_date) { const cx = x(r.ms.due_date) + R.dayW / 2, cy = y + PP_ROW_H / 2, done = r.ms.status === 'done'; parts.push(`<polygon class="pp-ms-diamond" data-ms-id="${+r.ms.id}" points="${cx},${cy - 7} ${cx + 7},${cy} ${cx},${cy + 7} ${cx - 7},${cy}" fill="${done ? '#166534' : r.ms.due_date < today ? '#DC2626' : '#003057'}"><title>${escHtml(r.ms.name)} · due ${ppDate(r.ms.due_date)}</title></polygon>`); }
+      return;
+    }
+    const t = r.t, s = S.byId[+t.id]; if (!s) return;
+    const x1 = x(s.es), x2 = Math.max(x1 + 3, x(ppIsoAdd(s.ef, 1))), done = t.status === 'done', crit = _pp.critOn !== false && s.critical, may = ppCanTouchTask(t) && !done;
+    pos[+t.id] = { x1, x2, y: y + PP_ROW_H / 2 };
+    if (t.baseline_start && t.baseline_end) parts.push(`<rect x="${x(t.baseline_start)}" y="${y + PP_ROW_H - 6}" width="${Math.max(2, x(ppIsoAdd(t.baseline_end, 1)) - x(t.baseline_start))}" height="3" fill="#94A3B8"/>`);
+    const fill = done ? '#94A3B8' : crit ? '#DC2626' : '#2F6FB5', pct = ppPct(t);
+    parts.push(`<g class="pp-bar ${may ? 'pp-bar-live' : ''}" data-task-id="${+t.id}" transform="translate(0,0)">
+      <rect class="pp-bar-body" x="${x1}" y="${y + 6}" width="${x2 - x1}" height="${PP_ROW_H - 12}" rx="3" fill="${fill}" opacity="0.85" ${may ? `onmousedown="ppBarDown(event, ${+t.id}, 'move')"` : ''}><title>${escHtml(t.name)} · ${ppDate(s.es)} → ${ppDate(s.ef)} · ${s.dur} d · slack ${s.slack} d${t.constraint_type === 'must_start_on' ? ' · pinned' : ''}</title></rect>
+      ${pct ? `<rect x="${x1}" y="${y + 6}" width="${Math.round((x2 - x1) * pct / 100)}" height="${PP_ROW_H - 12}" rx="3" fill="#0F172A" opacity="0.28" pointer-events="none"/>` : ''}
+      ${may ? `<rect class="pp-bar-resize" x="${x2 - 5}" y="${y + 6}" width="6" height="${PP_ROW_H - 12}" fill="transparent" onmousedown="ppBarDown(event, ${+t.id}, 'resize')"/>` : ''}
+      ${edit && !_ppLinksMissing ? `<circle class="pp-bar-link" cx="${x2 + 6}" cy="${y + PP_ROW_H / 2}" r="4" fill="#fff" stroke="#64748B" onmousedown="ppBarDown(event, ${+t.id}, 'link')"><title>Drag onto another task to make it depend on this one</title></circle>` : ''}
+      ${(x2 - x1) > 30 ? `<text x="${x2 + (edit ? 14 : 6)}" y="${y + PP_ROW_H / 2 + 4}" font-size="10" fill="#475569" pointer-events="none">${escHtml(ppPersonName(t.assignee_id) || '')}</text>` : ''}
+    </g>`);
+  });
+  // arrows
+  (_pp.links || []).forEach(l => {
+    const a = pos[+l.from_task], b = pos[+l.to_task]; if (!a || !b) return;
+    const type = l.link_type || 'FS', sa = S.byId[+l.from_task], sb = S.byId[+l.to_task];
+    const crit = _pp.critOn !== false && sa && sb && sa.critical && sb.critical;
+    const sx = type === 'SS' || type === 'SF' ? a.x1 : a.x2, ex = type === 'FF' || type === 'SF' ? b.x2 : b.x1;
+    const dir = type === 'FF' || type === 'SF' ? -1 : 1, mid = sx + 8 * (type === 'SS' || type === 'SF' ? -1 : 1);
+    const d = `M${sx},${a.y} L${mid},${a.y} L${mid},${b.y - (b.y > a.y ? PP_ROW_H / 2 : -PP_ROW_H / 2)} L${ex - 8 * dir},${b.y - (b.y > a.y ? PP_ROW_H / 2 : -PP_ROW_H / 2)} L${ex - 8 * dir},${b.y} L${ex},${b.y}`;
+    parts.push(`<path class="pp-link" data-link-id="${+l.id}" d="${d}" fill="none" stroke="${crit ? '#DC2626' : '#64748B'}" stroke-width="1.3" marker-end="url(#${crit ? 'pp-arrow-crit' : 'pp-arrow'})" ${edit ? `style="cursor:pointer" onclick="ppLinkClick(${+l.id})"` : ''}><title>${ppTaskNo(l.from_task)} → ${ppTaskNo(l.to_task)} ${type}${+l.lag_days ? (l.lag_days > 0 ? '+' : '') + l.lag_days + 'd' : ''}${edit ? ' · click to remove' : ''}</title></path>`);
+  });
+  if (today >= R.from && today <= R.to) parts.push(`<line x1="${x(today) + R.dayW / 2}" y1="${PP_HEAD_H - 2}" x2="${x(today) + R.dayW / 2}" y2="${H}" stroke="#FA0A11" stroke-width="1.5" stroke-dasharray="4 3"/><text x="${x(today) + R.dayW / 2 + 3}" y="${PP_HEAD_H + 10}" font-size="9" fill="#FA0A11">today</text>`);
+  parts.push('<path id="pp-link-ghost" d="" fill="none" stroke="#2F6FB5" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/>');
+  return `<div class="pp-sched" id="pp-sched"><div class="pp-sched-grid">${ppGridHtml(edit, false)}</div>
+    <div class="pp-sched-gantt" id="pp-gantt-scroll"><svg id="pp-gantt" width="${W}" height="${H}" data-dayw="${R.dayW}" data-from="${R.from}" style="display:block;font-family:Arial,sans-serif;">${defs}${parts.join('')}</svg></div></div>`;
+}
+// Bar drags: move the task (pins it when it has predecessors), stretch its duration, or draw a link.
+let _ppBar = null;
+function ppBarDown(ev, id, mode) {
+  ev.preventDefault(); ev.stopPropagation();
+  const svg = document.getElementById('pp-gantt'); if (!svg) return;
+  const g = svg.querySelector('.pp-bar[data-task-id="' + id + '"]');
+  _ppBar = { id: +id, mode, x0: ev.clientX, y0: ev.clientY, dx: 0, g, dayW: +svg.dataset.dayw, moved: false };
+  document.addEventListener('mousemove', ppBarMove); document.addEventListener('mouseup', ppBarUp);
+}
+function ppBarMove(ev) {
+  const b = _ppBar; if (!b) return;
+  b.dx = ev.clientX - b.x0; if (Math.abs(b.dx) > 2 || Math.abs(ev.clientY - b.y0) > 2) b.moved = true;
+  if (b.mode === 'move') b.g.setAttribute('transform', 'translate(' + Math.round(b.dx / b.dayW) * b.dayW + ',0)');
+  else if (b.mode === 'resize') { const r = b.g.querySelector('.pp-bar-body'); if (!b.w0) b.w0 = +r.getAttribute('width'); r.setAttribute('width', Math.max(3, b.w0 + Math.round(b.dx / b.dayW) * b.dayW)); }
+  else if (b.mode === 'link') {
+    const svg = document.getElementById('pp-gantt'), ghost = document.getElementById('pp-link-ghost'); if (!svg || !ghost) return;
+    const pt = svg.getBoundingClientRect(), c = b.g.querySelector('.pp-bar-link');
+    ghost.setAttribute('d', 'M' + c.getAttribute('cx') + ',' + c.getAttribute('cy') + ' L' + (ev.clientX - pt.left) + ',' + (ev.clientY - pt.top));
+    document.querySelectorAll('.pp-bar.pp-link-target').forEach(el => el.classList.remove('pp-link-target'));
+    const over = ppBarAt(ev.clientX, ev.clientY); if (over && over !== b.id) { const og = svg.querySelector('.pp-bar[data-task-id="' + over + '"]'); if (og) og.classList.add('pp-link-target'); }
+  }
+}
+function ppBarAt(cx, cy) {
+  const el = document.elementFromPoint(cx, cy); const g = el && el.closest ? el.closest('.pp-bar') : null;
+  if (g) return +g.dataset.taskId;
+  // off-screen (the row scrolled out of view while dragging): test the bars' own boxes
+  const hit = [...document.querySelectorAll('#pp-gantt .pp-bar-body')].find(r => { const b = r.getBoundingClientRect(); return cx >= b.left - 6 && cx <= b.right + 6 && cy >= b.top - 4 && cy <= b.bottom + 4; });
+  return hit ? +hit.closest('.pp-bar').dataset.taskId : null;
+}
+async function ppBarUp(ev) {
+  const b = _ppBar; _ppBar = null;
+  document.removeEventListener('mousemove', ppBarMove); document.removeEventListener('mouseup', ppBarUp);
+  if (!b) return;
+  const t = _pp.tasks.find(x => +x.id === b.id), S = ppSched(), s = t && S.byId[b.id];
+  const ghost = document.getElementById('pp-link-ghost'); if (ghost) ghost.setAttribute('d', '');
+  document.querySelectorAll('.pp-bar.pp-link-target').forEach(el => el.classList.remove('pp-link-target'));
+  if (!t || !s) return;
+  const days = Math.round(b.dx / b.dayW);
+  if (b.mode === 'link') { const to = ppBarAt(ev.clientX, ev.clientY); if (to && to !== b.id) await ppLinkAdd(b.id, to, 'FS', 0); else if (b.moved) ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); return; }
+  if (!b.moved || !days) { ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); return; }
+  if (b.mode === 'move') { const d = days > 0 ? ppNextWorking(ppIsoAdd(s.es, days)) : ppPrevWorking(ppIsoAdd(s.es, days)); await ppGridSet(b.id, 'start', d); }
+  else { const f = days > 0 ? ppNextWorking(ppIsoAdd(s.ef, days)) : ppPrevWorking(ppIsoAdd(s.ef, days)); await ppGridSet(b.id, 'finish', f < s.es ? s.es : f); }
+}
+async function ppLinkClick(linkId) {
+  if (!ppCanEdit()) return;
+  const l = _pp.links.find(x => +x.id === +linkId); if (!l) return;
+  const ok = await confirmDialog({ title: 'Remove the link?', message: 'Task ' + ppTaskNo(l.to_task) + ' will no longer wait for task ' + ppTaskNo(l.from_task) + ' (' + (l.link_type || 'FS') + ').', danger: true, confirmLabel: 'Remove' });
+  if (ok) await ppLinkRemove(linkId);
+}
+
+// ── Baseline ──────────────────────────────────────────────────────────────────
+async function ppBaselineSet() {
+  if (!ppCanEdit()) return;
+  const S = ppSched(), has = !!_pp.plan.baseline_set_at;
+  const ok = await confirmDialog({ title: has ? 'Reset the baseline?' : 'Set the baseline?', message: (has ? 'The baseline taken ' + ppDate(_pp.plan.baseline_set_at) + ' is replaced by today\'s dates' : 'Today\'s scheduled dates are frozen as the baseline') + ' on every task, so later slippage shows against them.', confirmLabel: has ? 'Reset' : 'Set baseline' });
+  if (!ok) return;
+  const now = new Date().toISOString();
+  try {
+    await Promise.all(_pp.tasks.map(t => { const s = S.byId[+t.id]; if (!s) return null; const body = { baseline_start: s.es, baseline_end: s.ef }; return api('project_tasks', 'PATCH', body, 'id=eq.' + t.id).then(rows => Object.assign(t, rows && rows[0] ? rows[0] : body)); }).filter(Boolean)
+      .concat([api('project_plans', 'PATCH', { baseline_set_at: now, baseline_set_by: currentUser.personId, updated_at: now, updated_by: currentUser.personId }, 'id=eq.' + _pp.plan.id).then(rows => Object.assign(_pp.plan, rows && rows[0] ? rows[0] : { baseline_set_at: now }))]));
+    showStatus('Baseline ' + (has ? 'reset' : 'set'));
+  } catch (e) { showStatus('Baseline not saved: ' + (/42703/.test(e.message) ? 'this database has not run sql/add_project_schedule.sql' : e.message), 'error'); }
+  ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(true));
+}
+
+// ── PERT ──────────────────────────────────────────────────────────────────────
+function ppPertHtml(edit) {
+  const S = ppSched(), tasks = ppGridRows().filter(r => r.kind === 'task').map(r => r.t);
+  if (!tasks.length) return '<div style="padding:18px;text-align:center;color:var(--text3);">No tasks yet.</div>';
+  const preds = {}; (_pp.links || []).forEach(l => { (preds[+l.to_task] = preds[+l.to_task] || []).push(+l.from_task); });
+  // level = longest chain of predecessors behind the task (cyclic tasks sit at level 0)
+  const level = {}, lv = id => { if (level[id] != null) return level[id]; if (S.cyclic.has(id)) return (level[id] = 0); level[id] = -1; const l = (preds[id] || []).filter(p => S.byId[p]).reduce((m, p) => Math.max(m, lv(p) + 1), 0); return (level[id] = l); };
+  tasks.forEach(t => lv(+t.id));
+  const cols = {}; tasks.forEach(t => { const l = Math.max(0, level[+t.id]); (cols[l] = cols[l] || []).push(t); });
+  const BW = 168, BH = 74, GX = 64, GY = 14, nCols = Object.keys(cols).length, maxRows = Math.max(...Object.values(cols).map(c => c.length));
+  const W = nCols * (BW + GX) + 20, H = maxRows * (BH + GY) + 20, pos = {};
+  const parts = [];
+  Object.keys(cols).map(Number).sort((a, b) => a - b).forEach(l => cols[l].forEach((t, i) => {
+    const s = S.byId[+t.id], x = 10 + l * (BW + GX), y = 10 + i * (BH + GY), crit = _pp.critOn !== false && s.critical, done = t.status === 'done';
+    pos[+t.id] = { x, y };
+    const stroke = crit ? '#DC2626' : done ? '#94A3B8' : '#003057';
+    parts.push(`<g class="pp-pert-node" data-task-id="${+t.id}">
+      <rect x="${x}" y="${y}" width="${BW}" height="${BH}" rx="4" fill="${done ? '#F8FAFC' : '#fff'}" stroke="${stroke}" stroke-width="${crit ? 2.5 : 1.2}"/>
+      <text x="${x + 6}" y="${y + 14}" font-size="10" font-weight="700" fill="${stroke}">${ppTaskNo(t.id)}. ${escHtml(t.name.length > 24 ? t.name.slice(0, 23) + '…' : t.name)}<title>${escHtml(t.name)}</title></text>
+      <line x1="${x}" y1="${y + 19}" x2="${x + BW}" y2="${y + 19}" stroke="${stroke}" stroke-width="0.6"/>
+      <text x="${x + 6}" y="${y + 33}" font-size="9.5" fill="#475569">ES ${ppDate(s.es)}</text><text x="${x + BW - 6}" y="${y + 33}" font-size="9.5" fill="#475569" text-anchor="end">EF ${ppDate(s.ef)}</text>
+      <text x="${x + 6}" y="${y + 47}" font-size="9.5" fill="#475569">LS ${ppDate(s.ls)}</text><text x="${x + BW - 6}" y="${y + 47}" font-size="9.5" fill="#475569" text-anchor="end">LF ${ppDate(s.lf)}</text>
+      <text x="${x + 6}" y="${y + 64}" font-size="10" font-weight="700" fill="${stroke}">${s.dur} d</text><text x="${x + BW - 6}" y="${y + 64}" font-size="10" fill="${crit ? '#DC2626' : '#166534'}" text-anchor="end">slack ${s.slack} d</text>
+    </g>`);
+  }));
+  const edges = [];
+  (_pp.links || []).forEach(l => {
+    const a = pos[+l.from_task], b = pos[+l.to_task]; if (!a || !b) return;
+    const sa = S.byId[+l.from_task], sb = S.byId[+l.to_task], crit = _pp.critOn !== false && sa.critical && sb.critical;
+    const x1 = a.x + BW, y1 = a.y + BH / 2, x2 = b.x, y2 = b.y + BH / 2, c = Math.max(24, (x2 - x1) / 2);
+    edges.push(`<path d="M${x1},${y1} C${x1 + c},${y1} ${x2 - c},${y2} ${x2},${y2}" fill="none" stroke="${crit ? '#DC2626' : '#64748B'}" stroke-width="${crit ? 2 : 1.2}" marker-end="url(#${crit ? 'pp-arrow-crit' : 'pp-arrow'})"><title>${ppTaskNo(l.from_task)} → ${ppTaskNo(l.to_task)} ${l.link_type || 'FS'}${+l.lag_days ? (l.lag_days > 0 ? '+' : '') + l.lag_days + 'd' : ''}</title></path>`);
+  });
+  const defs = `<defs><marker id="pp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748B"/></marker><marker id="pp-arrow-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker></defs>`;
+  // three-point estimates
+  const est = tasks.map(t => {
+    const o = t.pert_optimistic, m = t.pert_likely, p = t.pert_pessimistic, has = o != null && m != null && p != null;
+    const te = has ? (+o + 4 * +m + +p) / 6 : null, sd = has ? (+p - +o) / 6 : null, may = ppCanTouchTask(t);
+    const num = (col, v) => may ? `<input class="pp-cell" type="number" min="0" step="0.5" style="width:60px;text-align:right;" value="${v == null ? '' : escAttr(v)}" onchange="ppPertField(${+t.id}, '${col}', this.value)">` : `<span class="pp-cell-ro">${v == null ? '' : escHtml(v)}</span>`;
+    return `<tr style="height:${PP_ROW_H}px;"><td style="color:var(--text3);text-align:right;">${ppTaskNo(t.id)}</td><td style="font-weight:600;text-overflow:ellipsis;">${escHtml(t.name)}</td><td>${num('pert_optimistic', o)}</td><td>${num('pert_likely', m)}</td><td>${num('pert_pessimistic', p)}</td>
+      <td style="text-align:right;font-weight:700;">${te != null ? te.toLocaleString('en-US', { maximumFractionDigits: 1 }) : ''}</td><td style="text-align:right;">${sd != null ? (sd * sd).toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}</td>
+      <td style="text-align:right;">${ppTaskDur(t)}</td><td>${te != null && may && Math.round(te) !== ppTaskDur(t) ? `<button class="btn btn-ghost btn-sm" onclick="ppGridSet(${+t.id}, 'duration', ${Math.max(1, Math.round(te))})">Use ${Math.max(1, Math.round(te))} d</button>` : ''}</td></tr>`;
+  }).join('');
+  const critPath = S.order.filter(id => S.byId[id].critical);
+  const varSum = tasks.filter(t => critPath.includes(+t.id) && t.pert_optimistic != null && t.pert_pessimistic != null).reduce((a, t) => a + Math.pow((+t.pert_pessimistic - +t.pert_optimistic) / 6, 2), 0);
+  return `<div style="overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:#fff;"><svg id="pp-pert" width="${W}" height="${H}" style="display:block;font-family:Arial,sans-serif;">${defs}${edges.join('')}${parts.join('')}</svg></div>
+    <div style="font-size:12px;color:var(--text3);margin:8px 0;">Boxes read early start / finish, late start / finish, duration and slack; the critical path (slack 0) is red. ${critPath.length ? 'Critical: tasks ' + critPath.map(ppTaskNo).join(' → ') + '.' : ''}${varSum ? ' Standard deviation of the critical path from the three-point estimates: ' + Math.sqrt(varSum).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' days.' : ''}</div>
+    <div style="font-size:13px;font-weight:700;color:var(--navy);margin:12px 0 6px;">Three-point estimates <span style="font-weight:normal;font-size:12px;color:var(--text3);">· expected = (O + 4M + P) ÷ 6 working days</span></div>
+    <table class="pp-grid" id="pp-pert-table" style="width:820px;"><thead><tr><th style="width:34px;">#</th><th style="width:250px;">Task</th><th style="width:70px;">Optimistic</th><th style="width:70px;">Likely</th><th style="width:70px;">Pessimistic</th><th style="width:70px;">Expected</th><th style="width:70px;">Variance</th><th style="width:60px;">Dur now</th><th style="width:90px;"></th></tr></thead><tbody>${est}</tbody></table>`;
+}
+function ppPertField(id, col, value) { const t = _pp.tasks.find(x => +x.id === +id); if (!t) return; const n = value === '' ? null : +value; if (n != null && (isNaN(n) || n < 0)) { showStatus('An estimate is a number of working days', 'error'); return; } ppGridSet(id, 'pert', { [col]: n }); }
+
+// ── Print ─────────────────────────────────────────────────────────────────────
+function ppSchedPrint() {
+  const zoom = _pp.zoom; _pp.zoom = 'week'; ppSchedDirty();
+  const grid = ppGridHtml(false, true), svg = (ppGanttHtml(false).match(/<svg[\s\S]*<\/svg>/) || [''])[0];
+  _pp.zoom = zoom;
+  const w = window.open('', '_blank'); if (!w) { showStatus('The browser blocked the print window', 'error'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><title>${escHtml(_pp.plan.name)} — schedule</title><style>
+    @page { size: A4 landscape; margin: 12mm; } body { font-family: Arial, sans-serif; color: #0F172A; margin: 0; }
+    h1 { font-size: 16px; margin: 0 0 2px; } .sub { font-size: 11px; color: #64748B; margin-bottom: 10px; }
+    .wrap { display: flex; align-items: flex-start; gap: 0; width: 100%; }
+    table { border-collapse: collapse; font-size: 10px; } th, td { border-bottom: 1px solid #E2E8F0; padding: 0 5px; height: ${PP_ROW_H}px; text-align: left; white-space: nowrap; overflow: hidden; }
+    th { height: ${PP_HEAD_H}px; font-size: 9px; text-transform: uppercase; color: #64748B; vertical-align: bottom; } .pp-grid-ms td { font-weight: 700; color: #003057; background: #F8FAFC; }
+    svg { flex: 1; min-width: 0; max-width: 60%; height: auto; } .pp-cell-ro { display: inline; }
+  </style></head><body><h1>${escHtml(_pp.plan.name)}</h1><div class="sub">${escHtml(_pp.org ? _pp.org.name : '')} · ${escHtml(ppKindLabel(_pp.plan.kind))} plan · project manager ${escHtml(ppPersonName(_pp.plan.owner_id) || '—')} · printed ${ppDate(_today())}</div>
+    <div class="wrap">${grid}${svg}</div></body></html>`);
+  w.document.close(); w.focus(); setTimeout(() => { try { w.print(); } catch (e) {} }, 300);
 }
 
 // ── Contract Management → Contracts (v7.9.88) ────────────────────────────────
