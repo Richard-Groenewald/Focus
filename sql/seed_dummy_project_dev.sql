@@ -37,7 +37,7 @@ BEGIN
   SELECT id INTO v_stage FROM stages WHERE name = 'Secured' LIMIT 1;
   IF v_stage IS NULL THEN RAISE EXCEPTION 'no stage named Secured'; END IF;
 
-  SELECT s.id, s.service_major_id INTO v_sub, v_major FROM service_sub s
+  SELECT s.id, s.major_id INTO v_sub, v_major FROM service_sub s
    WHERE s.revenue_type = 'project' AND COALESCE(s.active, true) ORDER BY s.id LIMIT 1;
   IF v_sub IS NULL THEN RAISE EXCEPTION 'no project-revenue service type'; END IF;
 
