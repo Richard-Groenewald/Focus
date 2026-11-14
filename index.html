@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2512,9 +2512,12 @@ function _mockSeed() {
     quote_contract_accessories: [],
     quote_workforce_adjustments: [],
     // v7.10.30 Site Mobility: types, dated supplier rates (36-month quotes, plus a 48-month one for the bakkie), fuel prices, extras.
-    quote_vehicle_types: [['Light patrol car (1.0 - 1.2 hatchback)','petrol',4.9],['Single cab bakkie (2.4 diesel)','diesel',8.1],['14-seater staff transport','diesel',9.8],['Quad bike (estate perimeter)','petrol',6.5]]
-      .map((x, i) => ({ id: i + 1, name: x[0], fuel_type: x[1], fuel_economy: x[2], display_order: i + 1, active: true, in_use_date: '2025-01-01', retired_date: null, created_at: now })),
-    quote_vehicle_rates: [[1,36,1500,5890,640,199,2.10],[1,36,2500,6650,640,199,2.10],[2,36,2000,12450,1180,199,3.20],[2,36,3000,13900,1180,199,3.20],[3,36,3000,17800,1620,199,3.90],[4,36,800,3450,410,149,1.80],[2,48,2000,13100,1180,199,3.20]]
+    quote_vehicle_types: [['Light patrol car (1.0 - 1.2 hatchback)','petrol',4.9],['Single cab bakkie (2.4 diesel)','diesel',8.1],['14-seater staff transport','diesel',9.8],['Quad bike (estate perimeter)','petrol',6.5,'owned'],['Bicycle','none',0,'owned'],['Golf cart','none',0]]
+      .map((x, i) => ({ id: i + 1, name: x[0], fuel_type: x[1], fuel_economy: x[2], ownership: x[3] || 'rented', display_order: i + 1, active: true, in_use_date: '2025-01-01', retired_date: null, created_at: now })),
+    // v7.10.42: owned types carry a dated cost; the golf cart is rented at a flat R 4 950 (0 km band).
+    quote_vehicle_owned_costs: [[4, 69560, 36, 1000, 120, 0], [5, 5000, 24, 50, 0, 0]]
+      .map((x, i) => ({ id: i + 1, vehicle_type_id: x[0], effective_date: '2025-07-17', acquisition_cost: x[1], life_months: x[2], monthly_cost: x[3], insurance_monthly: x[4], tracking_monthly: x[5], note: '', created_at: now })),
+    quote_vehicle_rates: [[1,36,1500,5890,640,199,2.10],[1,36,2500,6650,640,199,2.10],[2,36,2000,12450,1180,199,3.20],[2,36,3000,13900,1180,199,3.20],[3,36,3000,17800,1620,199,3.90],[6,36,0,4950,0,0,0],[2,48,2000,13100,1180,199,3.20]]
       .map((x, i) => ({ id: i + 1, vehicle_type_id: x[0], effective_date: '2025-01-01', contract_months: x[1], inclusive_km: x[2], monthly_rate: x[3], rate_incl_vat: false, insurance_monthly: x[4], tracking_monthly: x[5], excess_km_rate: x[6], supplier: 'Avis Fleet', note: '', created_at: now })),
     quote_fuel_prices: [{ id: 1, effective_date: '2025-01-01', fuel_type: 'petrol', price_per_litre: 22.10, created_at: now }, { id: 2, effective_date: '2025-01-01', fuel_type: 'diesel', price_per_litre: 20.85, created_at: now }],
     quote_vehicle_extras: [['Dash camera',2850,36,15.83],['Roof light bar',1440,36,0],['Two-way radio (vehicle)',3200,48,0]]
@@ -11064,7 +11067,8 @@ async function openQuote(id) {
       apiGet('quote_fuel_prices', 'select=*').catch(() => []),
       apiGet('quote_vehicle_extras', 'select=*&order=display_order,id').catch(() => []),
       apiGet('quote_vehicles', 'quote_id=eq.' + id + '&select=*&order=display_order,id').catch(() => []),
-    ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], []]);
+      apiGet('quote_vehicle_owned_costs', 'select=*').catch(() => []),   // v7.10.42 (absent table → none)
+    ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], [], []]);
     // v7.10.28: the rate cards the labour engine prices off, whole (judged as at the contract start
     // date in the browser), and the quote's site for the posts' default area. An absent table
     // reads as no rates: the engine then says what is missing.
@@ -11119,6 +11123,7 @@ async function openQuote(id) {
     allData['quote_vehicle_rates'] = cats[10] || [];
     allData['quote_fuel_prices'] = cats[11] || [];
     allData['quote_vehicle_extras'] = cats[12] || [];
+    allData['quote_vehicle_owned_costs'] = cats[14] || [];   // v7.10.42
     pbVehicles = (cats[13] || []).map(v => Object.assign({}, v, { extras: [] }));
     if (pbVehicles.length) {
       const xl = await apiGet('quote_vehicle_extra_lines', 'quote_vehicle_id=in.(' + pbVehicles.map(v => v.id).join(',') + ')&select=*&order=id').catch(() => []);
@@ -12781,13 +12786,29 @@ function pbContractAccOverrideCancel() { _pbContractOvrPending = null; renderQuo
 // = that rate (VAT stripped when the row says it is included) + insurance + tracking + fuel (km ×
 // economy ÷ 100 × the litre price, wet lines only) + the extras (acquisition ÷ life + running);
 // price = cost ÷ (1 − markup) + excess km × the rate per km, which passes through unmarked. The
-// markup is the line's own, else the quote's margin. pbMobilityAll() is the ONE reader: the tab,
+// markup is the line's own, else the quote's margin. v7.10.42 (Richard 2026-11-14: "cycles and all other
+// need to be under site mobility, ie not a duplication of some in support items"): a vehicle type is
+// RENTED (the above) or OWNED — quote_vehicle_types.ownership, priced off the dated
+// quote_vehicle_owned_costs row (acquisition ÷ life + running + insurance + tracking, no supplier
+// rate, no excess km) — and fuel_type 'none' (bicycle, electric cart) prices no fuel; the three
+// vehicle-like Contract Support Items were retired (sql/site_mobility_owned_vehicles.sql).
+// pbMobilityAll() is the ONE reader: the tab,
 // pbLivePricing (a 'Site mobility' group, so the snapshot, the Pricing tab and the proposal carry it),
 // pgRenderScope and the Pricing tab's vehicle table.
 let pbVehicles = [];                 // this quote's lines, each with .extras (the quote_vehicle_extra_lines rows)
 let _pbMobilityMissing = false;      // sql/add_site_mobility.sql not run on this database
 let _mobState = { editing: null, open: new Set(), draft: null, busy: false };   // editing: null | 'new' | a line id
-const PB_FUEL_LABEL = { petrol: 'petrol', diesel: 'diesel' };
+const PB_FUEL_LABEL = { petrol: 'petrol', diesel: 'diesel', none: 'no fuel' };
+// v7.10.42: a vehicle type is RENTED (the supplier rate card) or OWNED (a dated cost row: acquisition
+// ÷ life + running + insurance + tracking, no supplier rate, no excess km); fuel 'none' prices no fuel.
+function pbVehicleOwned(t) { return !!t && t.ownership === 'owned'; }
+function pbVehicleOwnedCostFor(typeId, asAt) {
+  let best = null;
+  (allData['quote_vehicle_owned_costs'] || []).forEach(r => { if (+r.vehicle_type_id !== +typeId || String(r.effective_date) > asAt) return; if (!best || String(r.effective_date) > String(best.effective_date)) best = r; });
+  return best;
+}
+function pbVehicleOwnedMonthly(c) { return (c.life_months > 0 ? (+c.acquisition_cost || 0) / +c.life_months : 0) + (+c.monthly_cost || 0); }
+function pbVehicleTypeLabel(t) { return pbEsc(t.name) + ' — ' + (pbVehicleOwned(t) ? 'owned' : 'rented') + ', ' + (t.fuel_type === 'none' ? 'no fuel' : pbEsc(PB_FUEL_LABEL[t.fuel_type] || t.fuel_type) + ', ' + pbEsc(t.fuel_economy) + ' l/100 km'); }
 function pbVehicleType(id) { return (allData['quote_vehicle_types'] || []).find(t => +t.id === +id) || null; }
 function pbFuelPrice(fuel, asAt) {
   let best = null;
@@ -12838,20 +12859,26 @@ function pbVehicleCalc(v) {
   const asAt = pbQuoteAsAt(), months = +pbQ.contract_duration_months || 0, vatPct = +(appSettings['proposal_vat_pct'] || 15);
   const t = pbVehicleType(v.vehicle_type_id), qty = Math.max(1, +v.quantity || 1), km = Math.max(0, +v.monthly_km || 0), wet = v.fuel_included !== false;
   const markup = v.markup_pct != null && v.markup_pct !== '' ? +v.markup_pct : (+pbQ.margin_pct || 0);
-  const out = { id: v.id, type: t, qty, km, wet, markup, errors: [], warnings: [], rate: null, rateExVat: 0, insurance: 0, tracking: 0, excessKm: 0, excess: 0, litres: 0, fuelPrice: 0, fuelCost: 0, extras: [], extrasMonthly: 0, cost: 0, each: 0, monthly: 0 };
+  const out = { id: v.id, type: t, qty, km, wet, markup, errors: [], warnings: [], rate: null, rateExVat: 0, insurance: 0, tracking: 0, excessKm: 0, excess: 0, litres: 0, fuelPrice: 0, fuelCost: 0, extras: [], extrasMonthly: 0, cost: 0, each: 0, monthly: 0,
+    owned: pbVehicleOwned(t), ownedCost: null, ownedMonthly: 0, noFuel: !!t && t.fuel_type === 'none' };
+  if (out.noFuel) out.wet = false;
   out.label = (t ? t.name : 'Vehicle type ' + v.vehicle_type_id) + (qty > 1 ? ' × ' + qty : '');
   if (!t) { out.errors.push('Site Mobility: a line refers to a vehicle type that no longer exists.'); return out; }
   if (!pbItemInWindow(t, asAt)) out.warnings.push(t.retired_date && String(t.retired_date) < asAt ? 'This vehicle type is retired as at ' + asAt + '.' : 'This vehicle type is not yet in use at ' + asAt + '.');
-  const R = pbVehicleRateFor(t.id, km, months, asAt);
+  const R = out.owned ? { rate: null, warnings: [] } : pbVehicleRateFor(t.id, km, months, asAt);
   out.warnings.push(...R.warnings);
-  if (!R.rate) out.errors.push('Site Mobility: no supplier rate for "' + t.name + '" as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Supplier rates).');
+  if (out.owned) {
+    const c = pbVehicleOwnedCostFor(t.id, asAt);
+    if (!c) out.errors.push('Site Mobility: no owned-vehicle cost for "' + t.name + '" as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Owned vehicle costs).');
+    else { out.ownedCost = c; out.ownedMonthly = pbRound2(pbVehicleOwnedMonthly(c)); out.insurance = +c.insurance_monthly || 0; out.tracking = +c.tracking_monthly || 0; }
+  } else if (!R.rate) out.errors.push('Site Mobility: no supplier rate for "' + t.name + '" as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Supplier rates).');
   else {
     out.rate = R.rate;
     out.rateExVat = pbRound2(R.rate.rate_incl_vat ? (+R.rate.monthly_rate || 0) / (1 + vatPct / 100) : (+R.rate.monthly_rate || 0));
     out.insurance = +R.rate.insurance_monthly || 0; out.tracking = +R.rate.tracking_monthly || 0;
     out.excessKm = Math.max(0, km - (+R.rate.inclusive_km || 0)); out.excess = pbRound2(out.excessKm * (+R.rate.excess_km_rate || 0));
   }
-  if (wet) {
+  if (out.wet) {
     const fp = pbFuelPrice(t.fuel_type, asAt);
     if (!fp) out.errors.push('Site Mobility: no ' + (PB_FUEL_LABEL[t.fuel_type] || t.fuel_type) + ' price as at ' + asAt + ' (Admin → Proposal Builder → Site Mobility → Fuel prices).');
     else if (!(+t.fuel_economy > 0)) out.errors.push('Site Mobility: "' + t.name + '" has no fuel economy (litres per 100 km) on its vehicle type.');
@@ -12866,11 +12893,12 @@ function pbVehicleCalc(v) {
   });
   out.extrasMonthly = pbRound2(out.extras.reduce((a, x) => a + x.monthly, 0));
   if (out.errors.length) return out;
-  out.cost = pbRound2(out.rateExVat + out.insurance + out.tracking + out.fuelCost + out.extrasMonthly);
+  out.baseMonthly = out.owned ? out.ownedMonthly : out.rateExVat;   // the vehicle itself, before insurance / tracking / fuel / extras
+  out.cost = pbRound2(out.baseMonthly + out.insurance + out.tracking + out.fuelCost + out.extrasMonthly);
   out.each = pbRound2(out.cost / (1 - markup / 100) + out.excess);
   out.monthly = pbRound2(out.each * qty);
-  out.scopeText = (wet ? 'fuel included for ' : 'excluding fuel, ') + km.toLocaleString('en-US') + ' km a month' +
-    (out.rate && out.excessKm ? ' (' + (+out.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + pgMoney(+out.rate.excess_km_rate) + ' per km beyond)' : out.rate ? ' (' + (+out.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + pgMoney(+out.rate.excess_km_rate) + ' per km beyond)' : '') +
+  out.scopeText = (out.noFuel ? 'no fuel' : (out.wet ? 'fuel included for ' : 'excluding fuel, ') + km.toLocaleString('en-US') + ' km a month') +
+    (out.rate ? ' (' + (+out.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + pgMoney(+out.rate.excess_km_rate) + ' per km beyond)' : '') +
     (out.extras.length ? ', with ' + out.extras.map(x => x.name).join(', ') : '');
   return out;
 }
@@ -12889,11 +12917,11 @@ function renderSiteMobilityTab() {
     const open = st.open.has(+l.id), bad = l.errors.length, v = pbVehicles.find(x => +x.id === +l.id);
     rows += '<tr style="cursor:pointer;' + (bad ? 'background:#FEF2F2;' : l.warnings.length ? 'background:#FFFBEB;' : '') + '" onclick="pbMobToggle(' + l.id + ')">' +
       '<td><span style="display:inline-block;width:16px;color:var(--text3);">' + (open ? '▾' : '▸') + '</span><strong>' + pbEsc(l.type ? l.type.name : l.label) + '</strong>' +
-        '<div style="font-size:11px;color:var(--text3);">' + (l.wet ? 'Wet — fuel included' : 'Dry — client fuels') + (l.type ? ' · ' + pbEsc(PB_FUEL_LABEL[l.type.fuel_type] || l.type.fuel_type) : '') +
+        '<div style="font-size:11px;color:var(--text3);">' + (l.owned ? 'Owned' : 'Rented') + ' · ' + (l.noFuel ? 'no fuel' : (l.wet ? 'wet — fuel included' : 'dry — client fuels') + (l.type ? ', ' + pbEsc(PB_FUEL_LABEL[l.type.fuel_type] || l.type.fuel_type) : '')) +
         (l.rate ? ' · ' + (+l.rate.inclusive_km).toLocaleString('en-US') + ' km inclusive, ' + money(+l.rate.excess_km_rate) + '/km beyond' : '') + (l.extras.length ? ' · ' + l.extras.map(x => pbEsc(x.name)).join(', ') : '') + '</div>' +
         (bad ? '<div style="font-size:11px;color:#991B1B;">' + l.errors.map(pbEsc).join('<br>') + '</div>' : '') + '</td>' +
-      '<td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + l.km.toLocaleString('en-US') + '</td><td>' + (l.wet ? 'Wet' : 'Dry') + '</td><td style="text-align:right;">' + pbEsc(l.markup) + '%</td>' +
-      '<td style="text-align:right;">' + (l.rate ? money(l.rateExVat) : '<span class="pg-muted">—</span>') + '</td><td style="text-align:right;">' + (l.rate ? money(l.insurance) : '—') + '</td><td style="text-align:right;">' + (l.rate ? money(l.tracking) : '—') + '</td>' +
+      '<td style="text-align:right;">' + l.qty + '</td><td style="text-align:right;">' + (l.noFuel ? '—' : l.km.toLocaleString('en-US')) + '</td><td>' + (l.noFuel ? '—' : l.wet ? 'Wet' : 'Dry') + '</td><td style="text-align:right;">' + pbEsc(l.markup) + '%</td>' +
+      '<td style="text-align:right;">' + (l.rate || l.ownedCost ? money(l.baseMonthly || 0) + (l.owned ? '<div style="font-size:11px;color:var(--text3);">owned</div>' : '') : '<span class="pg-muted">—</span>') + '</td><td style="text-align:right;">' + (l.rate || l.ownedCost ? money(l.insurance) : '—') + '</td><td style="text-align:right;">' + (l.rate || l.ownedCost ? money(l.tracking) : '—') + '</td>' +
       '<td style="text-align:right;">' + (l.excessKm ? money(l.excess) + '<div style="font-size:11px;color:var(--text3);">' + l.excessKm.toLocaleString('en-US') + ' km</div>' : '<span class="pg-muted">—</span>') + '</td>' +
       '<td style="text-align:right;">' + (l.wet && l.fuelCost ? money(l.fuelCost) + '<div style="font-size:11px;color:var(--text3);">' + l.litres.toFixed(1) + ' l</div>' : '<span class="pg-muted">—</span>') + '</td>' +
       '<td style="text-align:right;"><strong>' + (bad ? '<span class="pg-muted">—</span>' : money(l.monthly)) + '</strong>' + (!bad && l.qty > 1 ? '<div style="font-size:11px;color:var(--text3);font-weight:400;">' + money(l.each) + ' each</div>' : '') + '</td></tr>';
@@ -12901,9 +12929,10 @@ function renderSiteMobilityTab() {
       const b = (k, val) => '<div style="color:var(--text2);">' + k + '</div><div style="text-align:right;font-variant-numeric:tabular-nums;">' + val + '</div>';
       rows += '<tr><td colspan="11" style="background:#F7F8FA;padding:10px 14px 12px 30px;" onclick="event.stopPropagation()">' +
         (bad ? '' : '<div style="display:grid;grid-template-columns:1fr auto;gap:3px 16px;font-size:12px;max-width:520px;">' +
-          b('Supplier rate (' + (+l.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + l.rate.contract_months + '-month contract' + (l.rate.rate_incl_vat ? ', VAT stripped' : '') + (l.rate.supplier ? ', ' + pbEsc(l.rate.supplier) : '') + ')', money(l.rateExVat)) +
+          (l.owned ? b('Owned: ' + money(+l.ownedCost.acquisition_cost) + ' ÷ ' + l.ownedCost.life_months + ' months + ' + money(+l.ownedCost.monthly_cost) + ' running (cost row of ' + pbEsc(l.ownedCost.effective_date) + ')', money(l.ownedMonthly))
+            : b('Supplier rate (' + (+l.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + l.rate.contract_months + '-month contract' + (l.rate.rate_incl_vat ? ', VAT stripped' : '') + (l.rate.supplier ? ', ' + pbEsc(l.rate.supplier) : '') + ')', money(l.rateExVat))) +
           b('Insurance', money(l.insurance)) + b('Tracking', money(l.tracking)) +
-          b('Fuel: ' + (l.wet ? l.km.toLocaleString('en-US') + ' km × ' + pbEsc(l.type.fuel_economy) + ' l/100 km = ' + l.litres.toFixed(1) + ' l × ' + money(l.fuelPrice) : 'dry, none'), money(l.fuelCost)) +
+          b('Fuel: ' + (l.noFuel ? 'none — this type uses no fuel' : l.wet ? l.km.toLocaleString('en-US') + ' km × ' + pbEsc(l.type.fuel_economy) + ' l/100 km = ' + l.litres.toFixed(1) + ' l × ' + money(l.fuelPrice) : 'dry, none'), money(l.fuelCost)) +
           b('Vehicle extras' + (l.extras.length ? ' (' + l.extras.map(x => pbEsc(x.name) + ' ' + money(x.monthly)).join(', ') + ')' : ''), money(l.extrasMonthly)) +
           b('Cost before markup', money(l.cost)) + b('÷ (1 − ' + pbEsc(l.markup) + '%)', money(pbRound2(l.cost / (1 - l.markup / 100)))) +
           b('Excess km, at the supplier\'s rate, no markup', money(l.excess)) +
@@ -12928,9 +12957,9 @@ function renderSiteMobilityTab() {
       (wet ? '<span style="display:inline-block;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.3px;border-radius:8px;padding:1px 7px;background:#DBEAFE;color:#1E40AF;">' + wet + ' wet</span>' : '') +
       '<button class="btn btn-primary btn-sm" onclick="pbMobAdd()"' + (_pbMobilityMissing || !types.length ? ' disabled' : '') + '>+ Add vehicle</button>' +
     '</div>' +
-    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">One line per vehicle type on the site. The supplier rate is the dated quote whose contract period covers the quote\'s duration and whose inclusive km is the largest at or below the monthly km; fuel is km × economy × the fuel price as at the start date (wet lines only); extras are priced as support items are (acquisition ÷ life + running). The markup goes on everything except the excess-km charge, which passes through at the supplier\'s rate per km.' +
+    '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">One line per vehicle type on the site — every vehicle, bicycles and carts included, is priced here and nowhere else. A rented type takes the dated supplier rate whose contract period covers the quote\'s duration and whose inclusive km is the largest at or below the monthly km; an owned type takes its dated cost (acquisition ÷ life + running + insurance + tracking); fuel is km × economy × the fuel price as at the start date (wet lines of a fuelled type only); extras are priced as support items are (acquisition ÷ life + running). The markup goes on everything except the excess-km charge, which passes through at the supplier\'s rate per km.' +
       (_pbMobilityMissing ? ' <strong>sql/add_site_mobility.sql has not been run on this database.</strong>' : !types.length ? ' <strong>No vehicle type is set up yet — Admin → Proposal Builder → Site Mobility.</strong>' : '') + '</div>' +
-    (M.lines.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Vehicle type</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Monthly km</th><th>Fuel</th><th style="text-align:right;">Markup %</th><th style="text-align:right;">Supplier rate</th><th style="text-align:right;">Insurance</th><th style="text-align:right;">Tracking</th><th style="text-align:right;">Excess km</th><th style="text-align:right;">Fuel cost</th><th style="text-align:right;">Monthly</th></tr></thead>' +
+    (M.lines.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Vehicle type</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Monthly km</th><th>Fuel</th><th style="text-align:right;">Markup %</th><th style="text-align:right;">Rate / owned cost</th><th style="text-align:right;">Insurance</th><th style="text-align:right;">Tracking</th><th style="text-align:right;">Excess km</th><th style="text-align:right;">Fuel cost</th><th style="text-align:right;">Monthly</th></tr></thead>' +
       '<tbody>' + rows + '</tbody><tbody><tr style="font-weight:700;color:var(--navy);"><td colspan="10" style="border-top:2px solid var(--navy);">Site mobility, per month</td><td style="text-align:right;border-top:2px solid var(--navy);">' + money(M.monthly) + '</td></tr></tbody></table>'
       : (st.editing ? '' : '<div class="pb-placeholder-text">No vehicle on this quote yet. Add one above.</div>')) +
     '<div style="font-size:11px;color:var(--text3);margin-top:10px;"><strong>Fuel price as at the start date:</strong> ' + fuel.join(' · ') + ' <span class="pg-muted">(Admin → Proposal Builder → Site Mobility → Fuel prices)</span></div>' +
@@ -12940,16 +12969,16 @@ function renderSiteMobilityTab() {
 // ── the add / edit form: every keystroke writes the draft, so a repaint loses nothing ──
 function pbMobFormHtml() {
   const d = _mobState.draft, asAt = pbQuoteAsAt(), types = (allData['quote_vehicle_types'] || []).filter(t => t.active !== false && (pbItemInWindow(t, asAt) || +t.id === +d.vehicle_type_id));
-  const opts = pbVehicleExtraOptions(asAt), prev = pbVehicleCalc(Object.assign({ id: 0 }, d, { extras: pbMobDraftExtras() }));
+  const opts = pbVehicleExtraOptions(asAt), prev = pbVehicleCalc(Object.assign({ id: 0 }, d, { extras: pbMobDraftExtras() })), noFuel = prev.noFuel;
   const money = n => pgMoney(n);
   const b = (k, val) => '<div style="color:var(--text2);">' + k + '</div><div style="text-align:right;font-variant-numeric:tabular-nums;">' + val + '</div>';
   return '<div style="background:#F7F8FA;border:1px solid var(--border);border-radius:4px;padding:12px 14px;margin-top:12px;" id="pb-mob-form">' +
     '<div style="font-size:12px;font-weight:700;color:var(--navy);margin-bottom:10px;">' + (_mobState.editing === 'new' ? 'Add a vehicle' : 'Edit vehicle line') + '</div>' +
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px 14px;">' +
-      '<div class="form-group"><label class="form-label">Vehicle type</label><select class="form-control" id="mob-type" onchange="pbMobTouch()">' + types.map(t => '<option value="' + t.id + '"' + (+t.id === +d.vehicle_type_id ? ' selected' : '') + '>' + pbEsc(t.name) + ' — ' + pbEsc(PB_FUEL_LABEL[t.fuel_type] || t.fuel_type) + ', ' + pbEsc(t.fuel_economy) + ' l/100 km</option>').join('') + '</select></div>' +
+      '<div class="form-group"><label class="form-label">Vehicle type</label><select class="form-control" id="mob-type" onchange="pbMobTouch()">' + types.map(t => '<option value="' + t.id + '"' + (+t.id === +d.vehicle_type_id ? ' selected' : '') + '>' + pbVehicleTypeLabel(t) + '</option>').join('') + '</select></div>' +
       '<div class="form-group"><label class="form-label">Quantity</label><input type="number" class="form-control" id="mob-qty" min="1" step="1" value="' + pbEsc(d.quantity) + '" oninput="pbMobTouch()"></div>' +
-      '<div class="form-group"><label class="form-label">Monthly km</label><input type="number" class="form-control" id="mob-km" min="0" step="100" value="' + pbEsc(d.monthly_km) + '" oninput="pbMobTouch()"></div>' +
-      '<div class="form-group"><label class="form-label">Fuel included</label><select class="form-control" id="mob-fuel" onchange="pbMobTouch()"><option value="wet"' + (d.fuel_included !== false ? ' selected' : '') + '>Wet (fuel included)</option><option value="dry"' + (d.fuel_included === false ? ' selected' : '') + '>Dry</option></select></div>' +
+      '<div class="form-group"><label class="form-label">Monthly km' + (noFuel ? ' <span class="pg-muted">(no fuel on this type)</span>' : '') + '</label><input type="number" class="form-control" id="mob-km" min="0" step="100" value="' + pbEsc(d.monthly_km) + '" oninput="pbMobTouch()"' + (noFuel ? ' disabled' : '') + '></div>' +
+      '<div class="form-group"><label class="form-label">Fuel included</label><select class="form-control" id="mob-fuel" onchange="pbMobTouch()"' + (noFuel ? ' disabled' : '') + '>' + (noFuel ? '<option value="wet" selected>No fuel</option>' : '<option value="wet"' + (d.fuel_included !== false ? ' selected' : '') + '>Wet (fuel included)</option><option value="dry"' + (d.fuel_included === false ? ' selected' : '') + '>Dry</option>') + '</select></div>' +
       '<div class="form-group"><label class="form-label">Markup % <span class="pg-muted">(blank = the quote\'s ' + pbEsc(+pbQ.margin_pct || 0) + '%)</span></label><input type="number" class="form-control" id="mob-mk" min="0" max="99" step="0.5" value="' + pbEsc(d.markup_pct == null ? '' : d.markup_pct) + '" placeholder="' + pbEsc(+pbQ.margin_pct || 0) + '" oninput="pbMobTouch()"></div>' +
       '<div class="form-group" style="grid-column:span 2;"><label class="form-label">Vehicle extras</label><div style="display:flex;flex-direction:column;gap:4px;font-size:12px;">' +
         (opts.length ? opts.map(x => '<label style="display:flex;gap:7px;align-items:center;"><input type="checkbox" class="mob-x" data-id="' + x.id + '" data-name="' + pbEsc(x.name) + '"' + (d.extraIds.has(+x.id) ? ' checked' : '') + ' onchange="pbMobTouch()"> ' + pbEsc(x.name) + '<span style="margin-left:auto;color:var(--text3);font-size:11px;white-space:nowrap;">' + money(pbVehicleExtraMonthly(x)) + ' /mo</span></label>').join('') : '<span class="pg-muted">No extras priced as at ' + pbEsc(asAt) + '.</span>') +
@@ -12959,8 +12988,9 @@ function pbMobFormHtml() {
     '</div>' +
     (prev.errors.length ? '<div style="font-size:11px;color:#991B1B;margin-top:10px;">' + prev.errors.map(pbEsc).join('<br>') + '</div>'
       : '<div style="display:grid;grid-template-columns:1fr auto;gap:3px 16px;font-size:12px;max-width:480px;margin-top:12px;">' +
-        b('Supplier rate, ' + (+prev.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + prev.rate.contract_months + ' months', money(prev.rateExVat)) + b('Insurance + tracking', money(prev.insurance + prev.tracking)) +
-        b('Fuel' + (prev.wet ? ' (' + prev.litres.toFixed(1) + ' l ' + pbEsc(PB_FUEL_LABEL[prev.type.fuel_type] || '') + ')' : ' — dry'), money(prev.fuelCost)) + b('Extras', money(prev.extrasMonthly)) +
+        (prev.owned ? b('Owned: ' + money(+prev.ownedCost.acquisition_cost) + ' ÷ ' + prev.ownedCost.life_months + ' months + ' + money(+prev.ownedCost.monthly_cost) + ' running', money(prev.ownedMonthly))
+          : b('Supplier rate, ' + (+prev.rate.inclusive_km).toLocaleString('en-US') + ' km band, ' + prev.rate.contract_months + ' months', money(prev.rateExVat))) + b('Insurance + tracking', money(prev.insurance + prev.tracking)) +
+        b('Fuel' + (prev.noFuel ? ' — none' : prev.wet ? ' (' + prev.litres.toFixed(1) + ' l ' + pbEsc(PB_FUEL_LABEL[prev.type.fuel_type] || '') + ')' : ' — dry'), money(prev.fuelCost)) + b('Extras', money(prev.extrasMonthly)) +
         b('Marked up ' + pbEsc(prev.markup) + '%', money(pbRound2(prev.cost / (1 - prev.markup / 100)))) + b('Excess km' + (prev.excessKm ? ' (' + prev.excessKm.toLocaleString('en-US') + ' km × ' + money(+prev.rate.excess_km_rate) + ')' : ''), money(prev.excess)) +
         '<div style="font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">Per vehicle</div><div style="text-align:right;font-weight:700;color:var(--navy);border-top:1px solid var(--border);padding-top:4px;">' + money(prev.each) + '</div>' +
         '<div style="font-weight:700;color:var(--navy);">× ' + prev.qty + ' per month</div><div style="text-align:right;font-weight:700;color:var(--navy);">' + money(prev.monthly) + '</div></div>') +
@@ -13066,11 +13096,11 @@ function pbMobilityTableHtml(pr) {
   let rows = '';
   M.lines.forEach(l => {
     rows += '<tr' + (l.errors.length ? ' style="color:#FA0A11;"' : '') + '><td>' + pbEsc(l.label) + (l.errors.length ? ' <span title="' + pbEsc(l.errors.join(' ')) + '">⚠ not priced</span>' : '') + '</td>' +
-      '<td>' + (l.wet ? 'Wet' : 'Dry') + '</td><td class="num">' + l.km.toLocaleString('en-US') + '</td><td class="num">' + pgMoney(l.rateExVat + l.insurance + l.tracking) + '</td><td class="num">' + pgMoney(l.fuelCost) + '</td>' +
+      '<td>' + (l.noFuel ? '—' : l.wet ? 'Wet' : 'Dry') + '</td><td class="num">' + (l.noFuel ? '—' : l.km.toLocaleString('en-US')) + '</td><td class="num">' + pgMoney((l.baseMonthly != null ? l.baseMonthly : l.rateExVat) + l.insurance + l.tracking) + (l.owned ? ' <span class="pg-muted">owned</span>' : '') + '</td><td class="num">' + pgMoney(l.fuelCost) + '</td>' +
       '<td class="num">' + pgMoney(l.extrasMonthly) + '</td><td class="num">' + pbEsc(l.markup) + '%</td><td class="num">' + pgMoney(l.excess) + '</td><td class="num">' + pgMoney(l.each) + '</td><td class="num">' + pgMoney(l.monthly) + '</td></tr>';
   });
   return '<h3>Site mobility</h3><table class="pg-table"><thead><tr><th>Vehicle</th><th>Fuel</th><th class="num">km / month</th><th class="num">Rate + ins. + tracking</th><th class="num">Fuel</th><th class="num">Extras</th><th class="num">Markup</th><th class="num">Excess km</th><th class="num">Per vehicle</th><th class="num">Monthly</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-    '<p class="pg-muted">Per vehicle = (rate + insurance + tracking + fuel + extras) ÷ (1 − markup) + excess km at the supplier\'s rate per km. The Site Mobility tab shows each line\'s build-up.</p>';
+    '<p class="pg-muted">Per vehicle = (rate or owned cost + insurance + tracking + fuel + extras) ÷ (1 − markup) + excess km at the supplier\'s rate per km (rented only). An owned vehicle\'s cost is acquisition ÷ life + running. The Site Mobility tab shows each line\'s build-up.</p>';
 }
 
 // ── Per-post checklists: Workforce Support Items and Training (v7.9.41) ─────────
@@ -13357,7 +13387,7 @@ async function pbCalcTake() {
           needed: p.needed, general: p.general, ph_only: p.phOnly, shift_rows: p.shiftRows || null, price_per_officer: p.pricePerOfficer, cost_per_officer: p.costPerOfficer, margin_pct: p.marginPct, support: p.support })) })),
         monthly: live.monthly, setup_once_off: pbRound2(live.setupOnceOff),
       },
-      mobility: live.mobility.lines.map(l => ({ quote_vehicle_id: l.id, label: l.label, quantity: l.qty, monthly_km: l.km, wet: l.wet, markup_pct: l.markup, rate: l.rate ? { monthly_rate: l.rateExVat, inclusive_km: l.rate.inclusive_km, contract_months: l.rate.contract_months, excess_km_rate: l.rate.excess_km_rate } : null,
+      mobility: live.mobility.lines.map(l => ({ quote_vehicle_id: l.id, label: l.label, quantity: l.qty, monthly_km: l.km, wet: l.wet, no_fuel: l.noFuel, markup_pct: l.markup, owned: l.owned, owned_cost: l.ownedCost ? { effective_date: l.ownedCost.effective_date, acquisition_cost: +l.ownedCost.acquisition_cost || 0, life_months: +l.ownedCost.life_months || 0, monthly_cost: +l.ownedCost.monthly_cost || 0, monthly: l.ownedMonthly } : null, rate: l.rate ? { monthly_rate: l.rateExVat, inclusive_km: l.rate.inclusive_km, contract_months: l.rate.contract_months, excess_km_rate: l.rate.excess_km_rate } : null,
         insurance: l.insurance, tracking: l.tracking, excess_km: l.excessKm, excess: l.excess, litres: l.litres, fuel_price: l.fuelPrice, fuel_cost: l.fuelCost, extras: l.extras, cost: l.cost, each: l.each, monthly: l.monthly })),   // v7.10.30
       labour: Object.fromEntries(Object.entries(live.labour).map(([id, c]) => [id, { ok: c.ok, cost: c.cost, margin_pct: c.marginPct, price: c.price, officers: c.officers, fixed: c.fixed,
         grade: c.grade ? c.grade.code : null, area: c.area ? c.area.code : null, lines: c.lines, warnings: c.warnings }])),
@@ -15783,7 +15813,8 @@ PB_SCHEMAS['vehicle-types'] = {
   title: 'Vehicle Types', table: 'quote_vehicle_types', sortBy: 'display_order',
   columns: [
     { key:'name',          label:'Vehicle type',        type:'text' },
-    { key:'fuel_type',     label:'Fuel',                type:'enum', options:[{value:'petrol',label:'Petrol'},{value:'diesel',label:'Diesel'}] },
+    { key:'ownership',     label:'Ownership',           type:'enum', options:[{value:'rented',label:'Rented (supplier rate)'},{value:'owned',label:'Owned (acquisition ÷ life)'}], default:'rented' },
+    { key:'fuel_type',     label:'Fuel',                type:'enum', options:[{value:'petrol',label:'Petrol'},{value:'diesel',label:'Diesel'},{value:'none',label:'None'}] },
     { key:'fuel_economy',  label:'Economy (l / 100 km)', type:'decimal' },
     { key:'in_use_date',   label:'In use from',         type:'date' },
     { key:'retired_date',  label:'Retired Date',        type:'date' },
@@ -15804,6 +15835,19 @@ PB_SCHEMAS['vehicle-rates'] = {
     { key:'tracking_monthly',  label:'Tracking / month',   type:'decimal', prefix:'R ' },
     { key:'excess_km_rate',    label:'Excess km rate',     type:'decimal', prefix:'R ' },
     { key:'supplier',          label:'Supplier',           type:'text' },
+    { key:'note',              label:'Note',               type:'text' }
+  ]
+};
+PB_SCHEMAS['vehicle-owned-costs'] = {   // v7.10.42: the dated cost of an OWNED vehicle type
+  title: 'Owned Vehicle Costs', table: 'quote_vehicle_owned_costs', sortBy: 'effective_date.desc,vehicle_type_id',
+  columns: [
+    { key:'effective_date',    label:'Effective Date',     type:'date' },
+    { key:'vehicle_type_id',   label:'Vehicle type',       type:'lookup', lookup:'quote_vehicle_types', lookupLabel:'name' },
+    { key:'acquisition_cost',  label:'Acquisition cost',   type:'decimal', prefix:'R ' },
+    { key:'life_months',       label:'Life (months)',      type:'int', default: 36 },
+    { key:'monthly_cost',      label:'Running cost / month', type:'decimal', prefix:'R ' },
+    { key:'insurance_monthly', label:'Insurance / month',  type:'decimal', prefix:'R ' },
+    { key:'tracking_monthly',  label:'Tracking / month',   type:'decimal', prefix:'R ' },
     { key:'note',              label:'Note',               type:'text' }
   ]
 };
@@ -15828,7 +15872,7 @@ PB_SCHEMAS['vehicle-extras'] = {
     { key:'display_order',    label:'Display Order',       type:'int' }
   ]
 };
-const PB_MOBILITY_TABS = [{ key: 'vehicle-types', label: 'Vehicle types' }, { key: 'vehicle-rates', label: 'Supplier rates' }, { key: 'fuel-prices', label: 'Fuel prices' }, { key: 'vehicle-extras', label: 'Vehicle extras' }];
+const PB_MOBILITY_TABS = [{ key: 'vehicle-types', label: 'Vehicle types' }, { key: 'vehicle-rates', label: 'Supplier rates' }, { key: 'vehicle-owned-costs', label: 'Owned vehicle costs' }, { key: 'fuel-prices', label: 'Fuel prices' }, { key: 'vehicle-extras', label: 'Vehicle extras' }];
 let pbMobSchema = 'vehicle-types';
 async function renderPbSiteMobilityPage() {
   pbCatalogTabs = PB_MOBILITY_TABS;
