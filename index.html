@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.40 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.41 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.40 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.41 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10469,7 +10469,39 @@ function pbSundayHoursPerMonth(p) {
 function pbGeneralOfficersNeeded(p) { return pbTotalMonthlyOfficerHours(p) / PB_HOURS_PER_OFFICER_PER_MONTH; }
 function pbSundayBoundOfficers(p) { return pbSundayHoursPerMonth(p) / PB_SUNDAY_HRS_PER_OFFICER_PER_MONTH; }
 function pbOfficersNeeded(p) { return Math.max(pbGeneralOfficersNeeded(p), pbSundayBoundOfficers(p)); }
-function pbOfficersForPost(p) { return Math.ceil(pbOfficersNeeded(p)); }
+// v7.10.41 (Richard 2026-11-14): officers stay derived from the grid; a post may carry an override
+// WITH A REASON (quote_posts.officers_override / _reason, sql/add_post_officers_override.sql).
+function pbOfficersDerived(p) { return Math.ceil(pbOfficersNeeded(p)); }
+function pbOfficersOverride(p) { const o = Math.round(+p.officers_override); return o >= 1 ? o : null; }
+function pbOfficersForPost(p) { return pbOfficersOverride(p) || pbOfficersDerived(p); }
+function pbOfficersOverrideReady(p) { return (typeof MOCK !== 'undefined' && MOCK) || !!(p && ('officers_override' in p)); }
+async function pbOfficersOverrideSet(postId, raw) {
+  const loc = pbFindPostLocation(postId); if (!loc) return;
+  const p = loc.heading.posts[loc.index], derived = pbOfficersDerived(p), cur = pbOfficersOverride(p);
+  const redraw = () => renderQuoteEditor();
+  if (raw === '' || raw == null) {
+    if (cur == null) return;
+    try { await apiPatch('quote_posts', postId, { officers_override: null, officers_override_reason: null }); p.officers_override = null; p.officers_override_reason = null; showStatus('Officers back to the shift grid (' + derived + ')', 'success'); }
+    catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+    redraw(); return;
+  }
+  const n = Math.round(+raw);
+  if (!(n >= 1)) { showStatus('Officers must be a whole number of at least 1 — leave the box blank to follow the shift grid', 'error'); redraw(); return; }
+  if (n === cur) return;
+  const reason = String((await promptDialog({ title: 'Officers set by hand', message: (p.name || 'This post') + ': the shift grid needs ' + derived + ' officer' + (derived === 1 ? '' : 's') + '; you are setting ' + n + '. Say why — the reason is recorded on the post.', placeholder: 'Reason', value: p.officers_override_reason || '', confirmLabel: 'Continue' })) || '').trim();
+  if (!reason) { showStatus('A reason is required — the figure departs from the shift grid', 'error'); redraw(); return; }
+  const diff = n - derived;
+  const lines = [
+    (p.name || 'This post') + ': the shift grid needs ' + derived + '.',
+    'This post will be priced and quoted at ' + n + (diff ? ' (' + (diff > 0 ? '+' : '') + diff + ' against the grid).' : ' — the same as the grid.'),
+    diff < 0 ? '\nWARNING: fewer than the grid needs. The shifts cannot all be covered at this number.' : '',
+    '\nReason recorded: ' + reason
+  ].filter(Boolean).join('\n');
+  if (!await confirmDialog({ title: 'Set the officers by hand?', message: lines, confirmLabel: 'Set ' + n + ' officers', danger: diff < 0 })) { redraw(); return; }
+  try { await apiPatch('quote_posts', postId, { officers_override: n, officers_override_reason: reason }); p.officers_override = n; p.officers_override_reason = reason; showStatus('Officers set to ' + n, 'success'); }
+  catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+  redraw();
+}
 // ── Labour costing engine (v7.10.28, Richard 2026-11-07: "build the manpower engine") ─────────
 // A port of the old Xone quote tool's CalculateManpower (XoneWebApplication,
 // CalculationComponent.cs) onto Focus's rate cards. ONE officer on ONE post for ONE month, built
@@ -10486,7 +10518,7 @@ function pbOfficersForPost(p) { return Math.ceil(pbOfficersNeeded(p)); }
 // pbLabourCalc(p) returns the build-up; pbCostPerOfficer(p) is its price (0 while it cannot be
 // priced), so every reader of pbPostSummaryCost — the Posts band, pgPricing's live path, the
 // per-shift split — prices off the engine. Nothing here touches support items or uniforms: they
-// still ride at cost through pbAccSummary (an open point for Richard).
+// are priced at the quote's margin through pbAccSummary / pbSupportPrice (v7.10.41, Richard's ruling).
 const PB_LABOUR_ENGINE = 'labour-1';
 let pbSite = null;   // the quote's quote_sites row, loaded with the quote: the posts' default area
 const PB_RATIO_CODES = {
@@ -10585,6 +10617,7 @@ function pbLabourCalc(p) {
   const add = (key, label, amount, how) => { lines.push({ key, label, amount: +amount || 0, how }); return +amount || 0; };
   const ratio = (k, label) => { const r = R.ratios[PB_RATIO_CODES[k]]; if (!r || r.value == null) { errors.push('HR calculation ratio "' + label + '" is not set as at ' + asAt + ' (Human Resources → HR Calculation Ratios).'); return 0; } return r.value; };
   if (!grade) errors.push('Pick a grade for the post.');
+  if (pbOfficersOverride(p)) warnings.push('Officers set by hand to ' + pbOfficersOverride(p) + ' (the shift grid needs ' + pbOfficersDerived(p) + '): ' + (p.officers_override_reason || 'no reason recorded'));
   if (!area) errors.push(pbQuoteAreaReady() ? 'Pick an area on the Basic info tab (or an area for this post).' : 'Pick an area for the post (the quote has no area until sql/add_quote_area.sql runs on this database' + (pbQ && pbQ.site_id ? '; the site has none either).' : ').'));
   // 1. Salary
   let promulgated = 0, hourly = 0;
@@ -10731,6 +10764,9 @@ function pbCostingHtml(p) {
     fld('Margin % (blank = quote\'s ' + pbEsc(pbNum(pbQ.margin_pct) || 0) + '%)', '<input ' + inp + ' type="number" step="0.01" min="0" max="99.99" value="' + (p.margin_pct_override != null ? pbEsc(p.margin_pct_override) : '') + '" placeholder="' + pbEsc(pbNum(pbQ.margin_pct) || 0) + '" onchange="pbCostingField(' + p.id + ', \'margin_pct_override\', this.value)">') +
     fld('Replacement pool', '<label style="font-size:12px;display:flex;align-items:center;gap:6px;margin-top:4px;"><input type="checkbox"' + (p.exclude_replacement_pool ? ' checked' : '') + ' onchange="pbCostingField(' + p.id + ', \'exclude_replacement_pool\', this.checked)"> No replacement pool provided</label>') +
     premSel('overtime', 'Overtime premium') + premSel('sunday', 'Sunday premium') + premSel('public_holiday', 'Public holiday premium') +
+    // v7.10.41: officers by hand, with a reason (blank = the shift grid's number)
+    fld('Officers (blank = shift grid: ' + pbOfficersDerived(p) + ')', '<input ' + inp + ' type="number" step="1" min="1" class="pb-officers-ovr" value="' + (pbOfficersOverride(p) || '') + '" placeholder="' + pbOfficersDerived(p) + '"' + (pbOfficersOverrideReady(p) ? '' : ' disabled title="Needs sql/add_post_officers_override.sql on this database"') + ' onchange="pbOfficersOverrideSet(' + p.id + ', this.value)">' +
+      (pbOfficersOverride(p) ? '<div style="font-size:11px;color:#8a6d00;margin-top:2px;">Set by hand: ' + pbEsc(p.officers_override_reason || '') + '</div>' : '')) +
     '</div>';
   if (c.errors.length) html += '<div style="padding:6px 10px;border-radius:4px;font-size:12px;border:1px solid #FA0A11;background:#fff0f0;margin-bottom:8px;">' + c.errors.map(e => '<div>✖ ' + pbEsc(e) + '</div>').join('') + '</div>';
   if (c.warnings.length) html += '<div style="padding:6px 10px;border-radius:4px;font-size:12px;border:1px solid #E0B252;background:#FFF8E6;margin-bottom:8px;">' + c.warnings.map(w => '<div>⚠ ' + pbEsc(w) + '</div>').join('') + '</div>';
@@ -10741,7 +10777,7 @@ function pbCostingHtml(p) {
     '<tr style="font-weight:700;"><td style="padding:4px 6px;border-top:1px solid var(--border);">Price per officer</td><td style="border-top:1px solid var(--border);"></td><td style="padding:4px 6px;border-top:1px solid var(--border);text-align:right;">' + money(c.price) + '</td></tr>' +
     '<tr style="font-weight:700;color:var(--red);"><td style="padding:4px 6px;">× ' + c.officers + ' officer' + (c.officers === 1 ? '' : 's') + ' = post price per month</td><td></td><td style="padding:4px 6px;text-align:right;">' + money(c.ok ? c.price * c.officers : 0) + '</td></tr>' +
     '</tbody></table>' +
-    '<div class="pb-placeholder-text" style="margin-top:8px;">Rates as at ' + pbEsc(c.asAt) + ', the contract start date. Workforce support items and the uniform are added to the post\'s monthly price at cost on the Pricing tab. Every input here saves as you leave it.</div>';
+    '<div class="pb-placeholder-text" style="margin-top:8px;">Rates as at ' + pbEsc(c.asAt) + ', the contract start date. Workforce support items and the uniform are added to the post\'s monthly price on the Pricing tab, priced at the quote\'s margin. Every input here saves as you leave it.</div>';
   return html;
 }
 async function pbCostingField(postId, field, raw) {
@@ -12252,15 +12288,18 @@ async function pbItemSaveCost(kind, itemId) {
 let pbContractAcc = new Map();   // accessory_id → quantity
 function pbAccSummary() {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [], items = allData['quote_accessories'] || [];
-  const out = { monthly: 0, onceOff: 0, absorbed: 0, byPost: {}, lines: [] };
+  // v7.10.41: monthly / onceOff / byPost are PRICED at the quote's margin (pbSupportPrice); the
+  // cost figures ride beside them as costMonthly / costOnceOff.
+  const out = { monthly: 0, onceOff: 0, costMonthly: 0, costOnceOff: 0, marginPct: pbSupportMarginPct(), absorbed: 0, byPost: {}, lines: [] };
   const add = (item, cost, qty, where) => {
     if (!cost || !qty) return;
     const unit = pbAccMonthlyUnit(cost);
-    const line = { name: item.name, where, qty, unit, basis: cost.cost_basis, recovery: cost.recovery, monthly: 0, onceOff: 0 };
+    const line = { name: item.name, where, qty, unit, basis: cost.cost_basis, recovery: cost.recovery, monthly: 0, onceOff: 0, costMonthly: 0, costOnceOff: 0 };
     if (cost.recovery === 'absorbed') { out.absorbed += unit * qty; }
-    else if (cost.recovery === 'once_off') { line.onceOff = qty * (+cost.acquisition_cost || 0); line.monthly = qty * ((+cost.monthly_cost || 0)); }
-    else { line.monthly = qty * unit; }
-    out.monthly += line.monthly; out.onceOff += line.onceOff; out.lines.push(line);
+    else if (cost.recovery === 'once_off') { line.costOnceOff = qty * (+cost.acquisition_cost || 0); line.costMonthly = qty * ((+cost.monthly_cost || 0)); }
+    else { line.costMonthly = qty * unit; }
+    line.monthly = pbSupportPrice(line.costMonthly); line.onceOff = pbSupportPrice(line.costOnceOff);
+    out.monthly += line.monthly; out.onceOff += line.onceOff; out.costMonthly += line.costMonthly; out.costOnceOff += line.costOnceOff; out.lines.push(line);
   };
   const unifItems = allData['quote_uniform_types'] || [], unifCosts = allData['quote_uniform_type_costs'] || [];   // v7.9.65
   pbHeadings.forEach(h => h.posts.forEach(p => {
@@ -12393,11 +12432,21 @@ function pbWfPosts(id, cost) {
   return out;
 }
 function pbWfRuleTotal(id, cost) { return pbWfPosts(id, cost).reduce((a, x) => a + x.qty, 0); }
+// v7.10.41 (Richard 2026-11-14, his ruling on the engine's fourth open call: "apply the quote's
+// margin to every line, as the old tool did"): every support item, uniform, workforce adjustment,
+// contract line and the once-off setup is priced at the QUOTE's margin, price = cost ÷ (1 − m),
+// exactly as labour is. One margin for every support line (a post's own margin override applies to
+// its labour only), so the Workforce / Contract / Service tabs, pbAccSummary and the Pricing tab
+// all agree. pbWfMoney and pbAccSummary's lines carry both the cost and the priced figure.
+function pbSupportMarginPct() { const m = pbNum(pbQ && pbQ.margin_pct) || 0; return m > 0 && m < 100 ? m : 0; }
+function pbSupportPrice(cost) { const m = pbSupportMarginPct(); return m ? (+cost || 0) / (1 - m / 100) : (+cost || 0); }
 function pbWfMoney(cost, qty) {
-  if (!cost) return { monthly: 0, onceOff: 0 };
-  if (cost.recovery === 'absorbed') return { monthly: 0, onceOff: 0 };
-  if (cost.recovery === 'once_off') return { monthly: qty * (+cost.monthly_cost || 0), onceOff: qty * (+cost.acquisition_cost || 0) };
-  return { monthly: qty * pbAccMonthlyUnit(cost), onceOff: 0 };
+  const r = { monthly: 0, onceOff: 0, costMonthly: 0, costOnceOff: 0 };
+  if (!cost || cost.recovery === 'absorbed') return r;
+  if (cost.recovery === 'once_off') { r.costMonthly = qty * (+cost.monthly_cost || 0); r.costOnceOff = qty * (+cost.acquisition_cost || 0); }
+  else r.costMonthly = qty * pbAccMonthlyUnit(cost);
+  r.monthly = pbSupportPrice(r.costMonthly); r.onceOff = pbSupportPrice(r.costOnceOff);
+  return r;
 }
 function pbWorkforceRollup(includeAll) {
   const asAt = pbQuoteAsAt(), costs = allData['quote_accessory_costs'] || [];
@@ -12466,6 +12515,7 @@ function renderWorkforceTab() {
           // A once-off item charges only its running cost monthly; the acquisition goes on the setup line.
           field('Unit / month', !r.cost ? '<span class="pg-muted">no price</span>' : r.cost.recovery === 'once_off' ? pbRand(+r.cost.monthly_cost || 0) : pbRand(r.unit)) +
           (r.cost && r.cost.recovery === 'once_off' ? field('Unit once-off', pbRand(+r.cost.acquisition_cost || 0)) : '') +
+          (r.cost && r.cost.recovery !== 'absorbed' ? field('Priced at', pbSupportMarginPct() + '% margin — cost ' + pbRand(r.money.costMonthly) + '/mo' + (r.money.costOnceOff ? ' + ' + pbRand(r.money.costOnceOff) + ' once-off' : '')) : '') +
           field('Basis', r.cost ? pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) : '—') +
           field('Recovery', r.cost ? pbEsc(PB_ACC_RECOVERY[r.cost.recovery] || r.cost.recovery) : '—') +
           field('Once-off at setup', r.money.onceOff ? pbRand(r.money.onceOff) : '—') +
@@ -12499,7 +12549,7 @@ function renderWorkforceTab() {
         '<div style="font-size:20px;font-weight:700;color:var(--navy);line-height:1.2;">' + pbRand(tot.m) + '<span style="font-size:12px;font-weight:400;color:var(--text3);"> /mo</span></div>' +
         (tot.o ? '<div style="font-size:11px;color:var(--text3);">plus ' + pbRand(tot.o) + ' once-off at setup</div>' : '') +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
+      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date, at the quote\'s ' + pbSupportMarginPct() + '% margin.</div>' +
       '<span style="flex:1;"></span>' +
       (tot.bad ? badge('bad', tot.bad + ' not priced') : '') + (tot.warn ? badge('warn', tot.warn + ' reduced') : '') + (tot.adj ? badge('info', tot.adj + ' adjusted') : '') +
       pbSupportCollapseLinks('wf', tree.keys) +
@@ -12632,6 +12682,7 @@ function pbSupportTabHtml(k) {
           // A once-off item charges only its running cost monthly; the acquisition goes on the setup line.
           field('Unit / month', !r.cost ? '<span class="pg-muted">no price</span>' : r.cost.recovery === 'once_off' ? pbRand(+r.cost.monthly_cost || 0) : pbRand(r.unit)) +
           (r.cost && r.cost.recovery === 'once_off' ? field('Unit once-off', pbRand(+r.cost.acquisition_cost || 0)) : '') +
+          (r.cost && r.cost.recovery !== 'absorbed' ? field('Priced at', pbSupportMarginPct() + '% margin — cost ' + pbRand(r.money.costMonthly) + '/mo' + (r.money.costOnceOff ? ' + ' + pbRand(r.money.costOnceOff) + ' once-off' : '')) : '') +
           field('Basis', r.cost ? pbEsc(PB_ACC_BASES[r.cost.cost_basis] || r.cost.cost_basis) : '—') +
           field('Recovery', r.cost ? pbEsc(PB_ACC_RECOVERY[r.cost.recovery] || r.cost.recovery) : '—') +
           field('Once-off at setup', r.money.onceOff ? pbRand(r.money.onceOff) : '—') +
@@ -12673,14 +12724,14 @@ function pbSupportTabHtml(k) {
         '<div style="font-size:20px;font-weight:700;color:var(--navy);line-height:1.2;">' + pbRand(tot.m) + '<span style="font-size:12px;font-weight:400;color:var(--text3);"> /mo</span></div>' +
         (tot.o ? '<div style="font-size:11px;color:var(--text3);">plus ' + pbRand(tot.o) + ' once-off at setup</div>' : '') +
       '</div>' +
-      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date.</div>' +
+      '<div style="font-size:11px;color:var(--text3);padding-bottom:3px;">Priced as at ' + pbEsc(asAt) + ', the contract start date, at the quote\'s ' + pbSupportMarginPct() + '% margin.</div>' +
       '<span style="flex:1;"></span>' +
       (tot.bad ? badge('bad', tot.bad + (tot.bad === 1 ? ' needs attention' : ' need attention')) : '') + (tot.ovr ? badge('warn', tot.ovr + ' switched off') : '') + (tot.auto ? badge('info', tot.auto + ' auto') : '') +
       pbSupportCollapseLinks(k, keys) +
       '<label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px;padding-bottom:3px;"><input type="checkbox" ' + (st.showAll ? 'checked' : '') + ' onchange="pbCtShowAll(this, \'' + k + '\')"> show every item in use, ticked or not</label>' +
     '</div>' +
     '<div class="pg-muted" style="font-size:11px;margin-bottom:10px;">' + (svc ? 'Service things a contract needs to be delivered, ticked' : 'Ticked') + ' once per quote, regardless of posts. An item marked <em>auto</em> was ticked by a condition (Admin → Proposal Builder → Conditions & Rules); switching it off asks for a reason. ' +
-      'Whole quote, every support item and uniform: ' + pbRand(sum.monthly) + '/mo and ' + pbRand(sum.onceOff) + ' once-off — the proposal prints the once-off as one "Setup and equipment" line.' + (sum.absorbed ? ' Absorbed, not itemised: ' + pbRand(sum.absorbed) + '/mo.' : '') + '</div>' +
+      'Every line is priced at the quote\'s ' + pbSupportMarginPct() + '% margin (cost ÷ (1 − margin), like labour). Whole quote, every support item and uniform: ' + pbRand(sum.monthly) + '/mo and ' + pbRand(sum.onceOff) + ' once-off — the proposal prints the once-off as one "Setup and equipment" line.' + (sum.absorbed ? ' Absorbed, not itemised: ' + pbRand(sum.absorbed) + '/mo.' : '') + '</div>' +
     (rows.length ? '<table style="width:100%;font-size:12px;border-collapse:collapse;" class="pg-table"><thead><tr><th>Item</th><th style="text-align:right;">Units</th><th style="text-align:right;">Monthly</th><th>Status</th></tr></thead><tbody>' + body + '</tbody></table>'
       : '<div class="pb-placeholder-text">' + (st.showAll
           ? 'No ' + (svc ? 'service' : 'contract') + ' support item is in use as at ' + pbEsc(asAt) + '. Add them under Admin → Proposal Builder → Support Items (' + (svc ? 'Service' : 'Contract') + ' tab).'
@@ -13351,7 +13402,7 @@ function pbLabourTableHtml(pr) {
     });
   });
   return '<h3>Labour per post</h3><table class="pg-table"><thead><tr><th>Post</th><th>Grade</th><th>Area</th><th class="num">Officers</th><th class="num">Cost / officer</th><th class="num">Margin</th><th class="num">Price / officer</th><th class="num">Support + uniform (at cost)</th></tr></thead><tbody>' + rows + '</tbody></table>' +
-    '<p class="pg-muted">Monthly price of a post = price per officer × officers + its support items and uniform at cost. Each post\'s Costing section shows the build-up line by line.</p>';
+    '<p class="pg-muted">Monthly price of a post = price per officer × officers + its support items and uniform, each priced at the quote\'s margin (v7.10.41). Each post\'s Costing section shows the build-up line by line.</p>';
 }
 function pgPricing() {
   const vatPct = +(appSettings['proposal_vat_pct'] || 15);
@@ -14300,7 +14351,7 @@ function renderPeopleSection() {
         '<div class="field"><span class="label">Labour cost /mo*</span><span class="value">' + pbFmtRand(t.cost) + '</span></div>' +
         '<div class="field"><span class="label">Labour price /mo*</span><span class="value">' + pbFmtRand(t.price) + (t.unpriced ? '<br><span style="font-size:11px;font-weight:normal;color:#FFB3B5;">' + t.unpriced + ' post' + (t.unpriced === 1 ? '' : 's') + ' not priced</span>' : '') + '</span></div>' +
       '</div>' +
-      '<div style="font-size:10px;color:var(--text3);margin-top:4px;padding-bottom:6px;">* Labour only, per officer × officers, as at the contract start date. Support items, uniforms and contract lines are added on the Pricing tab.</div>' +
+      '<div style="font-size:10px;color:var(--text3);margin-top:4px;padding-bottom:6px;">* Labour only, per officer × officers, as at the contract start date. Support items, uniforms and contract lines are added on the Pricing tab at the quote\'s margin.</div>' +
     '</div>';
 }
 
