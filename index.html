@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.39 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.40 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.39 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.40 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -10537,7 +10537,32 @@ function pbSalaryRateFor(R, gradeId, areaId) {
     .sort((a, b) => String(b.effective_date).localeCompare(String(a.effective_date)));
   return { rate: ok[0] || null, pending: pending[0] || null };
 }
-function pbPostAreaId(p) { return p.area_id || (pbSite && pbSite.area_id) || null; }
+// v7.10.40 (Richard 2026-11-14: "area must always be chosen. Default or Urban, have on basic info
+// tab"): the quote carries its own area (quote_quotes.area_id, sql/add_quote_area.sql), chosen on
+// Basic info; a post prices in its own override else the quote's. The default is the site's area
+// else Area 1 (Major Urban) — set once when a quote without one is opened (pbQuoteAreaEnsure), so
+// it is always chosen. A database without the column keeps the old site rule.
+function pbQuoteAreaReady() { return (typeof MOCK !== 'undefined' && MOCK) || !!(pbQ && 'area_id' in pbQ); }
+function pbQuoteAreaDefault() {
+  const areas = allData['quote_areas'] || [];
+  if (pbSite && pbSite.area_id && areas.some(a => +a.id === +pbSite.area_id)) return +pbSite.area_id;
+  const urban = areas.find(a => a.code === 'area_1') || areas.find(a => /major urban/i.test(a.description || '')) || areas[0];
+  return urban ? +urban.id : null;
+}
+function pbQuoteAreaId() { return (pbQ && pbQ.area_id) || (pbSite && pbSite.area_id) || null; }
+async function pbQuoteAreaEnsure() {
+  if (!pbQ || pbQ.area_id || !pbQuoteAreaReady()) return;
+  const id = pbQuoteAreaDefault();
+  if (!id) return;
+  try { await api('quote_quotes', 'PATCH', { area_id: id }, 'id=eq.' + pbQ.id, { silent: true }); pbQ.area_id = id; }
+  catch (e) { pbQ.area_id = id; /* priced on the default meanwhile; the next save of the field lands it */ }
+}
+async function pbSetQuoteArea(raw) {
+  const id = raw ? +raw : null;
+  if (!id || !pbQ || +pbQ.area_id === id) return;
+  await pbSaveQuoteField('area_id', id);
+}
+function pbPostAreaId(p) { return p.area_id || pbQuoteAreaId() || null; }
 function pbPostMarginPct(p) { const o = pbNum(p.margin_pct_override); return o != null ? o : (pbNum(pbQ && pbQ.margin_pct) || 0); }
 function pbPremiumColsReady(p) { return (typeof MOCK !== 'undefined' && MOCK) || !!(p && ('overtime_premium' in p)); }
 // A premium choice: the saved true/false, else the rule — Sunday / public holiday when the grid
@@ -10560,7 +10585,7 @@ function pbLabourCalc(p) {
   const add = (key, label, amount, how) => { lines.push({ key, label, amount: +amount || 0, how }); return +amount || 0; };
   const ratio = (k, label) => { const r = R.ratios[PB_RATIO_CODES[k]]; if (!r || r.value == null) { errors.push('HR calculation ratio "' + label + '" is not set as at ' + asAt + ' (Human Resources → HR Calculation Ratios).'); return 0; } return r.value; };
   if (!grade) errors.push('Pick a grade for the post.');
-  if (!area) errors.push(pbQ && pbQ.site_id ? 'Pick an area for the post, or set the site\'s area.' : 'Pick an area for the post (the quote has no site to take one from).');
+  if (!area) errors.push(pbQuoteAreaReady() ? 'Pick an area on the Basic info tab (or an area for this post).' : 'Pick an area for the post (the quote has no area until sql/add_quote_area.sql runs on this database' + (pbQ && pbQ.site_id ? '; the site has none either).' : ').'));
   // 1. Salary
   let promulgated = 0, hourly = 0;
   if (grade && area) {
@@ -10688,7 +10713,7 @@ function pbLabourAll() {
 // The Costing section of an expanded post: the inputs the engine reads, then the build-up.
 function pbCostingHtml(p) {
   const c = pbLabourCalc(p), areas = allData['quote_areas'] || [];
-  const siteArea = pbSite && areas.find(a => +a.id === +pbSite.area_id);
+  const quoteArea = areas.find(a => +a.id === +pbQuoteAreaId());   // v7.10.40: the quote's area, else the site's
   const inp = 'style="width:100%;box-sizing:border-box;border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-family:inherit;font-size:12px;background:var(--bg2);color:var(--text);"';
   const fld = (label, html) => '<div><div style="font-size:11px;color:var(--text3);margin-bottom:2px;">' + label + '</div>' + html + '</div>';
   const ready = pbPremiumColsReady(p);
@@ -10700,7 +10725,7 @@ function pbCostingHtml(p) {
   };
   const money = n => pgMoney(n);
   let html = '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px 14px;margin-bottom:10px;">' +
-    fld('Area', '<select ' + inp + ' onchange="pbCostingField(' + p.id + ', \'area_id\', this.value)"><option value="">' + pbEsc(siteArea ? 'Site: ' + siteArea.description : '— none —') + '</option>' +
+    fld('Area', '<select ' + inp + ' onchange="pbCostingField(' + p.id + ', \'area_id\', this.value)"><option value="">' + pbEsc(quoteArea ? 'Quote: ' + quoteArea.description : '— none —') + '</option>' +
       areas.map(a => '<option value="' + a.id + '"' + (+a.id === +p.area_id ? ' selected' : '') + '>' + pbEsc(a.description) + '</option>').join('') + '</select>') +
     fld('Fixed salary (blank = grade rate)', '<input ' + inp + ' type="number" step="0.01" min="0" value="' + (p.fixed_salary != null ? pbEsc(p.fixed_salary) : '') + '" placeholder="grade rate" onchange="pbCostingField(' + p.id + ', \'fixed_salary\', this.value)">') +
     fld('Margin % (blank = quote\'s ' + pbEsc(pbNum(pbQ.margin_pct) || 0) + '%)', '<input ' + inp + ' type="number" step="0.01" min="0" max="99.99" value="' + (p.margin_pct_override != null ? pbEsc(p.margin_pct_override) : '') + '" placeholder="' + pbEsc(pbNum(pbQ.margin_pct) || 0) + '" onchange="pbCostingField(' + p.id + ', \'margin_pct_override\', this.value)">') +
@@ -11050,6 +11075,7 @@ async function openQuote(id) {
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
+    await pbQuoteAreaEnsure();   // v7.10.40: a quote without an area takes the site's, else Area 1
     allData['quote_uniform_types'] = cats[6] || [];        // v7.9.65
     allData['quote_uniform_type_costs'] = cats[7] || [];   // v7.9.65
     allData['quote_support_subcategories'] = cats[8] || [];   // v7.9.71
@@ -14151,14 +14177,26 @@ function renderBasicInfoTab() {
       fg('Start date', pbDateField('contract_start_date', q.contract_start_date, false)),
       fg('Duration', pbDurationField(q.contract_duration_months)),
     ]) +
-    row('70px 70px 150px', [
+    row('70px 70px 230px 150px', [
       fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)">'),
       fg('Shifts/day', '<select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
         [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select>'),
+      fg('Area', pbQuoteAreaField()),
       statusCell,
     ]) +
     fg('Notes', '<textarea class="form-control" style="height:240px;resize:vertical;" onchange="pbSaveQuoteField(\'notes\', this.value)">' + pbEsc(q.notes || '') + '</textarea>') +
     '</div></div>';
+}
+
+// The quote's PSIRA area (v7.10.40): always one of the areas, no blank — the posts price in it
+// unless a post overrides it on its Costing section. Disabled naming the SQL file until the
+// column exists on this database.
+function pbQuoteAreaField() {
+  const areas = allData['quote_areas'] || [], ready = pbQuoteAreaReady(), cur = pbQuoteAreaId();
+  return '<select class="form-control" id="pb-quote-area"' + (ready ? '' : ' disabled title="Needs sql/add_quote_area.sql on this database"') + ' onchange="pbSetQuoteArea(this.value)">' +
+    (cur && !areas.some(a => +a.id === +cur) ? '<option value="' + pbEsc(cur) + '" selected>Area ' + pbEsc(cur) + '</option>' : '') +
+    areas.map(a => '<option value="' + a.id + '"' + (+a.id === +cur ? ' selected' : '') + '>' + pbEsc(a.description) + '</option>').join('') +
+    '</select>';
 }
 
 // ── Basic info field helpers (v7.10.31) ───────────────────────────────────────────
