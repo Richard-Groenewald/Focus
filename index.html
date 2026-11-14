@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -8490,10 +8490,12 @@ function ppFinishFrom(start, dur) { return dur > 0 ? ppShift(start, dur - 1) : s
 const PP_DUR_UNITS = { m: { label: 'min', long: 'minutes' }, h: { label: 'h', long: 'hours' }, d: { label: 'd', long: 'days' } };
 const PP_DUR_UNIT_MISSING_MSG = 'Durations in hours and minutes need sql/add_task_duration_units.sql on this database — working days only until then.';
 let _ppDurUnitMissing = false;
+// v7.10.37: hours in one working day for the schedule's h / min durations — Site Admin → Settings →
+// Project Planning (settings.pp_hours_per_day, Richard: "8, maybe configurable somewhere in site admin"),
+// 8 where the key is absent or unreadable. Independent of the timesheet working window.
 function ppHoursPerDay() {
-  const S = typeof appSettings !== 'undefined' ? appSettings : {}, p = v => { const m = /^(\d{1,2}):(\d{2})/.exec(String(v || '')); return m ? +m[1] + (+m[2]) / 60 : null; };
-  const a = p(S['time_normal_start']), b = p(S['time_normal_end']);
-  return a != null && b != null && b > a ? b - a : 8;
+  const S = typeof appSettings !== 'undefined' ? appSettings : {}, v = parseFloat(S['pp_hours_per_day']);
+  return isFinite(v) && v >= 1 && v <= 24 ? v : 8;
 }
 function ppDurToDays(value, unit) { const v = +value || 0; return unit === 'h' ? v / ppHoursPerDay() : unit === 'm' ? v / (ppHoursPerDay() * 60) : v; }
 function ppDurFromDays(days, unit) { const d = +days || 0, v = unit === 'h' ? d * ppHoursPerDay() : unit === 'm' ? d * ppHoursPerDay() * 60 : d; return Math.round(v * 100) / 100; }
@@ -8622,7 +8624,7 @@ function ppParsePreds(text) {
   return out;
 }
 // ── Predecessor picker ────────────────────────────────────────────────────────
-// The Pred. cell opens a picker: one row per predecessor with a task dropdown, a relationship dropdown
+// The Depends on cell (Pred. until v7.10.37) opens a picker: one row per predecessor with a task dropdown, a relationship dropdown
 // (plain words beside the FS / SS / FF / SF codes) and a lag in working days. Save turns the rows into the
 // same text the cell used to take and hands it to ppGridSet(id, 'preds', text) — still the one writer.
 const PP_LINK_INFO = {
@@ -8650,7 +8652,7 @@ function ppPredOpen(taskId) {
   _ppPred = { taskId: +t.id, rows: (_pp.links || []).filter(l => +l.to_task === +t.id).map(l => ({ from: +l.from_task, type: l.link_type || 'FS', lag: +l.lag_days || 0 })) };
   if (!_ppPred.rows.length) _ppPred.rows.push({ from: '', type: 'FS', lag: 0 });
   showModal(`<div class="modal-overlay" onclick="if(event.target===this)ppPredClose()"><div class="modal" style="width:680px;max-width:96vw;" onkeydown="if(event.key==='Escape'){event.stopPropagation();ppPredClose();}">
-    <div class="modal-header"><div class="modal-title">Predecessors of task ${ppTaskNo(t.id)} · ${escHtml(t.name)}</div><button class="modal-close" onclick="ppPredClose()">×</button></div>
+    <div class="modal-header"><div class="modal-title">Task ${ppTaskNo(t.id)} depends on · ${escHtml(t.name)}</div><button class="modal-close" onclick="ppPredClose()">×</button></div>
     <div class="modal-body" id="pp-pred-body"></div>
     <div class="modal-footer"><button class="btn btn-secondary" onclick="ppPredClose()">Cancel</button><button class="btn btn-primary" id="pp-pred-save" onclick="ppPredSave()">Save</button></div>
   </div></div>`);
@@ -8672,15 +8674,15 @@ function ppPredPaint() {
       <select class="form-control" id="pp-pred-from-${i}" onchange="ppPredSet(${i}, 'from', this.value)">${opts}</select>
       <select class="form-control" id="pp-pred-type-${i}" onchange="ppPredSet(${i}, 'type', this.value)" title="How the two tasks relate">${types}</select>
       <input class="form-control" type="number" step="1" id="pp-pred-lag-${i}" value="${+r.lag || 0}" title="Lag in working days — a minus figure overlaps" onchange="ppPredSet(${i}, 'lag', this.value)">
-      <button class="btn btn-ghost btn-sm" title="Remove this predecessor" onclick="ppPredRemove(${i})">✕</button>
+      <button class="btn btn-ghost btn-sm" title="Remove this dependency" onclick="ppPredRemove(${i})">✕</button>
     </div>
-    <div class="pp-pred-say">${r.from ? escHtml(ppPredSentence(t, r.from, r.type, r.lag)) : 'Pick the task this one waits for.'}</div>`;
+    <div class="pp-pred-say">${r.from ? escHtml(ppPredSentence(t, r.from, r.type, r.lag)) : 'Pick the task this one depends on.'}</div>`;
   };
-  body.innerHTML = `<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">The tasks this one waits for. Task ${ppTaskNo(t.id)} is scheduled from them, so its start and finish follow when they move.</div>
-    <div class="pp-pred-row" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:2px;"><div>Waits for</div><div>Relationship</div><div>Lag (days)</div><div></div></div>
+  body.innerHTML = `<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">The tasks this one depends on. Task ${ppTaskNo(t.id)} is scheduled from them, so its start and finish follow when they move.</div>
+    <div class="pp-pred-row" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:2px;"><div>Depends on</div><div>Relationship</div><div>Lag (days)</div><div></div></div>
     ${st.rows.map(rowHtml).join('')}
     ${rows.length ? '' : '<div style="font-size:12px;color:var(--text3);">There are no other tasks on the plan yet.</div>'}
-    <button class="btn btn-secondary btn-sm" id="pp-pred-add" onclick="ppPredAddRow()" style="margin-top:4px;">+ Add predecessor</button>
+    <button class="btn btn-secondary btn-sm" id="pp-pred-add" onclick="ppPredAddRow()" style="margin-top:4px;">+ Add a task it depends on</button>
     <div class="pp-pred-help"><div style="font-weight:700;color:var(--navy);margin-bottom:4px;">What the relationships mean</div>
       ${PP_LINK_TYPES.map(k => `<div><b>${PP_LINK_INFO[k].name} (${k})</b> — ${PP_LINK_INFO[k].help}.</div>`).join('')}
       <div style="margin-top:4px;">The lag is in working days: +2 leaves two days between them, −2 overlaps them by two days.</div>
@@ -8882,8 +8884,8 @@ function ppGridHtml(edit, print) {
   const inp = (t, col, type, value, extra, may) => may && !print
     ? `<input class="pp-cell" data-col="${col}" type="${type}" value="${escAttr(value == null ? '' : value)}" ${extra || ''} onchange="ppGridSet(${+t.id}, '${col}', this.value)" onkeydown="ppGridKey(event, this)">`
     : `<span class="pp-cell-ro">${escHtml(type === 'date' && value ? ppDate(value) : (value == null ? '' : String(value)))}</span>`;
-  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 110 + 122 + 122 + (predsCol ? 90 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
-  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:90px;" title="Predecessors — the tasks this one waits for. Click a cell to pick them.">Pred.</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
+  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 110 + 122 + 122 + (predsCol ? 96 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
+  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:96px;" title="The tasks this one depends on (its predecessors). Click a cell to pick them.">Depends on</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
   const body = rows.map(r => {
     if (r.kind === 'ms') {
       const m = r.ms, ts = r.tasks, ss = ts.map(t => S.byId[+t.id]).filter(Boolean);
@@ -38752,6 +38754,16 @@ async function renderSettingsPage() {
         </div>
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Project Planning</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Hours per Working Day</label>
+            <input type="number" id="setting-pp-hours" class="form-control" min="1" max="24" step="0.5" value="${sv('pp_hours_per_day', '8')}">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">How a task duration typed in hours or minutes converts to working days on a project schedule (8 h = 1 day). Stored durations do not change when this does — only the hours shown.</div>
+          </div>
+        </div>
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Duplicate Detection</div>
         <div class="form-row">
           <div class="form-group">
@@ -39092,6 +39104,7 @@ async function saveSettings() {
       proposal_vat_pct:               numSetting('setting-vat-pct', 0, 100, 15, false),
       proposal_default_validity_days: numSetting('setting-validity-days', 1, 365, 30, true),
       proposal_xone_psira_no:         (document.getElementById('setting-psira-no')?.value || '').trim(),
+      pp_hours_per_day:               numSetting('setting-pp-hours', 1, 24, 8, false),                                                   // v7.10.37
       legacy_notes_viewers:           [...document.querySelectorAll('.setting-legacy-viewer:checked')].map(cb => cb.value).join(','),   // v7.10.16
       nav_hidden:                     [...document.querySelectorAll('.setting-nav-hidden:checked')].map(cb => cb.value).join(','),      // v7.10.26
     };
@@ -39122,7 +39135,7 @@ async function saveSettings() {
     Object.assign(appSettings, commercial);
     buildNav(false); navHighlight(currentPage);   // v7.10.26: the sidebar shows the new hidden set at once
     // Show what was stored: numSetting clamps, rounds and fills a blank box, so the typed value may differ.
-    const commercialInputs = { rsg_probability_cap: 'setting-early-prob', default_margin_no_service: 'setting-fallback-margin', default_term_annuity: 'setting-term-annuity', default_term_project: 'setting-term-project', proposal_vat_pct: 'setting-vat-pct', proposal_default_validity_days: 'setting-validity-days', proposal_xone_psira_no: 'setting-psira-no' };
+    const commercialInputs = { rsg_probability_cap: 'setting-early-prob', default_margin_no_service: 'setting-fallback-margin', default_term_annuity: 'setting-term-annuity', default_term_project: 'setting-term-project', proposal_vat_pct: 'setting-vat-pct', proposal_default_validity_days: 'setting-validity-days', proposal_xone_psira_no: 'setting-psira-no', pp_hours_per_day: 'setting-pp-hours' };
     Object.entries(commercialInputs).forEach(([k, id]) => { const el = document.getElementById(id); if (el) el.value = commercial[k]; });
     appSettings['fy_start_month'] = fyStart;
     appSettings['escalation_month'] = escMonth;
