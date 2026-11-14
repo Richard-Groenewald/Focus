@@ -595,6 +595,10 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pp-cell:focus { outline:none; border-color:var(--navy); background:#fff; }
 select.pp-cell { appearance:auto; }
 .pp-cell-ro { display:inline-block; padding:2px 3px; }
+.pp-dur { display:flex; gap:2px; align-items:center; } .pp-dur input { flex:1; min-width:0; } select.pp-dur-unit { width:46px; flex:none; padding:2px 0; font-size:11px; }
+button.pp-pred-btn { text-align:left; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; } button.pp-pred-btn.pp-empty { color:var(--text3); }
+.pp-pred-row { display:grid; grid-template-columns:1fr 200px 72px 28px; gap:8px; align-items:center; margin-bottom:6px; } .pp-pred-say { font-size:12px; color:var(--text2); margin:-2px 0 8px 2px; }
+.pp-pred-help { background:#F1F5F9; border-radius:var(--radius); padding:8px 12px; font-size:12px; color:var(--text2); margin-top:12px; } .pp-pred-help b { color:var(--navy); }
 .pp-pin { cursor:pointer; font-size:11px; margin-right:2px; }
 .pp-ic { cursor:pointer; color:var(--text3); font-size:11px; padding:0 3px; }
 .pp-ic:hover { color:var(--navy); }
@@ -865,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.35 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.36 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -904,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.35 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.36 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7787,7 +7791,7 @@ async function ppSandboxCopy(planId) {
     for (const t of ts) {
       const body = { plan_id: +plan.id, milestone_id: t.milestone_id ? msMap[t.milestone_id] || null : null, name: t.name, description: t.description || null, assignee_id: t.assignee_id || null,
         start_date: mv(t.start_date), due_date: mv(t.due_date), status: 'todo', est_hours: t.est_hours, sort_order: t.sort_order, created_by: me };
-      ['duration_days', 'constraint_type', 'pert_optimistic', 'pert_likely', 'pert_pessimistic'].forEach(k => { if (t[k] != null) body[k] = t[k]; });
+      ['duration_days', 'duration_unit', 'constraint_type', 'pert_optimistic', 'pert_likely', 'pert_pessimistic'].forEach(k => { if (t[k] != null) body[k] = t[k]; });
       const r = await api('project_tasks', 'POST', body);
       tMap[t.id] = +r[0].id;
     }
@@ -7842,6 +7846,7 @@ async function openProjectPlan(planId, from) {
       if (!org) { try { org = (await apiGet('organisations', 'id=eq.' + deal.org_id + '&select=id,name'))[0] || null; } catch (e) {} }
     }
     allData['people'] = people;
+    _ppDurUnitMissing = !MOCK && ts.length > 0 && !('duration_unit' in ts[0]);
     Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people, links: links || [], sched: null, affil,
                          draft: !!deal && !dealIsSecuredStage(deal.stage_id),
                          holidays: new Set((hols || []).filter(h => h.active !== false).map(h => String(h.holiday_date).slice(0, 10))) });
@@ -8479,6 +8484,22 @@ function ppTaskDur(t) {
   return 1;
 }
 function ppFinishFrom(start, dur) { return dur > 0 ? ppShift(start, dur - 1) : start; }
+// v7.10.36: a duration is typed in minutes, hours or days (`duration_unit`), stored in WORKING DAYS (`duration_days`,
+// NUMERIC(10,5) after sql/add_task_duration_units.sql). The calendar rounds a task up to whole days: a 2-hour task
+// occupies one day. A working day's hours come from Settings → working hours (time_normal_start / end), else 8.
+const PP_DUR_UNITS = { m: { label: 'min', long: 'minutes' }, h: { label: 'h', long: 'hours' }, d: { label: 'd', long: 'days' } };
+const PP_DUR_UNIT_MISSING_MSG = 'Durations in hours and minutes need sql/add_task_duration_units.sql on this database — working days only until then.';
+let _ppDurUnitMissing = false;
+function ppHoursPerDay() {
+  const S = typeof appSettings !== 'undefined' ? appSettings : {}, p = v => { const m = /^(\d{1,2}):(\d{2})/.exec(String(v || '')); return m ? +m[1] + (+m[2]) / 60 : null; };
+  const a = p(S['time_normal_start']), b = p(S['time_normal_end']);
+  return a != null && b != null && b > a ? b - a : 8;
+}
+function ppDurToDays(value, unit) { const v = +value || 0; return unit === 'h' ? v / ppHoursPerDay() : unit === 'm' ? v / (ppHoursPerDay() * 60) : v; }
+function ppDurFromDays(days, unit) { const d = +days || 0, v = unit === 'h' ? d * ppHoursPerDay() : unit === 'm' ? d * ppHoursPerDay() * 60 : d; return Math.round(v * 100) / 100; }
+function ppDurUnit(t) { return t && PP_DUR_UNITS[t.duration_unit] ? t.duration_unit : 'd'; }
+function ppDurText(t) { const u = ppDurUnit(t), v = ppDurFromDays(ppTaskDur(t), u); return v.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ' + PP_DUR_UNITS[u].label; }
+function ppTaskCalDays(t) { return Math.ceil(ppTaskDur(t) - 1e-9); }
 function ppPct(t) { return t.status === 'done' ? 100 : Math.max(0, Math.min(100, +t.pct_done || 0)); }
 
 // ── The engine ────────────────────────────────────────────────────────────────
@@ -8498,7 +8519,7 @@ function ppSchedCompute(tasks, links, planStart) {
   const tById = {}; tasks.forEach(t => { tById[+t.id] = t; });
   // forward pass
   order.forEach(id => {
-    const t = tById[id], dur = ppTaskDur(t), fixed = t.status === 'done' && t.start_date && t.due_date;
+    const t = tById[id], dur = ppTaskCalDays(t), fixed = t.status === 'done' && t.start_date && t.due_date;
     let es;
     if (fixed) { es = t.start_date; byId[id] = { es, ef: t.due_date, dur, fixed: true, cyclic: cyclic.has(id) }; return; }
     if (t.constraint_type === 'must_start_on' && t.start_date) es = ppNextWorking(t.start_date);
@@ -8600,6 +8621,83 @@ function ppParsePreds(text) {
   }
   return out;
 }
+// ── Predecessor picker ────────────────────────────────────────────────────────
+// The Pred. cell opens a picker: one row per predecessor with a task dropdown, a relationship dropdown
+// (plain words beside the FS / SS / FF / SF codes) and a lag in working days. Save turns the rows into the
+// same text the cell used to take and hands it to ppGridSet(id, 'preds', text) — still the one writer.
+const PP_LINK_INFO = {
+  FS: { name: 'Finish → Start', short: 'starts after it finishes', help: 'the usual case: this task starts once the other has finished' },
+  SS: { name: 'Start → Start', short: 'starts when it starts', help: 'both start together' },
+  FF: { name: 'Finish → Finish', short: 'finishes when it finishes', help: 'this task cannot finish before the other does' },
+  SF: { name: 'Start → Finish', short: 'finishes when it starts', help: 'rare: this task must be finished by the time the other starts' },
+};
+let _ppPred = null;
+function ppPredCellHtml(t, edit) {
+  const text = ppPredText(t);
+  if (!edit) return '<span class="pp-cell-ro">' + escHtml(text) + '</span>';
+  const title = _ppLinksMissing ? PP_SCHED_MISSING_MSG : (text ? ppPredSentences(t).join('\n') + '\nClick to change' : 'Click to pick the tasks this one waits for');
+  return `<button class="pp-cell pp-pred-btn ${text ? '' : 'pp-empty'}" data-col="preds" title="${escAttr(title)}" ${_ppLinksMissing ? 'disabled' : ''} onclick="ppPredOpen(${+t.id})">${escHtml(text || '—')}</button>`;
+}
+function ppPredSentence(t, from, type, lag) {
+  const n = ppTaskNo(t.id), fn = ppTaskNo(from), info = PP_LINK_INFO[type] || PP_LINK_INFO.FS, l = +lag || 0;
+  const verb = { FS: 'starts after task ' + fn + ' finishes', SS: 'starts when task ' + fn + ' starts', FF: 'finishes when task ' + fn + ' finishes', SF: 'finishes when task ' + fn + ' starts' }[type] || info.short;
+  return 'Task ' + n + ' ' + verb + (l ? ', ' + Math.abs(l) + ' working day' + (Math.abs(l) === 1 ? '' : 's') + (l > 0 ? ' later' : ' earlier') : '') + '.';
+}
+function ppPredSentences(t) { return (_pp.links || []).filter(l => +l.to_task === +t.id).map(l => ppPredSentence(t, l.from_task, l.link_type || 'FS', l.lag_days)); }
+function ppPredOpen(taskId) {
+  const t = _pp.tasks.find(x => +x.id === +taskId); if (!t || !ppCanEdit()) return;
+  if (_ppLinksMissing) { showStatus(PP_SCHED_MISSING_MSG, 'error'); return; }
+  _ppPred = { taskId: +t.id, rows: (_pp.links || []).filter(l => +l.to_task === +t.id).map(l => ({ from: +l.from_task, type: l.link_type || 'FS', lag: +l.lag_days || 0 })) };
+  if (!_ppPred.rows.length) _ppPred.rows.push({ from: '', type: 'FS', lag: 0 });
+  showModal(`<div class="modal-overlay" onclick="if(event.target===this)ppPredClose()"><div class="modal" style="width:680px;max-width:96vw;" onkeydown="if(event.key==='Escape'){event.stopPropagation();ppPredClose();}">
+    <div class="modal-header"><div class="modal-title">Predecessors of task ${ppTaskNo(t.id)} · ${escHtml(t.name)}</div><button class="modal-close" onclick="ppPredClose()">×</button></div>
+    <div class="modal-body" id="pp-pred-body"></div>
+    <div class="modal-footer"><button class="btn btn-secondary" onclick="ppPredClose()">Cancel</button><button class="btn btn-primary" id="pp-pred-save" onclick="ppPredSave()">Save</button></div>
+  </div></div>`);
+  ppPredPaint();
+}
+function ppPredClose() { _ppPred = null; closeModal(); }
+function ppPredPaint() {
+  const st = _ppPred, body = document.getElementById('pp-pred-body'); if (!st || !body) return;
+  const t = _pp.tasks.find(x => +x.id === st.taskId), rows = ppGridRows().filter(r => r.kind === 'task' && +r.t.id !== st.taskId);
+  const others = _pp.links.filter(l => +l.to_task !== st.taskId);
+  const chosen = st.rows.map(r => +r.from);
+  const rowHtml = (r, i) => {
+    const opts = '<option value="">Pick a task…</option>' + rows.map(x => {
+      const loop = ppLinkWouldLoop(x.t.id, st.taskId, others), dup = chosen.includes(+x.t.id) && +r.from !== +x.t.id;
+      return `<option value="${+x.t.id}" ${+r.from === +x.t.id ? 'selected' : ''} ${loop || dup ? 'disabled' : ''}>${x.n} · ${escHtml(x.t.name)}${loop ? ' (would make a loop)' : dup ? ' (already listed)' : ''}</option>`;
+    }).join('');
+    const types = PP_LINK_TYPES.map(k => `<option value="${k}" ${r.type === k ? 'selected' : ''}>${PP_LINK_INFO[k].name} (${k})</option>`).join('');
+    return `<div class="pp-pred-row">
+      <select class="form-control" id="pp-pred-from-${i}" onchange="ppPredSet(${i}, 'from', this.value)">${opts}</select>
+      <select class="form-control" id="pp-pred-type-${i}" onchange="ppPredSet(${i}, 'type', this.value)" title="How the two tasks relate">${types}</select>
+      <input class="form-control" type="number" step="1" id="pp-pred-lag-${i}" value="${+r.lag || 0}" title="Lag in working days — a minus figure overlaps" onchange="ppPredSet(${i}, 'lag', this.value)">
+      <button class="btn btn-ghost btn-sm" title="Remove this predecessor" onclick="ppPredRemove(${i})">✕</button>
+    </div>
+    <div class="pp-pred-say">${r.from ? escHtml(ppPredSentence(t, r.from, r.type, r.lag)) : 'Pick the task this one waits for.'}</div>`;
+  };
+  body.innerHTML = `<div style="font-size:13px;color:var(--text2);margin-bottom:10px;">The tasks this one waits for. Task ${ppTaskNo(t.id)} is scheduled from them, so its start and finish follow when they move.</div>
+    <div class="pp-pred-row" style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:2px;"><div>Waits for</div><div>Relationship</div><div>Lag (days)</div><div></div></div>
+    ${st.rows.map(rowHtml).join('')}
+    ${rows.length ? '' : '<div style="font-size:12px;color:var(--text3);">There are no other tasks on the plan yet.</div>'}
+    <button class="btn btn-secondary btn-sm" id="pp-pred-add" onclick="ppPredAddRow()" style="margin-top:4px;">+ Add predecessor</button>
+    <div class="pp-pred-help"><div style="font-weight:700;color:var(--navy);margin-bottom:4px;">What the relationships mean</div>
+      ${PP_LINK_TYPES.map(k => `<div><b>${PP_LINK_INFO[k].name} (${k})</b> — ${PP_LINK_INFO[k].help}.</div>`).join('')}
+      <div style="margin-top:4px;">The lag is in working days: +2 leaves two days between them, −2 overlaps them by two days.</div>
+    </div>`;
+}
+function ppPredSet(i, key, value) { const r = _ppPred && _ppPred.rows[i]; if (!r) return; r[key] = key === 'lag' ? Math.round(+value || 0) : value; ppPredPaint(); }
+function ppPredAddRow() { if (!_ppPred) return; _ppPred.rows.push({ from: '', type: 'FS', lag: 0 }); ppPredPaint(); const el = document.getElementById('pp-pred-from-' + (_ppPred.rows.length - 1)); if (el) el.focus(); }
+function ppPredRemove(i) { if (!_ppPred) return; _ppPred.rows.splice(i, 1); ppPredPaint(); }
+async function ppPredSave() {
+  const st = _ppPred; if (!st) return;
+  const rows = st.rows.filter(r => r.from), seen = new Set();
+  for (const r of rows) { if (seen.has(+r.from)) { showStatus('Task ' + ppTaskNo(r.from) + ' is listed twice', 'error'); return; } seen.add(+r.from); }
+  const text = rows.map(r => ppTaskNo(r.from) + r.type + (r.lag ? (r.lag > 0 ? '+' : '') + r.lag + 'd' : '')).join(', ');
+  const taskId = st.taskId;
+  ppPredClose();
+  await ppGridSet(taskId, 'preds', text);
+}
 function ppLinkWouldLoop(fromId, toId, links) {
   const succs = {}; (links || []).forEach(l => { (succs[+l.from_task] = succs[+l.from_task] || []).push(+l.to_task); });
   const seen = new Set(), stack = [+toId];
@@ -8627,7 +8725,7 @@ async function ppLinkRemove(linkId, opts) {
 
 // ── Grid cell edits ───────────────────────────────────────────────────────────
 // Every editable cell lands here. A date or duration change reschedules; a predecessor change rewrites the links by difference.
-async function ppGridSet(id, col, value) {
+async function ppGridSet(id, col, value, unit) {
   const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
   const may = ppCanTouchTask(t), full = ppCanEdit();
   if (!may) { showStatus('Only the project manager, an administrator or the assignee can change this task', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(false)); return; }
@@ -8635,9 +8733,17 @@ async function ppGridSet(id, col, value) {
   let body = null, reschedule = false;
   if (col === 'name') { if (!full) return; const v = String(value || '').trim(); if (!v) { showStatus('The task needs a name', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; } body = { name: v }; }
   else if (col === 'duration') {
-    const n = value === '' || value == null ? null : Math.round(+value);
-    if (n != null && (isNaN(n) || n < 0)) { showStatus('Duration is a number of working days', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
-    body = { duration_days: n }; reschedule = true;
+    const u = PP_DUR_UNITS[unit] ? unit : ppDurUnit(t);
+    const v = value === '' || value == null ? null : +value;
+    if (v != null && (isNaN(v) || v < 0)) { showStatus('Duration is a number of ' + PP_DUR_UNITS[u].long, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    const n = v == null ? null : Math.round(ppDurToDays(v, u) * 100000) / 100000;
+    if (_ppDurUnitMissing && n != null && n !== Math.round(n)) { showStatus(PP_DUR_UNIT_MISSING_MSG, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    body = { duration_days: n }; if (!_ppDurUnitMissing) body.duration_unit = u; reschedule = true;
+  }
+  else if (col === 'durunit') {              // the figure keeps its length in days and is shown in the new unit
+    if (_ppDurUnitMissing) { showStatus(PP_DUR_UNIT_MISSING_MSG, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
+    if (!PP_DUR_UNITS[value]) return;
+    body = { duration_unit: value };
   }
   else if (col === 'start') {
     if (!value) { showStatus('A task needs a start date in the schedule — clear its predecessors or set a date', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
@@ -8654,6 +8760,7 @@ async function ppGridSet(id, col, value) {
     const f = ppPrevWorking(value);
     if (f < start) { showStatus('The finish cannot be before the start', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
     body = { duration_days: Math.max(1, ppWorkDaysIncl(start, f)) };
+    if (!_ppDurUnitMissing) body.duration_unit = 'd';
     if (t.status === 'done') body.due_date = f;
     reschedule = true;
   }
@@ -8764,13 +8871,19 @@ function ppScheduleHtml(edit) {
 function ppSchedTab(t) { _pp.schedTab = t; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
 function ppSchedZoom(z) { _pp.zoom = z; ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
 
+function ppDurCellHtml(t, edit) {
+  const u = ppDurUnit(t), v = ppDurFromDays(ppTaskDur(t), u);
+  if (!edit) return '<span class="pp-cell-ro">' + escHtml(ppDurText(t)) + '</span>';
+  const unitSel = `<select class="pp-cell pp-dur-unit" data-col="durunit" title="${escAttr(_ppDurUnitMissing ? PP_DUR_UNIT_MISSING_MSG : 'Shown in minutes, hours or working days (' + ppHoursPerDay().toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' h = 1 day)')}" ${_ppDurUnitMissing ? 'disabled' : ''} onchange="ppGridSet(${+t.id}, 'durunit', this.value)">${Object.keys(PP_DUR_UNITS).map(k => `<option value="${k}" ${k === u ? 'selected' : ''}>${PP_DUR_UNITS[k].label}</option>`).join('')}</select>`;
+  return `<span class="pp-dur"><input class="pp-cell" data-col="duration" type="number" min="0" step="${u === 'd' ? 1 : u === 'h' ? 0.5 : 5}" value="${escAttr(v)}" style="text-align:right;" onchange="ppGridSet(${+t.id}, 'duration', this.value, this.nextElementSibling.value)" onkeydown="ppGridKey(event, this)">${unitSel}</span>`;
+}
 function ppGridHtml(edit, print) {
   const S = ppSched(), rows = ppGridRows(), base = !!_pp.plan.baseline_set_at, today = _today();
   const inp = (t, col, type, value, extra, may) => may && !print
     ? `<input class="pp-cell" data-col="${col}" type="${type}" value="${escAttr(value == null ? '' : value)}" ${extra || ''} onchange="ppGridSet(${+t.id}, '${col}', this.value)" onkeydown="ppGridKey(event, this)">`
     : `<span class="pp-cell-ro">${escHtml(type === 'date' && value ? ppDate(value) : (value == null ? '' : String(value)))}</span>`;
-  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 52 + 122 + 122 + (predsCol ? 90 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
-  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:52px;" title="Working days">Dur</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:90px;" title="Task numbers, e.g. 3FS+2d">Pred.</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
+  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 110 + 122 + 122 + (predsCol ? 90 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
+  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:90px;" title="Predecessors — the tasks this one waits for. Click a cell to pick them.">Pred.</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
   const body = rows.map(r => {
     if (r.kind === 'ms') {
       const m = r.ms, ts = r.tasks, ss = ts.map(t => S.byId[+t.id]).filter(Boolean);
@@ -8785,10 +8898,10 @@ function ppGridHtml(edit, print) {
     return `<tr class="pp-grid-task ${crit ? 'pp-crit' : ''} ${done ? 'pp-done' : ''}" data-task-id="${+t.id}" style="height:${PP_ROW_H}px;" ${edit && !print ? `draggable="true" ondragstart="ppRowDragStart(event, ${+t.id})" ondragover="ppRowDragOver(event)" ondragleave="ppRowDragEnd()" ondrop="ppRowDrop(event, ${+t.id})" ondragend="ppRowDragEnd()"` : ''}>
       <td style="color:var(--text3);text-align:right;cursor:${edit && !print ? 'grab' : 'default'};">${r.n}</td>
       <td style="padding-left:18px;">${inp(t, 'name', 'text', t.name, 'style="font-weight:600;"', edit)}</td>
-      <td>${inp(t, 'duration', 'number', ppTaskDur(t), 'min="0" step="1" style="text-align:right;"', may)}</td>
+      <td>${ppDurCellHtml(t, may && !print)}</td>
       <td>${pin && !print ? '<span class="pp-pin" title="Pinned to this date — click to let it follow its predecessors" onclick="ppGridSet(' + (+t.id) + ", 'pin', false)\">📌</span>" : ''}${inp(t, 'start', 'date', s.es || t.start_date || '', '', may && !done)}</td>
       <td>${inp(t, 'finish', 'date', s.ef || t.due_date || '', '', may && !done)}</td>
-      ${_ppLinksMissing && print ? '' : '<td>' + inp(t, 'preds', 'text', ppPredText(t), 'placeholder="—" ' + (_ppLinksMissing ? 'disabled' : ''), edit) + '</td>'}
+      ${_ppLinksMissing && print ? '' : '<td>' + ppPredCellHtml(t, edit && !print) + '</td>'}
       <td>${edit && !print ? `<select class="pp-cell" data-col="assignee" onchange="ppGridSet(${+t.id}, 'assignee', this.value)">${ppPeopleOptions(t.assignee_id, false)}</select>` : '<span class="pp-cell-ro">' + escHtml(ppPersonName(t.assignee_id) || '') + '</span>'}</td>
       <td>${inp(t, 'pct', 'number', ppPct(t), 'min="0" max="100" step="5" style="text-align:right;"', may)}</td>
       <td>${inp(t, 'hours', 'number', t.est_hours != null ? +t.est_hours : '', 'min="0" step="0.5" style="text-align:right;"', edit)}</td>
@@ -8848,7 +8961,7 @@ function ppGanttHtml(edit) {
     if (t.baseline_start && t.baseline_end) parts.push(`<rect x="${x(t.baseline_start)}" y="${y + PP_ROW_H - 6}" width="${Math.max(2, x(ppIsoAdd(t.baseline_end, 1)) - x(t.baseline_start))}" height="3" fill="#94A3B8"/>`);
     const fill = done ? '#94A3B8' : crit ? '#DC2626' : '#2F6FB5', pct = ppPct(t);
     parts.push(`<g class="pp-bar ${may ? 'pp-bar-live' : ''}" data-task-id="${+t.id}" transform="translate(0,0)">
-      <rect class="pp-bar-body" x="${x1}" y="${y + 6}" width="${x2 - x1}" height="${PP_ROW_H - 12}" rx="3" fill="${fill}" opacity="0.85" ${may ? `onmousedown="ppBarDown(event, ${+t.id}, 'move')"` : ''}><title>${escHtml(t.name)} · ${ppDate(s.es)} → ${ppDate(s.ef)} · ${s.dur} d · slack ${s.slack} d${t.constraint_type === 'must_start_on' ? ' · pinned' : ''}${may ? (edit && !_ppLinksMissing ? '\nDrag sideways to move · drag onto another task to link it' : '\nDrag sideways to move') : ''}</title></rect>
+      <rect class="pp-bar-body" x="${x1}" y="${y + 6}" width="${x2 - x1}" height="${PP_ROW_H - 12}" rx="3" fill="${fill}" opacity="0.85" ${may ? `onmousedown="ppBarDown(event, ${+t.id}, 'move')"` : ''}><title>${escHtml(t.name)} · ${ppDate(s.es)} → ${ppDate(s.ef)} · ${ppDurText(t)} · slack ${s.slack} d${t.constraint_type === 'must_start_on' ? ' · pinned' : ''}${may ? (edit && !_ppLinksMissing ? '\nDrag sideways to move · drag onto another task to link it' : '\nDrag sideways to move') : ''}</title></rect>
       ${pct ? `<rect x="${x1}" y="${y + 6}" width="${Math.round((x2 - x1) * pct / 100)}" height="${PP_ROW_H - 12}" rx="3" fill="#0F172A" opacity="0.28" pointer-events="none"/>` : ''}
       ${may ? `<rect class="pp-bar-resize" x="${x2 - 5}" y="${y + 6}" width="6" height="${PP_ROW_H - 12}" fill="transparent" onmousedown="ppBarDown(event, ${+t.id}, 'resize')"/>` : ''}
       ${edit && !_ppLinksMissing ? `<circle class="pp-bar-link" cx="${x2 + 6}" cy="${y + PP_ROW_H / 2}" r="4" fill="#fff" stroke="#64748B" onmousedown="ppBarDown(event, ${+t.id}, 'link')"><title>Drag onto another task to make it depend on this one</title></circle>` : ''}
@@ -8969,7 +9082,7 @@ function ppPertHtml(edit) {
       <line x1="${x}" y1="${y + 19}" x2="${x + BW}" y2="${y + 19}" stroke="${stroke}" stroke-width="0.6"/>
       <text x="${x + 6}" y="${y + 33}" font-size="9.5" fill="#475569">ES ${ppDate(s.es)}</text><text x="${x + BW - 6}" y="${y + 33}" font-size="9.5" fill="#475569" text-anchor="end">EF ${ppDate(s.ef)}</text>
       <text x="${x + 6}" y="${y + 47}" font-size="9.5" fill="#475569">LS ${ppDate(s.ls)}</text><text x="${x + BW - 6}" y="${y + 47}" font-size="9.5" fill="#475569" text-anchor="end">LF ${ppDate(s.lf)}</text>
-      <text x="${x + 6}" y="${y + 64}" font-size="10" font-weight="700" fill="${stroke}">${s.dur} d</text><text x="${x + BW - 6}" y="${y + 64}" font-size="10" fill="${crit ? '#DC2626' : '#166534'}" text-anchor="end">slack ${s.slack} d</text>
+      <text x="${x + 6}" y="${y + 64}" font-size="10" font-weight="700" fill="${stroke}">${ppDurText(t)}</text><text x="${x + BW - 6}" y="${y + 64}" font-size="10" fill="${crit ? '#DC2626' : '#166534'}" text-anchor="end">slack ${s.slack} d</text>
     </g>`);
   }));
   const edges = [];
@@ -8987,7 +9100,7 @@ function ppPertHtml(edit) {
     const num = (col, v) => may ? `<input class="pp-cell" type="number" min="0" step="0.5" style="width:60px;text-align:right;" value="${v == null ? '' : escAttr(v)}" onchange="ppPertField(${+t.id}, '${col}', this.value)">` : `<span class="pp-cell-ro">${v == null ? '' : escHtml(v)}</span>`;
     return `<tr style="height:${PP_ROW_H}px;"><td style="color:var(--text3);text-align:right;">${ppTaskNo(t.id)}</td><td style="font-weight:600;text-overflow:ellipsis;">${escHtml(t.name)}</td><td>${num('pert_optimistic', o)}</td><td>${num('pert_likely', m)}</td><td>${num('pert_pessimistic', p)}</td>
       <td style="text-align:right;font-weight:700;">${te != null ? te.toLocaleString('en-US', { maximumFractionDigits: 1 }) : ''}</td><td style="text-align:right;">${sd != null ? (sd * sd).toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}</td>
-      <td style="text-align:right;">${ppTaskDur(t)}</td><td>${te != null && may && Math.round(te) !== ppTaskDur(t) ? `<button class="btn btn-ghost btn-sm" onclick="ppGridSet(${+t.id}, 'duration', ${Math.max(1, Math.round(te))})">Use ${Math.max(1, Math.round(te))} d</button>` : ''}</td></tr>`;
+      <td style="text-align:right;">${ppDurText(t)}</td><td>${te != null && may && Math.round(te) !== ppTaskDur(t) ? `<button class="btn btn-ghost btn-sm" onclick="ppGridSet(${+t.id}, 'duration', ${Math.max(1, Math.round(te))}, 'd')">Use ${Math.max(1, Math.round(te))} d</button>` : ''}</td></tr>`;
   }).join('');
   const critPath = S.order.filter(id => S.byId[id].critical);
   const varSum = tasks.filter(t => critPath.includes(+t.id) && t.pert_optimistic != null && t.pert_pessimistic != null).reduce((a, t) => a + Math.pow((+t.pert_pessimistic - +t.pert_optimistic) / 6, 2), 0);
