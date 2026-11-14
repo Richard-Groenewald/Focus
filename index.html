@@ -8752,9 +8752,10 @@ async function ppGridSet(id, col, value, unit) {
     if (!value) { showStatus('A task needs a start date in the schedule — clear its predecessors or set a date', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }
     const d = ppNextWorking(value), hasPreds = (_pp.links || []).some(l => +l.to_task === +t.id);
     if (d !== value) showStatus(ppDate(value) + ' is not a working day — moved to ' + ppDate(d));
-    body = { start_date: d, duration_days: ppTaskDur(t) };               // keep the length: the finish follows
+    // keep the length: the finish follows. The finish goes in the SAME write — the row's CHECK
+    // (due_date >= start_date) refused a start typed past the old finish (Richard, 2026-11-14, 23514).
+    body = { start_date: d, duration_days: ppTaskDur(t), due_date: ppFinishFrom(d, ppTaskDur(t)) };
     if (hasPreds || t.status === 'done') body.constraint_type = hasPreds ? 'must_start_on' : (t.constraint_type || 'asap');
-    if (t.status === 'done') body.due_date = ppFinishFrom(d, ppTaskDur(t));
     reschedule = true;
   }
   else if (col === 'finish') {
