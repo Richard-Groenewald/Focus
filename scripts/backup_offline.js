@@ -201,7 +201,12 @@ function sha256(file) {
 function writeManifest() {
   step(5, 'manifest and restore guide');
   const guide = path.join(root, 'docs', 'backup', 'RESTORE.md');
-  if (fs.existsSync(guide)) { fs.copyFileSync(guide, path.join(out, 'RESTORE.md')); note(path.join(out, 'RESTORE.md')); }
+  if (fs.existsSync(guide)) {
+    // The same guide twice: Markdown for the repo, and a plain .txt that opens anywhere.
+    fs.copyFileSync(guide, path.join(out, 'RESTORE.md')); note(path.join(out, 'RESTORE.md'));
+    const txt = path.join(out, 'README - what this backup is and how to recover.txt');
+    fs.writeFileSync(txt, fs.readFileSync(guide, 'utf8').replace(/\n/g, '\r\n')); note(txt);
+  }
   const lines = [
     `Focus offline backup — taken ${new Date().toISOString()}`,
     `prod project: ${projectOf(PROD)}    dev project: ${NO_DEV ? '(skipped)' : projectOf(DEV)}`,
