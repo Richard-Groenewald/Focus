@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.39 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.39 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1085,9 +1085,19 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
             </div>
           </div>
 
-          <div class="form-group" style="margin-top:12px;margin-bottom:0;max-width:220px;">
-            <label class="form-label">Expected Order Date</label>
-            <input type="date" id="opp-order-date-general" class="form-control" onchange="rsgSyncOrderDate('general')">
+          <!-- v7.10.39: the two deal dates live on the deal once and are shown here AND in the
+               generator modal (mirrored both ways). The start date gates the revenue grid — months
+               before it are read-only — and a project-revenue deal has no other box for it. -->
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;">
+            <div class="form-group" style="margin-bottom:0;width:220px;">
+              <label class="form-label">Expected Order Date</label>
+              <input type="date" id="opp-order-date-general" class="form-control" onchange="rsgSyncOrderDate('general')">
+            </div>
+            <div class="form-group" style="margin-bottom:0;width:220px;">
+              <label class="form-label">Expected Start Date</label>
+              <input type="date" id="opp-start-date-general" class="form-control" onchange="rsgSyncStartDate('general')" title="The first month of revenue. Months before it are greyed out on the revenue grid.">
+              <div style="font-size:11px;color:var(--text3);margin-top:3px;">First month of revenue — the grid opens from here.</div>
+            </div>
           </div>
           <div class="form-group" id="opp-legacy-desc-group" style="margin-top:16px;margin-bottom:0;">
             <label class="form-label">Description</label>
@@ -1146,7 +1156,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
                   </div>
                   <div class="form-group" style="margin-bottom:8px;">
                     <label class="form-label">Expected Start Date</label>
-                    <input type="date" id="opp-start-date" class="form-control" onchange="rsgRefresh(); buildRevGrid(); recalcGrid();">
+                    <input type="date" id="opp-start-date" class="form-control" onchange="rsgSyncStartDate('gen')">
                   </div>
                 </div>
                 <div class="opp-grid-3">
@@ -6225,7 +6235,7 @@ function _oppClearFields() {
   ['opp-name','opp-notes','opp-ext-notes','opp-margin-pct',
     'opp-order-date','opp-start-date','opp-base-amount','opp-num-months',
     'opp-escalation','opp-lost-date','opp-lost-to','opp-lost-notes',
-    'opp-probability','opp-order-date-general'].forEach(id => {
+    'opp-probability','opp-order-date-general','opp-start-date-general'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.value = ''; if (el.dataset) delete el.dataset.userSet; }
   });
@@ -6811,6 +6821,7 @@ async function initOppForm() {
   if (oppData.order_date) document.getElementById('opp-order-date').value = oppData.order_date;
   rsgSyncOrderDate('gen'); rsgRefresh(); rsgSummary();
   if (oppData.start_date) document.getElementById('opp-start-date').value = oppData.start_date;
+  rsgSyncStartDate('gen', false);
   if (oppData.notes) document.getElementById('opp-notes').value = oppData.notes;
   const extNotesEl = document.getElementById('opp-ext-notes');
   if (extNotesEl && oppData.ext_notes) extNotesEl.value = oppData.ext_notes;
@@ -11523,6 +11534,18 @@ function rsgSyncOrderDate(from) {
   const a = document.getElementById('opp-order-date'), b = document.getElementById('opp-order-date-general');
   if (!a || !b) return;
   if (from === 'general') a.value = b.value; else b.value = a.value;
+}
+// v7.10.39: the start date likewise — one value, two boxes. A change from either box redraws the
+// revenue grid (months before the start date are read-only) and re-reads the generator defaults;
+// the open path passes redraw=false because the grid is built afterwards anyway.
+function rsgSyncStartDate(from, redraw) {
+  const a = document.getElementById('opp-start-date'), b = document.getElementById('opp-start-date-general');
+  if (!a || !b) return;
+  if (from === 'general') a.value = b.value; else b.value = a.value;
+  if (redraw === false) return;
+  const err = checkDatesOrder(document.getElementById('opp-order-date').value, a.value);
+  if (err) showStatus(err + ' — the deal will not save until it is', 'error');
+  rsgRefresh(); buildRevGrid(); recalcGrid();
 }
 async function rsgAutoPopulate() {
   if (oppRevLocked) { showStatus('Forecast is locked — secured deals need a senior-approved re-forecast.', 'error'); return; }
