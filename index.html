@@ -869,7 +869,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.37 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.38 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +908,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.37 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.38 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7795,6 +7795,7 @@ async function ppSandboxCopy(planId) {
       const r = await api('project_tasks', 'POST', body);
       tMap[t.id] = +r[0].id;
     }
+    for (const m of ms) if (m.task_id && tMap[m.task_id] && msMap[m.id]) await api('project_milestones', 'PATCH', { task_id: tMap[m.task_id] }, 'id=eq.' + msMap[m.id]).catch(() => {});   // v7.10.38
     for (const l of links) {
       if (!tMap[l.from_task] || !tMap[l.to_task]) continue;
       await api('project_task_links', 'POST', { plan_id: +plan.id, from_task: tMap[l.from_task], to_task: tMap[l.to_task], link_type: l.link_type || 'FS', lag_days: l.lag_days || 0, created_by: me }).catch(() => {});
@@ -7847,6 +7848,7 @@ async function openProjectPlan(planId, from) {
     }
     allData['people'] = people;
     _ppDurUnitMissing = !MOCK && ts.length > 0 && !('duration_unit' in ts[0]);
+    _ppMsTaskMissing = !MOCK && ms.length > 0 && !('task_id' in ms[0]);   // v7.10.38: milestones tied to a task need sql/add_milestone_task.sql
     Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people, links: links || [], sched: null, affil,
                          draft: !!deal && !dealIsSecuredStage(deal.stage_id),
                          holidays: new Set((hols || []).filter(h => h.active !== false).map(h => String(h.holiday_date).slice(0, 10))) });
@@ -7936,6 +7938,51 @@ function ppRepaintSection(id, html) { const el = document.getElementById(id); if
 function ppBusy() { if (_pp.edit) { showStatus('Save or cancel the open row first', 'error'); return true; } if (_pp.teamNew) { showStatus('Finish or cancel the new person first', 'error'); return true; } return false; }
 
 // ── Milestones ────────────────────────────────────────────────────────────────
+// ── v7.10.38: a milestone tied to a task ──────────────────────────────────────
+// project_milestones.task_id (sql/add_milestone_task.sql) names the task whose completion the
+// milestone marks. The milestone's due_date and status are WRITTEN from the task — due = the task's
+// scheduled finish, status = done when the task is done — by ppMsSync(), the one writer, called after
+// every task change that can move a finish or a status (the schedule commit, the status writer, the
+// List editor's save, a task delete). So the Projects page, the deal tab and ppHealth keep reading the
+// milestone row as before, and the Gantt diamond sits on the task's finish.
+let _ppMsTaskMissing = false;
+const PP_MS_TASK_MISSING_MSG = 'Tying a milestone to a task needs sql/add_milestone_task.sql on this database.';
+function ppMsTask(m) { return m && m.task_id ? _pp.tasks.find(t => +t.id === +m.task_id) || null : null; }
+function ppMsOfTask(taskId) { return _pp.milestones.find(m => +m.task_id === +taskId) || null; }
+function ppMsTaskFinish(t) { if (!t) return null; let s = null; try { s = ppSched().byId[+t.id]; } catch (e) {} return (s && s.ef) || t.due_date || null; }
+async function ppMsSync(opts) {
+  const now = new Date().toISOString(), writes = [];
+  _pp.milestones.forEach(m => {
+    const t = ppMsTask(m); if (!t) return;
+    const due = ppMsTaskFinish(t), done = t.status === 'done';
+    const body = {};
+    if ((m.due_date || null) !== (due || null)) body.due_date = due;
+    if (done && m.status !== 'done') { body.status = 'done'; body.completed_at = t.completed_at || now; }
+    if (!done && m.status === 'done') { body.status = 'open'; body.completed_at = null; }
+    if (Object.keys(body).length) { body.updated_at = now; writes.push({ m, body }); }
+  });
+  if (!writes.length) return false;
+  try { await Promise.all(writes.map(w => api('project_milestones', 'PATCH', w.body, 'id=eq.' + w.m.id).then(rows => Object.assign(w.m, rows && rows[0] ? rows[0] : w.body)))); }
+  catch (e) { showStatus('A milestone did not follow its task: ' + e.message, 'error'); }
+  if (!(opts && opts.noPaint)) ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit()));
+  return true;
+}
+// "Make this a milestone" on a task: a milestone named after the task, tied to it.
+async function ppTaskMakeMilestone(taskId) {
+  if (!ppCanEdit() || ppBusy()) return;
+  const t = _pp.tasks.find(x => +x.id === +taskId); if (!t) return;
+  if (_ppMsTaskMissing) { showStatus(PP_MS_TASK_MISSING_MSG, 'error'); return; }
+  const have = ppMsOfTask(t.id); if (have) { showStatus('"' + have.name + '" already marks the completion of this task'); return; }
+  const now = new Date().toISOString(), done = t.status === 'done';
+  const sort = _pp.milestones.reduce((mx, m) => Math.max(mx, +m.sort_order || 0), 0) + 1;
+  try {
+    const rows = await api('project_milestones', 'POST', { plan_id: +_pp.plan.id, name: t.name, task_id: +t.id, due_date: ppMsTaskFinish(t), owner_id: t.assignee_id || _pp.plan.owner_id || null,
+      status: done ? 'done' : 'open', completed_at: done ? (t.completed_at || now) : null, sort_order: sort, created_by: currentUser.personId });
+    _pp.milestones.push(rows[0]);
+    showStatus('Milestone "' + t.name + '" marks the completion of task ' + ppTaskNo(t.id));
+    ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
+  } catch (e) { showStatus('Milestone not created: ' + (/42703|PGRST204|task_id/.test(e.message) ? PP_MS_TASK_MISSING_MSG : e.message), 'error'); }
+}
 function ppMilestonesHtml(edit) {
   const ms = _pp.milestones, today = _today();
   const billing = ms.reduce((t, m) => t + (+m.billing_pct || 0), 0);
@@ -7946,14 +7993,14 @@ function ppMilestonesHtml(edit) {
     const late = m.status !== 'done' && m.due_date && String(m.due_date).slice(0, 10) < today;
     return `<tr class="pp-ms-row" data-ms-id="${+m.id}" draggable="${edit ? 'true' : 'false'}" ondragstart="ppMsDragStart(event, ${+m.id})" ondragover="ppMsDragOver(event, ${+m.id})" ondragleave="ppMsDragLeave(event)" ondrop="ppMsDrop(event, ${+m.id})" ondragend="ppMsDragEnd(event)" style="${m.status === 'done' ? 'color:var(--text3);' : ''}">
       <td style="width:22px;color:var(--text3);cursor:${edit ? 'grab' : 'default'};" title="${edit ? 'Drag to reorder' : ''}">${edit ? '⠿' : ''}</td>
-      <td style="font-weight:600;${m.status === 'done' ? 'text-decoration:line-through;' : ''}">${escHtml(m.name)}${m.notes ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;white-space:pre-wrap;">' + escHtml(m.notes) + '</div>' : ''}</td>
+      <td style="font-weight:600;${m.status === 'done' ? 'text-decoration:line-through;' : ''}">${escHtml(m.name)}${ppMsTask(m) ? '<div class="pp-ms-tied" style="font-size:11px;color:var(--navy);font-weight:normal;text-decoration:none;">◆ on completion of task ' + ppTaskNo(ppMsTask(m).id) + ' · ' + escHtml(ppMsTask(m).name) + '</div>' : ''}${m.notes ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;white-space:pre-wrap;">' + escHtml(m.notes) + '</div>' : ''}</td>
       <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${m.due_date ? ppDate(m.due_date) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
       <td>${escHtml(ppPersonName(m.owner_id) || '—')}</td>
       <td style="text-align:right;">${m.billing_pct != null ? (+m.billing_pct).toLocaleString('en-US', { maximumFractionDigits: 2 }) + '%' : '—'}</td>
       <td style="white-space:nowrap;">${tl.length ? done + ' of ' + tl.length + ' done' : '<span style="color:var(--text3);">none</span>'}</td>
       <td style="white-space:nowrap;">${m.status === 'done' ? '<span class="badge" style="background:#DCFCE7;color:#166534;">Done' + (m.completed_at ? ' · ' + ppDate(m.completed_at) : '') + '</span>' : '<span class="badge" style="background:#DBEAFE;color:#1E40AF;">Open</span>'}</td>
       <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppMilestoneEdit(${+m.id})">Edit</button>
-        <button class="btn btn-ghost btn-sm" onclick="ppMilestoneToggleDone(${+m.id})">${m.status === 'done' ? 'Reopen' : 'Mark done'}</button>` : ''}</td>
+        ${ppMsTask(m) ? '<span style="font-size:11px;color:var(--text3);" title="Mark the task done and the milestone follows">follows its task</span>' : `<button class="btn btn-ghost btn-sm" onclick="ppMilestoneToggleDone(${+m.id})">${m.status === 'done' ? 'Reopen' : 'Mark done'}</button>`}` : ''}</td>
     </tr>`;
   };
   return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
@@ -7975,7 +8022,8 @@ function ppMilestoneEditorRow(m) {
   return `<tr class="pp-editor" data-editor="milestone">
     <td></td>
     <td><input class="form-control" id="pp-ms-name" placeholder="Milestone name" value="${escAttr(d.name || '')}" data-autofocus oninput="_pp.edit.draft.name=this.value"><input class="form-control" id="pp-ms-notes" placeholder="Notes (optional)" style="margin-top:4px;font-size:12px;" value="${escAttr(d.notes || '')}" oninput="_pp.edit.draft.notes=this.value"></td>
-    <td><input type="date" class="form-control" id="pp-ms-due" value="${escAttr(d.due_date || '')}" onchange="_pp.edit.draft.due_date=this.value"></td>
+    <td><input type="date" class="form-control" id="pp-ms-due" value="${escAttr((d.task_id ? ppMsTaskFinish(_pp.tasks.find(t => +t.id === +d.task_id)) : d.due_date) || '')}" ${d.task_id ? 'disabled title="Follows the task\'s finish"' : ''} onchange="_pp.edit.draft.due_date=this.value">
+      <select class="form-control" id="pp-ms-task" style="margin-top:4px;font-size:12px;" title="${escAttr(_ppMsTaskMissing ? PP_MS_TASK_MISSING_MSG : 'Tie the milestone to a task: its due date and status then follow that task')}" ${_ppMsTaskMissing ? 'disabled' : ''} onchange="ppMsEditorTask(this.value)"><option value="">Own date</option>${ppGridRows().filter(r => r.kind === 'task').map(r => { const other = ppMsOfTask(r.t.id); const taken = other && +other.id !== +(_pp.edit.id || 0); return `<option value="${+r.t.id}" ${+d.task_id === +r.t.id ? 'selected' : ''} ${taken ? 'disabled' : ''}>On completion of ${r.n} · ${escHtml(r.t.name)}${taken ? ' (already a milestone)' : ''}</option>`; }).join('')}</select></td>
     <td><select class="form-control" id="pp-ms-owner" onchange="_pp.edit.draft.owner_id=this.value?+this.value:null">${ppPeopleOptions(d.owner_id, true)}</select></td>
     <td><input type="number" class="form-control" id="pp-ms-billing" min="0" max="100" step="0.01" style="text-align:right;width:90px;" placeholder="—" value="${d.billing_pct != null ? escAttr(d.billing_pct) : ''}" oninput="_pp.edit.draft.billing_pct=this.value===''?null:+this.value"></td>
     <td colspan="2" style="color:var(--text3);font-size:12px;">${m ? '' : 'New milestone'}</td>
@@ -7985,8 +8033,16 @@ function ppMilestoneEditorRow(m) {
       ${m ? `<button class="btn btn-danger btn-sm" onclick="ppMilestoneDelete(${+m.id})">Delete</button>` : ''}
     </td></tr>`;
 }
-function ppMilestoneAdd() { if (!ppCanEdit() || ppBusy()) return; _pp.edit = { kind: 'milestone', id: null, draft: { name: '', due_date: '', owner_id: _pp.plan.owner_id || null, billing_pct: null, notes: '' } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
-function ppMilestoneEdit(id) { if (!ppCanEdit() || ppBusy()) return; const m = _pp.milestones.find(x => +x.id === +id); if (!m) return; _pp.edit = { kind: 'milestone', id: +id, draft: { name: m.name, due_date: m.due_date || '', owner_id: m.owner_id, billing_pct: m.billing_pct, notes: m.notes || '' } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
+function ppMsEditorTask(v) {
+  if (!_pp.edit || _pp.edit.kind !== 'milestone') return;
+  const d = _pp.edit.draft; d.task_id = v ? +v : null;
+  const t = d.task_id ? _pp.tasks.find(x => +x.id === d.task_id) : null;
+  if (t && !String(d.name || '').trim()) d.name = t.name;
+  ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
+  const el = document.getElementById('pp-ms-task'); if (el) el.focus();
+}
+function ppMilestoneAdd() { if (!ppCanEdit() || ppBusy()) return; _pp.edit = { kind: 'milestone', id: null, draft: { name: '', due_date: '', owner_id: _pp.plan.owner_id || null, billing_pct: null, notes: '', task_id: null } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
+function ppMilestoneEdit(id) { if (!ppCanEdit() || ppBusy()) return; const m = _pp.milestones.find(x => +x.id === +id); if (!m) return; _pp.edit = { kind: 'milestone', id: +id, draft: { name: m.name, due_date: m.due_date || '', owner_id: m.owner_id, billing_pct: m.billing_pct, notes: m.notes || '', task_id: m.task_id || null } }; ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); const el = document.getElementById('pp-ms-name'); if (el) el.focus(); }
 function ppEditCancel() { _pp.edit = null; ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); }
 async function ppMilestoneSave() {
   if (!_pp.edit || _pp.edit.kind !== 'milestone' || _pp.busy) return;
@@ -7994,6 +8050,14 @@ async function ppMilestoneSave() {
   if (!name) { showStatus('The milestone needs a name', 'error'); return; }
   if (d.billing_pct != null && (isNaN(d.billing_pct) || d.billing_pct < 0 || d.billing_pct > 100)) { showStatus('Billing % must be between 0 and 100', 'error'); return; }
   const body = { name, due_date: d.due_date || null, owner_id: d.owner_id || null, billing_pct: d.billing_pct == null ? null : +d.billing_pct, notes: String(d.notes || '').trim() || null, updated_at: new Date().toISOString() };
+  // v7.10.38: tied to a task → the due date and status come from the task, not the boxes
+  const tied = d.task_id ? _pp.tasks.find(t => +t.id === +d.task_id) : null;
+  if (d.task_id && !tied) { showStatus('That task is no longer on the plan', 'error'); return; }
+  if (d.task_id && _ppMsTaskMissing) { showStatus(PP_MS_TASK_MISSING_MSG, 'error'); return; }
+  const other = d.task_id ? ppMsOfTask(d.task_id) : null;
+  if (other && +other.id !== +(_pp.edit.id || 0)) { showStatus('"' + other.name + '" already marks the completion of that task', 'error'); return; }
+  if (!_ppMsTaskMissing) body.task_id = d.task_id || null;
+  if (tied) { body.due_date = ppMsTaskFinish(tied); body.status = tied.status === 'done' ? 'done' : 'open'; body.completed_at = tied.status === 'done' ? (tied.completed_at || body.updated_at) : null; }
   _pp.busy = true;
   try {
     if (_pp.edit.id) {
@@ -8007,12 +8071,13 @@ async function ppMilestoneSave() {
     _pp.edit = null;
     showStatus('Milestone saved');
     ppRepaintSection('pp-milestones', ppMilestonesHtml(true)); ppRepaintSection('pp-tasks', ppTasksHtml(true));
-  } catch (e) { showStatus('Milestone not saved: ' + e.message, 'error'); }
+  } catch (e) { showStatus('Milestone not saved: ' + (/42703|PGRST204/.test(e.message) && /task_id/.test(e.message) ? PP_MS_TASK_MISSING_MSG : e.message), 'error'); }
   finally { _pp.busy = false; }
 }
 async function ppMilestoneToggleDone(id) {
   if (!ppCanEdit() || ppBusy()) return;
   const m = _pp.milestones.find(x => +x.id === +id); if (!m) return;
+  if (ppMsTask(m)) { showStatus('This milestone follows task ' + ppTaskNo(m.task_id) + ' — mark the task done instead', 'error'); return; }
   const open = _pp.tasks.filter(t => +t.milestone_id === +id && t.status !== 'done').length;
   if (m.status !== 'done' && open) {
     const ok = await confirmDialog({ title: 'Mark the milestone done?', message: open + ' of its tasks ' + (open === 1 ? 'is' : 'are') + ' not done yet. Mark the milestone done anyway? The tasks stay as they are.', confirmLabel: 'Mark done' });
@@ -8126,7 +8191,7 @@ function ppTaskListHtml(edit) {
       <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${t.due_date ? ppDate(t.due_date) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
       <td style="text-align:right;">${t.est_hours != null ? (+t.est_hours).toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—'}</td>
       <td>${ppTaskStatusSelect(t)}</td>
-      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppTaskEdit(${+t.id})">Edit</button>` : ''}</td>
+      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppTaskEdit(${+t.id})">Edit</button>${ppMsOfTask(t.id) ? '<span style="font-size:11px;color:var(--navy);margin-left:4px;" title="A milestone marks the completion of this task">◆</span>' : `<button class="btn btn-ghost btn-sm" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◆ Milestone</button>`}` : ''}</td>
     </tr>`;
   };
   const newRow = _pp.edit && _pp.edit.kind === 'task' && !_pp.edit.id ? ppTaskEditorRow(null) : '';
@@ -8194,6 +8259,7 @@ async function ppTaskSave() {
     _pp.edit = null;
     showStatus('Task saved');
     ppSchedDirty();
+    await ppMsSync({ noPaint: true });
     ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
   } catch (e) { showStatus('Task not saved: ' + e.message, 'error'); }
   finally { _pp.busy = false; }
@@ -8206,6 +8272,7 @@ async function ppTaskDelete(id) {
   try {
     await api('project_tasks', 'DELETE', null, 'id=eq.' + id);
     _pp.tasks = _pp.tasks.filter(x => +x.id !== +id); _pp.links = (_pp.links || []).filter(l => +l.from_task !== +id && +l.to_task !== +id); _pp.edit = null; ppSchedDirty();
+    _pp.milestones.forEach(m => { if (+m.task_id === +id) m.task_id = null; });   // the database sets it NULL on delete; a milestone keeps its last date
     showStatus('Task deleted');
     ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
   } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
@@ -8221,7 +8288,7 @@ async function ppTaskSetStatus(id, status) {
   const was = { status: t.status, completed_at: t.completed_at };
   Object.assign(t, body); ppSchedDirty();
   ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit()));
-  try { const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + id); if (rows && rows[0]) Object.assign(t, rows[0]); }
+  try { const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + id); if (rows && rows[0]) Object.assign(t, rows[0]); await ppMsSync(); }
   catch (e) { Object.assign(t, was); showStatus('Not saved: ' + e.message, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
 }
 function ppBoardHtml(edit) {
@@ -8589,6 +8656,7 @@ async function ppSchedCommit(opts) {
     } catch (e) { showStatus('Not all tasks were rescheduled: ' + e.message, 'error'); }
   }
   ppSchedDirty();
+  await ppMsSync({ noPaint: true });   // v7.10.38: a tied milestone's date follows the task's finish
   if (!(opts && opts.noPaint)) { ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
 }
 let _ppSchedNoSlack = false;   // a database on the phase 1 tables only: dates still write, slack is not stored
@@ -8910,7 +8978,7 @@ function ppGridHtml(edit, print) {
       <td>${inp(t, 'pct', 'number', ppPct(t), 'min="0" max="100" step="5" style="text-align:right;"', may)}</td>
       <td>${inp(t, 'hours', 'number', t.est_hours != null ? +t.est_hours : '', 'min="0" step="0.5" style="text-align:right;"', edit)}</td>
       ${base ? '<td style="text-align:right;' + (slip > 0 ? 'color:var(--red);font-weight:700;' : slip < 0 ? 'color:#166534;' : '') + '">' + (slip == null ? '' : (slip > 0 ? '+' : '') + slip) + '</td>' : ''}
-      ${print ? '' : `<td style="white-space:nowrap;">${edit ? `<span class="pp-ic" title="Outdent (no milestone)" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent under the milestone above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>` : ''}</td>`}
+      ${print ? '' : `<td style="white-space:nowrap;">${edit ? `<span class="pp-ic" title="Outdent (no milestone)" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent under the milestone above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>${ppMsOfTask(t.id) ? '<span class="pp-ic" style="color:var(--navy);cursor:default;" title="A milestone marks the completion of this task">◆</span>' : `<span class="pp-ic" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◇</span>`}` : ''}</td>`}
     </tr>`;
   }).join('');
   return `<table class="pp-grid" id="pp-grid" style="width:${tw}px;"><thead>${head}</thead><tbody>${body}${!rows.some(r => r.kind === 'task') ? `<tr style="height:${PP_ROW_H}px;"><td colspan="12" style="color:var(--text3);text-align:center;">No tasks yet${edit ? ' — add one with + Task' : ''}.</td></tr>` : ''}</tbody></table>`;
@@ -8956,7 +9024,7 @@ function ppGanttHtml(edit) {
     if (r.kind === 'ms') {
       const ss = r.tasks.map(t => S.byId[+t.id]).filter(Boolean);
       if (ss.length) { const es = ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es), ef = ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef); parts.push(`<rect x="${x(es)}" y="${y + 9}" width="${Math.max(2, x(ppIsoAdd(ef, 1)) - x(es))}" height="6" fill="#003057" rx="1"/>`); }
-      if (r.ms && r.ms.due_date) { const cx = x(r.ms.due_date) + R.dayW / 2, cy = y + PP_ROW_H / 2, done = r.ms.status === 'done'; parts.push(`<polygon class="pp-ms-diamond" data-ms-id="${+r.ms.id}" points="${cx},${cy - 7} ${cx + 7},${cy} ${cx},${cy + 7} ${cx - 7},${cy}" fill="${done ? '#166534' : r.ms.due_date < today ? '#DC2626' : '#003057'}"><title>${escHtml(r.ms.name)} · due ${ppDate(r.ms.due_date)}</title></polygon>`); }
+      if (r.ms && r.ms.due_date) { const cx = x(r.ms.due_date) + R.dayW / 2, cy = y + PP_ROW_H / 2, done = r.ms.status === 'done'; parts.push(`<polygon class="pp-ms-diamond" data-ms-id="${+r.ms.id}" points="${cx},${cy - 7} ${cx + 7},${cy} ${cx},${cy + 7} ${cx - 7},${cy}" fill="${done ? '#166534' : r.ms.due_date < today ? '#DC2626' : '#003057'}"><title>${escHtml(r.ms.name)} · due ${ppDate(r.ms.due_date)}${ppMsTask(r.ms) ? ' · on completion of task ' + ppTaskNo(r.ms.task_id) : ''}</title></polygon>`); }
       return;
     }
     const t = r.t, s = S.byId[+t.id]; if (!s) return;
@@ -9082,7 +9150,7 @@ function ppPertHtml(edit) {
     const live = edit && !_ppLinksMissing;
     parts.push(`<g class="pp-pert-node ${live ? 'pp-pert-live' : ''}" data-task-id="${+t.id}" data-ax="${x + BW}" data-ay="${y + BH / 2}" ${live ? `onmousedown="ppPertDown(event, ${+t.id})"` : ''}>
       <rect x="${x}" y="${y}" width="${BW}" height="${BH}" rx="4" fill="${done ? '#F8FAFC' : '#fff'}" stroke="${stroke}" stroke-width="${crit ? 2.5 : 1.2}">${live ? '<title>Drag onto another task to make it depend on this one</title>' : ''}</rect>
-      <text x="${x + 6}" y="${y + 14}" font-size="10" font-weight="700" fill="${stroke}">${ppTaskNo(t.id)}. ${escHtml(t.name.length > 24 ? t.name.slice(0, 23) + '…' : t.name)}<title>${escHtml(t.name)}</title></text>
+      <text x="${x + 6}" y="${y + 14}" font-size="10" font-weight="700" fill="${stroke}">${ppMsOfTask(t.id) ? '◆ ' : ''}${ppTaskNo(t.id)}. ${escHtml(t.name.length > 24 ? t.name.slice(0, 23) + '…' : t.name)}<title>${escHtml(t.name)}${ppMsOfTask(t.id) ? ' · milestone: ' + escHtml(ppMsOfTask(t.id).name) : ''}</title></text>
       <line x1="${x}" y1="${y + 19}" x2="${x + BW}" y2="${y + 19}" stroke="${stroke}" stroke-width="0.6"/>
       <text x="${x + 6}" y="${y + 33}" font-size="9.5" fill="#475569">ES ${ppDate(s.es)}</text><text x="${x + BW - 6}" y="${y + 33}" font-size="9.5" fill="#475569" text-anchor="end">EF ${ppDate(s.ef)}</text>
       <text x="${x + 6}" y="${y + 47}" font-size="9.5" fill="#475569">LS ${ppDate(s.ls)}</text><text x="${x + BW - 6}" y="${y + 47}" font-size="9.5" fill="#475569" text-anchor="end">LF ${ppDate(s.lf)}</text>
