@@ -2,7 +2,7 @@
 -- task, MS Project style — the grid numbers them 1, 1.1, 1.2.1 …, a group's dates, hours, progress
 -- and status are rolled up from the tasks in it by the app (and written onto its row, so every reader
 -- of project_tasks sees them), and a group collapses in the grid, the list and the Gantt.
--- Additive, re-runnable, SQL-editor safe. No DROP (the MCP's migration tool waits on that word).
+-- Additive, re-runnable, SQL-editor safe. Nothing is removed.
 ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS parent_task_id BIGINT REFERENCES project_tasks(id) ON DELETE CASCADE;
 CREATE INDEX IF NOT EXISTS project_tasks_parent_idx ON project_tasks(parent_task_id) WHERE parent_task_id IS NOT NULL;
 COMMENT ON COLUMN project_tasks.parent_task_id IS 'The group (summary task) this task sits in; NULL = a top-level task. A task with children is a group and carries no dates, hours or status of its own — the app writes the roll-up onto it.';
