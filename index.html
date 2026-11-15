@@ -874,7 +874,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.45 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.46 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -913,7 +913,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.45 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.46 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1180,8 +1180,42 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
                   </div>
                 </div>
               </div>
-              <div id="rsg-project" style="display:none;margin-top:10px;padding:18px;text-align:center;color:var(--text3);border:1px dashed var(--border);border-radius:var(--radius);">
-                <strong style="color:var(--navy);">Project revenue generator</strong><br>In development.
+              <!-- v7.10.46: the project revenue generator — a total spread over the project's months, evenly or by
+                   typed shares. It writes the same revenue months as the annuity generator (oppMonths → Save). -->
+              <div id="rsg-project" style="display:none;margin-top:10px;">
+                <div class="opp-grid-3">
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Total Project Value (R, excl. VAT)</label>
+                    <input type="number" id="rsg-prj-total" class="form-control" placeholder="0" oninput="rsgSummary()">
+                  </div>
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Expected Start Date</label>
+                    <input type="date" id="rsg-prj-start" class="form-control" onchange="rsgProjectStartChanged(this.value)">
+                  </div>
+                  <div class="form-group" style="margin-bottom:8px;">
+                    <label class="form-label">Number of Months</label>
+                    <input type="number" id="rsg-prj-months" class="form-control" placeholder="3" min="1" max="60" oninput="rsgSummary()">
+                  </div>
+                </div>
+                <div class="opp-grid-3">
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Spread</label>
+                    <select id="rsg-prj-spread" class="form-control" onchange="rsgProjectSpreadChanged()">
+                      <option value="even">Evenly over the months</option>
+                      <option value="shares">By shares per month</option>
+                    </select>
+                  </div>
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Shares per month (%)</label>
+                    <input type="text" id="rsg-prj-shares" class="form-control" placeholder="e.g. 30 40 30" disabled oninput="rsgSummary()" title="One figure per month, in order — 30 40 30 bills 30% in month 1, 40% in month 2, 30% in month 3. The figures are scaled to add to 100.">
+                  </div>
+                  <div class="form-group" style="margin-bottom:0">
+                    <label class="form-label">Margin %</label>
+                    <input type="number" id="rsg-prj-margin" class="form-control" step="0.1" min="0" max="100" oninput="rsgSummary()">
+                    <div id="rsg-prj-margin-rule" style="font-size:11px;color:var(--text3);margin-top:3px;"></div>
+                  </div>
+                </div>
+                <div style="font-size:11px;color:var(--text3);margin-top:8px;">The month before the start date carries nothing; rounding lands on the last month so the months add to the total exactly. Generate writes the months into the revenue grid — they commit with Save.</div>
               </div>
             </div>
             <div class="modal-footer">
@@ -2388,13 +2422,14 @@ function _mockSeed() {
       { id: 3, name: 'Advisory & Design', active: true, created_at: now },
     ],
     service_sub: [
-      { id: 1, major_id: 1, name: 'On-Site Guarding',           is_recurring: true,  revenue_type: 'annuity', default_margin: 25, min_margin: 20, max_margin: 40, active: true, default_duration: 12, created_at: now },
-      { id: 2, major_id: 1, name: 'Off-Site Control Rooms',     is_recurring: true,  revenue_type: 'annuity', default_margin: 30, min_margin: 20, max_margin: 40, active: true, default_duration: 12, created_at: now },
-      { id: 3, major_id: 2, name: 'Project',                    is_recurring: false, revenue_type: 'project', default_margin: 25, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  created_at: now },
-      { id: 4, major_id: 2, name: 'Maintenance',                is_recurring: true,  revenue_type: 'annuity', default_margin: 30, min_margin: 20, max_margin: 40, active: true, default_duration: 12, created_at: now },
-      { id: 5, major_id: 3, name: 'Design Consulting',          is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  created_at: now },
-      { id: 6, major_id: 3, name: 'Risk Review',                is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  created_at: now },
-      { id: 7, major_id: 3, name: 'Process Design & Definition', is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  created_at: now },
+      // v7.10.46: quote_tool = the default tool for a new quote (null → by family: Off-Site Control Rooms exercises that path)
+      { id: 1, major_id: 1, name: 'On-Site Guarding',           is_recurring: true,  revenue_type: 'annuity', default_margin: 25, min_margin: 20, max_margin: 40, active: true, default_duration: 12, quote_tool: 'manpower', created_at: now },
+      { id: 2, major_id: 1, name: 'Off-Site Control Rooms',     is_recurring: true,  revenue_type: 'annuity', default_margin: 30, min_margin: 20, max_margin: 40, active: true, default_duration: 12, quote_tool: null, created_at: now },
+      { id: 3, major_id: 2, name: 'Project',                    is_recurring: false, revenue_type: 'project', default_margin: 25, min_margin: 15, max_margin: 45, active: true, default_duration: 3,  quote_tool: 'project', created_at: now },
+      { id: 4, major_id: 2, name: 'Maintenance',                is_recurring: true,  revenue_type: 'annuity', default_margin: 30, min_margin: 20, max_margin: 40, active: true, default_duration: 12, quote_tool: 'maintenance', created_at: now },
+      { id: 5, major_id: 3, name: 'Design Consulting',          is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  quote_tool: 'project', created_at: now },
+      { id: 6, major_id: 3, name: 'Risk Review',                is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  quote_tool: 'simple', created_at: now },
+      { id: 7, major_id: 3, name: 'Process Design & Definition', is_recurring: false, revenue_type: 'project', default_margin: 40, min_margin: 15, max_margin: 45, active: true, default_duration: 1,  quote_tool: 'project', created_at: now },
     ],
     research_campaigns: [
       { id: 1, name: 'Mining Sector Q3 Sweep', status: 'Active', created_at: now },
@@ -2535,8 +2570,10 @@ function _mockSeed() {
     quote_post_accessories: [],
     quote_post_training: [],
     proposal_templates: [
-      { id: 1, name: 'Manpower — On-Site Guarding (standard)', service_scope: 'Manpower', is_default: true, active: true, created_at: now },
+      { id: 1, name: 'Manpower — On-Site Guarding (standard)', service_scope: 'Manpower', is_default: true, active: true, quote_tool: 'manpower', created_at: now },
+      { id: 2, name: 'Simple quote (standard)', service_scope: 'Any', is_default: false, active: true, quote_tool: 'simple', created_at: now },   // v7.10.46
     ],
+    quote_simple_lines: [],   // v7.10.46
     proposal_template_sections: [
       { id: 1, template_id: 1, section_key: 'cover',         title: 'Cover',                                  display_order: 1, kind: 'generated',   body: null, mandatory: true,  page_break_before: false },
       { id: 2, template_id: 1, section_key: 'intro_letter',  title: 'Introduction',                           display_order: 2, kind: 'boilerplate', body: 'Dear {{contact.name}}\n\nThank you for the opportunity to submit this proposal for the provision of security services at {{site.name}}. This proposal is valid until {{proposal.valid_until}}.\n\nYours sincerely\n\n{{owner.name}}\n{{xone.legal_name}}', mandatory: true, page_break_before: false },
@@ -2546,6 +2583,13 @@ function _mockSeed() {
       { id: 5, template_id: 1, section_key: 'pricing',       title: 'Pricing',                                display_order: 6, kind: 'generated',   body: null, mandatory: true,  page_break_before: true },
       { id: 6, template_id: 1, section_key: 'terms',         title: 'Terms and conditions',                   display_order: 7, kind: 'boilerplate', body: '• Contract term: {{quote.duration_months}} months from {{quote.start_date}}.\n• Invoices are rendered monthly in advance, payable within 30 days.\n• This proposal is valid until {{proposal.valid_until}}.', mandatory: true, page_break_before: false },
       { id: 7, template_id: 1, section_key: 'acceptance',    title: 'Acceptance',                             display_order: 8, kind: 'generated',   body: null, mandatory: true,  page_break_before: true },
+      // v7.10.46: the simple quote's template — no deployment or shift schedule, a written scope, the line table.
+      { id: 9,  template_id: 2, section_key: 'cover',        title: 'Cover',                   display_order: 1, kind: 'generated',   body: null, mandatory: true,  page_break_before: false },
+      { id: 10, template_id: 2, section_key: 'intro_letter', title: 'Introduction',            display_order: 2, kind: 'boilerplate', body: 'Dear {{contact.name}}\n\nThank you for the opportunity to submit this proposal to {{client.name}}. It sets out the services we propose, the price and the terms on which we would deliver them.', mandatory: true, page_break_before: false },
+      { id: 11, template_id: 2, section_key: 'scope',        title: 'Proposed services',       display_order: 3, kind: 'prompt',      body: 'Describe the services quoted: what will be delivered, where, by whom and by when. Replace this text.', mandatory: true, page_break_before: false },
+      { id: 12, template_id: 2, section_key: 'pricing',      title: 'Pricing',                 display_order: 4, kind: 'generated',   body: null, mandatory: true,  page_break_before: true },
+      { id: 13, template_id: 2, section_key: 'terms',        title: 'Terms and conditions',    display_order: 5, kind: 'boilerplate', body: '• Prices exclude VAT and hold until {{proposal.valid_until}}.\n• Monthly amounts are invoiced monthly in advance; once-off amounts on acceptance unless agreed otherwise.\n• Invoices are payable within 30 days of invoice date.', mandatory: true, page_break_before: false },
+      { id: 14, template_id: 2, section_key: 'acceptance',   title: 'Acceptance',              display_order: 6, kind: 'generated',   body: null, mandatory: true,  page_break_before: true },
     ],
     proposal_documents: [],
     proposal_document_sections: [],
@@ -3351,6 +3395,107 @@ const ORG_DETAIL_FIELDS = [
 ];
 
 // ── Page config ──────────────────────────────────────────
+// ── Quote tools (v7.10.46; defined here, ahead of PAGES, which lists the tools in the Service Sub form)
+// (Richard 2026-11-14, Richard 2026-11-14: "manpower quotes, both control rooms and guarding use the
+// proposal tool we are creating, but other deal types wont … there will be more than one tool") ──────
+// ONE registry: each tool names the editor tabs it shows and the revenue it produces. A quote is STAMPED
+// with the tool that built it (quote_quotes.quote_tool), picked when the quote is created — the service
+// type's quote_tool (Admin → Lookups → Service Sub) is the DEFAULT offered, never a rule (Richard 2026-11-15:
+// the tool is chosen per quote). A tool that is not built yet is stood in for by the simple one, so a
+// project or maintenance quote can still be priced and issued today. Every quote made before this
+// release is a manpower quote (the column's default).
+const QUOTE_TOOLS = {
+  manpower:    { label: 'Manpower quote',    revenue: 'annuity', built: true,
+                 tabs: ['basic', 'posts', 'shifts', 'workforce', 'contract', 'service', 'mobility', 'pricing', 'proposal'],
+                 blurb: 'Posts, shifts, the labour engine, support items and Site Mobility — guarding and control rooms.' },
+  project:     { label: 'Project quote',     revenue: 'project', built: false, tabs: ['basic', 'simple', 'proposal'],
+                 blurb: 'Priced lines or phases with milestone billing. Not built yet — the simple quote stands in.' },
+  maintenance: { label: 'Maintenance quote', revenue: 'annuity', built: false, tabs: ['basic', 'simple', 'proposal'],
+                 blurb: 'Equipment under cover, call-outs and SLA hours. Not built yet — the simple quote stands in.' },
+  simple:      { label: 'Simple quote',      revenue: 'either',  built: true,  tabs: ['basic', 'simple', 'proposal'],
+                 blurb: 'One or more priced lines, monthly or once-off, and a short proposal — for any deal the richer tools do not fit.' },
+};
+const QUOTE_TOOL_KEYS = Object.keys(QUOTE_TOOLS);
+const PB_TOOL_MISSING_MSG = 'Quote tools need sql/add_quote_tools.sql on this database';
+let _pbToolColumn = null;      // quote_quotes.quote_tool on this database: null = not known yet, true / false once a row has been seen
+let _pbSimpleMissing = false;  // quote_simple_lines absent (404 / PGRST205)
+let pbSimpleLines = [];        // the open quote's simple lines
+function quoteToolKey(k) { return QUOTE_TOOL_KEYS.includes(k) ? k : null; }
+function quoteToolLabel(k) { return (QUOTE_TOOLS[k] || QUOTE_TOOLS.simple).label; }
+// The tool that built a quote. A row without the column (pre-SQL database) is a manpower quote.
+function quoteToolOf(q) { return quoteToolKey(q && q.quote_tool) || 'manpower'; }
+// The tool the editor RUNS for a quote: an unbuilt tool is stood in for by the simple one.
+function quoteToolRun(q) { const k = quoteToolOf(q); return QUOTE_TOOLS[k].built ? k : 'simple'; }
+function pbToolReady() { return !!MOCK || !!(pbQ && 'quote_tool' in pbQ); }
+function pbToolTabs() { return QUOTE_TOOLS[quoteToolRun(pbQ)].tabs; }
+// The DEFAULT tool for a service type: its own quote_tool when set; else manpower for an annuity type in
+// the Manpower family (judged by the family's name, else the type's), else simple. No service type → simple.
+function quoteToolDefaultFor(sub) {
+  if (!sub) return 'simple';
+  const own = quoteToolKey(sub.quote_tool); if (own) return own;
+  if (rsgRevenueType(sub) !== 'annuity') return 'simple';
+  const major = (allData['service_major'] || []).find(m => +m.id === +sub.major_id);
+  const manpower = major ? /manpower/i.test(major.name || '') : /guard|control room/i.test(sub.name || '');
+  return manpower ? 'manpower' : 'simple';
+}
+// The new-quote dialog: a name and the tool, the default marked. Resolves { name, tool } or null.
+function quoteToolDialog(opts) {
+  opts = opts || {};
+  const def = quoteToolKey(opts.defaultTool) || 'simple';
+  const toolOk = opts.toolColumn !== false;
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    const onKey = e => { if (e.key === 'Escape') done(null); };
+    const done = v => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    const opt = k => '<option value="' + k + '"' + (k === def ? ' selected' : '') + '>' + cEsc(QUOTE_TOOLS[k].label) + (k === def ? ' — default' + (opts.defaultWhy ? ' for ' + opts.defaultWhy : '') : '') + (QUOTE_TOOLS[k].built ? '' : ' (not built yet: the simple quote stands in)') + '</option>';
+    wrap.innerHTML =
+      `<div class="modal-overlay" style="z-index:100000;">
+         <div class="modal" style="width:480px;">
+           <div class="modal-header"><div class="modal-title">${cEsc(opts.title || 'New quote')}</div><button class="modal-close" data-act="cancel">×</button></div>
+           <div class="modal-body">
+             <div class="form-group"><label class="form-label">${cEsc(opts.nameLabel || 'Contract name')}</label><input type="text" class="form-control" data-act="name"></div>
+             <div class="form-group" style="margin-bottom:0;"><label class="form-label">Quote tool</label>
+               <select class="form-control" data-act="tool"${toolOk ? '' : ' disabled title="' + cEsc(PB_TOOL_MISSING_MSG) + '"'}>${QUOTE_TOOL_KEYS.map(opt).join('')}</select>
+               <div data-act="blurb" style="font-size:11px;color:var(--text3);margin-top:4px;line-height:1.4;"></div>
+               ${toolOk ? '' : '<div style="font-size:11px;color:#92400E;margin-top:4px;">' + cEsc(PB_TOOL_MISSING_MSG) + ' — every quote is a manpower quote until it runs.</div>'}
+             </div>
+           </div>
+           <div class="modal-footer"><button class="btn btn-secondary" data-act="cancel">Cancel</button><button class="btn btn-primary" data-act="ok">${cEsc(opts.confirmLabel || 'Create')}</button></div>
+         </div>
+       </div>`;
+    const ov = wrap.querySelector('.modal-overlay'), name = wrap.querySelector('[data-act="name"]'), tool = wrap.querySelector('[data-act="tool"]'), blurb = wrap.querySelector('[data-act="blurb"]');
+    const born = Date.now();
+    const paintBlurb = () => { blurb.textContent = QUOTE_TOOLS[tool.value].blurb; };
+    paintBlurb(); tool.addEventListener('change', paintBlurb);
+    ov.addEventListener('mousedown', e => { if (e.target === ov) ov._md = Date.now(); });
+    ov.addEventListener('click', e => { if (e.target === ov && Date.now() - born > 400 && Date.now() - (ov._md || 0) < 300) done(null); });
+    const ok = () => { const n = name.value.trim(); if (!n) { name.focus(); return; } done({ name: n, tool: toolOk ? tool.value : 'manpower' }); };
+    wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.addEventListener('click', () => done(null)));
+    wrap.querySelector('[data-act="ok"]').addEventListener('click', ok);
+    name.addEventListener('keydown', e => { if (e.key === 'Enter') ok(); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    setTimeout(() => name.focus(), 0);
+  });
+}
+// POST a quote with its tool. A database without the column refuses the key (42703 / PGRST204): the
+// quote is then created without it — a manpower quote — and the caller is told.
+async function pbPostQuote(payload, tool) {
+  if (_pbToolColumn !== false) {
+    try { const r = await apiPost('quote_quotes', Object.assign({}, payload, { quote_tool: tool })); _pbToolColumn = true; return r; }
+    catch (e) { if (!/42703|PGRST204|quote_tool/.test((e && e.message) || '')) throw e; _pbToolColumn = false; }
+  }
+  const r = await apiPost('quote_quotes', payload);
+  if (tool !== 'manpower') showStatus(PB_TOOL_MISSING_MSG + ' — created as a manpower quote', 'error');
+  return r;
+}
+function pbNoteToolColumn(rows) { if (rows && rows.length) _pbToolColumn = rows.some(q => 'quote_tool' in q); }
+function pbToolBadge(q) {
+  const k = quoteToolOf(q), run = quoteToolRun(q);
+  return '<span class="badge" style="background:#E8EEF5;color:var(--navy);" title="' + pbEsc(QUOTE_TOOLS[k].blurb) + '">' + pbEsc(quoteToolLabel(k)) + '</span>' +
+    (run !== k ? ' <span class="badge" style="background:#FFF8E6;color:#92400E;" title="The ' + pbEsc(quoteToolLabel(k)) + ' is not built yet">simple quote stands in</span>' : '');
+}
+
 const PAGES = {
   dashboard: { title: 'Dashboard', custom: true, readOnly: true, columns: [], fields: [] },
   opportunities: {
@@ -3860,11 +4005,15 @@ const PAGES = {
       { key: 'min_margin',      label: 'Min Margin', render: v => v != null ? v + '%' : '—' },
       { key: 'max_margin',      label: 'Max Margin', render: v => v != null ? v + '%' : '—' },
       { key: 'default_duration',label: 'Default Term', render: v => v ? v + ' mo' : '—' },
+      { key: 'quote_tool',      label: 'Quote tool', render: (v, row) => quoteToolKey(v) ? quoteToolLabel(v) : '<span style="color:var(--text3);">' + quoteToolLabel(quoteToolDefaultFor(row || {})) + ' (by family)</span>' },   // v7.10.46
       { key: 'active',          label: 'Active', render: v => v ? '<span class="badge badge-green">Active</span>' : '<span class="badge badge-gray">Inactive</span>' },
     ],
     fields: [
       { key: 'major_id',        label: 'Major Category', type: 'lookup', lookupTable: 'service_major', lookupLabel: r => r.name, required: true },
       { key: 'name',            label: 'Name', required: true },
+      // v7.10.46: the quote tool a new quote on a deal of this type DEFAULTS to (the tool is still picked per quote).
+      { key: 'quote_tool',      label: 'Quote tool (default for new quotes)', type: 'select', options: [''].concat(QUOTE_TOOL_KEYS),
+        optionLabel: o => o ? quoteToolLabel(o) + (QUOTE_TOOLS[o].built ? '' : ' (not built yet — the simple quote stands in)') : 'By family — Manpower quote for an annuity type under Manpower, else Simple quote' },
       // One home per rule (v7.9.91): the service type row holds its revenue type, its margin
       // default and limits, and its default term. The older is_recurring flag is no longer a
       // field — saveRecord keeps it in step with the revenue type for its remaining readers.
@@ -5577,6 +5726,12 @@ async function saveRecord(e) {
     if (body.min_margin != null && body.max_margin != null && body.min_margin > body.max_margin) { showStatus('Minimum margin cannot be above the maximum', 'error'); return; }
     if (body.default_margin != null && ((body.min_margin != null && body.default_margin < body.min_margin) || (body.max_margin != null && body.default_margin > body.max_margin))) { showStatus('Default margin must sit between the minimum and the maximum', 'error'); return; }
     body.is_recurring = body.revenue_type !== 'project';
+    // v7.10.46: a blank pick is NULL (the family rule); a database without sql/add_quote_tools.sql has no column.
+    if ('quote_tool' in body && !quoteToolKey(body.quote_tool)) body.quote_tool = null;
+    if (!MOCK && currentData.length && !currentData.some(r => 'quote_tool' in r)) {
+      if (body.quote_tool) { showStatus(PB_TOOL_MISSING_MSG, 'error'); return; }
+      delete body.quote_tool;
+    }
     // A database without sql/rules_one_home_phase1.sql has no max_margin column, and PostgREST
     // refuses the whole write for one unknown key. The rows on screen came from select=*, so they
     // say whether the column exists: without it a blank maximum is left out and the rest still saves.
@@ -11242,9 +11397,11 @@ const PB_EDITOR_TABS = [
   { id: 'service',   label: 'Service Support Items' },
   { id: 'mobility',  label: 'Site Mobility' },
   { id: 'pricing',   label: 'Pricing' },
+  { id: 'simple',    label: 'Pricing' },   // v7.10.46: the simple tool's one pricing tab (typed lines)
   { id: 'proposal',  label: 'Proposal' }
 ];
 function pbSwitchTab(tabId) { pbActiveTab = tabId; renderQuoteEditor(); }
+
 
 function pbFindHeading(id) { return pbHeadings.find(h => h.id === id); }
 function pbFindPostLocation(postId) {
@@ -11296,6 +11453,7 @@ async function loadProposalBuilder() {
       ? await apiGet('proposal_documents', 'quote_id=in.(' + quotes.map(q => q.id).join(',') + ')&status=in.(draft,issued)&select=quote_id,status,version,proposal_ref,issued_at').catch(() => [])
       : [];
     quotes.forEach(q => { q._pg = docs.filter(d => +d.quote_id === +q.id); });
+    pbNoteToolColumn(quotes);   // v7.10.46
     root.innerHTML = renderProposalBuilderList(quotes) + '<div id="pb-plan-card"></div>';
     oppPlanPbCard();   // v7.10.34: the project plan beside the proposal (background)
   } catch (e) { root.innerHTML = '<p style="color:var(--red);">Error loading proposals: ' + e.message + '</p>'; }
@@ -11322,24 +11480,35 @@ async function oppPlanPbCard() {
   </div>`;
 }
 
+// v7.10.46: the deal's service type names the DEFAULT quote tool; the dialog on + New Quote offers it.
+function pbDealToolDefault() {
+  const subs = allData['service_sub_all'] || allData['service_sub'] || [];
+  const sub = oppData && oppData.service_sub_id ? subs.find(s => +s.id === +oppData.service_sub_id) || null : null;
+  return { sub, tool: quoteToolDefaultFor(sub) };
+}
 function renderProposalBuilderList(quotes) {
-  const header = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;"><h2 style="margin:0;color:var(--navy);font-size:18px;">Proposal Builder</h2><button class="btn btn-primary" onclick="createNewQuote()">+ New Quote</button></div>';
+  const d = pbDealToolDefault();
+  const note = '<div style="font-size:12px;color:var(--text3);margin-top:4px;">' + (d.sub
+    ? 'Quotes for <strong>' + pbEsc(d.sub.name) + '</strong> default to the <strong>' + pbEsc(quoteToolLabel(d.tool)) + '</strong>' + (QUOTE_TOOLS[d.tool].built ? '' : ' (not built yet — the simple quote stands in)') + '; the tool is picked on each new quote.'
+    : 'No service type on this deal yet — new quotes default to the Simple quote. Set the service type on the General tab for the right default.') + '</div>';
+  const header = '<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;"><div><h2 style="margin:0;color:var(--navy);font-size:18px;">Proposal Builder</h2>' + note + '</div><button class="btn btn-primary" onclick="createNewQuote()">+ New Quote</button></div>';
   if (!quotes.length) return header + '<div style="padding:40px;text-align:center;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">No quotes yet. Click <strong>+ New Quote</strong> to create one.</div>';
   const sb = s => {
     const c = { draft:'#F3F4F6/#374151', sent:'#DBEAFE/#1E3A8A', accepted:'#DCFCE7/#166534', rejected:'#FEE2E2/#7F1D1D', lost:'#FEE2E2/#7F1D1D', expired:'#F3F4F6/#6B7280' };
     const [bg, fg] = (c[s] || '#F3F4F6/#374151').split('/');
     return '<span class="badge" style="background:' + bg + ';color:' + fg + ';">' + pbEsc(s) + '</span>';
   };
-  const rows = quotes.map(q => '<tr onclick="openQuote(' + q.id + ')" style="cursor:pointer;"><td style="font-weight:600;">' + pbEsc(q.contract_name) + '</td><td>' + pbEsc(q.quote_date) + '</td><td>' + pbEsc(q.contract_start_date) + '</td><td>' + pbEsc(q.contract_duration_months) + ' mo</td><td>' + pbEsc(q.margin_pct) + '%</td><td>' + sb(q.status) + '</td><td>v' + pbEsc(q.version) + '</td><td>' + pgListCell(q._pg || []) + '</td></tr>').join('');
-  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Contract Name</th><th>Quote Date</th><th>Start</th><th>Duration</th><th>Margin</th><th>Status</th><th>Ver</th><th>Proposal</th></tr></thead><tbody>' + rows + '</tbody></table>';
+  const rows = quotes.map(q => '<tr onclick="openQuote(' + q.id + ')" style="cursor:pointer;"><td style="font-weight:600;">' + pbEsc(q.contract_name) + '</td><td>' + pbToolBadge(q) + '</td><td>' + pbEsc(q.quote_date) + '</td><td>' + pbEsc(q.contract_start_date) + '</td><td>' + pbEsc(q.contract_duration_months) + ' mo</td><td>' + pbEsc(q.margin_pct) + '%</td><td>' + sb(q.status) + '</td><td>v' + pbEsc(q.version) + '</td><td>' + pgListCell(q._pg || []) + '</td></tr>').join('');
+  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Contract Name</th><th>Tool</th><th>Quote Date</th><th>Start</th><th>Duration</th><th>Margin</th><th>Status</th><th>Ver</th><th>Proposal</th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 async function createNewQuote() {
   if (!oppData || !oppData.id) return;
-  const name = await promptDialog({title:'New quote', message:'Contract name for the new quote?', confirmLabel:'Create'});
-  if (!name) return;
-  const payload = { deal_id: oppData.id, contract_name: name, contract_start_date: new Date().toISOString().slice(0,10), contract_duration_months: 12, quote_date: new Date().toISOString().slice(0,10), shifts_per_day: 2, margin_pct: 20.00, status: 'draft', version: 1 };
-  try { const r = await apiPost('quote_quotes', payload); if (r.length) await openQuote(r[0].id); }
+  const d = pbDealToolDefault();   // v7.10.46: name AND tool, the service type's tool offered as the default
+  const pick = await quoteToolDialog({ title: 'New quote', defaultTool: d.tool, defaultWhy: d.sub ? d.sub.name : null, toolColumn: _pbToolColumn });
+  if (!pick) return;
+  const payload = { deal_id: oppData.id, contract_name: pick.name, contract_start_date: new Date().toISOString().slice(0,10), contract_duration_months: 12, quote_date: new Date().toISOString().slice(0,10), shifts_per_day: 2, margin_pct: 20.00, status: 'draft', version: 1 };
+  try { const r = await pbPostQuote(payload, pick.tool); if (r.length) await openQuote(r[0].id); }
   catch (e) { showStatus('Could not create quote: ' + e.message, 'error'); }
 }
 
@@ -11379,7 +11548,9 @@ async function openQuote(id) {
       apiGet('quote_fuel_prices', 'select=*').catch(() => []),
       apiGet('quote_vehicle_extras', 'select=*&order=display_order,id').catch(() => []),
       apiGet('quote_vehicles', 'quote_id=eq.' + id + '&select=*&order=display_order,id').catch(() => []),
-    ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], []]);
+      // v7.10.46: the simple tool's priced lines (absent table → the tab names the SQL file)
+      apiGet('quote_simple_lines', 'quote_id=eq.' + id + '&select=*&order=display_order,id').then(r => { _pbSimpleMissing = false; return r; }).catch(e => { if (/^404\b|PGRST205/.test((e && e.message) || '')) _pbSimpleMissing = true; return []; }),
+    ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], [], []]);
     // v7.10.28: the rate cards the labour engine prices off, whole (judged as at the contract start
     // date in the browser), and the quote's site for the posts' default area. An absent table
     // reads as no rates: the engine then says what is missing.
@@ -11412,6 +11583,9 @@ async function openQuote(id) {
     ]);
     pbQ = qRows[0];
     if (!pbQ) return;
+    pbNoteToolColumn(qRows);                                          // v7.10.46
+    if (!pbToolTabs().includes(pbActiveTab)) pbActiveTab = 'basic';   // the tool names the tabs; land on one it has
+    pbSimpleLines = cats[14] || [];
     const rates = await rateP;
     ['quote_salary_rates', 'quote_rate_versions', 'quote_extraordinary_hour_rates', 'quote_shared_salary_option_types', 'quote_shared_salary_options',
      'quote_leave_types', 'quote_leave_allocations', 'quote_calculation_ratios'].forEach((t, i) => { allData[t] = rates[i] || []; });
@@ -11514,13 +11688,15 @@ function renderQuoteEditorTopBar() {
       '<button class="btn btn-ghost btn-sm" onclick="backToList()">← Back to quotes</button>' +
       '<h2>' + pbEsc(q.contract_name) + '<span class="meta">v' + q.version + '</span></h2>' +
       (q.is_sandbox ? '<span class="badge" style="background:var(--khaki, #C3B091);color:#3D3524;font-weight:700;letter-spacing:0.04em;">SANDBOX</span>' : '') +
+      pbToolBadge(q) +   /* v7.10.46 */
     '</div>' +
     '<div>' + (q.is_sandbox ? '' : '<span class="badge" style="background:var(--bg);color:var(--text2);">' + pbEsc(q.status) + '</span>') + '</div>' +
   '</div>';
 }
 
 function renderQuoteEditorTabBar() {
-  return '<div class="pb-editor-tabs">' + PB_EDITOR_TABS.filter(t => t.id !== 'proposal' || !_pgMissing).map(t =>
+  const tabs = pbToolTabs();   // v7.10.46: the quote's tool names its tabs
+  return '<div class="pb-editor-tabs">' + PB_EDITOR_TABS.filter(t => tabs.includes(t.id) && (t.id !== 'proposal' || !_pgMissing)).map(t =>
     '<button class="opp-tab ' + (t.id === pbActiveTab ? 'active' : '') + '" onclick="pbSwitchTab(\'' + t.id + '\')">' + pbEsc(t.label) + '</button>'
   ).join('') + '</div>';
 }
@@ -11535,6 +11711,7 @@ function renderQuoteEditorTabContent() {
     case 'service':   return renderServiceItemsTab();   // v7.10.30
     case 'mobility':  return renderSiteMobilityTab();   // v7.10.30
     case 'pricing':   return renderPricingTab();
+    case 'simple':    return renderSimpleTab();        // v7.10.46
     case 'proposal':  return renderProposalTab();
     default: return '';
   }
@@ -11879,6 +12056,11 @@ async function rsgServiceChanged(v) {
 function rsgSummary() {
   const el = document.getElementById('rsg-summary'); if (!el) return;
   const sub = rsgServiceSub();
+  if (sub && rsgRevenueType(sub) === 'project') {   // v7.10.46: the project generator's own figures
+    const total = +document.getElementById('rsg-prj-total')?.value || 0, months = document.getElementById('rsg-prj-months')?.value, margin = document.getElementById('rsg-prj-margin')?.value;
+    el.textContent = sub.name + ' · project' + (total ? ' · R ' + total.toLocaleString('en-US') + ' over ' + (months || rsgDefaultTerm(sub)) + ' mo' : '') + (margin !== '' && margin != null ? ' · ' + margin + '% margin' : '');
+    return;
+  }
   const base = +document.getElementById('opp-base-amount')?.value || 0, months = document.getElementById('opp-num-months')?.value, margin = document.getElementById('opp-margin-pct')?.value;
   el.textContent = sub ? sub.name + ' · ' + (rsgRevenueType(sub) === 'project' ? 'project' : 'annuity') + (base ? ' · R ' + base.toLocaleString('en-US') + '/mo × ' + (months || rsgDefaultTerm(sub)) + ' mo' : '') + (margin !== '' ? ' · margin ' + margin + '%' : '') : 'No service type chosen yet.';
 }
@@ -11895,6 +12077,7 @@ function rsgRefresh() {
   const ann = document.getElementById('rsg-annuity'), prj = document.getElementById('rsg-project');
   if (ann) ann.style.display = (!sub || rt === 'annuity') ? '' : 'none';
   if (prj) prj.style.display = rt === 'project' ? '' : 'none';
+  if (rt === 'project') rsgProjectRefresh(sub);   // v7.10.46
   const esc = document.getElementById('opp-escalation');
   if (esc && esc.value === '') { const d = rsgDefaultEscalation(document.getElementById('opp-start-date')?.value, sub); if (d != null) esc.value = d; }
   const nm = document.getElementById('opp-num-months'); if (nm) nm.placeholder = rsgDefaultTerm(sub);   // a blank box generates the service type's term (autoPopulateGrid) — show that figure, not a fixed 12
@@ -11924,11 +12107,88 @@ function rsgSyncStartDate(from, redraw) {
   if (err) showStatus(err + ' — the deal will not save until it is', 'error');
   rsgRefresh(); buildRevGrid(); recalcGrid();
 }
+// ── Project revenue generator (v7.10.46) ──────────────────────────────────────────────────────
+// The project block mirrors the shared boxes: its start date IS opp-start-date (one value, three boxes
+// with the General tab's), its margin lands in opp-margin-pct on generation (oppMarginPct reads that box).
+function rsgProjectRefresh(sub) {
+  const start = document.getElementById('rsg-prj-start'), shared = document.getElementById('opp-start-date');
+  if (start && shared && start.value !== shared.value) start.value = shared.value;
+  const nm = document.getElementById('rsg-prj-months'); if (nm) nm.placeholder = rsgDefaultTerm(sub);
+  const m = document.getElementById('rsg-prj-margin'), sharedM = document.getElementById('opp-margin-pct');
+  if (m && m.value === '') m.value = sharedM && sharedM.value !== '' ? sharedM.value : rsgDefaultMargin(sub);
+  const rule = rsgMarginRule(sub), ruleEl = document.getElementById('rsg-prj-margin-rule');
+  if (ruleEl) ruleEl.textContent = rule ? 'Margin for ' + sub.name + ': ' + rule.min_margin_pct + '% – ' + rule.max_margin_pct + '%, default ' + rsgDefaultMargin(sub) + '%' : 'No margin limits set for ' + sub.name + ' — default ' + rsgDefaultMargin(sub) + '%.';
+  rsgProjectSpreadChanged(true);
+}
+function rsgProjectStartChanged(v) {
+  const shared = document.getElementById('opp-start-date'); if (shared) shared.value = v;
+  rsgSyncStartDate('gen');
+}
+function rsgProjectSpreadChanged(quiet) {
+  const spread = document.getElementById('rsg-prj-spread'), shares = document.getElementById('rsg-prj-shares');
+  if (shares && spread) shares.disabled = spread.value !== 'shares';
+  if (!quiet) rsgSummary();
+}
+// "30 40 30", "30/40/30", "30, 40, 30" → [30, 40, 30]; null when unreadable or nothing positive.
+function rsgParseShares(text) {
+  const parts = String(text || '').split(/[\s,;/]+/).filter(Boolean);
+  if (!parts.length) return null;
+  const nums = parts.map(p => +p.replace('%', ''));
+  if (nums.some(n => !(n >= 0)) || !nums.some(n => n > 0)) return null;
+  return nums;
+}
+// The months of a project: total × share, whole rand, the rounding remainder on the last month so the
+// months add to the total exactly. Even = equal shares.
+function rsgProjectMonths(total, months, shares) {
+  const sh = shares || Array(months).fill(1), sum = sh.reduce((a, b) => a + b, 0);
+  const out = sh.map(s => Math.round(total * s / sum));
+  out[out.length - 1] += Math.round(total) - out.reduce((a, b) => a + b, 0);
+  return out;
+}
+function rsgProjectPopulate(sub) {
+  const total = +document.getElementById('rsg-prj-total').value || 0;
+  const startDate = document.getElementById('opp-start-date').value;
+  if (!(total > 0)) { showStatus('Enter the total project value first', 'error'); return false; }
+  if (!startDate) { showStatus('Enter the expected start date first', 'error'); return false; }
+  const dateErr = checkDatesOrder(document.getElementById('opp-order-date').value, startDate); if (dateErr) { showStatus(dateErr, 'error'); return false; }
+  const spread = document.getElementById('rsg-prj-spread').value;
+  let shares = null, months = +document.getElementById('rsg-prj-months').value || 0;
+  if (spread === 'shares') {
+    shares = rsgParseShares(document.getElementById('rsg-prj-shares').value);
+    if (!shares) { showStatus('Type one share per month, e.g. 30 40 30', 'error'); return false; }
+    if (months && months !== shares.length) { showStatus('The shares name ' + shares.length + ' months but Number of Months says ' + months + ' — make them agree or blank the months', 'error'); return false; }
+    months = shares.length;
+  }
+  if (!months) months = rsgDefaultTerm(sub) || 1;
+  if (months < 1 || months > 60) { showStatus('Number of months must be between 1 and 60', 'error'); return false; }
+  const rule = rsgMarginRule(sub), marginEl = document.getElementById('rsg-prj-margin');
+  if (marginEl.value === '') marginEl.value = rsgDefaultMargin(sub);
+  const margin = +marginEl.value;
+  if (!(margin >= 0)) { showStatus('Enter the margin as a percentage', 'error'); return false; }
+  if (rule && (margin < +rule.min_margin_pct || margin > +rule.max_margin_pct)) { showStatus('Margin ' + margin + '% is outside the rule (' + (+rule.min_margin_pct) + '–' + (+rule.max_margin_pct) + '%)', 'error'); return false; }
+  marginEl.value = margin;
+  document.getElementById('opp-margin-pct').value = margin;   // the one margin box every reader uses
+  const [y, mo] = startDate.split('-').map(Number);
+  const amounts = rsgProjectMonths(total, months, shares);
+  amounts.forEach((amt, i) => {
+    const t = (mo - 1) + i, key = (y + Math.floor(t / 12)) + '-' + String((t % 12) + 1).padStart(2, '0');
+    if (!oppMonths[key]) oppMonths[key] = {};
+    oppMonths[key].revenue = amt;
+    const inp = document.getElementById('rev-r-' + key); if (inp) inp.value = amt;
+  });
+  recalcGrid(); buildRevGrid();
+  return margin;
+}
 async function rsgAutoPopulate() {
   if (oppRevLocked) { showStatus('Forecast is locked — secured deals need a senior-approved re-forecast.', 'error'); return; }
   const sub = rsgServiceSub();
   if (!sub) { showStatus('Choose a Product/Service Type on the General tab first', 'error'); return; }
-  if (rsgRevenueType(sub) === 'project') { showStatus('The project generator is in development', 'error'); return; }
+  if (rsgRevenueType(sub) === 'project') {   // v7.10.46: the project generator, then the shared tail (dirty flag, probability cap)
+    const m = rsgProjectPopulate(sub);
+    if (m === false) return;
+    await rsgAfterGenerate(m, 'Project stream generated');
+    return;
+  }
   const base = +document.getElementById('opp-base-amount').value || 0;
   const startDate = document.getElementById('opp-start-date').value;
   if (!base) { showStatus('Enter the monthly base amount first', 'error'); return; }
@@ -11943,6 +12203,10 @@ async function rsgAutoPopulate() {
   if (rule && (margin < +rule.min_margin_pct || margin > +rule.max_margin_pct)) { showStatus('Margin ' + margin + '% is outside the rule (' + (+rule.min_margin_pct) + '–' + (+rule.max_margin_pct) + '%)', 'error'); return; }
   marginEl.value = margin;
   autoPopulateGrid();
+  await rsgAfterGenerate(margin, 'Stream generated');
+}
+// What follows any generation (v7.10.46 split out so the project generator shares it):
+async function rsgAfterGenerate(margin, label) {
   // The generated months and the probability decided below commit only through Save.
   // Nothing in this modal reaches _oppMarkDirty (it sits inside a .modal-overlay) and the
   // grid/probability writes are programmatic, so mark the structural-edit flag here: Back
@@ -11971,7 +12235,7 @@ async function rsgAutoPopulate() {
   oppScoreRefresh();   // the cap may have rewritten the box: the Scored / Typed line is derived from it
   updateRevTotals();
   const tcv = document.getElementById('rev-tcv')?.textContent || '';
-  showStatus('Stream generated at ' + margin + '% margin — TCV ' + tcv + probNote, 'success');
+  showStatus(label + ' at ' + margin + '% margin — TCV ' + tcv + probNote, 'success');
   rsgClose();
 }
 async function rsgClear() {
@@ -13507,7 +13771,13 @@ let _pgRpcMissing = false;        // rpc/issue_proposal absent (404 / PGRST202) 
 let pgState = { templates: [], sections: [], docs: [], draft: null, snapshot: null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
 function pgReset(o) {
   const docs = (o.docs || []).slice().sort((a, b) => b.version - a.version);
-  pgState = { templates: o.templates || [], sections: o.sections || [], docs, draft: docs.find(d => d.status === 'draft') || null,
+  // v7.10.46: a template belongs to a quote tool (proposal_templates.quote_tool, manpower when the column is
+  // absent); the quote's tool picks its templates. The tool that RUNS the quote is what matters — an unbuilt
+  // tool's quote prints from the simple templates.
+  const tool = quoteToolRun(pbQ);
+  const all = o.templates || [];
+  const templates = all.some(t => 'quote_tool' in t) ? all.filter(t => (quoteToolKey(t.quote_tool) || 'manpower') === tool) : (tool === 'manpower' ? all : []);
+  pgState = { templates, sections: o.sections || [], docs, draft: docs.find(d => d.status === 'draft') || null,
     snapshot: o.snapshot || null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
   const def = pgState.templates.find(t => t.is_default) || pgState.templates[0];
   // A new draft after an issue starts from the issued version's template.
@@ -13720,6 +13990,7 @@ function pbLabourTableHtml(pr) {
     '<p class="pg-muted">Monthly price of a post = price per officer × officers + its support items and uniform, each priced at the quote\'s margin (v7.10.41). Each post\'s Costing section shows the build-up line by line.</p>';
 }
 function pgPricing() {
+  if (quoteToolRun(pbQ) === 'simple') return pgSimplePricing();   // v7.10.46: typed lines, no snapshot
   const vatPct = +(appSettings['proposal_vat_pct'] || 15);
   // v7.10.28: the live figures come from the labour engine; a CURRENT snapshot (same fingerprint)
   // is what prints, an out-of-date one is reported and the live figures show.
@@ -13902,6 +14173,89 @@ function pbPriceBasisField(label) {
 }
 // Pricing tab: both views of the same prices, always (so it works before the SQL has run), the
 // basis select, a tie-out of the shift rows against the monthly total, and warnings.
+// ── The simple quote tool (v7.10.46) ────────────────────────────────────────────────────────
+// Typed lines, nothing computed from a rate card: description, quantity, unit price (excl. VAT, the
+// PRICE — the quote's margin % is a fact about it, carried to the revenue stream, never applied), and
+// whether it bills monthly or once-off. Table quote_simple_lines (sql/add_quote_tools.sql). There is
+// no Calculate step: the figures are what was typed, so the proposal prints them as they stand.
+function pbSimpleAmount(l) { return pbRound2((+l.quantity || 0) * (+l.unit_price || 0)); }
+function pbSimplePricing() {
+  const lines = pbSimpleLines.slice().sort((a, b) => (a.display_order - b.display_order) || (a.id - b.id));
+  const monthly = pbRound2(lines.filter(l => l.billing !== 'once_off').reduce((a, l) => a + pbSimpleAmount(l), 0));
+  const onceOff = pbRound2(lines.filter(l => l.billing === 'once_off').reduce((a, l) => a + pbSimpleAmount(l), 0));
+  return { lines, monthly, onceOff };
+}
+async function pbSimpleAdd() {
+  if (_pbSimpleMissing) { showStatus(PB_TOOL_MISSING_MSG, 'error'); return; }
+  const order = pbSimpleLines.reduce((m, l) => Math.max(m, +l.display_order || 0), 0) + 1;
+  try {
+    const r = await apiPost('quote_simple_lines', { quote_id: pbQ.id, description: '', quantity: 1, unit_price: 0, billing: 'monthly', display_order: order, created_by: currentUser.personId });
+    if (r && r[0]) pbSimpleLines.push(r[0]);
+    renderQuoteEditor();
+    setTimeout(() => { const el = document.querySelector('#pb-simple-table tr:last-child input[data-f="description"]'); if (el) el.focus(); }, 0);
+  } catch (e) { showStatus('Could not add the line: ' + e.message, 'error'); }
+}
+async function pbSimpleSet(id, field, value) {
+  const l = pbSimpleLines.find(x => +x.id === +id); if (!l) return;
+  if (field === 'quantity' || field === 'unit_price') { value = +value; if (!(value >= 0)) { showStatus(field === 'quantity' ? 'Quantity cannot be negative' : 'The unit price cannot be negative', 'error'); renderQuoteEditor(); return; } }
+  if (field === 'billing' && !['monthly', 'once_off'].includes(value)) return;
+  try { await apiPatch('quote_simple_lines', id, { [field]: value }); l[field] = value; renderQuoteEditor(); }
+  catch (e) { showStatus('Save failed: ' + e.message, 'error'); renderQuoteEditor(); }
+}
+async function pbSimpleDelete(id) {
+  const l = pbSimpleLines.find(x => +x.id === +id); if (!l) return;
+  if ((l.description || '').trim() || pbSimpleAmount(l)) { if (!await confirmDialog({ title: 'Remove line', message: 'Remove "' + (l.description || 'this line') + '" from the quote?', confirmLabel: 'Remove', danger: true })) return; }
+  try { await apiDelete('quote_simple_lines', id); pbSimpleLines = pbSimpleLines.filter(x => +x.id !== +id); renderQuoteEditor(); }
+  catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+}
+function renderSimpleTab() {
+  const q = pbQ, tool = quoteToolOf(q), vatPct = +(appSettings['proposal_vat_pct'] || 15);
+  const standIn = tool !== 'simple' ? '<div style="margin-bottom:12px;padding:8px 10px;border-radius:4px;font-size:12px;border:1px solid #E0B252;background:#FFF8E6;">The <strong>' + pbEsc(quoteToolLabel(tool)) + '</strong> is not built yet, so this quote is priced with the simple tool: typed lines, monthly or once-off.</div>' : '';
+  if (_pbSimpleMissing) return '<div class="pb-qheader" style="display:block;">' + standIn + '<div style="padding:30px;text-align:center;color:var(--text3);">' + pbEsc(PB_TOOL_MISSING_MSG) + '. Until it runs this quote cannot carry priced lines.</div></div>';
+  const s = pbSimplePricing(), months = +q.contract_duration_months || 0;
+  const rows = s.lines.map(l => '<tr>' +
+    '<td><input class="form-control" type="text" data-f="description" value="' + pbEsc(l.description || '') + '" placeholder="What is quoted" onchange="pbSimpleSet(' + l.id + ', \'description\', this.value)"></td>' +
+    '<td><input class="form-control" type="number" min="0" step="0.01" style="width:90px;text-align:right;" value="' + pbEsc(l.quantity) + '" onchange="pbSimpleSet(' + l.id + ', \'quantity\', this.value)"></td>' +
+    '<td><input class="form-control" type="number" min="0" step="0.01" style="width:140px;text-align:right;" value="' + pbEsc(l.unit_price) + '" onchange="pbSimpleSet(' + l.id + ', \'unit_price\', this.value)"></td>' +
+    '<td><select class="form-control" style="width:120px;" onchange="pbSimpleSet(' + l.id + ', \'billing\', this.value)"><option value="monthly"' + (l.billing !== 'once_off' ? ' selected' : '') + '>Monthly</option><option value="once_off"' + (l.billing === 'once_off' ? ' selected' : '') + '>Once-off</option></select></td>' +
+    '<td class="num" style="text-align:right;font-weight:600;">' + pgMoney(pbSimpleAmount(l)) + '</td>' +
+    '<td style="text-align:right;"><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="pbSimpleDelete(' + l.id + ')" title="Remove this line">✕</button></td></tr>').join('');
+  const tot = (label, v) => '<tr><td colspan="4" style="text-align:right;">' + label + '</td><td style="text-align:right;">' + pgMoney(v) + '</td><td></td></tr>';
+  const vatM = pbRound2(s.monthly * vatPct / 100), vatO = pbRound2(s.onceOff * vatPct / 100);
+  return '<div class="pb-qheader" style="display:block;overflow-x:auto;">' + standIn +
+    '<div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:10px;">' +
+      '<div style="font-size:12px;color:var(--text3);max-width:620px;">Each line is a price excl. VAT (quantity × unit price). A monthly line bills every month of the ' + months + '-month term; a once-off line bills once. The quote\'s margin % (Basic info) describes these prices for the revenue stream and is not added to them.</div>' +
+      '<button class="btn btn-primary btn-sm" onclick="pbSimpleAdd()">+ Add line</button></div>' +
+    '<table id="pb-simple-table" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);"><thead><tr><th>Description</th><th style="text-align:right;">Qty</th><th style="text-align:right;">Unit price (excl. VAT)</th><th>Billing</th><th style="text-align:right;">Amount</th><th></th></tr></thead>' +
+    '<tbody>' + (rows || '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:24px;">No lines yet — add one.</td></tr>') + '</tbody>' +
+    '<tbody style="font-weight:600;border-top:2px solid var(--border);">' +
+      (s.monthly || !s.onceOff ? tot('Monthly total (excl. VAT)', s.monthly) + tot('VAT @ ' + vatPct + '%', vatM) + tot('Monthly total (incl. VAT)', pbRound2(s.monthly + vatM)) : '') +
+      (s.onceOff ? tot('Once-off total (excl. VAT)', s.onceOff) + tot('VAT @ ' + vatPct + '%', vatO) + tot('Once-off total (incl. VAT)', pbRound2(s.onceOff + vatO)) : '') +
+      tot('Contract value over ' + months + ' months (excl. VAT)', pbRound2(s.monthly * months + s.onceOff)) +
+    '</tbody></table></div>';
+}
+// The simple tool's pricing in the shape pgPricing has always returned, so the proposal, its merge
+// fields, the frozen content_json and the ledger read it unchanged. tool: 'simple' and `simple` (the
+// lines) tell the renderer to print the line table instead of the post table.
+function pgSimplePricing() {
+  const vatPct = +(appSettings['proposal_vat_pct'] || 15), s = pbSimplePricing(), months = +pbQ.contract_duration_months || 0;
+  const posts = s.lines.map(l => ({ name: l.description || 'Unnamed line', officers: +l.quantity || 0, monthly: pbSimpleAmount(l), unit: +l.unit_price || 0, billing: l.billing === 'once_off' ? 'once_off' : 'monthly', lineId: l.id }));
+  const vat = pbRound2(s.monthly * vatPct / 100), inclVat = pbRound2(s.monthly + vat);
+  const errors = _pbSimpleMissing ? [PB_TOOL_MISSING_MSG] : (!s.lines.length ? ['add at least one priced line on the Pricing tab'] : (s.lines.some(l => !(l.description || '').trim()) ? ['every line needs a description'] : []));
+  return { tool: 'simple', simple: { lines: posts, vatOnceOff: pbRound2(s.onceOff * vatPct / 100) }, groups: [{ name: 'Services', posts, sub: pbRound2(s.monthly + s.onceOff) }],
+    monthly: s.monthly, contract: pbRound2(s.monthly * months + s.onceOff), months, vatPct, indicative: false, fresh: true, stale: false, errors, labour: {}, liveAsAt: pbQuoteAsAt(),
+    asOf: null, setupOnceOff: s.onceOff, basis: 'monthly', perShift: false, vat, inclVat };
+}
+function pgSimplePricingHtml(pr) {
+  const L = pr.simple.lines, m = L.filter(l => l.billing !== 'once_off'), o = L.filter(l => l.billing === 'once_off');
+  const block = (title, rows) => rows.length ? '<tr class="pg-group"><td colspan="4">' + title + '</td></tr>' + rows.map(l => '<tr><td>' + pbEsc(l.name) + '</td><td class="num">' + pbEsc(l.officers) + '</td><td class="num">' + pgMoney(l.unit) + '</td><td class="num">' + pgMoney(l.monthly) + '</td></tr>').join('') : '';
+  let html = '<table class="pg-table"><thead><tr><th>Item</th><th class="num">Qty</th><th class="num">Unit (excl. VAT)</th><th class="num">Amount (excl. VAT)</th></tr></thead><tbody>' + block('Monthly', m) + block('Once-off', o) + '</tbody><tfoot>';
+  if (m.length) html += '<tr><td colspan="3">Monthly total (excl. VAT)</td><td class="num">' + pgMoney(pr.monthly) + '</td></tr><tr><td colspan="3">VAT @ ' + pr.vatPct + '%</td><td class="num">' + pgMoney(pr.vat) + '</td></tr><tr class="pg-total"><td colspan="3">Monthly total (incl. VAT)</td><td class="num">' + pgMoney(pr.inclVat) + '</td></tr>';
+  if (o.length) html += '<tr><td colspan="3">Once-off total (excl. VAT)</td><td class="num">' + pgMoney(pr.setupOnceOff) + '</td></tr><tr><td colspan="3">VAT @ ' + pr.vatPct + '%</td><td class="num">' + pgMoney(pr.simple.vatOnceOff) + '</td></tr><tr class="pg-total"><td colspan="3">Once-off total (incl. VAT)</td><td class="num">' + pgMoney(pbRound2(pr.setupOnceOff + pr.simple.vatOnceOff)) + '</td></tr>';
+  html += '<tr><td colspan="3">Contract value over ' + pr.months + ' months (excl. VAT)</td><td class="num">' + pgMoney(pr.contract) + '</td></tr></tfoot></table>';
+  return html;
+}
+
 function renderPricingTab() {
   if (!pbHeadings.some(h => h.posts.length)) return '<div class="pb-qheader" style="display:block;color:var(--text3);font-size:13px;">Add posts on the Posts tab; their prices appear here per month and per shift.' + (pbVehicles.length ? ' The vehicles on the Site Mobility tab are priced with them.' : '') + '</div>';
   const pr = pgPricing(), rec = pgShiftReconcile(pr), warn = [];
@@ -13978,6 +14332,7 @@ function pgRenderScope() {
   return html || '<p class="pg-muted">No posts on this quote yet.</p>';
 }
 function pgPricingBannerHtml(pr) {
+  if (pr.tool === 'simple') return pr.errors.length ? '<div class="pg-indicative">NOT PRICED YET — ' + pbEsc(pr.errors[0]) + '.</div>' : '';   // v7.10.46: typed prices carry no rate date
   // v7.10.28: four states — cannot be priced, out of date, not yet calculated, calculated.
   if (pr.errors && pr.errors.length) return '<div class="pg-indicative">CANNOT BE PRICED — ' + pbEsc(pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' costing problems; open the posts\' Costing sections and the Site Mobility tab.') + '</div>';
   if (pr.stale) return '<div class="pg-indicative">OUT OF DATE — the quote changed since it was last calculated. The figures below are live; recalculate on the Pricing tab before issuing.</div>';
@@ -13987,6 +14342,7 @@ function pgPricingBannerHtml(pr) {
 // The pricing section prints by the quote's price basis (v7.9.93): the monthly table, the
 // per-shift table (same totals), or the monthly table followed by the rates behind it.
 function pgRenderPricing(pr) {
+  if (pr.tool === 'simple') return pgPricingBannerHtml(pr) + pgSimplePricingHtml(pr);   // v7.10.46
   const basis = pr.basis || 'monthly';
   let html = pgPricingBannerHtml(pr);
   if (basis === 'monthly') return html + pgPricingMonthlyHtml(pr);
@@ -14048,7 +14404,7 @@ function pgRenderDocument(ctx) {
 function renderProposalTab() {
   if (!pgState.templates.length) {
     return renderPbPlaceholderTab('Proposal', _pgMissing ? 'The Proposal Generator tables are not installed on this database yet (sql/proposal_generator_inc1.sql).'
-      : 'No active proposal template. Create one under Admin → Proposal Builder → Proposal Templates.');
+      : 'No active proposal template for the ' + quoteToolLabel(quoteToolRun(pbQ)) + '. Create one under Admin → Proposal Builder → Proposal Templates and set its Quote tool.');
   }
   setTimeout(pgFillPreview, 0);
   const secs = pgSections();
@@ -14071,7 +14427,7 @@ function renderProposalTab() {
   return '<style>' + PG_DOC_CSS + '</style><div class="pg-wrap">' +
     '<div class="pg-side">' +
       '<div class="pg-side-head"><label class="form-label">Template</label><select class="form-control" onchange="pgSetTemplate(+this.value)">' + tplOpts + '</select>' +
-        '<div style="margin-top:8px;">' + pbPriceBasisField('Prices shown as') + '</div>' +
+        (quoteToolRun(pbQ) === 'manpower' ? '<div style="margin-top:8px;">' + pbPriceBasisField('Prices shown as') + '</div>' : '') +   /* v7.10.46: per-shift is a manpower choice */
         '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft — edits create v' + pgNextVersion()) +
           (pgCurrentIssued() ? ' · <strong>' + pbEsc(pgCurrentIssued().proposal_ref) + ' v' + pbEsc(pgCurrentIssued().version) + '</strong> issued ' + pbEsc(String(pgCurrentIssued().issued_at || '').slice(0, 10)) : '') + '</div></div>' +
       '<div class="pg-sec-list">' + list + '</div>' +
@@ -14211,8 +14567,10 @@ function pgIssueBlockers() {
   if (!can('issue_proposal')) why.push('you do not have the issue_proposal permission');
   if (_pgRpcMissing) why.push('sql/proposal_generator_inc2.sql is not installed on this database');
   { const pr = pgPricing();   // v7.10.28: the calculation must exist, be current and be clean
-    if (pr.errors.length) why.push(pr.errors.length === 1 ? 'cannot be priced: ' + pr.errors[0] : pr.errors.length + ' costing problems (see the posts\' Costing sections and the Site Mobility tab)');
-    if (!pgState.snapshot) why.push('the quote has not been calculated yet (Pricing tab → Calculate)');
+    if (pr.tool === 'simple') { pr.errors.forEach(e => why.push(e)); }   // v7.10.46: typed lines — no snapshot to wait for
+    else if (pr.errors.length) why.push(pr.errors.length === 1 ? 'cannot be priced: ' + pr.errors[0] : pr.errors.length + ' costing problems (see the posts\' Costing sections and the Site Mobility tab)');
+    if (pr.tool === 'simple') {}
+    else if (!pgState.snapshot) why.push('the quote has not been calculated yet (Pricing tab → Calculate)');
     else if (pr.stale) why.push('the quote changed since it was calculated (Pricing tab → Recalculate)');
     else if (pbPriceBasis() !== 'monthly' && !pr.perShift) why.push('per-shift pricing is selected but the calculation carries no per-shift rates'); }
   if ((pgState.lastUnknown || []).length) why.push('the text still has unknown merge fields');
@@ -14285,13 +14643,19 @@ async function pgIssue() {
 }
 // The ledger: an engagement on the deal (client-facing — a proposal IS contact,
 // so Last Contact moves) and the offer to advance to the Proposal stage.
+// The money in the ledger note: monthly where the quote bills monthly, else the once-off value (v7.10.46).
+function pgLedgerMoney(pr) {
+  if (!pr) return '. Monthly ' + pgMoney(0) + ' excl. VAT.';
+  if (+pr.monthly > 0) return '. Monthly ' + pgMoney(pr.monthly) + ' excl. VAT' + (+pr.setupOnceOff > 0 ? ', once-off ' + pgMoney(pr.setupOnceOff) : '') + '.';
+  return '. Once-off ' + pgMoney(pr.setupOnceOff || pr.contract || 0) + ' excl. VAT.';
+}
 async function pgLedgerAfterIssue(row, ctx) {
   if (!pbQ.deal_id) return;
   try {
     const types = await engagementLookupRows('type', 'opportunities');   // v7.10.13: the one list's type use
     const type = types.find(t => /proposal/i.test(t.name || '')) || null;
     const notes = 'Proposal ' + row.proposal_ref + ' v' + row.version + ' issued — ' + (pbQ.contract_name || '') +
-      (row.valid_until ? '; valid until ' + row.valid_until : '') + '. Monthly ' + pgMoney((row.content_json || {}).pricing ? row.content_json.pricing.monthly : 0) + ' excl. VAT.';
+      (row.valid_until ? '; valid until ' + row.valid_until : '') + pgLedgerMoney((row.content_json || {}).pricing);
     const eng = await api('engagements', 'POST', {
       deal_id: pbQ.deal_id, engagement_date: new Date().toISOString().slice(0, 10),
       engagement_type: type ? type.name : 'Proposal Submitted', activity_type_id: type ? +type.id : null,
@@ -14417,7 +14781,7 @@ async function renderPgTemplatesPage() {
   const secs = pgAdmin.sections.filter(s => tpl && +s.template_id === +tpl.id).sort((a, b) => (a.display_order - b.display_order) || (a.id - b.id));
   const tplList = pgAdmin.templates.map(t => '<div class="pg-tpl' + (tpl && +t.id === +tpl.id ? ' active' : '') + '" onclick="pgAdminOpen(' + t.id + ')">' +
     '<strong>' + pbEsc(t.name) + '</strong>' + (t.is_default ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">default</span>' : '') + (t.active ? '' : ' <span class="badge">inactive</span>') +
-    '<div class="pg-muted">' + pbEsc(t.service_scope || '') + '</div></div>').join('');
+    '<div class="pg-muted">' + pbEsc(t.service_scope || '') + (('quote_tool' in t) ? ' · ' + pbEsc(quoteToolLabel(quoteToolKey(t.quote_tool) || 'manpower')) : '') + '</div></div>').join('');
   const secRows = secs.map(s => {
     const ed = pgAdmin.editing === s.id;
     return '<tr' + (ed ? ' style="background:#FFF8DC;"' : '') + '>' +
@@ -14435,9 +14799,12 @@ async function renderPgTemplatesPage() {
   body.innerHTML = '<tr><td style="padding:0;border:none;"><div class="pg-admin">' +
     '<div class="pg-admin-side"><button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;margin-bottom:10px;" onclick="pgAdminAddTemplate()">+ New template</button>' + tplList + '</div>' +
     '<div class="pg-admin-main">' + (tpl ? (
-      '<div class="pb-qheader" style="display:grid;grid-template-columns:2fr 1fr auto auto auto;gap:10px;align-items:end;">' +
+      '<div class="pb-qheader" style="display:grid;grid-template-columns:2fr 1fr 1fr auto auto auto;gap:10px;align-items:end;">' +
         '<div class="form-group"><label class="form-label">Name</label><input class="form-control" value="' + pbEsc(tpl.name) + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {name:this.value})"></div>' +
         '<div class="form-group"><label class="form-label">Service scope</label><input class="form-control" value="' + pbEsc(tpl.service_scope || '') + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {service_scope:this.value})"></div>' +
+        /* v7.10.46: the quote tool whose quotes print from this template */
+        '<div class="form-group"><label class="form-label">Quote tool</label><select class="form-control" ' + (MOCK || 'quote_tool' in tpl ? '' : 'disabled title="' + pbEsc(PB_TOOL_MISSING_MSG) + '"') + ' onchange="pgAdminSaveTemplate(' + tpl.id + ', {quote_tool:this.value})">' +
+          QUOTE_TOOL_KEYS.map(k => '<option value="' + k + '"' + ((quoteToolKey(tpl.quote_tool) || 'manpower') === k ? ' selected' : '') + '>' + pbEsc(quoteToolLabel(k)) + '</option>').join('') + '</select></div>' +
         '<label style="font-size:12px;"><input type="checkbox" ' + (tpl.active ? 'checked' : '') + ' onchange="pgAdminSaveTemplate(' + tpl.id + ', {active:this.checked})"> Active</label>' +
         '<button class="btn btn-secondary btn-sm" ' + (tpl.is_default ? 'disabled' : '') + ' onclick="pgAdminMakeDefault(' + tpl.id + ')">Make default</button>' +
         '<button class="btn btn-danger btn-sm" onclick="pgAdminDeleteTemplate(' + tpl.id + ')">Delete</button>' +
@@ -14543,13 +14910,17 @@ function renderBasicInfoTab() {
       fg('Start date', pbDateField('contract_start_date', q.contract_start_date, false)),
       fg('Duration', pbDurationField(q.contract_duration_months)),
     ]) +
-    row('70px 70px 230px 150px', [
+    (quoteToolRun(q) === 'manpower' ? row('70px 70px 230px 150px', [
       fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)">'),
       fg('Shifts/day', '<select class="form-control" onchange="pbUpdateShiftsPerDay(+this.value)">' +
         [1,2,3,4].map(n => '<option value="' + n + '" ' + (n===q.shifts_per_day?'selected':'') + '>' + n + '</option>').join('') + '</select>'),
       fg('Area', pbQuoteAreaField()),
       statusCell,
-    ]) +
+    ]) : row('70px 230px 150px', [   // v7.10.46: the simple tool has no posts, so no shifts a day and no PSIRA area
+      fg('Margin %', '<input class="form-control" type="number" step="0.01" value="' + pbEsc(q.margin_pct) + '" onchange="pbSaveQuoteField(\'margin_pct\', +this.value)" title="The margin in the typed prices — carried to the revenue stream, not applied to the prices">'),
+      '<div style="font-size:11px;color:var(--text3);align-self:end;padding-bottom:6px;">The margin is a fact about the prices typed on the Pricing tab, not a markup applied to them.</div>',
+      statusCell,
+    ])) +
     fg('Notes', '<textarea class="form-control" style="height:240px;resize:vertical;" onchange="pbSaveQuoteField(\'notes\', this.value)">' + pbEsc(q.notes || '') + '</textarea>') +
     '</div></div>';
 }
@@ -15115,6 +15486,7 @@ async function loadProposalSandbox() {
   root.innerHTML = '<p style="color:var(--text3);">Loading sandbox quotes…</p>';
   try {
     const quotes = await apiGet('quote_quotes', 'is_sandbox=eq.true&owner_id=eq.' + currentUser.personId + '&select=*&order=updated_at.desc');
+    pbNoteToolColumn(quotes);   // v7.10.46
     root.innerHTML = renderProposalSandboxList(quotes);
   } catch (e) { root.innerHTML = '<p style="color:var(--red);">Error loading sandbox quotes: ' + e.message + '</p>'; }
 }
@@ -15128,13 +15500,14 @@ function renderProposalSandboxList(quotes) {
   if (!quotes.length) return header + '<div style="padding:40px;text-align:center;color:var(--text3);background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);">No sandbox quotes yet. Click <strong>+ New Sandbox Quote</strong> to test a concept — nothing here touches the pipeline.</div>';
   const rows = quotes.map(q => '<tr onclick="openQuote(' + q.id + ')" style="cursor:pointer;">' +
     '<td style="font-weight:600;">' + pbEsc(q.contract_name) + '</td>' +
+    '<td>' + pbToolBadge(q) + '</td>' +
     '<td>' + pbEsc(q.sandbox_client_name || '—') + '</td>' +
     '<td>' + pbEsc(q.quote_date) + '</td>' +
     '<td>' + pbEsc(q.contract_duration_months) + ' mo</td>' +
     '<td>' + pbEsc(q.margin_pct) + '%</td>' +
     '<td>' + pbEsc((q.updated_at || '').slice(0, 10)) + '</td>' +
     '<td style="text-align:right;"><button class="btn btn-ghost btn-sm" style="color:var(--red);" onclick="event.stopPropagation(); deleteSandboxQuote(' + q.id + ')">Delete</button></td></tr>').join('');
-  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Title</th><th>Client (label)</th><th>Quote Date</th><th>Duration</th><th>Margin</th><th>Last Touched</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
+  return header + '<table style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;"><thead><tr><th>Title</th><th>Tool</th><th>Client (label)</th><th>Quote Date</th><th>Duration</th><th>Margin</th><th>Last Touched</th><th></th></tr></thead><tbody>' + rows + '</tbody></table>';
 }
 
 async function createNewSandboxQuote() {
@@ -15142,10 +15515,12 @@ async function createNewSandboxQuote() {
     const existing = await apiGet('quote_quotes', 'is_sandbox=eq.true&owner_id=eq.' + currentUser.personId + '&select=id');
     if (existing.length >= PB_SANDBOX_CAP) { showStatus('Sandbox limit reached (' + PB_SANDBOX_CAP + '). Delete an existing sandbox quote first.', 'error'); await loadProposalSandbox(); return; }
   } catch (e) { /* fall through — the DB trigger enforces the cap regardless */ }
-  const name = await promptDialog({title:'New sandbox quote', message:'Title for this concept quote?', confirmLabel:'Create'});
-  if (!name) return;
+  // v7.10.46: a sandbox quote has no deal to read a service type from, so the dialog asks for the tool (manpower offered).
+  const pick = await quoteToolDialog({ title: 'New sandbox quote', nameLabel: 'Title for this concept quote', defaultTool: 'manpower', toolColumn: _pbToolColumn });
+  if (!pick) return;
+  const name = pick.name;
   const payload = { deal_id: null, is_sandbox: true, owner_id: currentUser.personId, created_by: currentUser.personId, contract_name: name, contract_start_date: new Date().toISOString().slice(0,10), contract_duration_months: 12, quote_date: new Date().toISOString().slice(0,10), shifts_per_day: 2, margin_pct: 20.00, status: 'draft', version: 1 };
-  try { const r = await apiPost('quote_quotes', payload); if (r.length) await openQuote(r[0].id); }
+  try { const r = await pbPostQuote(payload, pick.tool); if (r.length) await openQuote(r[0].id); }
   catch (e) { showStatus('Could not create sandbox quote: ' + e.message, 'error'); }
 }
 
