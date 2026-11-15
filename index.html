@@ -874,7 +874,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.43 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.44 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -913,7 +913,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.43 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.44 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -7842,7 +7842,7 @@ async function openProjectPlan(planId, from) {
   if (!page || !root) return;
   _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: _pp.view || 'list', edit: null, from: from || null, busy: false,
           links: [], holidays: new Set(), sched: null, schedTab: _pp.schedTab || 'gantt', zoom: _pp.zoom || 'week', critOn: _pp.critOn !== false,
-          teamNew: null, affil: {}, draft: false, full: false, collapsed: new Set(), compact: !!_pp.compact, tree: null };
+          teamNew: null, affil: {}, draft: false, full: false, collapsed: new Set(), msCollapsed: new Set(), compact: !!_pp.compact, tree: null };
   root.innerHTML = '<div style="padding:40px;color:var(--text3);">Loading…</div>';
   page.classList.add('active');
   try {
@@ -8191,6 +8191,7 @@ function ppTasksHtml(edit) {
         <button class="btn btn-sm ${_pp.view === 'board' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-board" style="border:none;border-radius:0;" onclick="ppSetView('board')">Board</button>
         <button class="btn btn-sm ${_pp.view === 'schedule' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-schedule" style="border:none;border-radius:0;" onclick="ppSetView('schedule')">Schedule</button>
       </div>
+      ${_pp.view !== 'board' ? `<span style="font-size:12px;color:var(--text3);"><a href="#" id="pp-collapse-all" onclick="ppCollapseAll(true);return false;" title="Fold every milestone and group">Collapse all</a> · <a href="#" id="pp-expand-all" onclick="ppCollapseAll(false);return false;" title="Open every milestone and group">Expand all</a></span>` : ''}
       <div style="flex:1;"></div>
       <button class="btn btn-ghost btn-sm" id="pp-full" onclick="ppToggleFull()" title="${_pp.full ? 'Back to the plan page (Esc)' : 'Show the tasks on the whole screen'}">${_pp.full ? '⤡ Exit full page' : '⤢ Full page'}</button>
       ${edit ? '<button class="btn btn-secondary btn-sm" id="pp-task-add" onclick="ppTaskAdd()">+ Task</button>' : ''}
@@ -8246,7 +8247,7 @@ function ppTaskListHtml(edit) {
     </tr>`;
   };
   const groups = [];
-  rows.forEach(r => { if (r.kind === 'ms') groups.push({ ms: r.ms, leaves: r.leaves, rows: [] }); else groups[groups.length - 1].rows.push(r); });
+  rows.forEach(r => { if (r.kind === 'ms') groups.push({ ms: r.ms, leaves: r.leaves, rows: [], band: r }); else groups[groups.length - 1].rows.push(r); });
   // a new task's editor needs its band even when no task sits there yet (the grid's rows carry only bands with tasks)
   if (nd && !nd.parent_task_id && !groups.some(g => (g.ms == null && nd.milestone_id == null) || (g.ms && +nd.milestone_id === +g.ms.id))) {
     const m = nd.milestone_id != null ? _pp.milestones.find(x => +x.id === +nd.milestone_id) || null : null;
@@ -8265,7 +8266,8 @@ function ppTaskListHtml(edit) {
       shown.forEach((r, i) => { inner += row(r); const next = shown[i + 1]; if (!placed && under.has(+r.t.id) && !(next && under.has(+next.t.id))) { inner += newRow; placed = true; } });
       if (!placed) inner += newRow;
     } else inner = shown.map(row).join('') + (mine ? newRow : '');
-    return `<tr class="pp-task-group"><td colspan="7" style="background:var(--bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);padding:6px 8px;">${escHtml(name)} <span style="font-weight:normal;color:var(--text3);text-transform:none;letter-spacing:0;">· ${done} of ${g.leaves.length} done</span></td></tr>` + inner;
+    const band = g.band || { ms: g.ms, collapsed: false };
+    return `<tr class="pp-task-group"><td colspan="7" style="background:var(--bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);padding:6px 8px;"><span style="display:inline-flex;align-items:center;">${ppBandCaret(band)}</span>${escHtml(name)} <span style="font-weight:normal;color:var(--text3);text-transform:none;letter-spacing:0;">· ${done} of ${g.leaves.length} done</span></td></tr>` + inner;
   }).join('');
   return `<table class="pp-table" style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);text-align:left;">
@@ -8276,6 +8278,23 @@ function ppToggleGroup(id) {
   const c = _pp.collapsed || (_pp.collapsed = new Set());
   if (c.has(+id)) c.delete(+id); else c.add(+id);
   ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+// v7.10.44 (Richard: "allow phases to be collapsed"): a milestone band folds like a group — the caret on the band row in the
+// grid and the list; its tasks and their bars disappear until it is opened again. Collapse all / Expand all act on bands and groups together.
+function ppBandKey(ms) { return ms ? +ms.id : 0; }
+function ppToggleBand(key) {
+  const c = _pp.msCollapsed || (_pp.msCollapsed = new Set());
+  if (c.has(+key)) c.delete(+key); else c.add(+key);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+function ppCollapseAll(on) {
+  const T = ppTree();
+  _pp.collapsed = new Set(on ? _pp.tasks.filter(t => T.isSum(t.id)).map(t => +t.id) : []);
+  _pp.msCollapsed = new Set(on ? ppGridRows().filter(r => r.kind === 'ms').map(r => ppBandKey(r.ms)) : []);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+function ppBandCaret(r) {
+  return `<span class="pp-caret" title="${r.collapsed ? 'Expand the milestone' : 'Collapse the milestone — hide its tasks'}" onclick="ppToggleBand(${ppBandKey(r.ms)})">${r.collapsed ? '▸' : '▾'}</span>`;
 }
 function ppTaskEditorRow(t) {
   const d = _pp.edit.draft, sum = t && ppIsSummary(t);
@@ -8915,7 +8934,7 @@ let _ppSchedNoSlack = false;   // a database on the phase 1 tables only: dates s
 // plan, the tasks inside a group 1.1, 1.2, 1.2.1 … (v7.10.43, WBS); predecessors are typed by that number.
 // A row carries depth, summary (a group), collapsed and hidden (inside a collapsed group).
 function ppGridRows() {
-  const T = ppTree(), col = _pp.collapsed || (_pp.collapsed = new Set()), rows = [];
+  const T = ppTree(), col = _pp.collapsed || (_pp.collapsed = new Set()), mcol = _pp.msCollapsed || (_pp.msCollapsed = new Set()), rows = [];
   const known = id => _pp.milestones.some(m => +m.id === +id);
   const groups = _pp.milestones.map(m => ({ ms: m, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
   const loose = _pp.tasks.filter(t => t.milestone_id == null || !known(t.milestone_id));
@@ -8928,8 +8947,9 @@ function ppGridRows() {
     if (sum) T.kids[+t.id].forEach((k, i) => walk(k, wbs + '.' + (i + 1), depth + 1, hidden || closed));
   };
   groups.forEach(g => {
-    rows.push({ kind: 'ms', ms: g.ms, tasks: g.tasks, leaves: g.tasks.filter(t => !T.isSum(t.id)) });
-    g.tasks.filter(t => T.parent[+t.id] == null).sort(bySort).forEach(t => walk(t, String(++n), 0, false));
+    const closed = mcol.has(ppBandKey(g.ms));   // v7.10.44: a collapsed milestone band hides every task under it
+    rows.push({ kind: 'ms', ms: g.ms, tasks: g.tasks, leaves: g.tasks.filter(t => !T.isSum(t.id)), collapsed: closed });
+    g.tasks.filter(t => T.parent[+t.id] == null).sort(bySort).forEach(t => walk(t, String(++n), 0, closed));
   });
   return rows;
 }
@@ -9243,7 +9263,7 @@ function ppGridHtml(edit, print) {
     : `<tr><th style="width:40px;">#</th><th style="width:220px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days. A group spans its tasks.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:96px;" title="The tasks this one depends on (its predecessors). Click a cell to pick them.">Depends on</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:' + actW + 'px;"></th>'}</tr>`;
   const actions = (r, t) => edit && !print ? `<span class="pp-ic" title="Outdent — ${r.depth ? 'take it out of its group' : 'move it to No milestone'}" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent — make it a sub-task of the task above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="${escAttr(_ppGroupsMissing ? PP_GROUPS_MISSING_MSG : 'Add a task inside this one' + (r.summary ? '' : ' — it becomes a group'))}" onclick="ppTaskAdd(null, ${+t.id})">✚</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>${ppMsOfTask(t.id) ? '<span class="pp-ic" style="color:var(--navy);cursor:default;" title="A milestone marks the completion of this task">◆</span>' : `<span class="pp-ic" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◇</span>`}` : '';
   const nameCell = (r, t) => {
-    const caret = r.summary ? `<span class="pp-caret" title="${r.collapsed ? 'Expand the group' : 'Collapse the group'}" onclick="ppToggleGroup(${+t.id})">${r.collapsed ? '▸' : '▾'}</span>` : '<span class="pp-caret"></span>';
+    const caret = r.summary && !print ? `<span class="pp-caret" title="${r.collapsed ? 'Expand the group' : 'Collapse the group'}" onclick="ppToggleGroup(${+t.id})">${r.collapsed ? '▸' : '▾'}</span>` : '<span class="pp-caret"></span>';
     return `<td style="padding-left:${(print ? 4 : 6) + r.depth * 14}px;"><span style="display:flex;align-items:center;min-width:0;">${caret}${inp(t, 'name', 'text', t.name, 'style="font-weight:' + (r.summary ? 700 : 600) + ';"', edit)}</span></td>`;
   };
   const body = rows.map(r => {
@@ -9252,7 +9272,7 @@ function ppGridHtml(edit, print) {
       const es = ss.length ? ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es) : null, ef = ss.length ? ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef) : null;
       const pct = ts.length ? Math.round(ts.reduce((a, t) => a + ppPct(t), 0) / ts.length) : 0;
       const late = m && m.status !== 'done' && m.due_date && m.due_date < today;
-      const name = `<td style="font-weight:700;color:var(--navy);">${m ? escHtml(m.name) : 'No milestone'}${m && m.due_date ? ' <span style="font-weight:normal;color:' + (late ? 'var(--red)' : 'var(--text3)') + ';">· due ' + ppDate(m.due_date) + '</span>' : ''}</td>`;
+      const name = `<td style="font-weight:700;color:var(--navy);"><span style="display:flex;align-items:center;min-width:0;">${print ? '' : ppBandCaret(r)}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m ? escHtml(m.name) : 'No milestone'}${r.collapsed ? ' <span style="font-weight:normal;color:var(--text3);">· ' + ts.length + ' task' + (ts.length === 1 ? '' : 's') + '</span>' : ''}${m && m.due_date ? ' <span style="font-weight:normal;color:' + (late ? 'var(--red)' : 'var(--text3)') + ';">· due ' + ppDate(m.due_date) + '</span>' : ''}</span></span></td>`;
       if (compact) return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td>${name}${print ? '' : '<td></td>'}</tr>`;
       return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td>${name}<td style="text-align:right;">${es && ef ? ppWorkDaysIncl(es, ef) : ''}</td><td>${es ? ppDate(es) : ''}</td><td>${ef ? ppDate(ef) : ''}</td>${_ppLinksMissing && print ? '' : '<td></td>'}<td>${m ? escHtml(ppPersonName(m.owner_id) || '') : ''}</td><td style="text-align:right;">${ts.length ? pct + '%' : ''}</td><td style="text-align:right;">${ts.reduce((a, t) => a + (+t.est_hours || 0), 0) || ''}</td>${base ? '<td></td>' : ''}${print ? '' : '<td></td>'}</tr>`;
     }
