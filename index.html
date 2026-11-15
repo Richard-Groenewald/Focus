@@ -874,7 +874,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.44 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.45 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -913,7 +913,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.44 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.45 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -37033,16 +37033,42 @@ function fmtMinutes(m) {
   const h = Math.floor(m / 60), r = m % 60;
   return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`;
 }
+// v7.10.45: the Time Spent dropdown's steps — every quarter hour up to 8 h.
+const LI_DURATION_STEPS = Array.from({ length: 32 }, (_, k) => (k + 1) * 15);
 function setLiDuration(mins) {
   const el = document.getElementById('li-duration');
   if (!el || el.disabled) return;
   el.value = mins;
+  onLiDurationType();
+}
+// The dropdown was picked: a step writes the minutes box, "none" clears it, "Other" keeps what is
+// typed and puts the cursor in the box.
+function onLiDurationPick() {
+  const sel = document.getElementById('li-duration-sel');
+  const el = document.getElementById('li-duration');
+  if (!sel || !el) return;
+  if (sel.value === 'other') { el.focus(); el.select(); }
+  else el.value = sel.value;
   renderLiDurationHint();
 }
+// The minutes box was typed: the dropdown follows — the matching step, "none" when blank, else "Other".
+function onLiDurationType() {
+  const sel = document.getElementById('li-duration-sel');
+  const el = document.getElementById('li-duration');
+  if (sel && el) {
+    const m = el.value === '' ? '' : Math.round(+el.value);
+    sel.value = m === '' ? '' : LI_DURATION_STEPS.includes(m) ? String(m) : 'other';
+  }
+  renderLiDurationHint();
+}
+// The hint spells the box out ("1h 40m") only when the dropdown does not already say it.
 function renderLiDurationHint() {
   const el = document.getElementById('li-duration');
+  const sel = document.getElementById('li-duration-sel');
   const hint = document.getElementById('li-duration-hint');
-  if (hint) hint.textContent = (el && +el.value) ? fmtMinutes(+el.value) : '';
+  if (!hint) return;
+  const m = el ? +el.value : 0;
+  hint.textContent = (m > 0 && (!sel || sel.value === 'other')) ? fmtMinutes(Math.round(m)) : '';
 }
 function setLiWorkMode(mode) {
   const hidden = document.getElementById('li-work-mode');
@@ -37072,7 +37098,12 @@ function renderLiModeHint() {
 function _liTimeRowHtml(i, dis, forceInternal) {
   const mins = (i && i.duration_minutes != null) ? +i.duration_minutes : '';
   const mode = forceInternal ? 'internal' : ((i && i.work_mode) || 'client');
-  const chip = (m, l) => `<button type="button" class="btn btn-secondary btn-sm" ${dis} onclick="setLiDuration(${m})" style="padding:4px 9px;">${l}</button>`;
+  // v7.10.45 (Richard: "make time spent a dropdown in 15 min increments but allow minutes to be inputted
+  // manually for any number"): a select of 15-minute steps up to 8 h beside the minutes box. The select
+  // writes the box; a typed figure selects its step when it is one, else "Other" — the box (#li-duration)
+  // stays the one value the save reads, so any number of minutes still saves.
+  const stepOpts = LI_DURATION_STEPS.map(m => `<option value="${m}" ${mins === m ? 'selected' : ''}>${fmtMinutes(m)}</option>`).join('');
+  const other = mins !== '' && !LI_DURATION_STEPS.includes(mins);
   const modeBtn = (v, l) => `<button type="button" id="li-mode-${v}" class="btn btn-sm ${mode === v ? 'btn-primary' : 'btn-secondary'}" ${dis} onclick="setLiWorkMode('${v}')">${l}</button>`;
   return `
           <input type="hidden" id="li-work-mode" value="${mode}">
@@ -37080,8 +37111,13 @@ function _liTimeRowHtml(i, dis, forceInternal) {
             <div class="form-group">
               <label class="form-label">Time Spent <span style="font-weight:400;color:var(--text3);font-size:11px;">— optional</span></label>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                <input type="number" id="li-duration" class="form-control" style="width:82px;" min="1" max="1440" step="5" placeholder="min" value="${mins}" ${dis} oninput="renderLiDurationHint()">
-                ${chip(30, '30m')}${chip(60, '1h')}${chip(90, '1½h')}${chip(120, '2h')}
+                <select id="li-duration-sel" class="form-control" style="width:120px;" ${dis} onchange="onLiDurationPick()">
+                  <option value="" ${mins === '' ? 'selected' : ''}>— none —</option>
+                  ${stepOpts}
+                  <option value="other" ${other ? 'selected' : ''}>Other…</option>
+                </select>
+                <input type="number" id="li-duration" class="form-control" style="width:82px;" min="1" max="1440" step="1" placeholder="min" value="${mins}" ${dis} oninput="onLiDurationType()">
+                <span style="font-size:12px;color:var(--text3);">min</span>
                 <span id="li-duration-hint" style="font-size:12px;color:var(--text3);font-weight:700;"></span>
               </div>
             </div>
@@ -37674,6 +37710,7 @@ function _liSnapshotForm() {
     actionDetails: v('li-action-details'),
     nextDone: !!document.getElementById('li-next-done')?.checked,
     completionNote: v('li-completion-note-input'),
+    duration: v('li-duration'), workMode: v('li-work-mode'),   // v7.10.45: time spent survives the child modal too
   };
 }
 
@@ -37705,6 +37742,8 @@ async function _liRestoreForm(snap) {
   const noteWrap = document.getElementById('li-completion-note-wrap');
   if (noteWrap) noteWrap.style.display = snap.nextDone ? 'block' : 'none';
   set('li-completion-note-input', snap.completionNote);
+  if (snap.duration !== undefined) { set('li-duration', snap.duration); onLiDurationType(); }
+  if (snap.workMode && document.getElementById('li-mode-client')) setLiWorkMode(snap.workMode);
   await _liLoadPeople(true);   // keep current selections; rebuild only the pool
   window._liStream = snap.stream || null;
   _liRenderStreamSection();    // stream data lives in state — no refetch needed
