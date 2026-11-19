@@ -4283,7 +4283,7 @@ function showPage(page) {
 
   // Update topbar
   document.getElementById('page-title').textContent = cfg.title;
-  document.getElementById('page-sub').textContent = '';
+  document.getElementById('page-sub').textContent = PAGE_HELP[page] || '';   // v7.10.48: the page's description (a loader may append to it)
 
   // Hide the sidebar on the wide pages (Revenue Pipeline matrix, Opportunities
   // lineage table, Leads register — v7.9.15, Richard: "as with opportunities")
@@ -4519,7 +4519,8 @@ async function loadTable(page) {
         : currentData.filter(p => s.ownedPersons.has(+p.id));       // only your contacts
     }
 
-    document.getElementById('page-sub').textContent = (cfg.subtitle ? cfg.subtitle + ' · ' : '') + currentData.length + ' record' + (currentData.length !== 1 ? 's' : '');
+    const subText = cfg.subtitle || PAGE_HELP[page] || '';   // v7.10.48: the Access Control descriptions ride here too
+    document.getElementById('page-sub').textContent = (subText ? subText + ' · ' : '') + currentData.length + ' record' + (currentData.length !== 1 ? 's' : '');
 
     if (!currentData.length) {
       head.innerHTML = '<tr>' + cfg.columns.map(c => `<th>${c.label}</th>`).join('') + '<th>Actions</th></tr>';
@@ -5847,6 +5848,17 @@ async function deleteRecord(id) {
 
 
 // ── Menu Definition ──────────────────────────────────────
+// v7.10.48 (Richard 2026-11-19: "under site admin/access control, have each menu item come with a short
+// description on function and use"): one or two sentences per page — what it is for and when to use it —
+// shown under the page title (#page-sub; the generic list appends its record count) and as the sidebar
+// item's tooltip. Keyed on the page; add a page here and both surfaces carry it.
+const PAGE_HELP = {
+  system_users: 'Who can sign in. Each login belongs to a person on record and carries one login role; create a login here when someone joins, reset a password, and deactivate a leaver — which also ends their open sessions. What a login may do comes from its role.',
+  roles: 'The named roles a login can hold — Admin, Executive, Sales Manager, Technician and so on. A role is a bundle of permissions and nothing more: grant the rights under Role Permissions, then give people the role under System Users. Add a role when a new kind of user needs a different set of rights.',
+  permissions: 'The individual rights Focus checks before it shows a page or allows an action (manage_leads, approve_timesheets, the view_section keys that open each sidebar section). The list belongs to the application — a row is added when a release introduces a new right, never to grant access. Access is granted through roles.',
+  role_permissions: 'The matrix of which role holds which right. Tick a permission against a role and every login with that role has it from their next page load; untick to take it away. This is the one place access is actually granted or withdrawn.',
+  user_regions: 'The regions and branches each login is responsible for. They define the Team view and the manager-override scope — which records count as "my team\'s" — not what a user may open; a branch covers every region under it. Use it to tie a regional salesperson or manager to their own area.',
+};
 const MENU = [
   {
     section: 'Outreach Activities',
@@ -6141,7 +6153,8 @@ function buildNav(navigate = true) {
   // Helper: render one item button
   const renderItem = (item) => {
     if (!firstPage) firstPage = item.page;
-    return `<button class="nav-item" id="nav-${item.page}" onclick="showPage('${item.page}')">
+    const tip = PAGE_HELP[item.page] ? ` title="${escAttr(PAGE_HELP[item.page])}"` : '';   // v7.10.48: the page's description as the tooltip
+    return `<button class="nav-item" id="nav-${item.page}" onclick="showPage('${item.page}')"${tip}>
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">${item.icon}</svg>
       ${item.label}
     </button>`;
@@ -39923,7 +39936,7 @@ async function renderRolePermissions() {
     allData['roles'] = roles;
     allData['permissions'] = permissions;
 
-    document.getElementById('page-sub').textContent = roles.length + ' roles, ' + permissions.length + ' permissions';
+    document.getElementById('page-sub').textContent = (PAGE_HELP.role_permissions ? PAGE_HELP.role_permissions + ' · ' : '') + roles.length + ' roles, ' + permissions.length + ' permissions';   // v7.10.48: the description stays
 
     // Build assignment set for quick lookup
     const assigned = new Set(assignments.map(a => a.role_id + '_' + a.permission_id));
@@ -40002,7 +40015,7 @@ async function renderUserRegions() {
       .map(u => ({ ...u, _name: nameOf(u.person_id) }))
       .sort((a, b) => a._name.localeCompare(b._name));
 
-    document.getElementById('page-sub').textContent =
+    document.getElementById('page-sub').textContent = (PAGE_HELP.user_regions ? PAGE_HELP.user_regions + ' · ' : '') +   // v7.10.48: the description stays
       rows.length + ' users · ' + branches.length + ' branches, ' + regions.length + ' regions';
 
     const regionAssigned = new Set(regionAssign.map(a => a.system_user_id + '_' + a.region_id));
