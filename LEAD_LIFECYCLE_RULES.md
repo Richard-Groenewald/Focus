@@ -122,7 +122,7 @@ blocked** until the verdict is Ignore or the flag is removed.
 |---|---|
 | **Hold** | Mandatory wake date → auto back to Working + top-of-dashboard reminders (owner + SM) |
 | **Nurture** | Per-lead recurring cadence → each tick creates a **next-action obligation** (campaign-cadence machinery) |
-| **Raw** | No client contact for X days (Last Contact) → escalation to owner + SM |
+| **Raw** | No activity on the record for X days (Last Touch — research precedes contact; v7.10.47) → escalation to owner + SM |
 | **Working** | No client contact for Y days (Last Contact) → escalation to owner + SM |
 
 X and Y are Admin → Settings values, **overridable per user by the sales manager**.
