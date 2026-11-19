@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1011,8 +1011,14 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-left:16px;padding:5px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;white-space:nowrap;flex-shrink:0;" id="opp-owner-display" style="display:none;">
       <svg viewBox="0 0 16 16" fill="currentColor" style="width:13px;height:13px;color:var(--text3);"><circle cx="8" cy="5" r="3"/><path d="M2 13c0-3 2.7-5 6-5s6 2 6 5"/></svg>
-      <span style="color:var(--text3);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:0.05em;">Owner</span>
+      <span id="opp-owner-label" style="color:var(--text3);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:0.05em;">Owner</span>
       <span id="opp-owner-name" style="font-weight:700;color:var(--text);">—</span>
+    </div>
+    <!-- v7.10.51: the delivery owner of a secured deal (oppDeliveryRefresh) -->
+    <div id="opp-delivery-display" style="display:none;align-items:center;gap:6px;margin-left:8px;padding:5px 12px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);font-size:12px;white-space:nowrap;flex-shrink:0;">
+      <span style="color:var(--text3);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:0.05em;">Delivery</span>
+      <span id="opp-delivery-name" style="font-weight:700;color:var(--text);">—</span>
+      <button class="btn btn-ghost btn-sm" id="opp-delivery-set" style="display:none;padding:0 6px;font-size:12px;line-height:18px;" onclick="openDeliveryOwnerPrompt('set')" title="Set or change the delivery owner">✎</button>
     </div>
     <div style="flex:1;"></div>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -6347,6 +6353,217 @@ let oppFYs = []; // financial years shown
 let oppRevLocked = false; // contracted-forecast lock: true once a deal is secured
                           // (re-forecast is a future senior-approved action)
 let dealAdminMode = false; // true when a deal is opened from the Deal Administration
+
+// ── Delivery owner and delegation (v7.10.51) ─────────────────────────────────────────────────────
+// Richard 2026-11-19: "when an opportunity becomes a contract, the principle owner should be the
+// operations director owning the delivery responsibility. he/she might delegate some or all
+// responsibilities" → "one per family, no. build it". deals.owner_id stays the SALES owner — the
+// pipeline, targets, reports and attribution all key on it. A SECURED deal carries a DELIVERY owner
+// (deals.delivery_owner_id), defaulted at securing from Site Admin → Settings → Delivery owners (one
+// per service family) and asked for in the securing step; the delivery owner holds every area below,
+// a delegate the areas ticked on their deal_collaborators row (responsibilities, an optional
+// delegated_until). ONE access rule for a secured deal — dealDeliveryRights(): the delivery owner,
+// an administer_deals holder and Deal Administration hold everything; a delegate the areas delegated;
+// everyone else, the sales owner included (Richard's "no"), logs engagements and attaches files as
+// before. The opportunity stream stays frozen for all but Deal Administration — it is history.
+const DELIVERY_AREAS = [
+  { key: 'terms',       label: 'Contract terms',        help: 'Order and start dates and the notes on the General tab' },
+  { key: 'actuals',     label: 'Revenue actuals',       help: 'The recorded months of the fulfilment stream (reserved — no screen in Focus yet)' },
+  { key: 'billing',     label: 'Billing',               help: 'The billing schedule (reserved — no screen in Focus yet)' },
+  { key: 'plan',        label: 'Project plan',          help: 'Build and edit the project plan as its manager would' },
+  { key: 'engagements', label: 'Engagements and files', help: 'Log engagements and attach files (every collaborator has this)' },
+];
+const DELIVERY_MISSING_MSG = 'Delivery owners need sql/add_delivery_owner.sql on this database';
+let _deliveryMissing = false;        // the loaded deal row lacks delivery_owner_id
+let _delegationMissing = false;      // the loaded deal_collaborators rows lack responsibilities
+let _oppDeliveryPick;                // the securing step's answer (a person id, or null for none); undefined = not asked in this save
+let oppDeliveryRights = new Set();   // the areas the signed-in person holds on the OPEN secured deal
+let oppLevel = 'view';               // the open deal's edit level: full | delivery | engagement | view
+function deliveryAreaLabel(k) { const a = DELIVERY_AREAS.find(x => x.key === k); return a ? a.label : k; }
+function deliveryDefaultFor(majorId) { const v = +(appSettings['delivery_owner_default_' + (+majorId || 0)] || 0); return v > 0 ? v : null; }
+function deliveryOwnerReady(deal) { return !!MOCK || !!(deal && 'delivery_owner_id' in deal); }
+function _deliveryExpand(list) { const out = new Set(); (list || []).forEach(k => { if (k === 'all') DELIVERY_AREAS.forEach(a => out.add(a.key)); else out.add(k); }); return out; }
+function _delegationLive(c) { return !!(c && c.responsibilities && c.responsibilities.length && (!c.delegatedUntil || String(c.delegatedUntil) >= _today())); }
+function _deliveryName(id) { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : (id ? '#' + id : ''); }
+// The areas `currentUser` holds on a secured deal, judged from the deal row and its collaborator rows
+// (loadCollaborators' shape: personId, responsibilities, delegatedUntil).
+function dealDeliveryRights(deal, collabs) {
+  const me = +((currentUser && currentUser.personId) || 0);
+  if (!deal || !me) return new Set();
+  const all = () => new Set(DELIVERY_AREAS.map(a => a.key));
+  if (currentUser.isAdmin || (currentUser.permissions || []).includes('all') || can('administer_deals')) return all();
+  if (deal.delivery_owner_id != null && +deal.delivery_owner_id === me) return all();
+  const out = new Set();
+  (collabs || []).filter(c => +c.personId === me && _delegationLive(c)).forEach(c => _deliveryExpand(c.responsibilities).forEach(k => out.add(k)));
+  return out;
+}
+function deliveryCan(area) { return dealAdminMode || oppDeliveryRights.has(area); }
+// Who may set or change the delivery owner: a deal administrator, an owner-assigner in scope, the delivery owner.
+function canSetDeliveryOwner(deal) {
+  if (!currentUser || !deal || !deal.id) return false;
+  if (currentUser.isAdmin || can('administer_deals') || canAssignOwner(deal)) return true;
+  return deal.delivery_owner_id != null && +deal.delivery_owner_id === +currentUser.personId;
+}
+// Who may delegate: the delivery owner, a deal administrator, Deal Administration.
+function canDelegateDelivery() {
+  if (!currentUser || !oppData || !oppData.id) return false;
+  if (dealAdminMode || currentUser.isAdmin || can('administer_deals')) return true;
+  return oppData.delivery_owner_id != null && +oppData.delivery_owner_id === +currentUser.personId;
+}
+// The header's Delivery block (beside the sales owner, which reads "Sales" once the deal is secured).
+function oppDeliveryRefresh(secured) {
+  const box = document.getElementById('opp-delivery-display'), lbl = document.getElementById('opp-owner-label');
+  if (!box) return;
+  if (lbl) lbl.textContent = secured ? 'Sales' : 'Owner';
+  if (!secured || !oppData || !oppData.id) { box.style.display = 'none'; return; }
+  const nameEl = document.getElementById('opp-delivery-name'), btn = document.getElementById('opp-delivery-set');
+  const name = oppData.delivery_owner_id ? _deliveryName(oppData.delivery_owner_id) : '';
+  nameEl.textContent = name || 'not set';
+  nameEl.style.color = name ? '' : '#9A3412';
+  btn.style.display = canSetDeliveryOwner(oppData) ? '' : 'none';
+  btn.title = deliveryOwnerReady(oppData) ? 'Set or change the delivery owner' : DELIVERY_MISSING_MSG;
+  box.style.display = 'flex';
+}
+function _oppServiceMajorName(majorId) {
+  const m = (allData['service_major'] || []).find(x => +x.id === +majorId);
+  if (m) return m.name;
+  const sel = document.getElementById('opp-service-major-id');
+  const o = sel && [...sel.options].find(x => +x.value === +majorId);
+  return o ? o.textContent.trim() : '';
+}
+// The securing step's question ("Who owns delivery?") and the header's Set button. mode 'secure':
+// the answer is kept in _oppDeliveryPick and saveOpportunity resumed — the pattern of the legal-name
+// gate; mode 'set': PATCHed at once with a Handover engagement.
+function openDeliveryOwnerPrompt(mode) {
+  if (mode === 'set' && !deliveryOwnerReady(oppData)) { showStatus(DELIVERY_MISSING_MSG, 'error'); return; }
+  const majorId = +((document.getElementById('opp-service-major-id') || {}).value || (oppData && oppData.service_major_id) || 0);
+  const fam = _oppServiceMajorName(majorId);
+  const dflt = deliveryDefaultFor(majorId);
+  const current = mode === 'set' ? (oppData.delivery_owner_id || dflt) : dflt;
+  const people = homeOrgPeople(allData['people'] || [], [current]).filter(p => p.active !== false || +p.id === +current);
+  const note = fam
+    ? (dflt ? 'Default for ' + fam + ': <strong>' + escHtml(_deliveryName(dflt)) + '</strong>.' : 'No default delivery owner is set for <strong>' + escHtml(fam) + '</strong> — Site Admin → Settings → Delivery owners.')
+    : 'The deal has no service family, so there is no default to offer.';
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">${mode === 'set' ? 'Delivery owner' : 'Who owns delivery?'}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.5;">${mode === 'set' ? '' : 'Securing hands this deal to the person who owns its delivery. The sales owner stays as is — the pipeline, targets and reports keep the deal under them.<br>'}${note}</div>
+          <div class="form-group">
+            <label class="form-label">Delivery owner</label>
+            <select id="delivery-owner-pick" class="form-control">
+              <option value="">— none yet —</option>
+              ${people.map(p => `<option value="${p.id}" ${+p.id === +current ? 'selected' : ''}>${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+            </select>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The delivery owner holds every area of the ${mode === 'set' ? 'deal' : 'contract'} — contract terms, revenue actuals, billing, the project plan, engagements and files — and may delegate any of them on the Collaborators tab.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmDeliveryOwner('${mode}')">${mode === 'set' ? 'Save' : 'Secure →'}</button>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmDeliveryOwner(mode) {
+  const v = +((document.getElementById('delivery-owner-pick') || {}).value || 0) || null;
+  closeModal();
+  if (mode !== 'set') { _oppDeliveryPick = v; saveOpportunity(); return; }
+  const prev = oppData.delivery_owner_id || null;
+  if ((prev || null) === v) return;
+  try {
+    const rows = await api('deals', 'PATCH', { delivery_owner_id: v, delivery_handover_at: v ? new Date().toISOString() : null }, 'id=eq.' + oppData.id + '&select=*');
+    Object.assign(oppData, (rows && rows[0]) || { delivery_owner_id: v });
+    await logDeliveryHandover(oppData, v, prev);
+    showStatus(v ? 'Delivery owner: ' + _deliveryName(v) : 'Delivery owner cleared');
+    oppDeliveryRefresh(true);
+    renderCollaborators();
+    loadEngagements(oppData.id);
+  } catch (e) { showStatus('Could not set the delivery owner: ' + e.message, 'error'); }
+}
+async function logDeliveryHandover(deal, toId, fromId) {
+  const by = (currentUser && currentUser.name) || 'the owner';
+  const text = toId
+    ? 'Handed over to delivery: ' + _deliveryName(toId) + (fromId ? ' (was ' + _deliveryName(fromId) + ')' : '') + ', by ' + by + '.'
+    : 'Delivery owner cleared by ' + by + (fromId ? ' (was ' + _deliveryName(fromId) + ')' : '') + '.';
+  try {
+    await api('engagements', 'POST', { deal_id: deal.id, engagement_date: _today(), engagement_type: 'Handover', notes: text, next_action_done: true, created_by: currentUser.personId }, '', { prefer: 'return=minimal' });
+  } catch (e) { console.warn('handover engagement:', e.message); }
+}
+// Save on a secured deal for a delivery editor holding 'terms': only the terms columns, never the
+// sales side (client, service, stage, owner, probability, the stream).
+async function saveDeliveryTerms() {
+  const order = (document.getElementById('opp-order-date-general') || {}).value || null;
+  const start = (document.getElementById('opp-start-date-general') || {}).value || null;
+  const derr = checkDatesOrder(order, start); if (derr) { showStatus(derr, 'error'); return; }
+  const payload = { order_date: order, start_date: start, notes: document.getElementById('opp-notes').value || null, ext_notes: document.getElementById('opp-ext-notes').value || null };
+  try {
+    const r = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
+    Object.assign(oppData, (r && r[0]) || payload);
+    _oppDirtyFields.clear(); _oppEventDirty = false; _oppAutoSavedAny = true;
+    showStatus('Contract terms saved');
+    await closeOppPage({ force: true });
+    if (currentPage === 'opportunities') await renderOpportunitiesPage(); else await loadTable(currentPage);
+  } catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
+}
+// The Collaborators tab's Delegate modal: the areas and an optional end date on one collaborator row.
+function openDelegateModal(idx) {
+  const c = oppCollaborators[idx]; if (!c) return;
+  if (!canDelegateDelivery()) { showStatus('Only the delivery owner or a deal administrator may delegate', 'error'); return; }
+  if (_delegationMissing) { showStatus(DELIVERY_MISSING_MSG, 'error'); return; }
+  const have = _deliveryExpand(c.responsibilities);
+  showModal(`
+    <div class="modal-overlay" onmousedown="if(event.target===this)this._md=Date.now()" onclick="if(event.target===this&&Date.now()-this._md<300)closeModal()">
+      <div class="modal" style="width:520px;">
+        <div class="modal-header">
+          <div class="modal-title">Delegate to ${escHtml(c.name)}</div>
+          <button class="modal-close" onclick="closeModal()">×</button>
+        </div>
+        <div class="modal-body">
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.5;">Tick the areas of this secured deal ${escHtml(c.name)} may change. The delivery owner keeps every area whatever is delegated; a delegation with an end date lapses by itself.</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="dlg-all" ${have.size === DELIVERY_AREAS.length ? 'checked' : ''} onchange="document.querySelectorAll('.dlg-area').forEach(cb => cb.checked = this.checked)" style="accent-color:var(--red);"> All areas</label>
+          ${DELIVERY_AREAS.map(a => `<label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;margin:0 0 6px 18px;cursor:pointer;"><input type="checkbox" class="dlg-area" value="${a.key}" ${have.has(a.key) ? 'checked' : ''} onchange="document.getElementById('dlg-all').checked=[...document.querySelectorAll('.dlg-area')].every(x=>x.checked)" style="accent-color:var(--red);margin-top:2px;"><span><strong>${escHtml(a.label)}</strong><br><span style="color:var(--text3);font-size:11px;">${escHtml(a.help)}</span></span></label>`).join('')}
+          <div class="form-group" style="margin-top:12px;">
+            <label class="form-label">Until (optional)</label>
+            <input type="date" id="dlg-until" class="form-control" style="max-width:200px;" value="${escAttr(c.delegatedUntil || '')}">
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Leave blank for an open-ended delegation; set a date for leave cover.</div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          ${have.size ? `<button class="btn btn-danger" onclick="confirmDelegate(${idx}, true)" style="margin-right:auto;">Revoke</button>` : ''}
+          <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="confirmDelegate(${idx}, false)">Save</button>
+        </div>
+      </div>
+    </div>`);
+}
+async function confirmDelegate(idx, revoke) {
+  const c = oppCollaborators[idx]; if (!c) return;
+  const picked = revoke ? [] : [...document.querySelectorAll('.dlg-area:checked')].map(cb => cb.value);
+  const until = revoke ? null : ((document.getElementById('dlg-until') || {}).value || null);
+  if (!revoke && !picked.length) { showStatus('Tick at least one area, or Revoke', 'error'); return; }
+  const resp = picked.length === DELIVERY_AREAS.length ? ['all'] : (picked.length ? picked : null);
+  closeModal();
+  const patch = { responsibilities: resp, delegated_until: resp ? until : null, delegated_by: resp ? currentUser.personId : null, delegated_at: resp ? new Date().toISOString() : null };
+  try {
+    if (c.id) await api('deal_collaborators', 'PATCH', patch, 'id=eq.' + c.id, { prefer: 'return=minimal' });
+    c.responsibilities = resp; c.delegatedUntil = resp ? until : null;
+    renderCollaborators();
+    showStatus(resp ? 'Delegated to ' + c.name + ': ' + _deliveryChips(resp).text : 'Delegation to ' + c.name + ' revoked');
+  } catch (e) { showStatus('Could not save the delegation: ' + e.message, 'error'); }
+}
+function _deliveryChips(resp) {
+  const keys = [..._deliveryExpand(resp)];
+  const text = keys.length === DELIVERY_AREAS.length ? 'all areas' : keys.map(deliveryAreaLabel).join(', ');
+  const html = keys.length === DELIVERY_AREAS.length
+    ? '<span class="badge" style="background:#DCFCE7;color:#166534;">All areas</span>'
+    : keys.map(k => `<span class="badge" style="background:#E0F2FE;color:#075985;">${escHtml(deliveryAreaLabel(k))}</span>`).join(' ');
+  return { text, html };
+}
                            // page by an administer_deals holder: secured deals become
                            // fully editable (forecast lock lifted) and deletion is allowed.
 
@@ -6407,6 +6624,7 @@ async function openNewOpportunity() {
   oppMonths = {};
   oppRevLocked = false;
   dealAdminMode = false;
+  _oppDeliveryPick = undefined; oppDeliveryRights = new Set();   // v7.10.51
   oppCollaborators = [];
   oppContacts = [];
   if (window._liPeople) window._liPeople = [];
@@ -6461,6 +6679,7 @@ async function openOpportunity(id, adminMode = false) {
   try {
     resetOppDirty();
     dealAdminMode = !!adminMode && can('administer_deals');
+    _oppDeliveryPick = undefined; oppDeliveryRights = new Set();   // v7.10.51
     // v7.9.36: the deal row and its opportunity stream are both keyed by the id,
     // so they load together (was: deal → streams → months → form → owner →
     // collaborators → contacts → engagements, eight dependent round trips).
@@ -6508,8 +6727,13 @@ async function openOpportunity(id, adminMode = false) {
     // 'engagement' (log activity only). Full editing of a secured deal happens only on
     // the Deal Administration page (dealAdminMode), where the lock is lifted above.
     const secured = isRevLocked(oppData, streams[0]);
+    // v7.10.51: on a secured deal the delivery owner (and a delegate, for the areas delegated) edits;
+    // the sales owner and plain collaborators keep the engagement level.
+    _deliveryMissing = !!deals[0] && !deliveryOwnerReady(oppData);
+    oppDeliveryRights = secured && !dealAdminMode ? dealDeliveryRights(oppData, oppCollaborators) : new Set();
     let level = 'view';
     if (dealAdminMode) level = 'full';
+    else if (secured && oppDeliveryRights.size) level = 'delivery';
     else if (secured) level = (canEditRecord(oppData) || isCurrentUserOppCollaborator()) ? 'engagement' : 'view';
     else if (canEditRecord(oppData)) level = 'full';
     else if (isCurrentUserOppCollaborator()) level = 'engagement';
@@ -6518,7 +6742,9 @@ async function openOpportunity(id, adminMode = false) {
       ? (dealRevenueType(oppData) === 'project' ? 'Project' : 'Contract')
       : (level === 'full' ? 'Edit Opportunity' : 'View Opportunity');
     setupOppOwnerReassign();
-    applyOppReadOnly(level, { secured });
+    applyOppReadOnly(level, { secured, rights: oppDeliveryRights });
+    oppDeliveryRefresh(secured);   // v7.10.51: the header's Delivery block
+    renderCollaborators();          // v7.10.51: the delegation chips and buttons depend on the level
     oppFilesLoad();   // background: fills the Files tab and its count
     oppPlanTabRefresh(secured);   // v7.10.32: the Project Plan tab (background); v7.10.34: every saved deal, a draft while open
     await oppSuspensionOnOpen();
@@ -6773,24 +6999,31 @@ let oppReadOnly = false;
 //   'view'       — everyone else: fully view-only.
 // New deals always pass 'full' (the creator is the owner-to-be).
 function applyOppReadOnly(level, why) {
-  oppReadOnly = level !== 'full';
+  // v7.10.51: 'delivery' = a secured deal opened by its delivery owner or a delegate; `why.rights`
+  // says which areas. Holding 'terms' makes the General tab's dates and notes live (and the field
+  // autosave with them — those are exactly the autosave columns), so oppReadOnly is false then.
+  oppLevel = level;
+  const rights = (why && why.rights) || oppDeliveryRights || new Set();
+  const terms = level === 'delivery' && rights.has('terms');
+  oppReadOnly = level !== 'full' && !terms;
   const page = document.getElementById('opp-page');
   if (!page) return;
 
   const engTab = document.getElementById('opp-tab-engagement');
   const filesTab = document.getElementById('opp-tab-files');
+  const TERMS_IDS = ['opp-order-date-general', 'opp-start-date-general', 'opp-notes', 'opp-ext-notes'];
   // Disable every input/select/textarea. In 'engagement' mode, leave the
   // Engagement tab's controls enabled so a collaborator can still log activity
   // (and, v7.9.82, the Files tab's — a signed contract arrives after securing).
   page.querySelectorAll('input, select, textarea').forEach(el => {
     const inEng = (engTab && engTab.contains(el)) || (filesTab && filesTab.contains(el));
-    el.disabled = oppReadOnly && !(level === 'engagement' && inEng);
+    el.disabled = level !== 'full' && !((level === 'engagement' || level === 'delivery') && inEng) && !(terms && TERMS_IDS.includes(el.id));
     if (el.classList.contains('rev-past')) el.disabled = true;   // v7.9.48: past months stay read-only
   });
 
-  // Core Save is only available with full edit rights.
+  // Core Save is only available with full edit rights (v7.10.51: or the delivery 'terms' area).
   const saveBtn = document.getElementById('opp-save-btn');
-  if (saveBtn) saveBtn.style.display = (level === 'full') ? '' : 'none';
+  if (saveBtn) saveBtn.style.display = (level === 'full' || terms) ? '' : 'none';
 
   // Revert follows Save, and only exists once there is a saved state to go back to.
   const revertBtn = document.getElementById('opp-revert-btn');
@@ -6809,7 +7042,18 @@ function applyOppReadOnly(level, why) {
   if (banner) {
     // v7.9.87: a secured deal caps its owner at 'engagement' too — say why rather than calling
     // the owner a collaborator (Richard 2026-10-01, Beatrix).
-    if (level === 'engagement' && why && why.secured) {
+    if (level === 'delivery') {
+      const kind = dealRevenueType(oppData) === 'project' ? 'project' : 'contract';
+      const owner = oppData.delivery_owner_id != null && +oppData.delivery_owner_id === +currentUser.personId;
+      const admin = can('administer_deals') || (currentUser && currentUser.isAdmin);
+      const held = [...rights].map(deliveryAreaLabel).join(', ');
+      banner.textContent = owner
+        ? '🔒 Secured — you own delivery of this ' + kind + ': contract terms, the project plan, engagements and files are yours to change, and you may delegate any area on the Collaborators tab. The sales side (client, service, stage, revenue stream) is locked for everyone except Deal Administration.'
+        : admin
+          ? '🔒 Secured — as a deal administrator you hold every delivery area of this ' + kind + '. The sales side is changed in Deal Administration.'
+          : '🔒 Secured — you hold ' + held + ' on this ' + kind + ' by delegation from its delivery owner. Everything else is locked.';
+      banner.style.display = '';
+    } else if (level === 'engagement' && why && why.secured) {
       banner.textContent = '🔒 This deal is secured, so its details are locked. You can still log engagements and attach files; ' + (can('administer_deals') ? 'changes to the deal itself are made in Deal Administration.' : 'for changes to the deal itself, ask a deal administrator.');
       banner.style.display = '';
     } else if (level === 'engagement') {
@@ -7644,7 +7888,13 @@ function ppCanEdit() {
   if (!currentUser || !_pp.plan) return false;
   if (can('manage_project_plans')) return true;
   if (+_pp.plan.owner_id === +currentUser.personId) return true;
-  return !!_pp.deal && canEditRecord(_pp.deal);
+  return !!_pp.deal && (canEditRecord(_pp.deal) || _ppDeliveryCanPlan());
+}
+// v7.10.51: the deal's delivery owner, and a delegate holding 'plan', edit the plan like the PM.
+function _ppDeliveryCanPlan() {
+  const d = _pp.deal; if (!d || !currentUser) return false;
+  if (d.delivery_owner_id != null && +d.delivery_owner_id === +currentUser.personId) return true;
+  return (_pp.myCollab || []).some(c => _delegationLive({ responsibilities: c.responsibilities, delegatedUntil: c.delegated_until }) && _deliveryExpand(c.responsibilities).has('plan'));
 }
 function ppCanTouchTask(t) { return ppCanEdit() || (t && !ppIsSummary(t) && currentUser && +t.assignee_id === +currentUser.personId); }   // v7.10.43: a group is never "yours""
 
@@ -7680,7 +7930,7 @@ async function oppPlanSummary(dealId) {
   return { plan, ms, ts };
 }
 function oppPlanKind() { return dealRevenueType(oppData) === 'project' ? 'project' : 'startup'; }
-function oppPlanMayBuild() { return !!oppData && (can('manage_project_plans') || canEditRecord(oppData)); }
+function oppPlanMayBuild() { return !!oppData && (can('manage_project_plans') || canEditRecord(oppData) || deliveryCan('plan')); }   // v7.10.51: the delivery owner and a 'plan' delegate
 async function oppPlanTabRefresh(secured) {
   const btn = document.getElementById('opp-plan-tab-btn'), box = document.getElementById('opp-plan');
   if (!btn || !box) return;
@@ -7776,7 +8026,7 @@ async function renderProjectsPage() {
     const [ms, ts, deals] = await Promise.all([
       ids.length ? apiGetAll('project_milestones', 'plan_id=in.(' + ids.join(',') + ')&select=id,plan_id,name,status,due_date') : [],
       ids.length ? ppSlimTasks('plan_id=in.(' + ids.join(',') + ')', 'id,plan_id,status,due_date', true) : [],
-      dealIds.length ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,org_id,job_number,owner_id,stage_id') : [],
+      dealIds.length ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,org_id,job_number,owner_id,stage_id,delivery_owner_id').catch(e => /42703|delivery_owner_id/.test(String(e.message)) ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,org_id,job_number,owner_id,stage_id') : Promise.reject(e)) : [],   // v7.10.51: the delivery owner (a database without the column answers the plain read)
     ]);
     if (!allData['stages'] || !allData['stage_categories']) {
       const [st, sc] = await Promise.all([apiGet('stages', 'select=*'), apiGet('stage_categories', 'select=*')]);
@@ -7792,7 +8042,7 @@ async function renderProjectsPage() {
       return { p, client: org.name || '—', name: p.name || d.name || '—', kind: ppKindLabel(p.kind), owner: ppPersonName(p.owner_id, people),
                status: ppStatusLabel(PP_PLAN_STATUS, p.status), msDone: pm.filter(m => m.status === 'done').length, msTotal: pm.length,
                tsDone: pt.filter(t => t.status === 'done').length, tsTotal: pt.length, next: next ? next.due_date : '', nextName: next ? next.name : '',
-               health: h, job: d.job_number || '', draft };
+               health: h, job: d.job_number || '', draft, delivery: d.delivery_owner_id ? ppPersonName(d.delivery_owner_id, people) : '' };
     });
     const sub = document.getElementById('page-sub');
     const drafts = rows.filter(r => r.draft).length;
@@ -7806,6 +8056,7 @@ async function renderProjectsPage() {
         { key: 'kind',   label: 'Kind',            get: r => r.kind },
         { key: 'job',    label: 'Job number',      get: r => r.job },
         { key: 'owner',  label: 'Project manager', get: r => r.owner },
+        { key: 'delivery', label: 'Delivery owner', get: r => r.delivery },   // v7.10.51
         { key: 'status', label: 'Status',          get: r => r.status },
         { key: 'ms',     label: 'Milestones',      get: r => r.msTotal ? r.msDone + ' / ' + r.msTotal : '', sortGet: r => r.msTotal ? r.msDone / r.msTotal : -1 },
         { key: 'ts',     label: 'Tasks',           get: r => r.tsTotal ? r.tsDone + ' / ' + r.tsTotal : '', sortGet: r => r.tsTotal ? r.tsDone / r.tsTotal : -1 },
@@ -7819,6 +8070,7 @@ async function renderProjectsPage() {
         <td style="white-space:nowrap;"><span class="badge" style="background:var(--bg);color:var(--text2);">${escHtml(r.kind)}</span>${r.draft ? ' <span class="badge" style="background:#EDE9FE;color:#5B21B6;">Draft</span>' : ''}</td>
         <td style="white-space:nowrap;">${escHtml(r.job || '—')}</td>
         <td style="white-space:nowrap;">${escHtml(r.owner || '—')}</td>
+        <td style="white-space:nowrap;">${escHtml(r.delivery || '—')}</td>
         <td style="white-space:nowrap;">${escHtml(r.status)}</td>
         <td style="white-space:nowrap;">${r.msTotal ? r.msDone + ' of ' + r.msTotal + ' done' : '<span style="color:var(--text3);">none yet</span>'}</td>
         <td style="white-space:nowrap;">${r.tsTotal ? r.tsDone + ' of ' + r.tsTotal + ' done' : '<span style="color:var(--text3);">none yet</span>'}</td>
@@ -8015,14 +8267,16 @@ async function openProjectPlan(planId, from) {
     if (!plan) throw new Error('Plan ' + planId + ' was not found');
     // v7.10.34: a sandbox plan has no deal; the team's affiliations name an outsider's organisation;
     // the stage rows say whether a deal plan is still a draft.
-    const [deals, affil, , ] = await Promise.all([
+    const [deals, affil, , , , myCollab] = await Promise.all([
       plan.deal_id ? apiGet('deals', 'id=eq.' + plan.deal_id + '&select=*') : Promise.resolve([]),
       ppAffiliationsLoad(mem.map(m => +m.person_id)),
       allData['stages'] ? Promise.resolve() : apiGet('stages', 'select=*').then(r => { allData['stages'] = r; }).catch(() => {}),
       allData['stage_categories'] ? Promise.resolve() : apiGet('stage_categories', 'select=*').then(r => { allData['stage_categories'] = r; }).catch(() => {}),
       allData['organisations'] ? Promise.resolve() : apiGetAll('organisations', 'select=*').then(r => { allData['organisations'] = r; }).catch(() => {}),   // the outsider form's picker
+      plan.deal_id && currentUser ? apiGet('deal_collaborators', 'deal_id=eq.' + plan.deal_id + '&person_id=eq.' + currentUser.personId + '&select=*').catch(() => []) : Promise.resolve([]),   // v7.10.51: my delegation on the deal
     ]);
     const deal = deals[0] || null;
+    _pp.myCollab = myCollab || [];
     let org = null;
     if (deal && deal.org_id) {
       org = (allData['organisations'] || []).find(o => +o.id === +deal.org_id) || null;
@@ -9854,8 +10108,10 @@ async function renderContractsPage() {
       const ext = exts.find(e => +e.parent_deal_id === +d.id);
       const extStage = ext ? (stages.find(s => +s.id === +ext.stage_id) || {}).name : '';
       const own = people.find(p => +p.id === +d.owner_id);
+      const dlv = people.find(p => +p.id === +d.delivery_owner_id);   // v7.10.51
       return {
         d, rt, org,
+        delivery: dlv ? [dlv.first_name, dlv.last_name].filter(Boolean).join(' ') : '',
         client: org.name || '—',
         name: d.name || '—',
         site: (sites.find(s => +s.id === +d.site_id) || {}).name || '',
@@ -9892,7 +10148,8 @@ async function renderContractsPage() {
         { key: 'end',       label: 'Ends',              get: r => r.end },
         { key: 'monthly',   label: 'This month',        get: r => r.monthly, align: 'right' },
         { key: 'account',   label: 'Pastel account',    get: r => r.account },
-        { key: 'owner',     label: 'Owner',             get: r => r.owner },
+        { key: 'owner',     label: 'Sales owner',       get: r => r.owner },
+        { key: 'delivery',  label: 'Delivery owner',    get: r => r.delivery },   // v7.10.51
         { key: 'extension', label: 'Extension',         get: r => r.extension },
       ],
       rows: rows.sort((a, b) => familySortKeyOf(a.d.org_id, a.client).localeCompare(familySortKeyOf(b.d.org_id, b.client)) || a.name.localeCompare(b.name)),   // v7.10.25: a parent's contracts, then its children's
@@ -9906,6 +10163,7 @@ async function renderContractsPage() {
         <td style="text-align:right;white-space:nowrap;">${money(r.monthly)}</td>
         <td>${r.account ? escHtml(r.account) : '<span style="color:#9A3412;">none</span>'}</td>
         <td style="white-space:nowrap;">${escHtml(r.owner || '—')}</td>
+        <td style="white-space:nowrap;">${r.delivery ? escHtml(r.delivery) : '<span style="color:#9A3412;">not set</span>'}</td>
         <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${escHtml(r.extension || '—')}</td>
       </tr>`,
       emptyMessage: 'No contracts match the current filters',
@@ -9938,14 +10196,15 @@ function contractsExportXlsx() {
     { label: 'Ends', type: 'date', width: 12 },
     { label: 'This month (' + month + ')', type: 'money', width: 20 },
     { label: 'Pastel account', type: 'text', width: 16 },
-    { label: 'Owner', type: 'text', width: 20 },
+    { label: 'Sales owner', type: 'text', width: 20 },
+    { label: 'Delivery owner', type: 'text', width: 20 },
     { label: 'Extension', type: 'text', width: 20 },
   ];
   const data = rows.map(r => [
     r.client, groupOf(r.d.org_id), r.name, r.inFocus ? 'Yes' : '', r.site, r.rt ? r.service : 'Service type not set',
-    r.start, r.end, r.monthly, r.account, r.owner, r.extension,
+    r.start, r.end, r.monthly, r.account, r.owner, r.delivery, r.extension,
   ]);
-  const total = ['Total', '', rows.length + ' contract' + (rows.length === 1 ? '' : 's'), '', '', '', '', '', rows.reduce((t, r) => t + (+r.monthly || 0), 0), '', '', ''];
+  const total = ['Total', '', rows.length + ' contract' + (rows.length === 1 ? '' : 's'), '', '', '', '', '', rows.reduce((t, r) => t + (+r.monthly || 0), 0), '', '', '', ''];
   const filtered = rows.length !== s.rows.length;
   xlsxDownload({ filename: 'focus-contracts-' + new Date().toISOString().slice(0, 10) + '.xlsx', sheet: 'Contracts', columns, rows: data, total });
   showStatus(rows.length + ' contract' + (rows.length === 1 ? '' : 's') + ' exported' + (filtered ? ' (the filters in force applied — ' + s.rows.length + ' listed in all)' : ''));
@@ -18746,6 +19005,8 @@ function _preselectLookupInner(selectId, idField, textField, record) {
 }
 
 async function saveOpportunity() {
+  // v7.10.51: a delivery editor on a secured deal saves the contract terms only.
+  if (oppData.id && oppLevel === 'delivery') { if (deliveryCan('terms')) await saveDeliveryTerms(); else showStatus('You do not hold the contract terms of this deal.', 'error'); return; }
   // Defensive: Save is hidden unless the user has full edit rights, but refuse
   // cleanly if saveOpportunity() is reached for an existing deal the user can't edit.
   if (oppData.id && !canEditRecord(oppData)) {
@@ -18779,7 +19040,11 @@ async function saveOpportunity() {
   if (+stageId === 5 && +prevStageId !== 5) {
     const gateOrg = (allData['organisations'] || []).find(o => +o.id === +orgId);
     if (gateOrg && !String(gateOrg.legal_name || '').trim()) { openSecureLegalNamePrompt(gateOrg); return; }
+    // v7.10.51: securing hands the deal to a delivery owner — asked once per save, the family's
+    // default offered (openDeliveryOwnerPrompt sets _oppDeliveryPick and resumes this save).
+    if (_oppDeliveryPick === undefined && deliveryOwnerReady(oppData) && (!oppData.id || 'delivery_owner_id' in oppData)) { openDeliveryOwnerPrompt('secure'); return; }
   }
+  const securingNow = +stageId === 5 && +prevStageId !== 5;
 
   const payload = {
     name,
@@ -18806,6 +19071,10 @@ async function saveOpportunity() {
   // Securing locks probability at 100% — folded into this same PATCH (v7.9.36)
   // so runSecuredProcess no longer needs a second write to the deal row.
   if (+stageId === 5 && +prevStageId !== 5) payload.probability = 100;
+  if (securingNow && _oppDeliveryPick !== undefined && deliveryOwnerReady(oppData)) {   // v7.10.51
+    payload.delivery_owner_id = _oppDeliveryPick || null;
+    payload.delivery_handover_at = _oppDeliveryPick ? new Date().toISOString() : null;
+  }
   // v7.9.50: start date on or after order date; a suspended deal with a workable start date is restored only with confirmation.
   { const derr = checkDatesOrder(payload.order_date, payload.start_date); if (derr) { showStatus(derr, 'error'); return; } }
   if (oppData.id && dealIsSuspended(oppData) && +stageId === +oppData.stage_id && payload.start_date && payload.start_date > _today()) {
@@ -18862,6 +19131,11 @@ async function saveOpportunity() {
     // Securing is an event: on moving into Secured, run the secured process
     // (set 100% + freeze a historical snapshot), then offer the forward extension.
     await runSecuredProcess(deal, prevStageId);
+    if (securingNow) {   // v7.10.51: the handover is on the ledger
+      if (_oppDeliveryPick) await logDeliveryHandover(deal, _oppDeliveryPick, null);
+      else if (deliveryOwnerReady(oppData)) showStatus('Secured with no delivery owner yet — set one from the deal header', 'error');
+      _oppDeliveryPick = undefined;
+    }
     await maybeOfferExtensionProspect(deal, prevStageId);
 
     const fromAdmin = dealAdminMode;
@@ -19983,6 +20257,7 @@ async function loadCollaborators(dealId) {
       const collabs = await apiGet('deal_collaborators', `deal_id=eq.${dealId}&select=*`);
       const people = allData['people'] || await apiGet('people', 'select=*');
       allData['people'] = people;
+      _delegationMissing = !MOCK && collabs.length > 0 && !('responsibilities' in collabs[0]);   // v7.10.51
       collabs.forEach(c => {
         const p = people.find(x => +x.id === +c.person_id);
         oppCollaborators.push({
@@ -19991,6 +20266,8 @@ async function loadCollaborators(dealId) {
           name: p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown',
           role: c.role || 'Collaborator',
           isOwner: c.is_owner,
+          responsibilities: c.responsibilities || null,   // v7.10.51: the delegation
+          delegatedUntil: c.delegated_until || null,
         });
       });
 
@@ -20006,16 +20283,28 @@ function renderCollaborators() {
     list.innerHTML = '<div style="text-align:center;padding:40px;color:var(--text3);">No collaborators yet</div>';
     return;
   }
-  list.innerHTML = oppCollaborators.map((c, i) => `
+  // v7.10.51: on a secured deal a row carries its delegation (the areas, the end date) and the
+  // delivery owner / a deal administrator gets a Delegate button; the delivery owner's own row is tagged.
+  const secured = !!(oppData && oppData.id) && isRevLocked(oppData, { locked: oppRevLocked });
+  const mayDelegate = secured && canDelegateDelivery();
+  list.innerHTML = oppCollaborators.map((c, i) => {
+    const isDelivery = secured && oppData.delivery_owner_id != null && +oppData.delivery_owner_id === +c.personId;
+    const live = _delegationLive(c), lapsed = !!(c.responsibilities && c.responsibilities.length && !live);
+    const chips = secured && c.responsibilities && c.responsibilities.length
+      ? `<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;">${_deliveryChips(c.responsibilities).html}${c.delegatedUntil ? `<span style="font-size:11px;color:${lapsed ? '#9A3412' : 'var(--text3)'};">${lapsed ? 'lapsed ' : 'until '}${escHtml(String(c.delegatedUntil))}</span>` : ''}</div>` : '';
+    return `
     <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;">
       <div style="flex:1;">
         <div style="font-weight:600;font-size:13px;">${escHtml(c.name)}</div>
-        <div style="font-size:11px;color:var(--text3);">${c.role}</div>
+        <div style="font-size:11px;color:var(--text3);">${escHtml(c.role)}</div>
+        ${chips}
       </div>
-      ${c.isOwner ? '<span class="badge badge-blue">Owner</span>' : ''}
-      ${!c.isOwner ? `<button class="btn btn-danger btn-sm" onclick="removeCollaborator(${i})">Remove</button>` : ''}
-    </div>
-  `).join('');
+      ${c.isOwner ? '<span class="badge badge-blue">' + (secured ? 'Sales owner' : 'Owner') + '</span>' : ''}
+      ${isDelivery ? '<span class="badge" style="background:#DCFCE7;color:#166534;">Delivery owner</span>' : ''}
+      ${mayDelegate && !isDelivery ? `<button class="btn btn-secondary btn-sm" onclick="openDelegateModal(${i})" title="${_delegationMissing ? escAttr(DELIVERY_MISSING_MSG) : 'Choose the areas this person may change'}">${c.responsibilities && c.responsibilities.length ? 'Delegation…' : 'Delegate…'}</button>` : ''}
+      ${!c.isOwner && !(oppLevel === 'delivery' && c.id) ? `<button class="btn btn-danger btn-sm" onclick="removeCollaborator(${i})">Remove</button>` : ''}
+    </div>`;
+  }).join('');
 }
 
 function removeCollaborator(idx) {
@@ -20109,13 +20398,21 @@ async function confirmAddCollaborator() {
   if (!personId) { showStatus('Please select a person', 'error'); return; }
   const people = allData['people'] || [];
   const person = people.find(p => +p.id === +personId);
-  oppCollaborators.push({
+  const row = {
     personId: +personId,
     name: person ? [person.first_name, person.last_name].filter(Boolean).join(' ') : 'Unknown',
     role,
     isOwner: false,
     isNew: true,
-  });
+  };
+  // v7.10.51: a delivery editor has no full Save, so the row is written at once.
+  if (oppLevel === 'delivery' && oppData.id) {
+    try {
+      const r = await api('deal_collaborators', 'POST', { deal_id: oppData.id, person_id: row.personId, role, is_owner: false }, 'select=*');
+      row.id = r && r[0] ? r[0].id : null; delete row.isNew;
+    } catch (e) { showStatus('Could not add the collaborator: ' + e.message, 'error'); return; }
+  }
+  oppCollaborators.push(row);
   renderCollaborators();
   closeModal();
   showStatus('Collaborator added');
@@ -20310,12 +20607,10 @@ async function saveCollaborators(dealId) {
   for (const c of oppCollaborators) {
     if (!c.isNew) continue;
     try {
-      await api('deal_collaborators', 'POST', {
-        deal_id: dealId,
-        person_id: c.personId,
-        role: c.role,
-        is_owner: !!c.isOwner,
-      }, '');
+      const body = { deal_id: dealId, person_id: c.personId, role: c.role, is_owner: !!c.isOwner };
+      if (c.responsibilities && c.responsibilities.length && !_delegationMissing) { body.responsibilities = c.responsibilities; body.delegated_until = c.delegatedUntil || null; body.delegated_by = currentUser.personId; body.delegated_at = new Date().toISOString(); }   // v7.10.51
+      const made = await api('deal_collaborators', 'POST', body, 'select=id');
+      if (made && made[0]) c.id = made[0].id;
       delete c.isNew;
     } catch(e) {
       console.warn('Could not save collaborator:', e.message);
@@ -22161,7 +22456,8 @@ function dashSetScope(s) {
 function _dashInScope(rec, scope) {
   if (!rec) return false;
   if (scope === 'all') return true;
-  const mine = rec.owner_id != null && +rec.owner_id === +(currentUser?.personId || 0);
+  const me = +(currentUser?.personId || 0);
+  const mine = (rec.owner_id != null && +rec.owner_id === me) || (rec.delivery_owner_id != null && +rec.delivery_owner_id === me);   // v7.10.51: a contract is mine for its delivery owner too
   return scope === 'team' ? (mine || recordInUserScope(rec)) : mine;
 }
 function _dashStageIds(names) {
@@ -39607,6 +39903,7 @@ async function loadAppSettings() {
 }
 
 async function renderSettingsPage() {
+  if (!allData['service_major']) { try { allData['service_major'] = await apiGet('service_major', 'select=*&order=name.asc'); } catch (e) {} }   // v7.10.51: the Delivery owners section
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
   document.getElementById('add-btn').style.display = 'none';
@@ -39817,6 +40114,11 @@ async function renderSettingsPage() {
         </div>
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
+        <div class="opp-section-title">Delivery owners</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">When a deal is <strong>secured</strong> it is handed to a <strong>delivery owner</strong> — the person who owns delivering the contract or project; the salesperson stays its sales owner. The securing step offers the default for the deal's service family, set here; it can be changed on the deal header afterwards. The delivery owner holds every area of the secured deal and delegates areas to others on the Collaborators tab.</div>
+        ${deliveryOwnerSettingHtml()}
+      </div>
+      <div class="opp-section" style="margin-bottom:16px;">
         <div class="opp-section-title">Hidden menu items</div>
         <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">Tick an entry to take it off the sidebar for <strong>everyone, Admins included</strong> — for a demo, or a part of Focus not in use yet. Permissions are unchanged: this hides the menu entry and nothing else. Untick to bring it back. The Dashboard is always shown.</div>
         ${navHiddenSettingHtml()}
@@ -39997,6 +40299,22 @@ async function runOrgMerge() {
   } finally { if (btn) btn.disabled = false; }
 }
 
+// v7.10.51: Settings → Delivery owners — one select per active service family (settings.delivery_owner_default_<id>).
+function deliveryOwnerSettingHtml() {
+  const majors = (allData['service_major'] || []).filter(m => m.active !== false).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  if (!majors.length) return '<div style="font-size:12px;color:var(--text3);">No service families on record.</div>';
+  const people = homeOrgPeople(allData['people'] || [], majors.map(m => deliveryDefaultFor(m.id))).filter(p => p.active !== false || majors.some(m => deliveryDefaultFor(m.id) === +p.id));
+  return '<div class="form-row-3">' + majors.map(m => {
+    const cur = deliveryDefaultFor(m.id);
+    return `<div class="form-group">
+      <label class="form-label">${escHtml(m.name)}</label>
+      <select class="form-control setting-delivery-default" data-major="${+m.id}">
+        <option value="">— no default —</option>
+        ${people.map(p => `<option value="${p.id}" ${cur === +p.id ? 'selected' : ''}>${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+      </select>
+    </div>`;
+  }).join('') + '</div>';
+}
 // v7.10.26: the tick list behind Settings → Hidden menu items — one tick per sidebar section, item and
 // the Capture Time button, drawn from MENU so a new page is offered without touching this list.
 function navHiddenSettingHtml() {
@@ -40060,6 +40378,8 @@ async function saveSettings() {
       legacy_notes_viewers:           [...document.querySelectorAll('.setting-legacy-viewer:checked')].map(cb => cb.value).join(','),   // v7.10.16
       nav_hidden:                     [...document.querySelectorAll('.setting-nav-hidden:checked')].map(cb => cb.value).join(','),      // v7.10.26
     };
+    document.querySelectorAll('.setting-delivery-default').forEach(sel => { commercial['delivery_owner_default_' + sel.dataset.major] = sel.value || ''; });   // v7.10.51: one per service family
+
     const upsertSetting = async (key, value) => {
       const r = await api('settings', 'PATCH', { value, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
       if (!r || !r.length) await api('settings', 'POST', { key, value }, '');
