@@ -1,7 +1,7 @@
 # Focus on a PC and on a phone — scope
 
 Richard, 19 November 2026: "focus needs to differentiate between running on a PC or Mobile".
-A scope, not a build. Section 5 lists the decisions it needs.
+Richard the same day: "go with recommendation, build layers 1 and 2" — built as **v7.10.49** (a tablet is a PC; the override is the Phone view / Desktop view button in the sidebar footer; nothing is blocked on a phone). Layer 3 (the phone home and the needs-a-PC notes) waits for a week of use.
 
 ## 1. What Focus does today (checked 19 November)
 
