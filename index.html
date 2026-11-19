@@ -2534,6 +2534,7 @@ function _mockSeed() {
     lead_research_interviews: [],   // v7.10.16
     lead_red_flags: [],
     lead_strategic_decisions: [],
+    user_dashboard_prefs: [],   // v7.10.50: a person's dashboard order and hidden cards, following the login
     // v7.9.41 Proposal Generator: the per-post checklists and the default template, so the Proposal tab works offline.
     quote_accessories: [
       ['officer_pocket_book','Security Officer Pocket Book'],['restraints_pouch','Restraints & Pouch'],['baton','Baton'],['torch_rubberized','Torch/Spotlight - Rubberized'],['umbrella','Umbrella'],
@@ -21163,6 +21164,7 @@ async function enterApp(userId) {
   currentUser = ctx;
   pbiResetSession();   // v7.9.75: the catalogue pages open collapsed after every login
   viewChipsResetSession();   // v7.9.96: the stage/type chips start from the default view at every login
+  _dashPrefs = null;         // v7.10.50: this login's dashboard preferences are read from the database on the first dashboard
   realUser = null;            // a fresh sign-in is never a masquerade
 
   document.getElementById('login-screen').style.display = 'none';
@@ -22189,9 +22191,62 @@ function _dashCard(title, scope, kpis, sub, page, linkLabel) {
 // "Reset layout" drops the personal order and returns to it. New widgets a role
 // gains later are appended in base order, so a stale saved order never hides one.
 function _dashOrderKey() { return 'focus_dash_order_' + (currentUser?.personId || 'anon'); }
+// v7.10.50 (Richard: "follow the login"): the personal order and the hidden set live on the database —
+// `user_dashboard_prefs`, one row per person (sql/add_user_dashboard_prefs.sql) — read ONCE per session
+// (`_dashPrefsLoad`, awaited beside the dashboard bundle) into `_dashPrefs = { order, hidden, exists }` and
+// written by every change (`_dashPrefsSave`, PATCH or POST, silent). The browser's localStorage copy stays
+// as the mirror: it paints the first dashboard before the row answers and is the whole store on a database
+// without the table (404 / PGRST205 → `_dashPrefsMissing`). A browser that still holds a local choice and a
+// person with no row yet: the first load carries the local choice up, so nothing anyone arranged is lost.
+let _dashPrefs = null, _dashPrefsMissing = false, _dashPrefsLoading = null;
+function _dashLocalOrder() { try { const v = JSON.parse(localStorage.getItem(_dashOrderKey()) || 'null'); return Array.isArray(v) ? v : null; } catch (e) { return null; } }
+function _dashLocalHidden() { try { const v = JSON.parse(localStorage.getItem(_dashHiddenKey()) || 'null'); return Array.isArray(v) ? v : []; } catch (e) { return []; } }
+function _dashMirror() {   // the browser copy follows what the session holds
+  if (!_dashPrefs) return;
+  try {
+    if (_dashPrefs.order) localStorage.setItem(_dashOrderKey(), JSON.stringify(_dashPrefs.order)); else localStorage.removeItem(_dashOrderKey());
+    if (_dashPrefs.hidden && _dashPrefs.hidden.length) localStorage.setItem(_dashHiddenKey(), JSON.stringify(_dashPrefs.hidden)); else localStorage.removeItem(_dashHiddenKey());
+  } catch (e) {}
+}
+async function _dashPrefsLoad() {
+  if (_dashPrefs || _dashPrefsMissing) return;
+  const pid = currentUser && currentUser.personId; if (!pid) return;
+  if (_dashPrefsLoading) return _dashPrefsLoading;
+  _dashPrefsLoading = (async () => {
+    try {
+      const rows = await apiGet('user_dashboard_prefs', 'person_id=eq.' + pid + '&select=*');
+      const r = rows && rows[0];
+      if (r) {
+        _dashPrefs = { order: Array.isArray(r.widget_order) ? r.widget_order : null, hidden: Array.isArray(r.hidden_widgets) ? r.hidden_widgets : [], exists: true };
+      } else {
+        // No row yet: a choice this browser already holds becomes the login's.
+        _dashPrefs = { order: _dashLocalOrder(), hidden: _dashLocalHidden(), exists: false };
+        if (_dashPrefs.order || _dashPrefs.hidden.length) await _dashPrefsSave();
+      }
+      _dashMirror();
+    } catch (e) {
+      if (/404|PGRST205|does not exist|not found/i.test(String(e && e.message || e))) _dashPrefsMissing = true;   // the browser copy is the store
+      else console.warn('Dashboard preferences not read: ' + (e && e.message || e));
+    } finally { _dashPrefsLoading = null; }
+  })();
+  return _dashPrefsLoading;
+}
+async function _dashPrefsSave() {
+  _dashMirror();
+  if (_dashPrefsMissing || !_dashPrefs) return;
+  const pid = currentUser && currentUser.personId; if (!pid) return;
+  const body = { widget_order: _dashPrefs.order, hidden_widgets: _dashPrefs.hidden || [], updated_at: new Date().toISOString() };
+  try {
+    if (_dashPrefs.exists) await api('user_dashboard_prefs', 'PATCH', body, 'person_id=eq.' + pid, { silent: true });
+    else { await api('user_dashboard_prefs', 'POST', Object.assign({ person_id: pid }, body), '', { silent: true }); _dashPrefs.exists = true; }
+  } catch (e) {
+    if (/404|PGRST205|does not exist|not found/i.test(String(e && e.message || e))) _dashPrefsMissing = true;
+    else showStatus('Dashboard layout kept on this device only — it could not be saved to your login: ' + (e && e.message || e), 'error');
+  }
+}
+function _dashSetOrder(order) { if (!_dashPrefs) _dashPrefs = { order: null, hidden: _dashLocalHidden(), exists: false }; _dashPrefs.order = order; _dashPrefsSave(); }
 function _dashApplyUserOrder(widgets) {
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(_dashOrderKey()) || 'null'); } catch (e) {}
+  const saved = _dashPrefs ? _dashPrefs.order : _dashLocalOrder();
   if (!Array.isArray(saved)) return widgets;
   const out = saved.filter(w => widgets.includes(w));
   widgets.forEach(w => { if (!out.includes(w)) out.push(w); });
@@ -22209,7 +22264,7 @@ function dashDrop(ev, w) {
   if (from < 0 || to < 0) { _dashDragKey = null; return; }
   order.splice(to, 0, order.splice(from, 1)[0]);
   _dashDragKey = null;
-  try { localStorage.setItem(_dashOrderKey(), JSON.stringify(order)); } catch (e) {}
+  _dashSetOrder(order);   // v7.10.50: the row and the mirror
   const hidden = _dashHiddenSet();   // v7.10.50: the order keeps hidden cards in place; only the shown ones move on screen
   _dashApplyOrderToDom(order.filter(w => !hidden.has(w)));
 }
@@ -22220,13 +22275,14 @@ function dashDrop(ev, w) {
 // its data is not loaded, nothing else changes. Reset layout clears both the order and the hidden set.
 function _dashHiddenKey() { return 'focus_dash_hidden_' + (currentUser?.personId || 'anon'); }
 function _dashHiddenSet() {
-  let saved = null;
-  try { saved = JSON.parse(localStorage.getItem(_dashHiddenKey()) || 'null'); } catch (e) {}
+  const saved = _dashPrefs ? _dashPrefs.hidden : _dashLocalHidden();
   const allowed = _dashWidgetsForUser();
   return new Set((Array.isArray(saved) ? saved : []).filter(w => allowed.includes(w)));   // clamped to what the role allows
 }
 function _dashSaveHidden(set) {
-  try { if (set.size) localStorage.setItem(_dashHiddenKey(), JSON.stringify([...set])); else localStorage.removeItem(_dashHiddenKey()); } catch (e) {}
+  if (!_dashPrefs) _dashPrefs = { order: _dashLocalOrder(), hidden: [], exists: false };
+  _dashPrefs.hidden = [...set];
+  _dashPrefsSave();   // the mirror and the row
 }
 // The cards to draw: the person's order over the role's cards, less the ones they have hidden.
 function _dashVisibleWidgets() {
@@ -22234,7 +22290,7 @@ function _dashVisibleWidgets() {
   return _dashApplyUserOrder(_dashWidgetsForUser()).filter(w => !hidden.has(w));
 }
 function _dashLayoutCustomised() {
-  let order = false; try { order = !!localStorage.getItem(_dashOrderKey()); } catch (e) {}
+  const order = _dashPrefs ? !!_dashPrefs.order : !!_dashLocalOrder();
   return order || _dashHiddenSet().size > 0;
 }
 function dashToggleWidget(w, on) {
@@ -22269,8 +22325,9 @@ function _dashCardsPaint() {
     </label>`).join('') : '<div style="padding:12px 0;color:var(--text3);font-size:12px;">Your role has no dashboard cards.</div>';
 }
 function dashResetLayout() {
-  try { localStorage.removeItem(_dashOrderKey()); } catch (e) {}
-  _dashSaveHidden(new Set());   // v7.10.50: the hidden set is part of the personal layout
+  if (!_dashPrefs) _dashPrefs = { order: null, hidden: [], exists: false };
+  _dashPrefs.order = null; _dashPrefs.hidden = [];   // v7.10.50: the whole personal layout — order and hidden set
+  _dashPrefsSave();
   renderDashboard({ reuse: true });
 }
 // Reorder the cards already on screen (v7.9.36) — a drag or a reset is pure
@@ -22479,7 +22536,7 @@ async function renderDashboard(opts) {
   // re-renders from the bundle it already has ({ reuse: true }) — no traffic.
   const reuse = !!(opts && opts.reuse && window._dashBundle);
   const sweepP = reuse ? Promise.resolve({ woke: [], working: [] }) : startLeadSweep({ wakeOnly: true });
-  const B = reuse ? window._dashBundle : await _dashFetchBundle();
+  const [B] = reuse ? [window._dashBundle] : await Promise.all([_dashFetchBundle(), _dashPrefsLoad()]);   // v7.10.50: the login's layout beside the bundle
   window._dashBundle = B;
   // Make sure shared lookups the widgets read are present.
   // Full rows, the shape preloadLookups caches: id+name rows here left the deal form with no stages for the session (v7.9.95).
