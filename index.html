@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.51 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.52 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.51 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.52 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -6252,9 +6252,10 @@ function buildNav(navigate = true) {
   const renderItem = (item) => {
     if (!firstPage) firstPage = item.page;
     const tip = PAGE_HELP[item.page] ? ` title="${escAttr(PAGE_HELP[item.page])}"` : '';   // v7.10.48: the page's description as the tooltip
+    const tick = item.page === 'cm_contracts' && contractsIntegrity() ? ' <span class="nav-tick" title="Contract data integrity confirmed" style="display:inline-block;width:14px;height:14px;line-height:14px;text-align:center;border-radius:50%;background:#16A34A;color:#fff;font-size:10px;font-weight:800;margin-left:6px;vertical-align:middle;">✓</span>' : '';   // v7.10.52
     return `<button class="nav-item" id="nav-${item.page}" onclick="showPage('${item.page}')"${tip}>
       <svg class="nav-icon" viewBox="0 0 16 16" fill="currentColor">${item.icon}</svg>
-      ${item.label}
+      ${item.label}${tick}
     </button>`;
   };
 
@@ -6555,6 +6556,65 @@ async function confirmDelegate(idx, revoke) {
     renderCollaborators();
     showStatus(resp ? 'Delegated to ' + c.name + ': ' + _deliveryChips(resp).text : 'Delegation to ' + c.name + ' revoked');
   } catch (e) { showStatus('Could not save the delegation: ' + e.message, 'error'); }
+}
+// ── Contract data integrity confirmation (v7.10.52) ─────────────────────────────────────────────
+// Richard 2026-11-19: "i am replacing the contracts data with better data. Once I am happy with the
+// integrity, i want some form of notification that the integrity is checked and complete. perhaps a
+// green tickbox next to contracts and when opened a message that says integrity updated and
+// confirmed?" One setting, `contracts_integrity` = JSON { at, by, note }, written from the Contracts
+// page by an administer_deals / manage_settings holder; the sidebar's Contracts item carries a green
+// ✓ while it is set, and the page opens on a green banner naming who confirmed and when. The banner
+// also counts the contracts whose deal row changed AFTER the confirmation (deals.updated_at), so a
+// confirmation that has gone stale says so and can be renewed; Withdraw clears it.
+function contractsIntegrity() {
+  try { const v = appSettings['contracts_integrity']; if (!v) return null; const o = JSON.parse(v); return o && o.at ? o : null; } catch (e) { return null; }
+}
+function contractsIntegrityMay() { return can('administer_deals') || can('manage_settings'); }
+async function _settingUpsert(key, value) {
+  const r = await api('settings', 'PATCH', { value, updated_at: new Date().toISOString() }, 'key=eq.' + key + '&select=key');
+  if (!r || !r.length) await api('settings', 'POST', { key, value }, '');
+  appSettings[key] = value;
+}
+async function contractsIntegrityConfirm() {
+  if (!contractsIntegrityMay()) { showStatus('Only a deal administrator may confirm the contract data', 'error'); return; }
+  const cur = contractsIntegrity();
+  const note = await promptDialog({ title: cur ? 'Confirm the contract data again' : 'Confirm the contract data', message: 'This records that the contracts listed here have been checked and their integrity confirmed, by you, today. A note is optional (what was checked, the source).', value: cur && cur.note ? cur.note : '', placeholder: 'e.g. checked against the November billing run', confirmLabel: 'Confirm integrity' });
+  if (note === null) return;
+  try {
+    await _settingUpsert('contracts_integrity', JSON.stringify({ at: new Date().toISOString(), by: currentUser.personId, note: String(note || '').trim() || null }));
+    showStatus('Contract data integrity confirmed');
+    buildNav(false); navHighlight(currentPage);
+    if (currentPage === 'cm_contracts') await renderContractsPage();
+  } catch (e) { showStatus('Could not record the confirmation: ' + e.message, 'error'); }
+}
+async function contractsIntegrityWithdraw() {
+  if (!contractsIntegrityMay()) return;
+  if (!await confirmDialog({ title: 'Withdraw the confirmation?', message: 'The Contracts page and the sidebar will no longer show the data as confirmed until someone confirms it again.', confirmLabel: 'Withdraw', danger: true })) return;
+  try {
+    await _settingUpsert('contracts_integrity', '');
+    showStatus('Confirmation withdrawn');
+    buildNav(false); navHighlight(currentPage);
+    if (currentPage === 'cm_contracts') await renderContractsPage();
+  } catch (e) { showStatus('Could not withdraw: ' + e.message, 'error'); }
+}
+// The banner above the Contracts list. `deals` = the rows the page lists (their updated_at tells
+// what changed since the confirmation).
+function contractsIntegrityBannerHtml(deals) {
+  const ci = contractsIntegrity(), may = contractsIntegrityMay();
+  if (!ci) {
+    return `<div style="margin:0 0 12px;padding:10px 14px;border:1px dashed var(--border);border-radius:var(--radius);font-size:13px;color:var(--text2);display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span>Contract data integrity has <strong>not been confirmed</strong> yet.</span>
+      ${may ? '<button class="btn btn-secondary btn-sm" onclick="contractsIntegrityConfirm()">✓ Confirm integrity</button>' : ''}
+    </div>`;
+  }
+  const when = new Date(ci.at), who = _deliveryName(ci.by) || 'a deal administrator';
+  const changed = (deals || []).filter(d => d.updated_at && String(d.updated_at) > String(ci.at));
+  const stale = changed.length > 0;
+  return `<div id="cm-integrity" style="margin:0 0 12px;padding:10px 14px;background:${stale ? '#FFF7E6' : '#DCFCE7'};border:1px solid ${stale ? '#E8A33D' : '#86EFAC'};border-radius:var(--radius);font-size:13px;color:${stale ? '#7A4F0E' : '#166534'};display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span style="font-size:16px;line-height:1;">${stale ? '⚠' : '✓'}</span>
+    <span><strong>Integrity ${stale ? 'confirmed, but ' + changed.length + ' contract' + (changed.length === 1 ? ' has' : 's have') + ' changed since' : 'updated and confirmed'}</strong> — checked by ${escHtml(who)} on ${when.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long', year: 'numeric' })} at ${when.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}${ci.note ? ' · ' + escHtml(ci.note) : ''}.${stale ? ' Check the changes and confirm again.' : ''}</span>
+    ${may ? `<span style="margin-left:auto;display:flex;gap:6px;"><button class="btn btn-secondary btn-sm" onclick="contractsIntegrityConfirm()">${stale ? '✓ Confirm again' : 'Re-confirm'}</button><button class="btn btn-ghost btn-sm" onclick="contractsIntegrityWithdraw()">Withdraw</button></span>` : ''}
+  </div>`;
 }
 function _deliveryChips(resp) {
   const keys = [..._deliveryExpand(resp)];
@@ -10135,6 +10195,9 @@ async function renderContractsPage() {
     // in force), one row each, as a real .xlsx (xlsxDownload); not just what fits on the screen.
     const viewBar = document.getElementById('view-filter-bar');
     if (viewBar && currentPage === 'cm_contracts') viewBar.innerHTML = '<button class="btn btn-secondary btn-sm" onclick="contractsExportXlsx()" title="Download the contracts listed here as an Excel workbook">⤓ Export to Excel</button>';
+    // v7.10.52: the integrity confirmation banner, in the strip between the top bar and the list
+    const chipBar = document.getElementById('page-chip-bar');
+    if (chipBar && currentPage === 'cm_contracts') { chipBar.innerHTML = contractsIntegrityBannerHtml(rows.map(r => r.d)); chipBar.style.display = ''; }
     makeSortableFilterableTable({
       tableId: 'cm_contracts',
       headRoot: head,
