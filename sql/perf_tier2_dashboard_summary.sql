@@ -18,7 +18,7 @@
 -- Keys returned (all arrays unless noted):
 --   leads            every lead, the union of the columns the four widgets read,
 --                    with sites:{name} in the PostgREST embed shape
---   deals            id, name, stage_id, probability, owner/branch/region, org_id, service_sub_id
+--   deals            id, name, stage_id, probability, owner/branch/region, org_id, service_sub_id, delivery_owner_id (v7.10.51)
 --   orgs             id, parent_org_id, group_touch_soothes, sector_id
 --   org_touches      object {"o<org_id>": "YYYY-MM-DD"} — latest non-internal GROUP engagement (v7.9.07;
 --                    kept for a client on the previous release)
@@ -63,7 +63,8 @@ SELECT jsonb_build_object(
   'deals', (SELECT coalesce(jsonb_agg(jsonb_build_object(
       'id', d.id, 'name', d.name, 'stage_id', d.stage_id, 'probability', d.probability,
       'owner_id', d.owner_id, 'branch_id', d.branch_id, 'region_id', d.region_id,
-      'org_id', d.org_id, 'service_sub_id', d.service_sub_id) ORDER BY d.id), '[]'::jsonb)
+      'org_id', d.org_id, 'service_sub_id', d.service_sub_id,
+      'delivery_owner_id', d.delivery_owner_id) ORDER BY d.id), '[]'::jsonb)   -- v7.10.51: a contract is "mine" for its delivery owner too
     FROM public.deals d),
 
   'orgs', (SELECT coalesce(jsonb_agg(jsonb_build_object(
