@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.54 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.55 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.54 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.55 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -1154,6 +1154,12 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
               <label class="form-label" id="opp-start-date-label">Expected Start Date</label>
               <input type="date" id="opp-start-date-general" class="form-control" onchange="rsgSyncStartDate('general')" title="The first month of revenue. Months before it are greyed out on the revenue grid.">
               <div style="font-size:11px;color:var(--text3);margin-top:3px;">First month of revenue — the grid opens from here.</div>
+            </div>
+            <!-- v7.10.55: the contract's Pastel account number (a secured deal only; oppApplyWording shows it) -->
+            <div class="form-group" id="opp-pastel-wrap" style="display:none;margin-bottom:0;width:220px;">
+              <label class="form-label">Pastel account no.</label>
+              <input type="text" id="opp-pastel-no" class="form-control" placeholder="e.g. XON001" oninput="_oppEventDirty = true" title="The Pastel customer account this contract is invoiced under">
+              <div style="font-size:11px;color:var(--text3);margin-top:3px;">Required on every contract — defaulted from the client at securing.</div>
             </div>
           </div>
           <div class="form-group" id="opp-legacy-desc-group" style="margin-top:16px;margin-bottom:0;">
@@ -6509,11 +6515,22 @@ async function logDeliveryHandover(deal, toId, fromId) {
 }
 // Save on a secured deal for a delivery editor holding 'terms': only the terms columns, never the
 // sales side (client, service, stage, owner, probability, the stream).
+// v7.10.55: every contract carries its Pastel account number (deals.pastel_account_no, defaulted
+// from the client at securing, a contract term afterwards). pastelReady() = the column is on the row.
+const PASTEL_MISSING_MSG = 'The Pastel number on a contract needs sql/add_deal_pastel_no.sql on this database';
+function pastelReady(deal) { return !!MOCK || !!(deal && 'pastel_account_no' in deal); }
+function pastelBoxValue() { return String((document.getElementById('opp-pastel-no') || {}).value || '').trim(); }
+function orgPastelNo(orgId) { const o = (allData['organisations'] || []).find(x => +x.id === +orgId); return o ? String(o.account_no || '').trim() : ''; }
 async function saveDeliveryTerms() {
   const order = (document.getElementById('opp-order-date-general') || {}).value || null;
   const start = (document.getElementById('opp-start-date-general') || {}).value || null;
   const derr = checkDatesOrder(order, start); if (derr) { showStatus(derr, 'error'); return; }
   const payload = { order_date: order, start_date: start, notes: document.getElementById('opp-notes').value || null, ext_notes: document.getElementById('opp-ext-notes').value || null };
+  if (pastelReady(oppData)) {   // v7.10.55
+    const pn = pastelBoxValue();
+    if (!pn) { showStatus('Every contract must carry a Pastel account number', 'error'); document.getElementById('opp-pastel-no').focus(); return; }
+    payload.pastel_account_no = pn;
+  }
   try {
     const r = await api('deals', 'PATCH', payload, 'id=eq.' + oppData.id + '&select=*');
     Object.assign(oppData, (r && r[0]) || payload);
@@ -6734,6 +6751,7 @@ function oppApplyWording(secured) {
   set('opp-order-date-label', secured ? 'Order Date' : 'Expected Order Date');
   set('opp-start-date-label', secured ? 'Start Date' : 'Expected Start Date');
   const g = document.getElementById('rsg-open-btn'); if (g) g.style.display = secured ? 'none' : '';
+  const pw = document.getElementById('opp-pastel-wrap'); if (pw) pw.style.display = secured ? '' : 'none';   // v7.10.55
   const n = document.getElementById('pb-secured-note');
   if (n) { n.style.display = secured ? '' : 'none'; n.textContent = 'The proposals and quotes that won this ' + kind + ' — kept as history. The revenue stream is frozen; changes to the ' + kind + ' itself are made in Deal Administration.'; }
   const pa = document.getElementById('collab-presales-actions'), ta = document.getElementById('collab-team-actions');
@@ -6797,7 +6815,7 @@ function _oppClearFields() {
   ['opp-name','opp-notes','opp-ext-notes','opp-margin-pct',
     'opp-order-date','opp-start-date','opp-base-amount','opp-num-months',
     'opp-escalation','opp-lost-date','opp-lost-to','opp-lost-notes',
-    'opp-probability','opp-order-date-general','opp-start-date-general'].forEach(id => {
+    'opp-probability','opp-order-date-general','opp-start-date-general','opp-pastel-no'].forEach(id => {
     const el = document.getElementById(id);
     if (el) { el.value = ''; if (el.dataset) delete el.dataset.userSet; }
   });
@@ -7201,7 +7219,7 @@ function applyOppReadOnly(level, why) {
 
   const engTab = document.getElementById('opp-tab-engagement');
   const filesTab = document.getElementById('opp-tab-files');
-  const TERMS_IDS = ['opp-order-date-general', 'opp-start-date-general', 'opp-notes', 'opp-ext-notes'];
+  const TERMS_IDS = ['opp-order-date-general', 'opp-start-date-general', 'opp-notes', 'opp-ext-notes', 'opp-pastel-no'];   // v7.10.55: the Pastel number is a contract term
   // Disable every input/select/textarea. In 'engagement' mode, leave the
   // Engagement tab's controls enabled so a collaborator can still log activity
   // (and, v7.9.82, the Files tab's — a signed contract arrives after securing).
@@ -7417,6 +7435,7 @@ async function initOppForm() {
   if (oppData.start_date) document.getElementById('opp-start-date').value = oppData.start_date;
   rsgSyncStartDate('gen', false);
   if (oppData.notes) document.getElementById('opp-notes').value = oppData.notes;
+  { const pn = document.getElementById('opp-pastel-no'); if (pn) pn.value = oppData.pastel_account_no || ''; }   // v7.10.55
   const extNotesEl = document.getElementById('opp-ext-notes');
   if (extNotesEl && oppData.ext_notes) extNotesEl.value = oppData.ext_notes;
 
@@ -10309,7 +10328,8 @@ async function renderContractsPage() {
         service: sub ? sub.name : (maj ? maj.name : ''),
         start: d.start_date || '', end: d.contract_end_date || '',
         monthly: valueOf(d),
-        account: String(org.account_no || '').trim(),
+        account: String(d.pastel_account_no || '').trim() || String(org.account_no || '').trim(),   // v7.10.55: the contract's own number, else the client's
+        accountFromOrg: !String(d.pastel_account_no || '').trim() && !!String(org.account_no || '').trim(),
         owner: own ? [own.first_name, own.last_name].filter(Boolean).join(' ') : '',
         extension: ext ? (extStage || 'Open') + (ext.probability != null ? ' · ' + ext.probability + '%' : '') : '',
         inFocus: !streams.some(s => +s.deal_id === +d.id && s.stream_type === 'fulfilment'),
@@ -10357,7 +10377,7 @@ async function renderContractsPage() {
         <td style="white-space:nowrap;">${date(r.start)}</td>
         <td style="white-space:nowrap;">${date(r.end)}</td>
         <td style="text-align:right;white-space:nowrap;">${money(r.monthly)}</td>
-        <td>${r.account ? escHtml(r.account) : '<span style="color:#9A3412;">none</span>'}</td>
+        <td>${r.account ? escHtml(r.account) + (r.accountFromOrg ? ' <span style="font-size:10px;color:var(--text3);" title="Taken from the client — not yet on the contract itself">client</span>' : '') : '<span style="color:#9A3412;font-weight:600;">none</span>'}</td>
         <td style="white-space:nowrap;">${escHtml(r.owner || '—')}</td>
         <td style="white-space:nowrap;">${r.delivery ? escHtml(r.delivery) : '<span style="color:#9A3412;">not set</span>'}</td>
         <td style="white-space:nowrap;font-size:12px;color:var(--text2);">${escHtml(r.extension || '—')}</td>
@@ -19241,6 +19261,14 @@ async function saveOpportunity() {
     // v7.10.51: securing hands the deal to a delivery owner — asked once per save, the family's
     // default offered (openDeliveryOwnerPrompt sets _oppDeliveryPick and resumes this save).
     if (_oppDeliveryPick === undefined && deliveryOwnerReady(oppData) && (!oppData.id || 'delivery_owner_id' in oppData)) { openDeliveryOwnerPrompt('secure'); return; }
+    // v7.10.55: every contract must carry a Pastel account number — the box, else the client's, else ask.
+    if (pastelReady(oppData) && !pastelBoxValue() && !orgPastelNo(orgId)) {
+      const pn = await promptDialog({ title: 'Pastel account number', message: 'Every contract must carry a Pastel account number, and ' + ((allData['organisations'] || []).find(o => +o.id === +orgId) || {}).name + ' has none on record. Enter the number to secure — it is saved on the contract and on the client.', placeholder: 'e.g. XON001', confirmLabel: 'Secure →' });
+      if (pn === null) return;
+      if (!String(pn).trim()) { showStatus('A Pastel account number is required to secure', 'error'); return; }
+      const box = document.getElementById('opp-pastel-no'); if (box) box.value = String(pn).trim();
+      try { await api('organisations', 'PATCH', { account_no: String(pn).trim() }, 'id=eq.' + orgId); const o = (allData['organisations'] || []).find(x => +x.id === +orgId); if (o) o.account_no = String(pn).trim(); } catch (e) { console.warn('client account_no:', e.message); }
+    }
   }
   const securingNow = +stageId === 5 && +prevStageId !== 5;
 
@@ -19269,6 +19297,11 @@ async function saveOpportunity() {
   // Securing locks probability at 100% — folded into this same PATCH (v7.9.36)
   // so runSecuredProcess no longer needs a second write to the deal row.
   if (+stageId === 5 && +prevStageId !== 5) payload.probability = 100;
+  if (pastelReady(oppData) && (securingNow || dealIsSecuredStage(stageId))) {   // v7.10.55: the contract's Pastel number — the box, else the client's
+    const pn = pastelBoxValue() || orgPastelNo(orgId);
+    if (!pn) { showStatus('Every contract must carry a Pastel account number', 'error'); switchOppTab('general', document.querySelector('.opp-tab')); return; }
+    payload.pastel_account_no = pn;
+  }
   if (securingNow && _oppDeliveryPick !== undefined && deliveryOwnerReady(oppData)) {   // v7.10.51
     payload.delivery_owner_id = _oppDeliveryPick || null;
     payload.delivery_handover_at = _oppDeliveryPick ? new Date().toISOString() : null;
