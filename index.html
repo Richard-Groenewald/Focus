@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.49 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.50 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.49 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.50 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5517,7 +5517,7 @@ const HELP_CONTENT = {
     sections: [
       { note: '<strong>What appears here is role-driven.</strong> Admin curates which cards each role sees (Admin → Settings → Dashboards); you see the union of your roles\' cards.' },
       { h: 'Mine / Team / All', body: 'The scope switch (top right) cuts the ownership-scoped cards — Outstanding Actions, Leads, Opportunities, Pipeline, Campaigns, Interactions, Recent Milestones — to <strong>Mine</strong> (records you own or engagements you logged), <strong>Team</strong> (Sales Managers: your region/branch) or <strong>All</strong> (view-all rights). Each card\'s chip states the scope it is showing, and your choice is remembered between logins. The switch only appears when your rights offer more than one option.' },
-      { h: 'Arrange it your way', body: 'Drag any card to reorder — the layout is remembered for you personally, and <strong>↺ Reset layout</strong> returns to your role\'s standard arrangement.' },
+      { h: 'Arrange it your way', body: 'Drag any card to reorder, and use <strong>☰ Cards</strong> to choose which of the cards your role allows actually show — both are remembered for you personally on this device. <strong>↺ Reset layout</strong> returns to your role\'s standard arrangement with every card shown.' },
       { h: 'The action cards', body: '<strong>Outstanding Actions</strong> — open next actions across leads and opportunities, overdue first; click a row to open the engagement. <strong>Approvals Outstanding</strong> (approvers only) — everything awaiting <em>your</em> decision: promotions, dead reviews, red flags (Executives) and proposed ★ milestones; click a row to act. <strong>Leads</strong> — the two umbrella-band counts (In Qualification vs Qualified) with the full stage composition and your overdue follow-up count. <strong>Leads needing attention</strong> (banner) — woken holds and aging leads; its <strong>Manage →</strong> button opens the Attention Workbench page, where the full lead list and every open action are workable.' },
       { h: 'The activity cards', body: '<strong>Interactions</strong> — engagements per week/month, stacked by category, with its own Mine/All toggle and the per-person target line. <strong>Recent Milestones</strong> — the latest approved ★ milestones in your scope. <strong>Pipeline</strong> — weighted and total open value, computed from revenue streams.' },
       { h: 'Announcements', body: 'A navy (notice) or red (urgent) banner across the top is a <strong>broadcast</strong> from admin — e.g. a deploy warning. Dismiss it with the ×; it disappears everywhere once it expires or is ended.' },
@@ -22210,11 +22210,68 @@ function dashDrop(ev, w) {
   order.splice(to, 0, order.splice(from, 1)[0]);
   _dashDragKey = null;
   try { localStorage.setItem(_dashOrderKey(), JSON.stringify(order)); } catch (e) {}
-  _dashApplyOrderToDom(order);
+  const hidden = _dashHiddenSet();   // v7.10.50: the order keeps hidden cards in place; only the shown ones move on screen
+  _dashApplyOrderToDom(order.filter(w => !hidden.has(w)));
+}
+// v7.10.50 (Richard 2026-11-19: "a user may order (as is current) dashboard items on his login, but also
+// choose to see or not see dashboard items allowed by his permissions"): a personal HIDDEN set beside the
+// personal order, the same home (localStorage per person on this browser). The role matrix still decides
+// what a login MAY see; the person decides which of those cards show. A card hidden here is only hidden —
+// its data is not loaded, nothing else changes. Reset layout clears both the order and the hidden set.
+function _dashHiddenKey() { return 'focus_dash_hidden_' + (currentUser?.personId || 'anon'); }
+function _dashHiddenSet() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(_dashHiddenKey()) || 'null'); } catch (e) {}
+  const allowed = _dashWidgetsForUser();
+  return new Set((Array.isArray(saved) ? saved : []).filter(w => allowed.includes(w)));   // clamped to what the role allows
+}
+function _dashSaveHidden(set) {
+  try { if (set.size) localStorage.setItem(_dashHiddenKey(), JSON.stringify([...set])); else localStorage.removeItem(_dashHiddenKey()); } catch (e) {}
+}
+// The cards to draw: the person's order over the role's cards, less the ones they have hidden.
+function _dashVisibleWidgets() {
+  const hidden = _dashHiddenSet();
+  return _dashApplyUserOrder(_dashWidgetsForUser()).filter(w => !hidden.has(w));
+}
+function _dashLayoutCustomised() {
+  let order = false; try { order = !!localStorage.getItem(_dashOrderKey()); } catch (e) {}
+  return order || _dashHiddenSet().size > 0;
+}
+function dashToggleWidget(w, on) {
+  const hidden = _dashHiddenSet();
+  if (on) hidden.delete(w); else hidden.add(w);
+  _dashSaveHidden(hidden);
+  renderDashboard({ reuse: true });   // from the bundle it already has — no traffic
+  _dashCardsPaint();
+}
+function dashShowAllWidgets() { _dashSaveHidden(new Set()); renderDashboard({ reuse: true }); _dashCardsPaint(); }
+// The chooser: one tick per card the role allows, in the person's order; the dashboard behind it follows each tick.
+function dashCardsOpen() {
+  showModal(`<div class="modal" style="width:420px;">
+    <div class="modal-header"><div class="modal-title">Dashboard cards</div><button class="modal-close" onclick="closeModal()">×</button></div>
+    <div class="modal-body" style="padding:14px 22px 6px;">
+      <div style="font-size:12px;color:var(--text2);margin-bottom:10px;">Tick the cards you want on your dashboard. The list is what your role allows; your choice is remembered on this device. Drag the cards themselves to change their order.</div>
+      <div id="dash-cards-list"></div>
+    </div>
+    <div class="modal-footer"><button class="btn btn-ghost btn-sm" onclick="dashShowAllWidgets()">Show all</button><button class="btn btn-primary" onclick="closeModal()">Done</button></div>
+  </div>`);
+  _dashCardsPaint();
+}
+function _dashCardsPaint() {
+  const box = document.getElementById('dash-cards-list');
+  if (!box) return;
+  const hidden = _dashHiddenSet();
+  const rows = _dashApplyUserOrder(_dashWidgetsForUser());
+  box.innerHTML = rows.length ? rows.map(w => `<label style="display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--border);font-size:13px;cursor:pointer;">
+      <input type="checkbox" ${hidden.has(w) ? '' : 'checked'} onchange="dashToggleWidget('${w}', this.checked)" style="width:16px;height:16px;">
+      <span style="flex:1;">${escHtml(DASH_WIDGET_CATALOG[w] || w)}</span>
+      ${hidden.has(w) ? '<span style="font-size:11px;color:var(--text3);">hidden</span>' : ''}
+    </label>`).join('') : '<div style="padding:12px 0;color:var(--text3);font-size:12px;">Your role has no dashboard cards.</div>';
 }
 function dashResetLayout() {
   try { localStorage.removeItem(_dashOrderKey()); } catch (e) {}
-  _dashApplyOrderToDom(_dashWidgetsForUser());
+  _dashSaveHidden(new Set());   // v7.10.50: the hidden set is part of the personal layout
+  renderDashboard({ reuse: true });
 }
 // Reorder the cards already on screen (v7.9.36) — a drag or a reset is pure
 // layout, so it no longer re-runs the ~30 requests behind the widgets.
@@ -22223,10 +22280,8 @@ function _dashApplyOrderToDom(order) {
   const grid = first && first.parentElement;
   if (!grid) { renderDashboard(); return; }
   order.forEach(w => { const el = document.getElementById('dash-' + w); if (el) grid.appendChild(el); });
-  let customised = false;
-  try { customised = !!localStorage.getItem(_dashOrderKey()); } catch (e) {}
   const btn = document.getElementById('dash-reset-btn');
-  if (btn) btn.style.display = customised ? '' : 'none';
+  if (btn) btn.style.display = _dashLayoutCustomised() ? '' : 'none';
 }
 
 // ── Lifecycle timers: aging thresholds + top-of-dashboard reminders ──────────
@@ -22410,9 +22465,10 @@ async function renderDashboard(opts) {
   const head = document.getElementById('table-head');
   const body = document.getElementById('table-body');
   head.innerHTML = '';
-  const widgets = _dashApplyUserOrder(_dashWidgetsForUser());
+  const allowed = _dashWidgetsForUser();
+  const widgets = _dashVisibleWidgets();   // v7.10.50: the person's order, less the cards they have hidden
   const greeting = ('Welcome, ' + (currentUser?.name || '')).trim().replace(/,$/, '');
-  if (!widgets.length) {
+  if (!allowed.length) {
     body.innerHTML = `<tr><td style="padding:0;border:none;"><div style="padding:48px 24px;text-align:center;color:var(--text3);">
       <div style="font-size:18px;font-weight:700;color:var(--text2);margin-bottom:6px;">${greeting}</div>
       <div>No dashboard is configured for your role yet.</div></div></td></tr>`;
@@ -22430,7 +22486,8 @@ async function renderDashboard(opts) {
   if (!allData['stages'] || !allData['stages'].length) { try { allData['stages'] = await apiGet('stages', 'select=*'); } catch(e) {} }
   // Lifecycle reminders (woke-from-Hold + aging escalations) — top of dashboard.
   const remindersHtml = await _dashRemindersHtml(B, sweepP);
-  const customised = !!localStorage.getItem(_dashOrderKey());
+  const customised = _dashLayoutCustomised();
+  const hiddenN = allowed.length - widgets.length;
   // Global scope switch (Mine / Team / All) — shown only when rights offer a
   // choice; the pick is remembered per person and drives every scoped card.
   const scopeOpts = _dashScopeOptions();
@@ -22450,10 +22507,12 @@ async function renderDashboard(opts) {
         <div style="display:flex;align-items:center;gap:10px;">
           ${scopeSeg}
           <span style="font-size:11px;color:var(--text3);">Drag cards to rearrange</span>
-          <button id="dash-reset-btn" class="btn btn-ghost btn-sm" onclick="dashResetLayout()" title="Return to the standard layout for your role" style="display:${customised ? '' : 'none'};">↺ Reset layout</button>
+          <button id="dash-cards-btn" class="btn btn-ghost btn-sm" onclick="dashCardsOpen()" title="Choose which of the cards your role allows show on your dashboard">☰ Cards${hiddenN ? ` <span style="color:var(--text3);font-weight:500;">(${widgets.length} of ${allowed.length})</span>` : ''}</button>
+          <button id="dash-reset-btn" class="btn btn-ghost btn-sm" onclick="dashResetLayout()" title="Return to the standard layout for your role — every card shown, in the standard order" style="display:${customised ? '' : 'none'};">↺ Reset layout</button>
         </div>
       </div>
       ${remindersHtml}
+      ${widgets.length ? '' : `<div style="padding:28px 0 8px;color:var(--text3);font-size:13px;text-align:center;">Every card is hidden — <a href="#" onclick="event.preventDefault(); dashCardsOpen();">choose the cards to show</a>.</div>`}
       <div class="dash-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px;align-items:stretch;">${shell}</div>
     </div></td></tr>`;
   const loaders = { approvals: _dashApprovals, actions: _dashActions, leads: _dashLeads, opportunities: _dashOpps,
@@ -23136,7 +23195,7 @@ async function renderDashboardAdmin() {
       <div style="font-size:12px;color:var(--text3);margin-bottom:14px;">
         Tick the categories each role sees on its dashboard. A user with several roles sees the union of their roles' categories.
         Widgets appear in the column order below — this is the BASE layout; users can drag-reorder their own dashboard,
-        and its <em>Reset layout</em> button returns them to this base. Changes apply the next time a user opens their dashboard.
+        and may hide cards they do not want (<em>Cards</em>); the <em>Reset layout</em> button returns them to this base with every card shown. Changes apply the next time a user opens their dashboard.
       </div>
       <div class="card" style="padding:0;overflow-x:auto;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
