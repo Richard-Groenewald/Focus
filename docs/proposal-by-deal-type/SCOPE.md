@@ -5,7 +5,17 @@ surfaced on 14 November (v7.10.39): manpower deals (guarding, control rooms) use
 other deal types will not; and the Revenue Stream Generator and the Proposal Builder tab should
 follow the type.
 
-This is a scope, not a build. Section 6 lists the decisions it needs from Richard.
+**Ruling, the same day** (Richard, on reading this): "each deal type has a proposal type (set in site admin).
+where a proposal type has not been created for the deal type, say so under proposal and have the user
+create one outside focus." That replaces the three-value mode of section 3 with a **Proposal Types
+lookup** — Site Admin → Lookups → Proposal Types lists the tools Focus offers (one today, the
+manpower quote tool), and a service type (Lookups → Service Sub) points at one or at nothing. Built as
+**v7.10.48** (phase 1 below): `proposal_types`, `service_sub.proposal_type_id`, `dealProposalType`,
+the tab's three bodies, `sql/add_proposal_types.sql`. Sections 3 to 7 stand as the thinking behind it;
+where they say `proposal_mode` read "the proposal type the service type points at", and `none` is a
+service type that points at nothing. Phase 1b (the project generator) and phase 2 (a document-mode
+proposal type) remain open; a document tool would be a second row in Proposal Types with its own
+`tool` value.
 
 ## 1. What "deal type" means here
 
