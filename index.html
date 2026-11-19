@@ -587,6 +587,11 @@ body.net-busy #busy-cursor,body.click-busy #busy-cursor{opacity:1;animation:busy
 .pp-grid tr.pp-grid-ms td { background:#F8FAFC; }
 .pp-grid tr.pp-crit td:nth-child(2) { box-shadow:inset 3px 0 0 #DC2626; }
 .pp-grid tr.pp-done td { color:var(--text3); }
+/* v7.10.43: task groups */
+.pp-grid tr.pp-grid-sum td { background:#FBFCFE; } .pp-grid tr.pp-grid-sum td .pp-cell-ro { font-weight:700; color:var(--navy); }
+.pp-caret { display:inline-block; width:13px; flex:none; cursor:pointer; color:var(--text3); font-size:11px; line-height:1; user-select:none; } .pp-caret:hover { color:var(--navy); }
+.pp-wbs { color:var(--text3); font-weight:normal; font-size:11px; margin-right:6px; }
+.pp-table tr.pp-task-sum td { background:#FBFCFE; }
 .pp-grid tr.pp-done td input { color:var(--text3); }
 .pp-grid tr.pp-drop-above td { box-shadow:inset 0 2px 0 var(--red); }
 .pp-grid tr.pp-drop-below td { box-shadow:inset 0 -2px 0 var(--red); }
@@ -869,7 +874,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.42 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.46 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -908,7 +913,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.42 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.46 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -2514,7 +2519,7 @@ function _mockSeed() {
     // v7.10.30 Site Mobility: types, dated supplier rates (36-month quotes, plus a 48-month one for the bakkie), fuel prices, extras.
     quote_vehicle_types: [['Light patrol car (1.0 - 1.2 hatchback)','petrol',4.9],['Single cab bakkie (2.4 diesel)','diesel',8.1],['14-seater staff transport','diesel',9.8],['Quad bike (estate perimeter)','petrol',6.5,'owned'],['Bicycle','none',0,'owned'],['Golf cart','none',0]]
       .map((x, i) => ({ id: i + 1, name: x[0], fuel_type: x[1], fuel_economy: x[2], ownership: x[3] || 'rented', display_order: i + 1, active: true, in_use_date: '2025-01-01', retired_date: null, created_at: now })),
-    // v7.10.42: owned types carry a dated cost; the golf cart is rented at a flat R 4 950 (0 km band).
+    // v7.10.46: owned types carry a dated cost; the golf cart is rented at a flat R 4 950 (0 km band).
     quote_vehicle_owned_costs: [[4, 69560, 36, 1000, 120, 0], [5, 5000, 24, 50, 0, 0]]
       .map((x, i) => ({ id: i + 1, vehicle_type_id: x[0], effective_date: '2025-07-17', acquisition_cost: x[1], life_months: x[2], monthly_cost: x[3], insurance_monthly: x[4], tracking_monthly: x[5], note: '', created_at: now })),
     quote_vehicle_rates: [[1,36,1500,5890,640,199,2.10],[1,36,2500,6650,640,199,2.10],[2,36,2000,12450,1180,199,3.20],[2,36,3000,13900,1180,199,3.20],[3,36,3000,17800,1620,199,3.90],[6,36,0,4950,0,0,0],[2,48,2000,13100,1180,199,3.20]]
@@ -7434,7 +7439,8 @@ function switchOppTab(tab, btn) {
 let _ppMissing = false;
 let _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: 'list', edit: null, from: null, busy: false,
             links: [], holidays: new Set(), sched: null, schedTab: 'gantt', zoom: 'week', critOn: true,     // v7.10.33 schedule
-            teamNew: null, affil: {}, draft: false, full: false };   // v7.10.34: the outside-resource form, person → organisation, a plan on an open deal
+            teamNew: null, affil: {}, draft: false, full: false,   // v7.10.34: the outside-resource form, person → organisation, a plan on an open deal
+            collapsed: new Set(), compact: false, tree: null };     // v7.10.43: collapsed task groups, the compact grid, the memoised task tree
 const PP_TASK_STATUS = [['todo', 'To do'], ['in_progress', 'In progress'], ['blocked', 'Blocked'], ['done', 'Done']];
 const PP_PLAN_STATUS = [['planning', 'Planning'], ['active', 'Active'], ['on_hold', 'On hold'], ['complete', 'Complete']];
 const PP_HEALTH = { ontrack: ['On track', '#DCFCE7', '#166534'], atrisk: ['At risk', '#FEF3C7', '#92400E'], late: ['Late', '#FEE2E2', '#991B1B'], complete: ['Complete', '#E0E7FF', '#3730A3'], hold: ['On hold', '#F1F5F9', '#475569'],
@@ -7489,7 +7495,7 @@ function ppCanEdit() {
   if (+_pp.plan.owner_id === +currentUser.personId) return true;
   return !!_pp.deal && canEditRecord(_pp.deal);
 }
-function ppCanTouchTask(t) { return ppCanEdit() || (t && currentUser && +t.assignee_id === +currentUser.personId); }
+function ppCanTouchTask(t) { return ppCanEdit() || (t && !ppIsSummary(t) && currentUser && +t.assignee_id === +currentUser.personId); }   // v7.10.43: a group is never "yours""
 
 // ── The deal page tab ─────────────────────────────────────────────────────────
 // Shown on every SAVED deal (v7.10.34; until then a secured deal only — `secured` from
@@ -7497,6 +7503,16 @@ function ppCanTouchTask(t) { return ppCanEdit() || (t && currentUser && +t.assig
 // row becomes the delivery plan, untouched, when the deal is secured. The build card is offered to
 // the deal's editor (the sales owner, a manager in scope, an admin) and manage_project_plans
 // holders; everyone else sees "no plan yet". Once a plan exists the tab summarises it.
+// v7.10.43: the slim task reads behind the counts leave GROUPS out (a group is a task that is another's parent);
+// a database without parent_task_id answers the plain read.
+async function ppSlimTasks(filter, cols, all) {
+  const get = sel => all ? apiGetAll('project_tasks', filter + '&select=' + sel) : apiGet('project_tasks', filter + '&select=' + sel);
+  let rows;
+  try { rows = await get(cols + ',parent_task_id'); }
+  catch (e) { if (!/parent_task_id|42703/.test(e.message)) throw e; return get(cols); }
+  const parents = new Set(rows.map(r => r.parent_task_id).filter(x => x != null).map(Number));
+  return rows.filter(r => !parents.has(+r.id));
+}
 // oppPlanSummary(dealId) is the one reader shared with the Proposal Builder tab's card.
 async function oppPlanSummary(dealId) {
   const [plans, people] = await Promise.all([
@@ -7508,7 +7524,7 @@ async function oppPlanSummary(dealId) {
   let ms = [], ts = [];
   if (plan) [ms, ts] = await Promise.all([
     apiGet('project_milestones', 'plan_id=eq.' + plan.id + '&select=id,status,due_date,name,sort_order&order=sort_order,id'),
-    apiGet('project_tasks', 'plan_id=eq.' + plan.id + '&select=id,status,due_date'),
+    ppSlimTasks('plan_id=eq.' + plan.id, 'id,status,due_date'),
   ]);
   return { plan, ms, ts };
 }
@@ -7608,7 +7624,7 @@ async function renderProjectsPage() {
     const ids = listed.map(p => +p.id), dealIds = listed.map(p => +p.deal_id);
     const [ms, ts, deals] = await Promise.all([
       ids.length ? apiGetAll('project_milestones', 'plan_id=in.(' + ids.join(',') + ')&select=id,plan_id,name,status,due_date') : [],
-      ids.length ? apiGetAll('project_tasks', 'plan_id=in.(' + ids.join(',') + ')&select=id,plan_id,status,due_date') : [],
+      ids.length ? ppSlimTasks('plan_id=in.(' + ids.join(',') + ')', 'id,plan_id,status,due_date', true) : [],
       dealIds.length ? apiGetAll('deals', 'id=in.(' + dealIds.join(',') + ')&select=id,name,org_id,job_number,owner_id,stage_id') : [],
     ]);
     if (!allData['stages'] || !allData['stage_categories']) {
@@ -7809,6 +7825,7 @@ async function ppSandboxCopy(planId) {
       const r = await api('project_tasks', 'POST', body);
       tMap[t.id] = +r[0].id;
     }
+    for (const t of ts) if (t.parent_task_id && tMap[t.parent_task_id] && tMap[t.id]) await api('project_tasks', 'PATCH', { parent_task_id: tMap[t.parent_task_id] }, 'id=eq.' + tMap[t.id]).catch(() => {});   // v7.10.43: the groups
     for (const m of ms) if (m.task_id && tMap[m.task_id] && msMap[m.id]) await api('project_milestones', 'PATCH', { task_id: tMap[m.task_id] }, 'id=eq.' + msMap[m.id]).catch(() => {});   // v7.10.38
     for (const l of links) {
       if (!tMap[l.from_task] || !tMap[l.to_task]) continue;
@@ -7828,7 +7845,7 @@ async function openProjectPlan(planId, from) {
   if (!page || !root) return;
   _pp = { plan: null, deal: null, org: null, milestones: [], tasks: [], members: [], people: [], view: _pp.view || 'list', edit: null, from: from || null, busy: false,
           links: [], holidays: new Set(), sched: null, schedTab: _pp.schedTab || 'gantt', zoom: _pp.zoom || 'week', critOn: _pp.critOn !== false,
-          teamNew: null, affil: {}, draft: false, full: false };
+          teamNew: null, affil: {}, draft: false, full: false, collapsed: new Set(), msCollapsed: new Set(), compact: !!_pp.compact, tree: null };
   root.innerHTML = '<div style="padding:40px;color:var(--text3);">Loading…</div>';
   page.classList.add('active');
   try {
@@ -7863,6 +7880,7 @@ async function openProjectPlan(planId, from) {
     allData['people'] = people;
     _ppDurUnitMissing = !MOCK && ts.length > 0 && !('duration_unit' in ts[0]);
     _ppMsTaskMissing = !MOCK && ms.length > 0 && !('task_id' in ms[0]);   // v7.10.38: milestones tied to a task need sql/add_milestone_task.sql
+    _ppGroupsMissing = !MOCK && ts.length > 0 && !('parent_task_id' in ts[0]);   // v7.10.43: task groups need sql/add_task_groups.sql
     Object.assign(_pp, { plan, deal, org, milestones: ms, tasks: ts, members: mem, people, links: links || [], sched: null, affil,
                          draft: !!deal && !dealIsSecuredStage(deal.stage_id),
                          holidays: new Set((hols || []).filter(h => h.active !== false).map(h => String(h.holiday_date).slice(0, 10))) });
@@ -7964,11 +7982,28 @@ const PP_MS_TASK_MISSING_MSG = 'Tying a milestone to a task needs sql/add_milest
 function ppMsTask(m) { return m && m.task_id ? _pp.tasks.find(t => +t.id === +m.task_id) || null : null; }
 function ppMsOfTask(taskId) { return _pp.milestones.find(m => +m.task_id === +taskId) || null; }
 function ppMsTaskFinish(t) { if (!t) return null; let s = null; try { s = ppSched().byId[+t.id]; } catch (e) {} return (s && s.ef) || t.due_date || null; }
+// v7.10.43: a group's derived status and % are written onto its row whenever a task under it changes,
+// so the Projects page, the deal tab and a tied milestone read them without the engine running.
+async function ppGroupSync() {
+  const now = new Date().toISOString(), writes = [];
+  _pp.tasks.forEach(t => {
+    if (!ppIsSummary(t)) return;
+    const r = ppRollup(t.id), body = {};
+    if (t.status !== r.status) { body.status = r.status; body.completed_at = r.status === 'done' ? (t.completed_at || now) : null; }
+    if ((+t.pct_done || 0) !== r.pct) body.pct_done = r.pct;
+    if (Object.keys(body).length) { body.updated_at = now; writes.push({ t, body }); }
+  });
+  if (!writes.length) return false;
+  try { await Promise.all(writes.map(w => api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id).then(rows => Object.assign(w.t, rows && rows[0] ? rows[0] : w.body)))); }
+  catch (e) { showStatus('A group did not follow its tasks: ' + e.message, 'error'); }
+  return true;
+}
 async function ppMsSync(opts) {
+  await ppGroupSync();
   const now = new Date().toISOString(), writes = [];
   _pp.milestones.forEach(m => {
     const t = ppMsTask(m); if (!t) return;
-    const due = ppMsTaskFinish(t), done = t.status === 'done';
+    const due = ppMsTaskFinish(t), done = ppTaskDone(t);
     const body = {};
     if ((m.due_date || null) !== (due || null)) body.due_date = due;
     if (done && m.status !== 'done') { body.status = 'done'; body.completed_at = t.completed_at || now; }
@@ -7987,7 +8022,7 @@ async function ppTaskMakeMilestone(taskId) {
   const t = _pp.tasks.find(x => +x.id === +taskId); if (!t) return;
   if (_ppMsTaskMissing) { showStatus(PP_MS_TASK_MISSING_MSG, 'error'); return; }
   const have = ppMsOfTask(t.id); if (have) { showStatus('"' + have.name + '" already marks the completion of this task'); return; }
-  const now = new Date().toISOString(), done = t.status === 'done';
+  const now = new Date().toISOString(), done = ppTaskDone(t);
   const sort = _pp.milestones.reduce((mx, m) => Math.max(mx, +m.sort_order || 0), 0) + 1;
   try {
     const rows = await api('project_milestones', 'POST', { plan_id: +_pp.plan.id, name: t.name, task_id: +t.id, due_date: ppMsTaskFinish(t), owner_id: t.assignee_id || _pp.plan.owner_id || null,
@@ -8000,7 +8035,7 @@ async function ppTaskMakeMilestone(taskId) {
 function ppMilestonesHtml(edit) {
   const ms = _pp.milestones, today = _today();
   const billing = ms.reduce((t, m) => t + (+m.billing_pct || 0), 0);
-  const tasksOf = id => _pp.tasks.filter(t => +t.milestone_id === +id);
+  const tasksOf = id => _pp.tasks.filter(t => +t.milestone_id === +id && !ppIsSummary(t));   // v7.10.43: groups are not counted
   const row = m => {
     if (_pp.edit && _pp.edit.kind === 'milestone' && +_pp.edit.id === +m.id) return ppMilestoneEditorRow(m);
     const tl = tasksOf(m.id), done = tl.filter(t => t.status === 'done').length;
@@ -8150,7 +8185,7 @@ async function ppMilestoneMove(fromId, targetId, above) {
 
 // ── Tasks: list and board ─────────────────────────────────────────────────────
 function ppTasksHtml(edit) {
-  const ts = _pp.tasks, done = ts.filter(t => t.status === 'done').length, hours = ts.reduce((s, t) => s + (+t.est_hours || 0), 0);
+  const ts = _pp.tasks.filter(t => !ppIsSummary(t)), done = ts.filter(t => t.status === 'done').length, hours = ts.reduce((s, t) => s + (+t.est_hours || 0), 0);   // v7.10.43: groups are not counted
   return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
       <div style="font-size:14px;font-weight:700;color:var(--navy);">Tasks</div>
       <span style="font-size:12px;color:var(--text3);">${done} of ${ts.length} done${hours ? ' · ' + hours.toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' h estimated' : ''}</span>
@@ -8159,6 +8194,7 @@ function ppTasksHtml(edit) {
         <button class="btn btn-sm ${_pp.view === 'board' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-board" style="border:none;border-radius:0;" onclick="ppSetView('board')">Board</button>
         <button class="btn btn-sm ${_pp.view === 'schedule' ? 'btn-primary' : 'btn-ghost'}" id="pp-view-schedule" style="border:none;border-radius:0;" onclick="ppSetView('schedule')">Schedule</button>
       </div>
+      ${_pp.view !== 'board' ? `<span style="font-size:12px;color:var(--text3);"><a href="#" id="pp-collapse-all" onclick="ppCollapseAll(true);return false;" title="Fold every milestone and group">Collapse all</a> · <a href="#" id="pp-expand-all" onclick="ppCollapseAll(false);return false;" title="Open every milestone and group">Expand all</a></span>` : ''}
       <div style="flex:1;"></div>
       <button class="btn btn-ghost btn-sm" id="pp-full" onclick="ppToggleFull()" title="${_pp.full ? 'Back to the plan page (Esc)' : 'Show the tasks on the whole screen'}">${_pp.full ? '⤡ Exit full page' : '⤢ Full page'}</button>
       ${edit ? '<button class="btn btn-secondary btn-sm" id="pp-task-add" onclick="ppTaskAdd()">+ Task</button>' : ''}
@@ -8192,38 +8228,93 @@ function ppTaskStatusSelect(t, cls) {
   return `<select class="form-control ${cls || ''}" style="padding:3px 6px;font-size:12px;" ${may ? '' : 'disabled'} onchange="ppTaskSetStatus(${+t.id}, this.value)">${PP_TASK_STATUS.map(s => `<option value="${s[0]}" ${t.status === s[0] ? 'selected' : ''}>${s[1]}</option>`).join('')}</select>`;
 }
 function ppTaskListHtml(edit) {
-  const today = _today();
-  const groups = _pp.milestones.map(m => ({ id: +m.id, name: m.name, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
-  groups.push({ id: null, name: 'No milestone', tasks: _pp.tasks.filter(t => t.milestone_id == null) });
-  const row = t => {
+  // v7.10.43: the list follows the grid's order — milestone bands, then tasks with their groups indented under them (a caret collapses a group)
+  const today = _today(), S = ppSched(), rows = ppGridRows();
+  const newRow = _pp.edit && _pp.edit.kind === 'task' && !_pp.edit.id ? ppTaskEditorRow(null) : '';
+  const nd = newRow ? _pp.edit.draft : null;
+  const row = r => {
+    const t = r.t;
     if (_pp.edit && _pp.edit.kind === 'task' && +_pp.edit.id === +t.id) return ppTaskEditorRow(t);
-    const late = t.status !== 'done' && t.due_date && String(t.due_date).slice(0, 10) < today;
-    return `<tr class="pp-task-row" data-task-id="${+t.id}" style="${t.status === 'done' ? 'color:var(--text3);' : ''}">
-      <td style="padding-left:22px;${t.status === 'done' ? 'text-decoration:line-through;' : 'font-weight:600;'}">${escHtml(t.name)}${t.description ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;text-decoration:none;white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}</td>
-      <td>${escHtml(ppPersonName(t.assignee_id) || '—')}</td>
-      <td style="white-space:nowrap;">${t.start_date ? ppDate(t.start_date) : '—'}</td>
-      <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${t.due_date ? ppDate(t.due_date) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
-      <td style="text-align:right;">${t.est_hours != null ? (+t.est_hours).toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—'}</td>
-      <td>${ppTaskStatusSelect(t)}</td>
-      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppTaskEdit(${+t.id})">Edit</button>${ppMsOfTask(t.id) ? '<span style="font-size:11px;color:var(--navy);margin-left:4px;" title="A milestone marks the completion of this task">◆</span>' : `<button class="btn btn-ghost btn-sm" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◆ Milestone</button>`}` : ''}</td>
+    const s = S.byId[+t.id] || {}, start = s.es || t.start_date || null, due = s.ef || t.due_date || null;
+    const done = ppTaskDone(t), late = !done && due && String(due).slice(0, 10) < today;
+    const roll = r.summary ? ppRollup(t.id) : null;
+    const caret = r.summary ? `<span class="pp-caret" title="${r.collapsed ? 'Expand the group' : 'Collapse the group'}" onclick="ppToggleGroup(${+t.id})">${r.collapsed ? '▸' : '▾'}</span>` : '<span class="pp-caret"></span>';
+    return `<tr class="pp-task-row ${r.summary ? 'pp-task-sum' : ''}" data-task-id="${+t.id}" style="${done ? 'color:var(--text3);' : ''}">
+      <td style="padding-left:${22 + r.depth * 18}px;${done ? 'text-decoration:line-through;' : 'font-weight:600;'}">${caret}<span class="pp-wbs">${r.n}</span>${escHtml(t.name)}${r.summary ? ' <span style="font-size:10px;color:var(--text3);font-weight:normal;text-transform:uppercase;letter-spacing:.04em;">group · ' + roll.leaves.length + ' task' + (roll.leaves.length === 1 ? '' : 's') + '</span>' : ''}${t.description ? '<div style="font-size:11px;color:var(--text3);font-weight:normal;text-decoration:none;white-space:pre-wrap;">' + escHtml(t.description) + '</div>' : ''}</td>
+      <td>${r.summary ? '<span style="color:var(--text3);">—</span>' : escHtml(ppPersonName(t.assignee_id) || '—')}</td>
+      <td style="white-space:nowrap;">${start ? ppDate(start) : '—'}</td>
+      <td style="white-space:nowrap;${late ? 'color:var(--red);font-weight:700;' : ''}">${due ? ppDate(due) : '—'}${late ? ' <span style="font-size:10px;">OVERDUE</span>' : ''}</td>
+      <td style="text-align:right;">${r.summary ? (roll.hours ? roll.hours.toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—') : (t.est_hours != null ? (+t.est_hours).toLocaleString('en-US', { maximumFractionDigits: 1 }) : '—')}</td>
+      <td>${r.summary ? '<span style="font-size:12px;color:var(--text3);white-space:nowrap;" title="A group\'s status and progress follow the tasks in it">' + ppStatusLabel(PP_TASK_STATUS, roll.status) + ' · ' + roll.pct + '%</span>' : ppTaskStatusSelect(t)}</td>
+      <td style="white-space:nowrap;text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppTaskEdit(${+t.id})">Edit</button><button class="btn btn-ghost btn-sm" title="${escAttr(_ppGroupsMissing ? PP_GROUPS_MISSING_MSG : 'Add a task inside this one — it becomes a group')}" ${_ppGroupsMissing ? 'disabled' : ''} onclick="ppTaskAdd(null, ${+t.id})">+ Sub-task</button>${ppMsOfTask(t.id) ? '<span style="font-size:11px;color:var(--navy);margin-left:4px;" title="A milestone marks the completion of this task">◆</span>' : `<button class="btn btn-ghost btn-sm" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◆ Milestone</button>`}` : ''}</td>
     </tr>`;
   };
-  const newRow = _pp.edit && _pp.edit.kind === 'task' && !_pp.edit.id ? ppTaskEditorRow(null) : '';
-  const body = groups.map(g => (g.tasks.length || (g.id == null && newRow) || (newRow && +_pp.edit.draft.milestone_id === g.id))
-    ? `<tr class="pp-task-group"><td colspan="7" style="background:var(--bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);padding:6px 8px;">${escHtml(g.name)} <span style="font-weight:normal;color:var(--text3);text-transform:none;letter-spacing:0;">· ${g.tasks.filter(t => t.status === 'done').length} of ${g.tasks.length} done</span></td></tr>`
-      + g.tasks.map(row).join('') + (newRow && ((g.id == null && _pp.edit.draft.milestone_id == null) || +_pp.edit.draft.milestone_id === g.id) ? newRow : '')
-    : '').join('');
+  const groups = [];
+  rows.forEach(r => { if (r.kind === 'ms') groups.push({ ms: r.ms, leaves: r.leaves, rows: [], band: r }); else groups[groups.length - 1].rows.push(r); });
+  // a new task's editor needs its band even when no task sits there yet (the grid's rows carry only bands with tasks)
+  if (nd && !nd.parent_task_id && !groups.some(g => (g.ms == null && nd.milestone_id == null) || (g.ms && +nd.milestone_id === +g.ms.id))) {
+    const m = nd.milestone_id != null ? _pp.milestones.find(x => +x.id === +nd.milestone_id) || null : null;
+    groups.push({ ms: m, leaves: [], rows: [] });
+  }
+  const body = groups.map(g => {
+    const mine = nd && ((g.ms == null && nd.milestone_id == null) || (g.ms && +nd.milestone_id === +g.ms.id));
+    if (!g.rows.length && !mine) return '';
+    const name = g.ms ? g.ms.name : 'No milestone', done = g.leaves.filter(t => t.status === 'done').length;
+    let inner = '';
+    const shown = g.rows.filter(r => !r.hidden);
+    if (mine && nd.parent_task_id) {
+      // the new sub-task's editor sits right after its parent's rows
+      const T = ppTree(), under = new Set([+nd.parent_task_id, ...T.desc(nd.parent_task_id)]);
+      let placed = false;
+      shown.forEach((r, i) => { inner += row(r); const next = shown[i + 1]; if (!placed && under.has(+r.t.id) && !(next && under.has(+next.t.id))) { inner += newRow; placed = true; } });
+      if (!placed) inner += newRow;
+    } else inner = shown.map(row).join('') + (mine ? newRow : '');
+    const band = g.band || { ms: g.ms, collapsed: false };
+    return `<tr class="pp-task-group"><td colspan="7" style="background:var(--bg);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);padding:6px 8px;"><span style="display:inline-flex;align-items:center;">${ppBandCaret(band)}</span>${escHtml(name)} <span style="font-weight:normal;color:var(--text3);text-transform:none;letter-spacing:0;">· ${done} of ${g.leaves.length} done</span></td></tr>` + inner;
+  }).join('');
   return `<table class="pp-table" style="width:100%;border-collapse:collapse;font-size:13px;">
       <thead><tr style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--text3);text-align:left;">
         <th>Task</th><th>Assignee</th><th>Start</th><th>Due</th><th style="text-align:right;">Est. h</th><th>Status</th><th></th></tr></thead>
       <tbody>${body}${!_pp.tasks.length && !newRow ? '<tr><td colspan="7" style="padding:18px;text-align:center;color:var(--text3);">No tasks yet' + (edit ? ' — add the first one' : '') + '.</td></tr>' : ''}</tbody></table>`;
 }
+function ppToggleGroup(id) {
+  const c = _pp.collapsed || (_pp.collapsed = new Set());
+  if (c.has(+id)) c.delete(+id); else c.add(+id);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+// v7.10.44 (Richard: "allow phases to be collapsed"): a milestone band folds like a group — the caret on the band row in the
+// grid and the list; its tasks and their bars disappear until it is opened again. Collapse all / Expand all act on bands and groups together.
+function ppBandKey(ms) { return ms ? +ms.id : 0; }
+function ppToggleBand(key) {
+  const c = _pp.msCollapsed || (_pp.msCollapsed = new Set());
+  if (c.has(+key)) c.delete(+key); else c.add(+key);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+function ppCollapseAll(on) {
+  const T = ppTree();
+  _pp.collapsed = new Set(on ? _pp.tasks.filter(t => T.isSum(t.id)).map(t => +t.id) : []);
+  _pp.msCollapsed = new Set(on ? ppGridRows().filter(r => r.kind === 'ms').map(r => ppBandKey(r.ms)) : []);
+  ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()));
+}
+function ppBandCaret(r) {
+  return `<span class="pp-caret" title="${r.collapsed ? 'Expand the milestone' : 'Collapse the milestone — hide its tasks'}" onclick="ppToggleBand(${ppBandKey(r.ms)})">${r.collapsed ? '▸' : '▾'}</span>`;
+}
 function ppTaskEditorRow(t) {
-  const d = _pp.edit.draft;
-  return `<tr class="pp-editor" data-editor="task">
-    <td style="padding-left:22px;"><input class="form-control" id="pp-task-name" placeholder="Task name" value="${escAttr(d.name || '')}" oninput="_pp.edit.draft.name=this.value">
+  const d = _pp.edit.draft, sum = t && ppIsSummary(t);
+  const par = d.parent_task_id ? _pp.tasks.find(x => +x.id === +d.parent_task_id) : null;
+  const first = `<td style="padding-left:22px;"><input class="form-control" id="pp-task-name" placeholder="${sum ? 'Group name' : 'Task name'}" value="${escAttr(d.name || '')}" oninput="_pp.edit.draft.name=this.value">
       <input class="form-control" id="pp-task-desc" placeholder="Description (optional)" style="margin-top:4px;font-size:12px;" value="${escAttr(d.description || '')}" oninput="_pp.edit.draft.description=this.value">
-      <select class="form-control" id="pp-task-ms" style="margin-top:4px;font-size:12px;" onchange="_pp.edit.draft.milestone_id=this.value?+this.value:null"><option value="">No milestone</option>${_pp.milestones.map(m => `<option value="${+m.id}" ${+d.milestone_id === +m.id ? 'selected' : ''}>${escHtml(m.name)}</option>`).join('')}</select></td>
+      ${par ? '<div style="margin-top:4px;font-size:12px;color:var(--text3);">Sub-task of ' + escHtml(ppTaskNo(par.id) + ' · ' + par.name) + (par.milestone_id ? ' — under its milestone' : '') + '</div>'
+            : `<select class="form-control" id="pp-task-ms" style="margin-top:4px;font-size:12px;" onchange="_pp.edit.draft.milestone_id=this.value?+this.value:null"><option value="">No milestone</option>${_pp.milestones.map(m => `<option value="${+m.id}" ${+d.milestone_id === +m.id ? 'selected' : ''}>${escHtml(m.name)}</option>`).join('')}</select>`}</td>`;
+  if (sum) return `<tr class="pp-editor" data-editor="task">${first}
+    <td colspan="4" style="font-size:12px;color:var(--text3);">A group — its dates, hours, progress and status come from the tasks in it${t.milestone_id !== (d.milestone_id || null) ? '; moving it moves them all' : ''}.</td>
+    <td style="white-space:nowrap;text-align:right;">
+      <button class="btn btn-primary btn-sm" onclick="ppTaskSave()">Save</button>
+      <button class="btn btn-ghost btn-sm" onclick="ppEditCancel()">Cancel</button>
+      <button class="btn btn-danger btn-sm" onclick="ppTaskDelete(${+t.id})">Delete</button>
+    </td></tr>`;
+  return `<tr class="pp-editor" data-editor="task">
+    ${first}
     <td><select class="form-control" id="pp-task-assignee" onchange="_pp.edit.draft.assignee_id=this.value?+this.value:null">${ppPeopleOptions(d.assignee_id, false)}</select></td>
     <td><input type="date" class="form-control" id="pp-task-start" value="${escAttr(d.start_date || '')}" onchange="_pp.edit.draft.start_date=this.value"></td>
     <td><input type="date" class="form-control" id="pp-task-due" value="${escAttr(d.due_date || '')}" onchange="_pp.edit.draft.due_date=this.value"></td>
@@ -8235,10 +8326,14 @@ function ppTaskEditorRow(t) {
       ${t ? `<button class="btn btn-danger btn-sm" onclick="ppTaskDelete(${+t.id})">Delete</button>` : ''}
     </td></tr>`;
 }
-function ppTaskAdd(milestoneId) {
+function ppTaskAdd(milestoneId, parentId) {
   if (!ppCanEdit() || ppBusy()) return;
+  // v7.10.43: a task added INSIDE another (parentId) makes that one a group; it takes the parent's milestone
+  const par = parentId ? _pp.tasks.find(x => +x.id === +parentId) : null;
+  if (parentId && !par) return;
+  if (par && _ppGroupsMissing) { showStatus(PP_GROUPS_MISSING_MSG, 'error'); return; }
   if (_pp.view !== 'list') _pp.view = 'list';
-  _pp.edit = { kind: 'task', id: null, draft: { name: '', description: '', milestone_id: milestoneId || null, assignee_id: null, start_date: '', due_date: '', est_hours: null, status: 'todo' } };
+  _pp.edit = { kind: 'task', id: null, draft: { name: '', description: '', milestone_id: par ? (par.milestone_id || null) : (milestoneId || null), parent_task_id: par ? +par.id : null, assignee_id: null, start_date: '', due_date: '', est_hours: null, status: 'todo' } };
   ppRepaintSection('pp-tasks', ppTasksHtml(true)); const el = document.getElementById('pp-task-name'); if (el) el.focus();
 }
 function ppTaskEdit(id) {
@@ -8255,46 +8350,88 @@ async function ppTaskSave() {
   if (d.start_date && d.due_date && d.due_date < d.start_date) { showStatus('The due date cannot be before the start date', 'error'); return; }
   if (d.est_hours != null && (isNaN(d.est_hours) || d.est_hours < 0)) { showStatus('Estimated hours cannot be negative', 'error'); return; }
   const now = new Date().toISOString();
-  const body = { name, description: String(d.description || '').trim() || null, milestone_id: d.milestone_id || null, assignee_id: d.assignee_id || null,
+  let body = { name, description: String(d.description || '').trim() || null, milestone_id: d.milestone_id || null, assignee_id: d.assignee_id || null,
                  start_date: d.start_date || null, due_date: d.due_date || null, est_hours: d.est_hours == null ? null : +d.est_hours, status: d.status || 'todo', updated_at: now };
   _pp.busy = true;
+  let note = 'Task saved';
   try {
     if (_pp.edit.id) {
       const t = _pp.tasks.find(x => +x.id === +_pp.edit.id);
-      if (body.status === 'done' && t.status !== 'done') body.completed_at = now;
-      if (body.status !== 'done') body.completed_at = null;
-      const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + _pp.edit.id);
-      Object.assign(t, rows && rows[0] ? rows[0] : body);
+      if (ppIsSummary(t)) {
+        // v7.10.43: a group keeps only what is its own; a changed milestone moves the whole group
+        body = { name, description: body.description, updated_at: now };
+        const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + t.id);
+        Object.assign(t, rows && rows[0] ? rows[0] : body);
+        if ((t.milestone_id || null) !== (d.milestone_id || null)) await ppSetMilestone(t, d.milestone_id || null, { noPaint: true });
+        note = 'Group saved';
+      } else {
+        if (body.status === 'done' && t.status !== 'done') body.completed_at = now;
+        if (body.status !== 'done') body.completed_at = null;
+        const rows = await api('project_tasks', 'PATCH', body, 'id=eq.' + _pp.edit.id);
+        Object.assign(t, rows && rows[0] ? rows[0] : body);
+      }
     } else {
       const sort = _pp.tasks.reduce((mx, t) => Math.max(mx, +t.sort_order || 0), 0) + 1;
+      const par = d.parent_task_id ? _pp.tasks.find(x => +x.id === +d.parent_task_id) : null;
+      if (d.parent_task_id && !par) throw new Error('the task this one was to sit under is gone');
+      if (par) { body.milestone_id = par.milestone_id || null; if (!_ppGroupsMissing) body.parent_task_id = +par.id; }
+      const wasLeaf = par && !ppIsSummary(par);
       const rows = await api('project_tasks', 'POST', { ...body, plan_id: +_pp.plan.id, sort_order: sort, completed_at: body.status === 'done' ? now : null, created_by: currentUser.personId });
       _pp.tasks.push(rows[0]);
+      if (wasLeaf) note = '"' + par.name + '" is now a group — its dates, hours and progress come from the tasks in it';
     }
     _pp.edit = null;
-    showStatus('Task saved');
+    showStatus(note);
     ppSchedDirty();
     await ppMsSync({ noPaint: true });
     ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
-  } catch (e) { showStatus('Task not saved: ' + e.message, 'error'); }
+    if (d.parent_task_id) await ppSchedCommit({ quiet: true });   // the new group's span and the links into it
+  } catch (e) {
+    if (/parent_task_id|42703|PGRST204/.test(e.message) && d.parent_task_id) { _ppGroupsMissing = true; showStatus(PP_GROUPS_MISSING_MSG, 'error'); }
+    else showStatus('Task not saved: ' + e.message, 'error');
+  }
   finally { _pp.busy = false; }
 }
 async function ppTaskDelete(id) {
   if (!ppCanEdit()) return;
   const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
+  if (ppIsSummary(t)) {
+    // v7.10.43: a group — keep its tasks (they move up a level) or delete them with it (the database cascades)
+    const n = ppTree().desc(t.id).length;
+    showModal(`<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal" style="width:500px;" onkeydown="if(event.key==='Escape'){event.stopPropagation();closeModal();}">
+      <div class="modal-header"><div class="modal-title">Delete the group?</div><button class="modal-close" onclick="closeModal()">×</button></div>
+      <div class="modal-body"><div style="font-size:13px;color:var(--text2);line-height:1.5;">"${escHtml(t.name)}" holds ${n} task${n === 1 ? '' : 's'}. Keep ${n === 1 ? 'it' : 'them'} — ${n === 1 ? 'it moves' : 'they move'} up a level, where the group stood — or delete ${n === 1 ? 'it' : 'them'} with the group.</div></div>
+      <div class="modal-footer"><button class="btn btn-secondary" onclick="closeModal()">Cancel</button><button class="btn btn-secondary" id="pp-del-keep" onclick="ppTaskDeleteGo(${+t.id}, true)">Delete the group, keep its tasks</button><button class="btn btn-danger" id="pp-del-all" onclick="ppTaskDeleteGo(${+t.id}, false)">Delete the group and its tasks</button></div>
+    </div></div>`);
+    return;
+  }
   const ok = await confirmDialog({ title: 'Delete the task?', message: 'Delete "' + t.name + '"?', danger: true, confirmLabel: 'Delete' });
   if (!ok) return;
+  await ppTaskDeleteGo(id, true);
+}
+async function ppTaskDeleteGo(id, keep) {
+  closeModal();
+  const t = _pp.tasks.find(x => +x.id === +id); if (!t || !ppCanEdit()) return;
+  const T = ppTree(), kids = (T.kids[+t.id] || []).slice(), gone = keep ? [+t.id] : [+t.id, ...T.desc(t.id)];
   try {
-    await api('project_tasks', 'DELETE', null, 'id=eq.' + id);
-    _pp.tasks = _pp.tasks.filter(x => +x.id !== +id); _pp.links = (_pp.links || []).filter(l => +l.from_task !== +id && +l.to_task !== +id); _pp.edit = null; ppSchedDirty();
-    _pp.milestones.forEach(m => { if (+m.task_id === +id) m.task_id = null; });   // the database sets it NULL on delete; a milestone keeps its last date
-    showStatus('Task deleted');
-    ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
-  } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); }
+    if (keep && kids.length) {
+      const up = T.parent[+t.id];
+      await api('project_tasks', 'PATCH', { parent_task_id: up == null ? null : up, updated_at: new Date().toISOString() }, 'parent_task_id=eq.' + id);
+      kids.forEach(k => { k.parent_task_id = up == null ? null : up; });
+    }
+    await api('project_tasks', 'DELETE', null, gone.length > 1 ? 'id=in.(' + gone.join(',') + ')' : 'id=eq.' + id);
+    const G = new Set(gone);
+    _pp.tasks = _pp.tasks.filter(x => !G.has(+x.id)); _pp.links = (_pp.links || []).filter(l => !G.has(+l.from_task) && !G.has(+l.to_task)); _pp.edit = null; ppSchedDirty();
+    _pp.milestones.forEach(m => { if (G.has(+m.task_id)) m.task_id = null; });   // the database sets it NULL on delete; a milestone keeps its last date
+    showStatus(gone.length > 1 ? 'Group and ' + (gone.length - 1) + ' task' + (gone.length === 2 ? '' : 's') + ' deleted' : kids.length ? 'Group deleted — its tasks moved up a level' : 'Task deleted');
+    await ppSchedCommit({ quiet: true });
+  } catch (e) { showStatus('Not deleted: ' + e.message, 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(true)); }
 }
 // The ONE status writer: the list's select, the board's drag, a member moving their own task.
 async function ppTaskSetStatus(id, status) {
   const t = _pp.tasks.find(x => +x.id === +id);
   if (!t || !PP_TASK_STATUS.some(s => s[0] === status)) return;
+  if (ppIsSummary(t)) { showStatus("A group's status follows the tasks in it — move those", 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); return; }
   if (!ppCanTouchTask(t)) { showStatus('Only the project manager, an administrator or the assignee can move this task', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); return; }
   if (t.status === status) return;
   const now = new Date().toISOString();
@@ -8322,7 +8459,7 @@ function ppBoardHtml(edit) {
     </div>`;
   };
   return `<div class="pp-board" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;">${PP_TASK_STATUS.map(s => {
-    const list = _pp.tasks.filter(t => t.status === s[0]);
+    const list = _pp.tasks.filter(t => t.status === s[0] && !ppIsSummary(t));   // v7.10.43: a group has no card
     return `<div class="pp-col" data-status="${s[0]}" ondragover="ppColDragOver(event)" ondragleave="ppColDragLeave(event)" ondrop="ppColDrop(event, '${s[0]}')" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:10px;min-height:160px;">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--navy);margin-bottom:8px;display:flex;justify-content:space-between;"><span>${s[1]}</span><span style="color:var(--text3);">${list.length}</span></div>
       ${list.map(card).join('') || '<div style="font-size:12px;color:var(--text3);text-align:center;padding:14px 0;">—</div>'}
@@ -8560,6 +8697,7 @@ function ppWorkDaysBetween(a, b) {
 function ppWorkDaysIncl(a, b) { return b < a ? 0 : ppWorkDaysBetween(ppIsoAdd(a, -1), b); }
 // Duration in working days of a task, as scheduled: the typed figure, else counted from its dates, else 1.
 function ppTaskDur(t) {
+  if (ppIsSummary(t)) { const s = _pp.sched && _pp.sched.byId[+t.id]; if (s) return s.dur; return t.start_date && t.due_date && t.due_date >= t.start_date ? ppWorkDaysIncl(t.start_date, t.due_date) : 0; }   // v7.10.43: a group spans its tasks
   if (t.duration_days != null && t.duration_days !== '') return Math.max(0, +t.duration_days);
   if (t.start_date && t.due_date && t.due_date >= t.start_date) return Math.max(1, ppWorkDaysIncl(t.start_date, t.due_date));
   return 1;
@@ -8580,37 +8718,148 @@ function ppHoursPerDay() {
 }
 function ppDurToDays(value, unit) { const v = +value || 0; return unit === 'h' ? v / ppHoursPerDay() : unit === 'm' ? v / (ppHoursPerDay() * 60) : v; }
 function ppDurFromDays(days, unit) { const d = +days || 0, v = unit === 'h' ? d * ppHoursPerDay() : unit === 'm' ? d * ppHoursPerDay() * 60 : d; return Math.round(v * 100) / 100; }
-function ppDurUnit(t) { return t && PP_DUR_UNITS[t.duration_unit] ? t.duration_unit : 'd'; }
+function ppDurUnit(t) { return t && PP_DUR_UNITS[t.duration_unit] && !ppIsSummary(t) ? t.duration_unit : 'd'; }
 function ppDurText(t) { const u = ppDurUnit(t), v = ppDurFromDays(ppTaskDur(t), u); return v.toLocaleString('en-US', { maximumFractionDigits: 2 }) + ' ' + PP_DUR_UNITS[u].label; }
 function ppTaskCalDays(t) { return Math.ceil(ppTaskDur(t) - 1e-9); }
-function ppPct(t) { return t.status === 'done' ? 100 : Math.max(0, Math.min(100, +t.pct_done || 0)); }
+function ppPct(t) { if (ppIsSummary(t)) return ppRollup(t.id).pct; return t.status === 'done' ? 100 : Math.max(0, Math.min(100, +t.pct_done || 0)); }
+
+// ── Task groups (v7.10.43) ───────────────────────────────────────────────────
+// A task may hold other tasks (`parent_task_id`), to any depth, inside its milestone — MS Project's summary
+// task. A group carries nothing of its own: start, finish, duration, % done (weighted by working days),
+// hours and status are ROLLED UP from the leaves under it (ppRollup); the engine spans it over its leaves
+// and ppSchedCommit writes the derived figures onto its row so every reader of project_tasks sees them.
+// ppTree(tasks) is the one reader of the hierarchy (memoised on _pp.tree, cleared by ppSchedDirty).
+let _ppGroupsMissing = false;
+const PP_GROUPS_MISSING_MSG = 'Grouping tasks needs sql/add_task_groups.sql on this database.';
+function ppTreeOf(tasks) {
+  const ids = new Set(tasks.map(t => +t.id)), kids = {}, parent = {};
+  tasks.forEach(t => { const p = t.parent_task_id != null && ids.has(+t.parent_task_id) && +t.parent_task_id !== +t.id ? +t.parent_task_id : null; parent[+t.id] = p; if (p != null) (kids[p] = kids[p] || []).push(t); });
+  Object.values(kids).forEach(l => l.sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || +a.id - +b.id));
+  const isSum = id => !!(kids[+id] && kids[+id].length);
+  const anc = id => { const out = []; let p = parent[+id], g = 0; while (p != null && g++ < 200 && !out.includes(p)) { out.push(p); p = parent[p]; } return out; };
+  const desc = id => { const out = [], seen = new Set([+id]), st = (kids[+id] || []).map(k => +k.id); while (st.length) { const x = st.pop(); if (seen.has(x)) continue; seen.add(x); out.push(x); (kids[x] || []).forEach(k => st.push(+k.id)); } return out; };
+  const leaves = id => desc(id).filter(x => !isSum(x));
+  return { kids, parent, isSum, anc, desc, leaves, depth: id => anc(id).length };
+}
+function ppTree(tasks) { if (tasks) return ppTreeOf(tasks); if (!_pp.tree) _pp.tree = ppTreeOf(_pp.tasks || []); return _pp.tree; }
+function ppIsSummary(t) { return !!t && ppTree().isSum(t.id); }
+// The roll-up over a group's leaves: % done weighted by working days, status derived, hours summed.
+function ppRollup(id) {
+  const L = ppTree().leaves(id).map(x => _pp.tasks.find(t => +t.id === x)).filter(Boolean);
+  let w = 0, acc = 0;
+  L.forEach(t => { const d = Math.max(ppTaskDur(t), 0.0001); w += d; acc += ppPct(t) * d; });
+  const pct = w ? Math.round(acc / w) : 0;
+  const status = L.length && L.every(t => t.status === 'done') ? 'done' : L.some(t => t.status !== 'todo') ? 'in_progress' : 'todo';
+  return { pct, status, hours: L.reduce((a, t) => a + (+t.est_hours || 0), 0), leaves: L };
+}
+function ppTaskDone(t) { return ppIsSummary(t) ? ppRollup(t.id).status === 'done' : t.status === 'done'; }
+// The dependency graph the engine schedules: a link INTO a group lands on the leaves nothing inside the
+// group already schedules; a link FROM a group leaves from the group node, which sits after its leaves
+// (implicit leaf → group edges), so "after group G" means after G's last leaf. A link between a group
+// and one of its own tasks is ignored.
+function ppLinkGraph(links, tasks) {
+  const T = ppTree(tasks), ids = new Set(tasks.map(t => +t.id)), edges = [];
+  const inside = (id, root) => +id === +root || T.anc(id).includes(+root);
+  const L = (links || []).filter(l => ids.has(+l.from_task) && ids.has(+l.to_task) && +l.from_task !== +l.to_task && !inside(l.from_task, l.to_task) && !inside(l.to_task, l.from_task));
+  const targets = l => T.isSum(l.to_task) ? T.leaves(l.to_task) : [+l.to_task];
+  L.forEach(l => {
+    const e = { from: +l.from_task, type: l.link_type || 'FS', lag: +l.lag_days || 0, id: l.id };
+    if (!T.isSum(l.to_task)) { edges.push({ ...e, to: +l.to_task }); return; }
+    const inner = new Set(); L.forEach(x => { if (x !== l && inside(x.from_task, l.to_task)) targets(x).forEach(id => inner.add(id)); });
+    T.leaves(l.to_task).forEach(leaf => { if (!inner.has(leaf)) edges.push({ ...e, to: leaf }); });
+  });
+  tasks.forEach(t => { if (T.isSum(t.id)) T.leaves(t.id).forEach(leaf => edges.push({ from: leaf, to: +t.id, implicit: true })); });
+  return { edges, T };
+}
+function ppGraphCyclic(edges) {
+  const indeg = {}, succ = {};
+  edges.forEach(e => { indeg[e.to] = (indeg[e.to] || 0) + 1; indeg[e.from] = indeg[e.from] || 0; (succ[e.from] = succ[e.from] || []).push(e.to); });
+  const q = Object.keys(indeg).filter(k => !indeg[k]).map(Number); let seen = 0;
+  while (q.length) { const id = q.shift(); seen++; (succ[id] || []).forEach(s => { if (--indeg[s] === 0) q.push(s); }); }
+  return seen < Object.keys(indeg).length;
+}
+// Move a task — with everything under it — to a new parent / milestone and position, then renumber
+// sort_order 1..N in grid order and write only the rows that changed. The one structural writer
+// (indent, outdent, a row drag). dest = { parent, milestone, before | after: taskId | end: true }.
+async function ppMoveSubtree(id, dest) {
+  if (!ppCanEdit()) return false;
+  const T = ppTree(), src = _pp.tasks.find(t => +t.id === +id); if (!src) return false;
+  const sub = [src, ...T.desc(id).map(x => _pp.tasks.find(t => +t.id === x)).filter(Boolean)], subIds = new Set(sub.map(t => +t.id));
+  if (dest.parent != null && subIds.has(+dest.parent)) { showStatus('A task cannot be moved into its own group', 'error'); return false; }
+  if ((dest.before != null && subIds.has(+dest.before)) || (dest.after != null && subIds.has(+dest.after))) { showStatus('A group cannot be dropped inside itself', 'error'); return false; }
+  if (dest.parent != null && _ppGroupsMissing) { showStatus(PP_GROUPS_MISSING_MSG, 'error'); return false; }
+  const snap = _pp.tasks.map(t => ({ t, p: t.parent_task_id, m: t.milestone_id, s: t.sort_order }));
+  const flat = ppGridRows().filter(r => r.kind === 'task' && !subIds.has(+r.t.id)).map(r => r.t);
+  const spanEnd = tid => { const i = flat.findIndex(x => +x.id === +tid); if (i < 0) return flat.length; const D = new Set(T.desc(tid)); let j = i + 1; while (j < flat.length && D.has(+flat[j].id)) j++; return j; };
+  src.parent_task_id = dest.parent == null ? null : +dest.parent;
+  sub.forEach(t => { t.milestone_id = dest.milestone == null ? null : +dest.milestone; });
+  let at;
+  if (dest.before != null) at = Math.max(0, flat.findIndex(x => +x.id === +dest.before));
+  else if (dest.after != null) at = spanEnd(dest.after);
+  else if (dest.parent != null) { const k = (T.kids[+dest.parent] || []).filter(x => !subIds.has(+x.id)); at = k.length ? spanEnd(k[k.length - 1].id) : spanEnd(dest.parent); }
+  else { const tops = flat.filter(x => T.parent[+x.id] == null && (x.milestone_id || null) === (dest.milestone == null ? null : +dest.milestone)); at = tops.length ? spanEnd(tops[tops.length - 1].id) : flat.length; }
+  flat.splice(at, 0, ...sub);
+  const now = new Date().toISOString(), writes = [];
+  flat.forEach((t, i) => {
+    const body = {}, was = snap.find(s => s.t === t);
+    if ((+t.sort_order || 0) !== i + 1) body.sort_order = i + 1;
+    if (subIds.has(+t.id)) { if ((was.m || null) !== (t.milestone_id || null)) body.milestone_id = t.milestone_id || null; if ((was.p || null) !== (t.parent_task_id || null) && !_ppGroupsMissing) body.parent_task_id = t.parent_task_id || null; }
+    if (Object.keys(body).length) { body.updated_at = now; writes.push({ t, body }); }
+  });
+  try {
+    await Promise.all(writes.map(w => api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id).then(rows => Object.assign(w.t, rows && rows[0] ? rows[0] : w.body))));
+  } catch (e) {
+    snap.forEach(s => { s.t.parent_task_id = s.p; s.t.milestone_id = s.m; s.t.sort_order = s.s; });
+    if (/parent_task_id|42703|PGRST204/.test(e.message)) { _ppGroupsMissing = true; showStatus(PP_GROUPS_MISSING_MSG, 'error'); } else showStatus('Not moved: ' + e.message, 'error');
+    ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(true)); return false;
+  }
+  _pp.tasks.sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || +a.id - +b.id);
+  await ppSchedCommit({ quiet: true });   // a leaf joining a group may now be scheduled by the links into it
+  return true;
+}
+// A task's milestone, carried onto everything under it.
+async function ppSetMilestone(t, msId, opts) {
+  const T = ppTree(), ids = [+t.id, ...T.desc(t.id)], now = new Date().toISOString();
+  const was = ids.map(id => { const x = _pp.tasks.find(y => +y.id === id); return { x, m: x && x.milestone_id }; }).filter(w => w.x);
+  was.forEach(w => { w.x.milestone_id = msId == null ? null : +msId; });
+  try { await Promise.all(was.map(w => api('project_tasks', 'PATCH', { milestone_id: msId == null ? null : +msId, updated_at: now }, 'id=eq.' + w.x.id).then(rows => Object.assign(w.x, rows && rows[0] ? rows[0] : { milestone_id: msId })))); }
+  catch (e) { was.forEach(w => { w.x.milestone_id = w.m; }); showStatus('Not saved: ' + e.message, 'error'); }
+  ppSchedDirty();
+  if (!(opts && opts.noPaint)) { ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit())); ppRepaintSection('pp-milestones', ppMilestonesHtml(ppCanEdit())); }
+}
 
 // ── The engine ────────────────────────────────────────────────────────────────
 // ppSchedCompute(tasks, links, planStart) → { byId: { id: { es, ef, ls, lf, slack, critical, dur, cyclic } }, end, start, order }
 function ppSchedCompute(tasks, links, planStart) {
-  const byId = {}, ids = new Set(tasks.map(t => +t.id));
-  const L = (links || []).filter(l => ids.has(+l.from_task) && ids.has(+l.to_task) && +l.from_task !== +l.to_task);
+  const byId = {}, G = ppLinkGraph(links, tasks), T = G.T, E = G.edges;
   const preds = {}, succs = {}, indeg = {};
   tasks.forEach(t => { preds[+t.id] = []; succs[+t.id] = []; indeg[+t.id] = 0; });
-  L.forEach(l => { preds[+l.to_task].push(l); succs[+l.from_task].push(l); indeg[+l.to_task]++; });
+  E.forEach(e => { preds[e.to].push(e); succs[e.from].push(e); indeg[e.to]++; });
   // Kahn's order; anything left over sits in a cycle and is scheduled as if unlinked (flagged).
   const order = [], q = tasks.filter(t => indeg[+t.id] === 0).map(t => +t.id), deg = { ...indeg };
-  while (q.length) { const id = q.shift(); order.push(id); succs[id].forEach(l => { if (--deg[+l.to_task] === 0) q.push(+l.to_task); }); }
+  while (q.length) { const id = q.shift(); order.push(id); succs[id].forEach(e => { if (--deg[e.to] === 0) q.push(e.to); }); }
   const cyclic = new Set(tasks.map(t => +t.id).filter(id => !order.includes(id)));
   cyclic.forEach(id => order.push(id));
   const start0 = ppNextWorking(planStart || _today());
   const tById = {}; tasks.forEach(t => { tById[+t.id] = t; });
+  // v7.10.43: a group spans its leaves (the implicit leaf → group edges order it after them)
+  const span = id => {
+    const ls = T.leaves(id).map(x => byId[x]).filter(Boolean);
+    const es = ls.length ? ls.reduce((m, s) => s.es < m ? s.es : m, ls[0].es) : start0, ef = ls.length ? ls.reduce((m, s) => s.ef > m ? s.ef : m, ls[0].ef) : start0;
+    return { es, ef, dur: ppWorkDaysIncl(es, ef), fixed: false, summary: true, cyclic: cyclic.has(id) };
+  };
   // forward pass
   order.forEach(id => {
+    if (T.isSum(id)) { byId[id] = span(id); return; }
     const t = tById[id], dur = ppTaskCalDays(t), fixed = t.status === 'done' && t.start_date && t.due_date;
     let es;
     if (fixed) { es = t.start_date; byId[id] = { es, ef: t.due_date, dur, fixed: true, cyclic: cyclic.has(id) }; return; }
     if (t.constraint_type === 'must_start_on' && t.start_date) es = ppNextWorking(t.start_date);
     else {
       const cands = [];
-      if (!cyclic.has(id)) preds[id].forEach(l => {
-        const p = byId[+l.from_task]; if (!p) return;
-        const lag = +l.lag_days || 0, type = l.link_type || 'FS';
+      if (!cyclic.has(id)) preds[id].forEach(e => {
+        const p = byId[e.from]; if (!p || e.implicit) return;
+        const lag = e.lag, type = e.type;
         if (type === 'FS') cands.push(ppShift(p.ef, 1 + lag));
         else if (type === 'SS') cands.push(ppShift(p.es, lag));
         else if (type === 'FF') { const f = ppShift(p.ef, lag); cands.push(dur > 0 ? ppShift(f, -(dur - 1)) : f); }
@@ -8621,15 +8870,17 @@ function ppSchedCompute(tasks, links, planStart) {
     }
     byId[id] = { es, ef: ppFinishFrom(es, dur), dur, fixed: false, cyclic: cyclic.has(id) };
   });
-  const all = Object.values(byId);
+  order.forEach(id => { if (T.isSum(id)) Object.assign(byId[id], span(id)); });   // a group whose leaves were in a loop is spanned once every leaf has dates
+  const leaves = Object.keys(byId).filter(id => !T.isSum(id)).map(id => byId[id]), all = leaves.length ? leaves : Object.values(byId);
   const end = all.length ? all.reduce((m, s) => s.ef > m ? s.ef : m, all[0].ef) : start0;
   const start = all.length ? all.reduce((m, s) => s.es < m ? s.es : m, all[0].es) : start0;
   // backward pass
   order.slice().reverse().forEach(id => {
     const s = byId[id], dur = s.dur, cands = [];
-    if (!cyclic.has(id)) succs[id].forEach(l => {
-      const n = byId[+l.to_task]; if (!n || n.ls == null) return;
-      const lag = +l.lag_days || 0, type = l.link_type || 'FS';
+    if (!cyclic.has(id)) succs[id].forEach(e => {
+      const n = byId[e.to]; if (!n || n.ls == null) return;
+      if (e.implicit) { cands.push(n.lf); return; }   // a task inside a group finishes no later than the group may
+      const lag = e.lag, type = e.type;
       if (type === 'FS') cands.push(ppShift(n.ls, -(1 + lag)));
       else if (type === 'SS') { const ls = ppShift(n.ls, -lag); cands.push(dur > 0 ? ppShift(ls, dur - 1) : ls); }
       else if (type === 'FF') cands.push(ppShift(n.lf, -lag));
@@ -8641,23 +8892,29 @@ function ppSchedCompute(tasks, links, planStart) {
     s.slack = Math.max(0, ppWorkDaysBetween(s.es, s.ls));
     s.critical = !s.fixed && s.slack === 0;
   });
-  return { byId, end, start, order, cyclic };
+  order.forEach(id => { if (T.isSum(id)) byId[id].critical = T.leaves(id).some(x => byId[x] && byId[x].critical); });   // a group is critical when a task in it is
+  return { byId, end, start, order, cyclic, tree: T };
 }
 function ppSched() { if (!_pp.sched) _pp.sched = ppSchedCompute(_pp.tasks, _pp.links || [], _pp.plan && _pp.plan.planned_start); return _pp.sched; }
-function ppSchedDirty() { _pp.sched = null; }
+function ppSchedDirty() { _pp.sched = null; _pp.tree = null; }
 
 // Compute, write every changed date / slack back, repaint. The one path from a schedule change to the rows.
 async function ppSchedCommit(opts) {
   ppSchedDirty();
-  const S = ppSched(), writes = [];
+  const S = ppSched(), writes = [], now = new Date().toISOString();
   _pp.tasks.forEach(t => {
     const s = S.byId[+t.id]; if (!s || s.fixed) return;
-    const slack = s.slack == null ? null : s.slack;
+    const slack = s.slack == null ? null : s.slack, body = {};
     if (t.start_date !== s.es || t.due_date !== s.ef || (t.slack_days == null ? null : +t.slack_days) !== slack) {
-      const body = { start_date: s.es, due_date: s.ef, updated_at: new Date().toISOString() };
+      body.start_date = s.es; body.due_date = s.ef;
       if (!_ppSchedNoSlack) body.slack_days = slack;
-      writes.push({ t, body });
     }
+    if (s.summary) {   // v7.10.43: a group's status and % are derived, written so every reader of the row sees them
+      const r = ppRollup(t.id);
+      if (t.status !== r.status) { body.status = r.status; body.completed_at = r.status === 'done' ? (t.completed_at || now) : null; }
+      if ((+t.pct_done || 0) !== r.pct) body.pct_done = r.pct;
+    }
+    if (Object.keys(body).length) { body.updated_at = now; writes.push({ t, body }); }
   });
   if (writes.length) {
     try {
@@ -8676,17 +8933,31 @@ async function ppSchedCommit(opts) {
 let _ppSchedNoSlack = false;   // a database on the phase 1 tables only: dates still write, slack is not stored
 
 // ── Grid rows and numbering ───────────────────────────────────────────────────
-// Tasks are numbered 1..n in grid order (under their milestones, then No milestone); predecessors are typed by that number.
+// Tasks are numbered in grid order (under their milestones, then No milestone): top-level tasks 1..n across the
+// plan, the tasks inside a group 1.1, 1.2, 1.2.1 … (v7.10.43, WBS); predecessors are typed by that number.
+// A row carries depth, summary (a group), collapsed and hidden (inside a collapsed group).
 function ppGridRows() {
-  const rows = [], groups = _pp.milestones.map(m => ({ ms: m, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
-  const loose = _pp.tasks.filter(t => t.milestone_id == null || !_pp.milestones.some(m => +m.id === +t.milestone_id));
+  const T = ppTree(), col = _pp.collapsed || (_pp.collapsed = new Set()), mcol = _pp.msCollapsed || (_pp.msCollapsed = new Set()), rows = [];
+  const known = id => _pp.milestones.some(m => +m.id === +id);
+  const groups = _pp.milestones.map(m => ({ ms: m, tasks: _pp.tasks.filter(t => +t.milestone_id === +m.id) }));
+  const loose = _pp.tasks.filter(t => t.milestone_id == null || !known(t.milestone_id));
   if (loose.length || !groups.length) groups.push({ ms: null, tasks: loose });
+  const bySort = (a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || +a.id - +b.id;
   let n = 0;
-  groups.forEach(g => { rows.push({ kind: 'ms', ms: g.ms, tasks: g.tasks }); g.tasks.forEach(t => rows.push({ kind: 'task', t, n: ++n })); });
+  const walk = (t, wbs, depth, hidden) => {
+    const sum = T.isSum(t.id), closed = sum && col.has(+t.id);
+    rows.push({ kind: 'task', t, n: wbs, depth, summary: sum, collapsed: closed, hidden });
+    if (sum) T.kids[+t.id].forEach((k, i) => walk(k, wbs + '.' + (i + 1), depth + 1, hidden || closed));
+  };
+  groups.forEach(g => {
+    const closed = mcol.has(ppBandKey(g.ms));   // v7.10.44: a collapsed milestone band hides every task under it
+    rows.push({ kind: 'ms', ms: g.ms, tasks: g.tasks, leaves: g.tasks.filter(t => !T.isSum(t.id)), collapsed: closed });
+    g.tasks.filter(t => T.parent[+t.id] == null).sort(bySort).forEach(t => walk(t, String(++n), 0, closed));
+  });
   return rows;
 }
 function ppTaskNo(id) { const r = ppGridRows().find(r => r.kind === 'task' && +r.t.id === +id); return r ? r.n : null; }
-function ppTaskByNo(n) { const r = ppGridRows().find(r => r.kind === 'task' && r.n === +n); return r ? r.t : null; }
+function ppTaskByNo(n) { const s = String(n).trim(); const r = ppGridRows().find(r => r.kind === 'task' && r.n === s); return r ? r.t : null; }
 function ppPredText(t) {
   return (_pp.links || []).filter(l => +l.to_task === +t.id).map(l => {
     const n = ppTaskNo(l.from_task); if (!n) return null;
@@ -8698,9 +8969,9 @@ function ppPredText(t) {
 function ppParsePreds(text) {
   const out = [], seen = new Set();
   for (const part of String(text || '').split(/[,;]/).map(s => s.trim()).filter(Boolean)) {
-    const m = /^(\d+)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*d?$/i.exec(part);
-    if (!m) return { error: 'Cannot read "' + part + '" — write the task number, then FS / SS / FF / SF and a lag, like 3FS+2d' };
-    const no = +m[1]; if (seen.has(no)) return { error: 'Task ' + no + ' is listed twice' };
+    const m = /^(\d+(?:\.\d+)*)\s*(FS|SS|FF|SF)?\s*([+-]\s*\d+)?\s*d?$/i.exec(part);
+    if (!m) return { error: 'Cannot read "' + part + '" — write the task number, then FS / SS / FF / SF and a lag, like 3FS+2d or 2.1SS' };
+    const no = m[1]; if (seen.has(no)) return { error: 'Task ' + no + ' is listed twice' };
     seen.add(no);
     out.push({ no, type: (m[2] || 'FS').toUpperCase(), lag: m[3] ? +m[3].replace(/\s+/g, '') : 0 });
   }
@@ -8744,13 +9015,14 @@ function ppPredOpen(taskId) {
 function ppPredClose() { _ppPred = null; closeModal(); }
 function ppPredPaint() {
   const st = _ppPred, body = document.getElementById('pp-pred-body'); if (!st || !body) return;
-  const t = _pp.tasks.find(x => +x.id === st.taskId), rows = ppGridRows().filter(r => r.kind === 'task' && +r.t.id !== st.taskId);
+  const t = _pp.tasks.find(x => +x.id === st.taskId), rows = ppGridRows().filter(r => r.kind === 'task' && +r.t.id !== st.taskId), T = ppTree();
   const others = _pp.links.filter(l => +l.to_task !== st.taskId);
   const chosen = st.rows.map(r => +r.from);
   const rowHtml = (r, i) => {
     const opts = '<option value="">Pick a task…</option>' + rows.map(x => {
-      const loop = ppLinkWouldLoop(x.t.id, st.taskId, others), dup = chosen.includes(+x.t.id) && +r.from !== +x.t.id;
-      return `<option value="${+x.t.id}" ${+r.from === +x.t.id ? 'selected' : ''} ${loop || dup ? 'disabled' : ''}>${x.n} · ${escHtml(x.t.name)}${loop ? ' (would make a loop)' : dup ? ' (already listed)' : ''}</option>`;
+      const own = T.anc(x.t.id).includes(st.taskId) || T.anc(st.taskId).includes(+x.t.id);   // v7.10.43: a group and its own task never depend on each other
+      const loop = !own && ppLinkWouldLoop(x.t.id, st.taskId, others), dup = chosen.includes(+x.t.id) && +r.from !== +x.t.id;
+      return `<option value="${+x.t.id}" ${+r.from === +x.t.id ? 'selected' : ''} ${own || loop || dup ? 'disabled' : ''}>${x.n} · ${escHtml(x.t.name)}${own ? ' (same group)' : loop ? ' (would make a loop)' : dup ? ' (already listed)' : ''}</option>`;
     }).join('');
     const types = PP_LINK_TYPES.map(k => `<option value="${k}" ${r.type === k ? 'selected' : ''}>${PP_LINK_INFO[k].name} (${k})</option>`).join('');
     return `<div class="pp-pred-row">
@@ -8784,15 +9056,18 @@ async function ppPredSave() {
   await ppGridSet(taskId, 'preds', text);
 }
 function ppLinkWouldLoop(fromId, toId, links) {
-  const succs = {}; (links || []).forEach(l => { (succs[+l.from_task] = succs[+l.from_task] || []).push(+l.to_task); });
-  const seen = new Set(), stack = [+toId];
-  while (stack.length) { const id = stack.pop(); if (id === +fromId) return true; if (seen.has(id)) continue; seen.add(id); (succs[id] || []).forEach(s => stack.push(s)); }
-  return false;
+  // v7.10.43: judged on the EXPANDED graph (a link on a group reaches its leaves), so a loop through a group is caught too;
+  // a group and one of its own tasks can never be linked. A graph that is already cyclic blames no new link.
+  const T = ppTree();
+  if (+fromId === +toId || T.anc(fromId).includes(+toId) || T.anc(toId).includes(+fromId)) return true;
+  const base = ppLinkGraph(links || [], _pp.tasks).edges, withNew = ppLinkGraph((links || []).concat([{ from_task: +fromId, to_task: +toId, link_type: 'FS', lag_days: 0 }]), _pp.tasks).edges;
+  return ppGraphCyclic(withNew) && !ppGraphCyclic(base);
 }
 async function ppLinkAdd(fromId, toId, type, lag, opts) {
   if (!ppCanEdit()) return false;
   if (_ppLinksMissing) { showStatus(PP_SCHED_MISSING_MSG, 'error'); return false; }
   if (+fromId === +toId) { showStatus('A task cannot depend on itself', 'error'); return false; }
+  { const T = ppTree(); if (T.anc(fromId).includes(+toId) || T.anc(toId).includes(+fromId)) { showStatus('A group and a task inside it cannot depend on each other', 'error'); return false; } }
   if ((_pp.links || []).some(l => +l.from_task === +fromId && +l.to_task === +toId)) { showStatus('That link already exists', 'error'); return false; }
   if (ppLinkWouldLoop(fromId, toId, _pp.links)) { showStatus('That link would make a loop: task ' + ppTaskNo(toId) + ' already leads to task ' + ppTaskNo(fromId), 'error'); return false; }
   try {
@@ -8814,6 +9089,7 @@ async function ppGridSet(id, col, value, unit) {
   const t = _pp.tasks.find(x => +x.id === +id); if (!t) return;
   const may = ppCanTouchTask(t), full = ppCanEdit();
   if (!may) { showStatus('Only the project manager, an administrator or the assignee can change this task', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(false)); return; }
+  if (ppIsSummary(t) && !['name', 'preds', 'milestone'].includes(col)) { showStatus('A group takes its dates, duration, progress and hours from the tasks in it — change those', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; }   // v7.10.43
   const now = new Date().toISOString();
   let body = null, reschedule = false;
   if (col === 'name') { if (!full) return; const v = String(value || '').trim(); if (!v) { showStatus('The task needs a name', 'error'); ppRepaintSection('pp-tasks', ppTasksHtml(full)); return; } body = { name: v }; }
@@ -8881,7 +9157,7 @@ async function ppGridSet(id, col, value, unit) {
     else body = { pct_done: n, status: n > 0 && t.status === 'todo' ? 'in_progress' : t.status };
   }
   else if (col === 'hours') { if (!full) return; const n = value === '' ? null : +value; if (n != null && (isNaN(n) || n < 0)) { showStatus('Hours cannot be negative', 'error'); return; } body = { est_hours: n }; }
-  else if (col === 'milestone') { if (!full) return; body = { milestone_id: value ? +value : null }; }
+  else if (col === 'milestone') { if (!full) return; await ppSetMilestone(t, value ? +value : null); return; }   // v7.10.43: carried onto everything under it
   else if (col === 'pert') { body = value; }           // { pert_optimistic, pert_likely, pert_pessimistic }
   else return;
   body.updated_at = now;
@@ -8896,16 +9172,36 @@ async function ppGridSet(id, col, value, unit) {
     ppRepaintSection('pp-tasks', ppTasksHtml(full)); return;
   }
   if (reschedule) await ppSchedCommit({ quiet: true });
-  else { ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(full)); ppRepaintSection('pp-milestones', ppMilestonesHtml(full)); }
+  else { ppSchedDirty(); if (col === 'pct') await ppMsSync({ noPaint: true }); ppRepaintSection('pp-tasks', ppTasksHtml(full)); ppRepaintSection('pp-milestones', ppMilestonesHtml(full)); }
 }
-// Indent = file the task under the milestone above it in the grid; outdent = No milestone.
+// v7.10.43: ▶ makes the task a sub-task of the task above it (its previous sibling), as in MS Project; a
+// top-level task with nothing above it in its band is filed under the milestone above (the v7.10.33 meaning).
+// ◀ takes a sub-task out of its group, landing after the group; a top-level task goes to No milestone.
 async function ppGridIndent(id, dir) {
   if (!ppCanEdit()) return;
   const rows = ppGridRows(), i = rows.findIndex(r => r.kind === 'task' && +r.t.id === +id); if (i < 0) return;
-  if (dir < 0) { await ppGridSet(id, 'milestone', null); return; }
-  let ms = null; for (let j = i - 1; j >= 0; j--) if (rows[j].kind === 'ms' && rows[j].ms) { ms = rows[j].ms; break; }
-  if (!ms) { showStatus('No milestone above this task to indent under', 'error'); return; }
-  await ppGridSet(id, 'milestone', ms.id);
+  const r = rows[i], t = r.t, T = ppTree();
+  if (dir > 0) {
+    let sib = null;
+    for (let j = i - 1; j >= 0; j--) { const x = rows[j]; if (x.kind === 'ms' || x.depth < r.depth) break; if (x.depth === r.depth) { sib = x.t; break; } }
+    if (sib) {
+      if (_ppGroupsMissing) { showStatus(PP_GROUPS_MISSING_MSG, 'error'); return; }
+      const wasLeaf = !T.isSum(sib.id);
+      if (await ppMoveSubtree(id, { parent: sib.id, milestone: sib.milestone_id, end: true })) showStatus(wasLeaf ? '"' + sib.name + '" is now a group holding "' + t.name + '"' : '"' + t.name + '" moved into "' + sib.name + '"');
+      return;
+    }
+    if (r.depth === 0) {
+      let ms = null; for (let j = i - 1; j >= 0; j--) if (rows[j].kind === 'ms' && rows[j].ms) { ms = rows[j].ms; break; }
+      if (!ms || +t.milestone_id === +ms.id) { showStatus('Nothing above this task to indent under — it is the first in its band', 'error'); return; }
+      await ppMoveSubtree(id, { parent: null, milestone: ms.id, end: true }); return;
+    }
+    showStatus('Nothing above this task to indent under — it is the first in its group', 'error');
+  } else {
+    const p = T.parent[+t.id];
+    if (p != null) { const par = _pp.tasks.find(x => +x.id === p); await ppMoveSubtree(id, { parent: T.parent[p], milestone: par ? par.milestone_id : t.milestone_id, after: p }); return; }
+    if (t.milestone_id == null) { showStatus('Already at the top level', 'error'); return; }
+    await ppMoveSubtree(id, { parent: null, milestone: null, end: true });
+  }
 }
 // Enter moves down a row, staying in the column; Escape reverts the cell.
 function ppGridKey(ev, el) {
@@ -8922,16 +9218,10 @@ async function ppRowDrop(ev, targetId) {
   const above = ev.currentTarget.classList.contains('pp-drop-above'), from = _ppRowDrag;
   ppRowDragEnd();
   if (from == null || +from === +targetId) return;
-  const src = _pp.tasks.find(t => +t.id === +from), dst = _pp.tasks.find(t => +t.id === +targetId); if (!src || !dst) return;
-  const order = ppGridRows().filter(r => r.kind === 'task').map(r => r.t).filter(t => +t.id !== +from);
-  const at = order.findIndex(t => +t.id === +targetId);
-  order.splice(above ? at : at + 1, 0, src);
-  const writes = [];
-  order.forEach((t, i) => { const ms = +t.id === +from ? (dst.milestone_id || null) : (t.milestone_id || null); if ((+t.sort_order || 0) !== i + 1 || (t.milestone_id || null) !== ms) writes.push({ t, body: { sort_order: i + 1, milestone_id: ms } }); });
-  try { await Promise.all(writes.map(w => api('project_tasks', 'PATCH', w.body, 'id=eq.' + w.t.id).then(rows => Object.assign(w.t, rows && rows[0] ? rows[0] : w.body)))); }
-  catch (e) { showStatus('Not reordered: ' + e.message, 'error'); }
-  _pp.tasks.sort((a, b) => (+a.sort_order || 0) - (+b.sort_order || 0) || +a.id - +b.id);
-  ppSchedDirty(); ppRepaintSection('pp-tasks', ppTasksHtml(true)); ppRepaintSection('pp-milestones', ppMilestonesHtml(true));
+  const T = ppTree(), dst = _pp.tasks.find(t => +t.id === +targetId); if (!dst) return;
+  if (T.anc(targetId).includes(+from)) { showStatus('A group cannot be dropped inside itself', 'error'); return; }
+  // v7.10.43: the row — with everything under it — lands beside the target, at the target's level and in its group
+  await ppMoveSubtree(from, { parent: T.parent[+targetId], milestone: dst.milestone_id, [above ? 'before' : 'after']: +targetId });
 }
 
 // ── The Schedule view ─────────────────────────────────────────────────────────
@@ -8944,6 +9234,7 @@ function ppScheduleHtml(edit) {
       <div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">${btn('pp-sched-gantt', 'Gantt', tab === 'gantt', "ppSchedTab('gantt')")}${btn('pp-sched-pert', 'PERT', tab === 'pert', "ppSchedTab('pert')")}</div>
       ${tab === 'gantt' ? `<div style="display:inline-flex;border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;">${['day', 'week', 'month'].map(z => btn('pp-zoom-' + z, z[0].toUpperCase() + z.slice(1), (_pp.zoom || 'week') === z, "ppSchedZoom('" + z + "')")).join('')}</div>` : ''}
       <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;"><input type="checkbox" id="pp-crit" ${_pp.critOn !== false ? 'checked' : ''} onchange="_pp.critOn=this.checked;ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()))"> Critical path <span style="color:var(--text3);">(${crit})</span></label>
+      ${tab === 'gantt' ? `<label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;" title="Show only the number and the name on the left, so the Gantt gets the room"><input type="checkbox" id="pp-compact" ${_pp.compact ? 'checked' : ''} onchange="_pp.compact=this.checked;ppRepaintSection('pp-tasks', ppTasksHtml(ppCanEdit()))"> Compact</label>` : ''}
       <span style="color:var(--text3);">${S.order.length ? ppDate(S.start) + ' → ' + ppDate(S.end) + ' · ' + ppWorkDaysIncl(S.start, S.end) + ' working days' : 'nothing scheduled yet'}</span>
       <span style="color:var(--text3);">· ${base}</span>
       <div style="flex:1;"></div>
@@ -8964,38 +9255,54 @@ function ppDurCellHtml(t, edit) {
   return `<span class="pp-dur"><input class="pp-cell" data-col="duration" type="number" min="0" step="${u === 'd' ? 1 : u === 'h' ? 0.5 : 5}" value="${escAttr(v)}" style="text-align:right;" onchange="ppGridSet(${+t.id}, 'duration', this.value, this.nextElementSibling.value)" onkeydown="ppGridKey(event, this)">${unitSel}</span>`;
 }
 function ppGridHtml(edit, print) {
-  const S = ppSched(), rows = ppGridRows(), base = !!_pp.plan.baseline_set_at, today = _today();
+  const S = ppSched(), rows = ppGridRows().filter(r => !r.hidden), base = !!_pp.plan.baseline_set_at, today = _today(), compact = !!_pp.compact && !print;
   const inp = (t, col, type, value, extra, may) => may && !print
     ? `<input class="pp-cell" data-col="${col}" type="${type}" value="${escAttr(value == null ? '' : value)}" ${extra || ''} onchange="ppGridSet(${+t.id}, '${col}', this.value)" onkeydown="ppGridKey(event, this)">`
     : `<span class="pp-cell-ro">${escHtml(type === 'date' && value ? ppDate(value) : (value == null ? '' : String(value)))}</span>`;
-  const predsCol = !(_ppLinksMissing && print), tw = 34 + 200 + 110 + 122 + 122 + (predsCol ? 96 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : 54);
-  const head = `<tr><th style="width:34px;">#</th><th style="width:200px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:96px;" title="The tasks this one depends on (its predecessors). Click a cell to pick them.">Depends on</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:54px;"></th>'}</tr>`;
+  const predsCol = !(_ppLinksMissing && print), actW = 92;
+  const tw = compact ? 40 + 280 + (print ? 0 : actW) : 40 + 220 + 110 + 122 + 122 + (predsCol ? 96 : 0) + 126 + 46 + 52 + (base ? 46 : 0) + (print ? 0 : actW);
+  const head = compact
+    ? `<tr><th style="width:40px;">#</th><th style="width:280px;">Task</th>${print ? '' : '<th style="width:' + actW + 'px;"></th>'}</tr>`
+    : `<tr><th style="width:40px;">#</th><th style="width:220px;">Task</th><th style="width:110px;" title="How long the task takes — in minutes, hours or working days. The calendar rounds it up to whole days. A group spans its tasks.">Duration</th><th style="width:122px;">Start</th><th style="width:122px;">Finish</th>${_ppLinksMissing && print ? '' : '<th style="width:96px;" title="The tasks this one depends on (its predecessors). Click a cell to pick them.">Depends on</th>'}<th style="width:126px;">Resource</th><th style="width:46px;">%</th><th style="width:52px;">Hours</th>${base ? '<th style="width:46px;" title="Working days later than the baseline finish">Slip</th>' : ''}${print ? '' : '<th style="width:' + actW + 'px;"></th>'}</tr>`;
+  const actions = (r, t) => edit && !print ? `<span class="pp-ic" title="Outdent — ${r.depth ? 'take it out of its group' : 'move it to No milestone'}" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent — make it a sub-task of the task above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="${escAttr(_ppGroupsMissing ? PP_GROUPS_MISSING_MSG : 'Add a task inside this one' + (r.summary ? '' : ' — it becomes a group'))}" onclick="ppTaskAdd(null, ${+t.id})">✚</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>${ppMsOfTask(t.id) ? '<span class="pp-ic" style="color:var(--navy);cursor:default;" title="A milestone marks the completion of this task">◆</span>' : `<span class="pp-ic" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◇</span>`}` : '';
+  const nameCell = (r, t) => {
+    const caret = r.summary && !print ? `<span class="pp-caret" title="${r.collapsed ? 'Expand the group' : 'Collapse the group'}" onclick="ppToggleGroup(${+t.id})">${r.collapsed ? '▸' : '▾'}</span>` : '<span class="pp-caret"></span>';
+    return `<td style="padding-left:${(print ? 4 : 6) + r.depth * 14}px;"><span style="display:flex;align-items:center;min-width:0;">${caret}${inp(t, 'name', 'text', t.name, 'style="font-weight:' + (r.summary ? 700 : 600) + ';"', edit)}</span></td>`;
+  };
   const body = rows.map(r => {
     if (r.kind === 'ms') {
-      const m = r.ms, ts = r.tasks, ss = ts.map(t => S.byId[+t.id]).filter(Boolean);
+      const m = r.ms, ts = r.leaves, ss = ts.map(t => S.byId[+t.id]).filter(Boolean);
       const es = ss.length ? ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es) : null, ef = ss.length ? ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef) : null;
       const pct = ts.length ? Math.round(ts.reduce((a, t) => a + ppPct(t), 0) / ts.length) : 0;
       const late = m && m.status !== 'done' && m.due_date && m.due_date < today;
-      return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td><td colspan="${print ? 1 : 1}" style="font-weight:700;color:var(--navy);">${m ? escHtml(m.name) : 'No milestone'}${m && m.due_date ? ' <span style="font-weight:normal;color:' + (late ? 'var(--red)' : 'var(--text3)') + ';">· due ' + ppDate(m.due_date) + '</span>' : ''}</td><td style="text-align:right;">${es && ef ? ppWorkDaysIncl(es, ef) : ''}</td><td>${es ? ppDate(es) : ''}</td><td>${ef ? ppDate(ef) : ''}</td>${_ppLinksMissing && print ? '' : '<td></td>'}<td>${m ? escHtml(ppPersonName(m.owner_id) || '') : ''}</td><td style="text-align:right;">${ts.length ? pct + '%' : ''}</td><td style="text-align:right;">${ts.reduce((a, t) => a + (+t.est_hours || 0), 0) || ''}</td>${base ? '<td></td>' : ''}${print ? '' : '<td></td>'}</tr>`;
+      const name = `<td style="font-weight:700;color:var(--navy);"><span style="display:flex;align-items:center;min-width:0;">${print ? '' : ppBandCaret(r)}<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${m ? escHtml(m.name) : 'No milestone'}${r.collapsed ? ' <span style="font-weight:normal;color:var(--text3);">· ' + ts.length + ' task' + (ts.length === 1 ? '' : 's') + '</span>' : ''}${m && m.due_date ? ' <span style="font-weight:normal;color:' + (late ? 'var(--red)' : 'var(--text3)') + ';">· due ' + ppDate(m.due_date) + '</span>' : ''}</span></span></td>`;
+      if (compact) return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td>${name}${print ? '' : '<td></td>'}</tr>`;
+      return `<tr class="pp-grid-ms" style="height:${PP_ROW_H}px;"><td></td>${name}<td style="text-align:right;">${es && ef ? ppWorkDaysIncl(es, ef) : ''}</td><td>${es ? ppDate(es) : ''}</td><td>${ef ? ppDate(ef) : ''}</td>${_ppLinksMissing && print ? '' : '<td></td>'}<td>${m ? escHtml(ppPersonName(m.owner_id) || '') : ''}</td><td style="text-align:right;">${ts.length ? pct + '%' : ''}</td><td style="text-align:right;">${ts.reduce((a, t) => a + (+t.est_hours || 0), 0) || ''}</td>${base ? '<td></td>' : ''}${print ? '' : '<td></td>'}</tr>`;
     }
-    const t = r.t, s = S.byId[+t.id] || {}, may = ppCanTouchTask(t), done = t.status === 'done', crit = _pp.critOn !== false && s.critical;
+    const t = r.t, s = S.byId[+t.id] || {}, may = ppCanTouchTask(t), done = ppTaskDone(t), crit = _pp.critOn !== false && s.critical;
+    const drag = edit && !print ? `draggable="true" ondragstart="ppRowDragStart(event, ${+t.id})" ondragover="ppRowDragOver(event)" ondragleave="ppRowDragEnd()" ondrop="ppRowDrop(event, ${+t.id})" ondragend="ppRowDragEnd()"` : '';
+    const cls = `pp-grid-task ${r.summary ? 'pp-grid-sum' : ''} ${crit ? 'pp-crit' : ''} ${done ? 'pp-done' : ''}`;
+    const no = `<td style="color:var(--text3);text-align:right;cursor:${edit && !print ? 'grab' : 'default'};">${r.n}</td>`;
+    if (compact) return `<tr class="${cls}" data-task-id="${+t.id}" style="height:${PP_ROW_H}px;" ${drag}>${no}${nameCell(r, t)}${print ? '' : '<td style="white-space:nowrap;">' + actions(r, t) + '</td>'}</tr>`;
     const slip = base && t.baseline_end && s.ef ? ppWorkDaysBetween(t.baseline_end, s.ef) : null;
-    const pin = t.constraint_type === 'must_start_on';
-    return `<tr class="pp-grid-task ${crit ? 'pp-crit' : ''} ${done ? 'pp-done' : ''}" data-task-id="${+t.id}" style="height:${PP_ROW_H}px;" ${edit && !print ? `draggable="true" ondragstart="ppRowDragStart(event, ${+t.id})" ondragover="ppRowDragOver(event)" ondragleave="ppRowDragEnd()" ondrop="ppRowDrop(event, ${+t.id})" ondragend="ppRowDragEnd()"` : ''}>
-      <td style="color:var(--text3);text-align:right;cursor:${edit && !print ? 'grab' : 'default'};">${r.n}</td>
-      <td style="padding-left:18px;">${inp(t, 'name', 'text', t.name, 'style="font-weight:600;"', edit)}</td>
-      <td>${ppDurCellHtml(t, may && !print)}</td>
-      <td>${pin && !print ? '<span class="pp-pin" title="Pinned to this date — click to let it follow its predecessors" onclick="ppGridSet(' + (+t.id) + ", 'pin', false)\">📌</span>" : ''}${inp(t, 'start', 'date', s.es || t.start_date || '', '', may && !done)}</td>
-      <td>${inp(t, 'finish', 'date', s.ef || t.due_date || '', '', may && !done)}</td>
+    const pin = t.constraint_type === 'must_start_on' && !r.summary;
+    const roll = r.summary ? ppRollup(t.id) : null;
+    const ro = v => '<span class="pp-cell-ro">' + escHtml(v == null ? '' : String(v)) + '</span>';
+    return `<tr class="${cls}" data-task-id="${+t.id}" style="height:${PP_ROW_H}px;" ${drag}>
+      ${no}
+      ${nameCell(r, t)}
+      <td>${r.summary ? ro(ppDurText(t)) : ppDurCellHtml(t, may && !print)}</td>
+      <td>${pin && !print ? '<span class="pp-pin" title="Pinned to this date — click to let it follow its predecessors" onclick="ppGridSet(' + (+t.id) + ", 'pin', false)\">📌</span>" : ''}${r.summary ? ro(s.es ? ppDate(s.es) : '') : inp(t, 'start', 'date', s.es || t.start_date || '', '', may && !done)}</td>
+      <td>${r.summary ? ro(s.ef ? ppDate(s.ef) : '') : inp(t, 'finish', 'date', s.ef || t.due_date || '', '', may && !done)}</td>
       ${_ppLinksMissing && print ? '' : '<td>' + ppPredCellHtml(t, edit && !print) + '</td>'}
-      <td>${edit && !print ? `<select class="pp-cell" data-col="assignee" onchange="ppGridSet(${+t.id}, 'assignee', this.value)">${ppPeopleOptions(t.assignee_id, false)}</select>` : '<span class="pp-cell-ro">' + escHtml(ppPersonName(t.assignee_id) || '') + '</span>'}</td>
-      <td>${inp(t, 'pct', 'number', ppPct(t), 'min="0" max="100" step="5" style="text-align:right;"', may)}</td>
-      <td>${inp(t, 'hours', 'number', t.est_hours != null ? +t.est_hours : '', 'min="0" step="0.5" style="text-align:right;"', edit)}</td>
+      <td>${r.summary ? '' : edit && !print ? `<select class="pp-cell" data-col="assignee" onchange="ppGridSet(${+t.id}, 'assignee', this.value)">${ppPeopleOptions(t.assignee_id, false)}</select>` : '<span class="pp-cell-ro">' + escHtml(ppPersonName(t.assignee_id) || '') + '</span>'}</td>
+      <td>${r.summary ? '<span class="pp-cell-ro" style="display:block;text-align:right;">' + roll.pct + '</span>' : inp(t, 'pct', 'number', ppPct(t), 'min="0" max="100" step="5" style="text-align:right;"', may)}</td>
+      <td>${r.summary ? '<span class="pp-cell-ro" style="display:block;text-align:right;">' + (roll.hours || '') + '</span>' : inp(t, 'hours', 'number', t.est_hours != null ? +t.est_hours : '', 'min="0" step="0.5" style="text-align:right;"', edit)}</td>
       ${base ? '<td style="text-align:right;' + (slip > 0 ? 'color:var(--red);font-weight:700;' : slip < 0 ? 'color:#166534;' : '') + '">' + (slip == null ? '' : (slip > 0 ? '+' : '') + slip) + '</td>' : ''}
-      ${print ? '' : `<td style="white-space:nowrap;">${edit ? `<span class="pp-ic" title="Outdent (no milestone)" onclick="ppGridIndent(${+t.id}, -1)">◀</span><span class="pp-ic" title="Indent under the milestone above" onclick="ppGridIndent(${+t.id}, 1)">▶</span><span class="pp-ic" title="Edit in the list" onclick="ppTaskEdit(${+t.id})">✎</span>${ppMsOfTask(t.id) ? '<span class="pp-ic" style="color:var(--navy);cursor:default;" title="A milestone marks the completion of this task">◆</span>' : `<span class="pp-ic" title="Make the completion of this task a milestone" onclick="ppTaskMakeMilestone(${+t.id})">◇</span>`}` : ''}</td>`}
+      ${print ? '' : `<td style="white-space:nowrap;">${actions(r, t)}</td>`}
     </tr>`;
   }).join('');
-  return `<table class="pp-grid" id="pp-grid" style="width:${tw}px;"><thead>${head}</thead><tbody>${body}${!rows.some(r => r.kind === 'task') ? `<tr style="height:${PP_ROW_H}px;"><td colspan="12" style="color:var(--text3);text-align:center;">No tasks yet${edit ? ' — add one with + Task' : ''}.</td></tr>` : ''}</tbody></table>`;
+  return `<table class="pp-grid ${compact ? 'pp-grid-compact' : ''}" id="pp-grid" style="width:${tw}px;"><thead>${head}</thead><tbody>${body}${!rows.some(r => r.kind === 'task') ? `<tr style="height:${PP_ROW_H}px;"><td colspan="12" style="color:var(--text3);text-align:center;">No tasks yet${edit ? ' — add one with + Task' : ''}.</td></tr>` : ''}</tbody></table>`;
 }
 
 // ── Gantt ─────────────────────────────────────────────────────────────────────
@@ -9016,7 +9323,7 @@ function ppGanttRange() {
   return { from, to: ppIsoAdd(from, days - 1), days, dayW: PP_ZOOM[z], zoom: z };
 }
 function ppGanttHtml(edit) {
-  const S = ppSched(), rows = ppGridRows(), R = ppGanttRange(), W = Math.round(R.days * R.dayW), H = PP_HEAD_H + rows.length * PP_ROW_H + 8, today = _today();
+  const S = ppSched(), rows = ppGridRows().filter(r => !r.hidden), R = ppGanttRange(), W = Math.round(R.days * R.dayW), H = PP_HEAD_H + rows.length * PP_ROW_H + 8, today = _today();
   const x = d => Math.round((new Date(d + 'T00:00:00Z') - new Date(R.from + 'T00:00:00Z')) / 86400000 * R.dayW);
   const parts = [], defs = `<defs><marker id="pp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748B"/></marker><marker id="pp-arrow-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker></defs>`;
   // non-working days and the header
@@ -9036,14 +9343,19 @@ function ppGanttHtml(edit) {
   rows.forEach((r, i) => {
     const y = PP_HEAD_H + i * PP_ROW_H;
     if (r.kind === 'ms') {
-      const ss = r.tasks.map(t => S.byId[+t.id]).filter(Boolean);
+      const ss = r.leaves.map(t => S.byId[+t.id]).filter(Boolean);
       if (ss.length) { const es = ss.reduce((a, s) => s.es < a ? s.es : a, ss[0].es), ef = ss.reduce((a, s) => s.ef > a ? s.ef : a, ss[0].ef); parts.push(`<rect x="${x(es)}" y="${y + 9}" width="${Math.max(2, x(ppIsoAdd(ef, 1)) - x(es))}" height="6" fill="#003057" rx="1"/>`); }
       if (r.ms && r.ms.due_date) { const cx = x(r.ms.due_date) + R.dayW / 2, cy = y + PP_ROW_H / 2, done = r.ms.status === 'done'; parts.push(`<polygon class="pp-ms-diamond" data-ms-id="${+r.ms.id}" points="${cx},${cy - 7} ${cx + 7},${cy} ${cx},${cy + 7} ${cx - 7},${cy}" fill="${done ? '#166534' : r.ms.due_date < today ? '#DC2626' : '#003057'}"><title>${escHtml(r.ms.name)} · due ${ppDate(r.ms.due_date)}${ppMsTask(r.ms) ? ' · on completion of task ' + ppTaskNo(r.ms.task_id) : ''}</title></polygon>`); }
       return;
     }
     const t = r.t, s = S.byId[+t.id]; if (!s) return;
-    const x1 = x(s.es), x2 = Math.max(x1 + 3, x(ppIsoAdd(s.ef, 1))), done = t.status === 'done', crit = _pp.critOn !== false && s.critical, may = ppCanTouchTask(t) && !done;
+    const x1 = x(s.es), x2 = Math.max(x1 + 3, x(ppIsoAdd(s.ef, 1))), done = ppTaskDone(t), crit = _pp.critOn !== false && s.critical, may = ppCanTouchTask(t) && !done;
     pos[+t.id] = { x1, x2, y: y + PP_ROW_H / 2 };
+    if (r.summary) {   // v7.10.43: a group is a bracket over its tasks — not draggable, a link may still land on it
+      const roll = ppRollup(t.id), col = done ? '#64748B' : crit ? '#991B1B' : '#003057';
+      parts.push(`<g class="pp-bar pp-sum" data-task-id="${+t.id}"><rect class="pp-bar-body" x="${x1}" y="${y + 9}" width="${x2 - x1}" height="5" fill="${col}"/><polygon points="${x1},${y + 9} ${x1 + 6},${y + 9} ${x1},${y + 19}" fill="${col}"/><polygon points="${x2},${y + 9} ${x2 - 6},${y + 9} ${x2},${y + 19}" fill="${col}"/><title>${escHtml(t.name)} · group of ${roll.leaves.length} · ${ppDate(s.es)} → ${ppDate(s.ef)} · ${ppDurText(t)} · ${roll.pct}% done</title></g>`);
+      return;
+    }
     if (t.baseline_start && t.baseline_end) parts.push(`<rect x="${x(t.baseline_start)}" y="${y + PP_ROW_H - 6}" width="${Math.max(2, x(ppIsoAdd(t.baseline_end, 1)) - x(t.baseline_start))}" height="3" fill="#94A3B8"/>`);
     const fill = done ? '#94A3B8' : crit ? '#DC2626' : '#2F6FB5', pct = ppPct(t);
     parts.push(`<g class="pp-bar ${may ? 'pp-bar-live' : ''}" data-task-id="${+t.id}" transform="translate(0,0)">
@@ -9147,9 +9459,11 @@ async function ppBaselineSet() {
 
 // ── PERT ──────────────────────────────────────────────────────────────────────
 function ppPertHtml(edit) {
-  const S = ppSched(), tasks = ppGridRows().filter(r => r.kind === 'task').map(r => r.t);
+  // v7.10.43: the network shows the tasks that carry work — a group is not a node; a link on a group is drawn on the leaves it reaches
+  const S = ppSched(), tasks = ppGridRows().filter(r => r.kind === 'task' && !r.summary).map(r => r.t);
   if (!tasks.length) return '<div style="padding:18px;text-align:center;color:var(--text3);">No tasks yet.</div>';
-  const preds = {}; (_pp.links || []).forEach(l => { (preds[+l.to_task] = preds[+l.to_task] || []).push(+l.from_task); });
+  const E = ppLinkGraph(_pp.links || [], _pp.tasks).edges.filter(e => !e.implicit);
+  const preds = {}; E.forEach(e => { (preds[e.to] = preds[e.to] || []).push(e.from); });
   // level = longest chain of predecessors behind the task (cyclic tasks sit at level 0)
   const level = {}, lv = id => { if (level[id] != null) return level[id]; if (S.cyclic.has(id)) return (level[id] = 0); level[id] = -1; const l = (preds[id] || []).filter(p => S.byId[p]).reduce((m, p) => Math.max(m, lv(p) + 1), 0); return (level[id] = l); };
   tasks.forEach(t => lv(+t.id));
@@ -9172,11 +9486,12 @@ function ppPertHtml(edit) {
     </g>`);
   }));
   const edges = [];
-  (_pp.links || []).forEach(l => {
-    const a = pos[+l.from_task], b = pos[+l.to_task]; if (!a || !b) return;
-    const sa = S.byId[+l.from_task], sb = S.byId[+l.to_task], crit = _pp.critOn !== false && sa.critical && sb.critical;
+  E.forEach(e => {
+    const a = pos[e.from], b = pos[e.to]; if (!a || !b) return;
+    const sa = S.byId[e.from], sb = S.byId[e.to], crit = _pp.critOn !== false && sa.critical && sb.critical;
     const x1 = a.x + BW, y1 = a.y + BH / 2, x2 = b.x, y2 = b.y + BH / 2, c = Math.max(24, (x2 - x1) / 2);
-    edges.push(`<path class="pp-pert-edge" data-link-id="${+l.id}" d="M${x1},${y1} C${x1 + c},${y1} ${x2 - c},${y2} ${x2},${y2}" fill="none" stroke="${crit ? '#DC2626' : '#64748B'}" stroke-width="${crit ? 2 : 1.2}" marker-end="url(#${crit ? 'pp-arrow-crit' : 'pp-arrow'})" ${edit ? `onclick="ppLinkClick(${+l.id})"` : ''}><title>${ppTaskNo(l.from_task)} → ${ppTaskNo(l.to_task)} ${l.link_type || 'FS'}${+l.lag_days ? (l.lag_days > 0 ? '+' : '') + l.lag_days + 'd' : ''}${edit ? ' · click to remove' : ''}</title></path>`);
+    const l = (_pp.links || []).find(x => +x.id === +e.id) || {};
+    edges.push(`<path class="pp-pert-edge" data-link-id="${+e.id}" d="M${x1},${y1} C${x1 + c},${y1} ${x2 - c},${y2} ${x2},${y2}" fill="none" stroke="${crit ? '#DC2626' : '#64748B'}" stroke-width="${crit ? 2 : 1.2}" marker-end="url(#${crit ? 'pp-arrow-crit' : 'pp-arrow'})" ${edit ? `onclick="ppLinkClick(${+e.id})"` : ''}><title>${ppTaskNo(l.from_task || e.from)} → ${ppTaskNo(l.to_task || e.to)} ${e.type}${e.lag ? (e.lag > 0 ? '+' : '') + e.lag + 'd' : ''}${edit ? ' · click to remove' : ''}</title></path>`);
   });
   const defs = `<defs><marker id="pp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748B"/></marker><marker id="pp-arrow-crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#DC2626"/></marker></defs>`;
   // three-point estimates
@@ -9188,7 +9503,7 @@ function ppPertHtml(edit) {
       <td style="text-align:right;font-weight:700;">${te != null ? te.toLocaleString('en-US', { maximumFractionDigits: 1 }) : ''}</td><td style="text-align:right;">${sd != null ? (sd * sd).toLocaleString('en-US', { maximumFractionDigits: 2 }) : ''}</td>
       <td style="text-align:right;">${ppDurText(t)}</td><td>${te != null && may && Math.round(te) !== ppTaskDur(t) ? `<button class="btn btn-ghost btn-sm" onclick="ppGridSet(${+t.id}, 'duration', ${Math.max(1, Math.round(te))}, 'd')">Use ${Math.max(1, Math.round(te))} d</button>` : ''}</td></tr>`;
   }).join('');
-  const critPath = S.order.filter(id => S.byId[id].critical);
+  const critPath = S.order.filter(id => S.byId[id].critical && !S.byId[id].summary);
   const varSum = tasks.filter(t => critPath.includes(+t.id) && t.pert_optimistic != null && t.pert_pessimistic != null).reduce((a, t) => a + Math.pow((+t.pert_pessimistic - +t.pert_optimistic) / 6, 2), 0);
   return `<div style="overflow:auto;border:1px solid var(--border);border-radius:var(--radius);background:#fff;"><svg id="pp-pert" width="${W}" height="${H}" style="display:block;font-family:Arial,sans-serif;">${defs}${edges.join('')}${parts.join('')}<path id="pp-pert-ghost" d="" fill="none" stroke="#2F6FB5" stroke-width="1.5" stroke-dasharray="4 3" pointer-events="none"/></svg></div>
     <div style="font-size:12px;color:var(--text3);margin:8px 0;">Boxes read early start / finish, late start / finish, duration and slack; the critical path (slack 0) is red. ${critPath.length ? 'Critical: tasks ' + critPath.map(ppTaskNo).join(' → ') + '.' : ''}${varSum ? ' Standard deviation of the critical path from the three-point estimates: ' + Math.sqrt(varSum).toLocaleString('en-US', { maximumFractionDigits: 1 }) + ' days.' : ''}</div>
@@ -11067,7 +11382,7 @@ async function openQuote(id) {
       apiGet('quote_fuel_prices', 'select=*').catch(() => []),
       apiGet('quote_vehicle_extras', 'select=*&order=display_order,id').catch(() => []),
       apiGet('quote_vehicles', 'quote_id=eq.' + id + '&select=*&order=display_order,id').catch(() => []),
-      apiGet('quote_vehicle_owned_costs', 'select=*').catch(() => []),   // v7.10.42 (absent table → none)
+      apiGet('quote_vehicle_owned_costs', 'select=*').catch(() => []),   // v7.10.46 (absent table → none)
     ]).catch(() => [[], [], [], [], [], [], [], [], [], [], [], [], [], [], []]);
     // v7.10.28: the rate cards the labour engine prices off, whole (judged as at the contract start
     // date in the browser), and the quote's site for the posts' default area. An absent table
@@ -11123,7 +11438,7 @@ async function openQuote(id) {
     allData['quote_vehicle_rates'] = cats[10] || [];
     allData['quote_fuel_prices'] = cats[11] || [];
     allData['quote_vehicle_extras'] = cats[12] || [];
-    allData['quote_vehicle_owned_costs'] = cats[14] || [];   // v7.10.42
+    allData['quote_vehicle_owned_costs'] = cats[14] || [];   // v7.10.46
     pbVehicles = (cats[13] || []).map(v => Object.assign({}, v, { extras: [] }));
     if (pbVehicles.length) {
       const xl = await apiGet('quote_vehicle_extra_lines', 'quote_vehicle_id=in.(' + pbVehicles.map(v => v.id).join(',') + ')&select=*&order=id').catch(() => []);
@@ -12786,7 +13101,7 @@ function pbContractAccOverrideCancel() { _pbContractOvrPending = null; renderQuo
 // = that rate (VAT stripped when the row says it is included) + insurance + tracking + fuel (km ×
 // economy ÷ 100 × the litre price, wet lines only) + the extras (acquisition ÷ life + running);
 // price = cost ÷ (1 − markup) + excess km × the rate per km, which passes through unmarked. The
-// markup is the line's own, else the quote's margin. v7.10.42 (Richard 2026-11-14: "cycles and all other
+// markup is the line's own, else the quote's margin. v7.10.46 (Richard 2026-11-14: "cycles and all other
 // need to be under site mobility, ie not a duplication of some in support items"): a vehicle type is
 // RENTED (the above) or OWNED — quote_vehicle_types.ownership, priced off the dated
 // quote_vehicle_owned_costs row (acquisition ÷ life + running + insurance + tracking, no supplier
@@ -12799,7 +13114,7 @@ let pbVehicles = [];                 // this quote's lines, each with .extras (t
 let _pbMobilityMissing = false;      // sql/add_site_mobility.sql not run on this database
 let _mobState = { editing: null, open: new Set(), draft: null, busy: false };   // editing: null | 'new' | a line id
 const PB_FUEL_LABEL = { petrol: 'petrol', diesel: 'diesel', none: 'no fuel' };
-// v7.10.42: a vehicle type is RENTED (the supplier rate card) or OWNED (a dated cost row: acquisition
+// v7.10.46: a vehicle type is RENTED (the supplier rate card) or OWNED (a dated cost row: acquisition
 // ÷ life + running + insurance + tracking, no supplier rate, no excess km); fuel 'none' prices no fuel.
 function pbVehicleOwned(t) { return !!t && t.ownership === 'owned'; }
 function pbVehicleOwnedCostFor(typeId, asAt) {
@@ -15838,7 +16153,7 @@ PB_SCHEMAS['vehicle-rates'] = {
     { key:'note',              label:'Note',               type:'text' }
   ]
 };
-PB_SCHEMAS['vehicle-owned-costs'] = {   // v7.10.42: the dated cost of an OWNED vehicle type
+PB_SCHEMAS['vehicle-owned-costs'] = {   // v7.10.46: the dated cost of an OWNED vehicle type
   title: 'Owned Vehicle Costs', table: 'quote_vehicle_owned_costs', sortBy: 'effective_date.desc,vehicle_type_id',
   columns: [
     { key:'effective_date',    label:'Effective Date',     type:'date' },
@@ -36762,16 +37077,42 @@ function fmtMinutes(m) {
   const h = Math.floor(m / 60), r = m % 60;
   return h ? (r ? `${h}h ${r}m` : `${h}h`) : `${r}m`;
 }
+// v7.10.45: the Time Spent dropdown's steps — every quarter hour up to 8 h.
+const LI_DURATION_STEPS = Array.from({ length: 32 }, (_, k) => (k + 1) * 15);
 function setLiDuration(mins) {
   const el = document.getElementById('li-duration');
   if (!el || el.disabled) return;
   el.value = mins;
+  onLiDurationType();
+}
+// The dropdown was picked: a step writes the minutes box, "none" clears it, "Other" keeps what is
+// typed and puts the cursor in the box.
+function onLiDurationPick() {
+  const sel = document.getElementById('li-duration-sel');
+  const el = document.getElementById('li-duration');
+  if (!sel || !el) return;
+  if (sel.value === 'other') { el.focus(); el.select(); }
+  else el.value = sel.value;
   renderLiDurationHint();
 }
+// The minutes box was typed: the dropdown follows — the matching step, "none" when blank, else "Other".
+function onLiDurationType() {
+  const sel = document.getElementById('li-duration-sel');
+  const el = document.getElementById('li-duration');
+  if (sel && el) {
+    const m = el.value === '' ? '' : Math.round(+el.value);
+    sel.value = m === '' ? '' : LI_DURATION_STEPS.includes(m) ? String(m) : 'other';
+  }
+  renderLiDurationHint();
+}
+// The hint spells the box out ("1h 40m") only when the dropdown does not already say it.
 function renderLiDurationHint() {
   const el = document.getElementById('li-duration');
+  const sel = document.getElementById('li-duration-sel');
   const hint = document.getElementById('li-duration-hint');
-  if (hint) hint.textContent = (el && +el.value) ? fmtMinutes(+el.value) : '';
+  if (!hint) return;
+  const m = el ? +el.value : 0;
+  hint.textContent = (m > 0 && (!sel || sel.value === 'other')) ? fmtMinutes(Math.round(m)) : '';
 }
 function setLiWorkMode(mode) {
   const hidden = document.getElementById('li-work-mode');
@@ -36801,7 +37142,12 @@ function renderLiModeHint() {
 function _liTimeRowHtml(i, dis, forceInternal) {
   const mins = (i && i.duration_minutes != null) ? +i.duration_minutes : '';
   const mode = forceInternal ? 'internal' : ((i && i.work_mode) || 'client');
-  const chip = (m, l) => `<button type="button" class="btn btn-secondary btn-sm" ${dis} onclick="setLiDuration(${m})" style="padding:4px 9px;">${l}</button>`;
+  // v7.10.45 (Richard: "make time spent a dropdown in 15 min increments but allow minutes to be inputted
+  // manually for any number"): a select of 15-minute steps up to 8 h beside the minutes box. The select
+  // writes the box; a typed figure selects its step when it is one, else "Other" — the box (#li-duration)
+  // stays the one value the save reads, so any number of minutes still saves.
+  const stepOpts = LI_DURATION_STEPS.map(m => `<option value="${m}" ${mins === m ? 'selected' : ''}>${fmtMinutes(m)}</option>`).join('');
+  const other = mins !== '' && !LI_DURATION_STEPS.includes(mins);
   const modeBtn = (v, l) => `<button type="button" id="li-mode-${v}" class="btn btn-sm ${mode === v ? 'btn-primary' : 'btn-secondary'}" ${dis} onclick="setLiWorkMode('${v}')">${l}</button>`;
   return `
           <input type="hidden" id="li-work-mode" value="${mode}">
@@ -36809,8 +37155,13 @@ function _liTimeRowHtml(i, dis, forceInternal) {
             <div class="form-group">
               <label class="form-label">Time Spent <span style="font-weight:400;color:var(--text3);font-size:11px;">— optional</span></label>
               <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-                <input type="number" id="li-duration" class="form-control" style="width:82px;" min="1" max="1440" step="5" placeholder="min" value="${mins}" ${dis} oninput="renderLiDurationHint()">
-                ${chip(30, '30m')}${chip(60, '1h')}${chip(90, '1½h')}${chip(120, '2h')}
+                <select id="li-duration-sel" class="form-control" style="width:120px;" ${dis} onchange="onLiDurationPick()">
+                  <option value="" ${mins === '' ? 'selected' : ''}>— none —</option>
+                  ${stepOpts}
+                  <option value="other" ${other ? 'selected' : ''}>Other…</option>
+                </select>
+                <input type="number" id="li-duration" class="form-control" style="width:82px;" min="1" max="1440" step="1" placeholder="min" value="${mins}" ${dis} oninput="onLiDurationType()">
+                <span style="font-size:12px;color:var(--text3);">min</span>
                 <span id="li-duration-hint" style="font-size:12px;color:var(--text3);font-weight:700;"></span>
               </div>
             </div>
@@ -37403,6 +37754,7 @@ function _liSnapshotForm() {
     actionDetails: v('li-action-details'),
     nextDone: !!document.getElementById('li-next-done')?.checked,
     completionNote: v('li-completion-note-input'),
+    duration: v('li-duration'), workMode: v('li-work-mode'),   // v7.10.45: time spent survives the child modal too
   };
 }
 
@@ -37434,6 +37786,8 @@ async function _liRestoreForm(snap) {
   const noteWrap = document.getElementById('li-completion-note-wrap');
   if (noteWrap) noteWrap.style.display = snap.nextDone ? 'block' : 'none';
   set('li-completion-note-input', snap.completionNote);
+  if (snap.duration !== undefined) { set('li-duration', snap.duration); onLiDurationType(); }
+  if (snap.workMode && document.getElementById('li-mode-client')) setLiWorkMode(snap.workMode);
   await _liLoadPeople(true);   // keep current selections; rebuild only the pool
   window._liStream = snap.stream || null;
   _liRenderStreamSection();    // stream data lives in state — no refetch needed
