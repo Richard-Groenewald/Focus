@@ -47,6 +47,7 @@ Focus CRM (formerly SalesFlow) — internal CRM for **Xone Integrated Security (
 ## Deployment
 
 - **Frontend:** Netlify — `storied-griffin-6eab6b.netlify.app`
+- **Mobile engagement logger (`/log`, Nov 2026, phase 1):** `log.html` + `log.webmanifest` + `log-sw.js`, installable on its own like `/time`, same `focus_session` login and `/sb/` proxy. One screen: deal-or-lead picker, type / date / next-action / due chips from `activity_types` (same `requires_detail` and No Further Action rules as the main form), notes with keyboard or Web Speech dictation (en-ZA / af-ZA). Writes ONE `engagements` row (`deal_id` or `lead_id`, `created_by` = person); stream and lead last-touch are DB triggers, `leads.woke_at` is cleared best-effort. Offline queue in localStorage `lg_pend`; a sent-but-unacknowledged item is looked up before it is re-sent (no `client_uuid` column on `engagements`). The service worker caches only the shell, never `/sb/`; `build.js` copies `log-sw.js` to `dist/`. Not built: people involved, milestones, stream continuation, audio → Whisper → Claude field extraction (phase 2), calendar prompts (phase 3). No SQL.
 - **Backend:** Supabase — `kevrfdjqyuhmgziqxuvs.supabase.co`
 - **Repo:** GitHub — `Richard-Groenewald/Focus` (previously `Richard-Groenewald/salesflow`)
 

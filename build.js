@@ -65,7 +65,7 @@ for (const dir of ['icons', 'assets']) {
 }
 for (const f of fs.readdirSync(root)) {
   if (f === 'index.html') continue;
-  if (/\.(webmanifest|html)$/.test(f)) fs.copyFileSync(path.join(root, f), path.join(dist, f));
+  if (/\.(webmanifest|html)$/.test(f) || f === 'log-sw.js') fs.copyFileSync(path.join(root, f), path.join(dist, f));
 }
 
 const kb = n => (n / 1024).toFixed(0) + ' KB';
