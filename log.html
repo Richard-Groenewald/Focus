@@ -183,11 +183,17 @@ async function start() {
   paintAll();
 }
 async function loadTargets() {
-  const [deals, leads] = await Promise.all([
-    api('deals?select=id,name,owner_id,organisations(name),stages!inner(name)&stages.name=not.in.(Lost,Complete,Suspended)&order=name.asc&limit=2000'),
+  const [deals, leads, stages, orgs] = await Promise.all([
+    api('deals?select=id,name,owner_id,org_id,stage_id&order=name.asc&limit=3000'),
     api('leads?status=not.in.(Dead,Promoted)&select=id,owner_id,site_name,target_org_name,description,status&order=id.desc&limit=2000'),
+    api('stages?select=id,name&limit=200'),
+    api('organisations?select=id,name&limit=5000'),
   ]);
-  TARGETS = deals.map(d => ({ key: 'd' + d.id, kind: 'deal', id: +d.id, label: (d.organisations && d.organisations.name) || d.name || 'Deal', sub: (d.name || '') + (d.stages ? ' · ' + d.stages.name : ''), mine: +d.owner_id === +ME.personId }))
+  const SKIP = ['Lost', 'Complete', 'Suspended'];
+  const stageName = {}; stages.forEach(s => stageName[s.id] = s.name);
+  const orgName = {}; orgs.forEach(o => orgName[o.id] = o.name);
+  TARGETS = deals.filter(d => !SKIP.includes(stageName[d.stage_id]))
+    .map(d => ({ key: 'd' + d.id, kind: 'deal', id: +d.id, label: orgName[d.org_id] || d.name || 'Deal', sub: (d.name || '') + (stageName[d.stage_id] ? ' · ' + stageName[d.stage_id] : ''), mine: +d.owner_id === +ME.personId }))
     .concat(leads.map(l => ({ key: 'l' + l.id, kind: 'lead', id: +l.id, label: l.site_name || l.target_org_name || l.description || ('Lead #' + l.id), sub: 'Lead · ' + l.status, mine: +l.owner_id === +ME.personId })));
   LS.set('lg_targets', TARGETS);
 }
