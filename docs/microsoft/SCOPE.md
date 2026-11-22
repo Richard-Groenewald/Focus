@@ -6,7 +6,9 @@ The same day: "i need users to be able to log in without microsoft too, when on 
 not an employee (in some cases) so either MS or regular login? can i tie both to MS
 authenticator?" and "xone email is on 365. i administer it".
 
-Nothing here is built. Section 7 lists the rulings still needed.
+Richard the same day: "go with recommendations, start phase 1" — rulings 1 to 5 taken as
+recommended, and parts 0 and A built as **v7.10.58** (see CLAUDE.md for what was built and how it
+was tested). Parts B and C are not built. Section 7 lists the rulings still needed for them.
 
 ## 1. What Focus does today (checked 22 November)
 
@@ -214,8 +216,9 @@ Steps 1 to 3 are needed for part B. Step 4 can wait for part C.
    (tenant) ID**. Neither is a secret. Do not create a client secret.
 3. Under **Authentication** add two more single-page redirect addresses:
    `https://storied-griffin-6eab6b.netlify.app/time` and
-   `https://storied-griffin-6eab6b.netlify.app/log`. Add the same three for the DEV site. More
-   can be added at any time, for example a custom address later.
+   `https://storied-griffin-6eab6b.netlify.app/log`. Add the same three for the DEV site:
+   `https://test--storied-griffin-6eab6b.netlify.app/`, `…/time` and `…/log`. More can be added
+   at any time, for example a custom address later.
 4. Under **API permissions** add Microsoft Graph delegated permissions `Mail.Read`,
    `Calendars.Read`, `Tasks.ReadWrite` and `offline_access`, then **Grant admin consent**.
 5. Check that Xone's Microsoft 365 asks everyone for a second step (Security defaults, or a
@@ -236,16 +239,17 @@ Phase 1 needs nothing from Microsoft and can start at once.
 
 ## 7. Decisions for Richard
 
-1. **Build part 0 with part A?** Recommendation: yes. Without it any signed-in user can read or
+1. **Build part 0 with part A?** DECIDED 22 November: yes. Recommendation: yes. Without it any signed-in user can read or
    reset another user's second step.
-2. **Code on every regular sign-in, or per user?** Recommendation: every one. A user allowed both
+2. **Code on every regular sign-in, or per user?** DECIDED: every one. Recommendation: every one. A user allowed both
    methods is only as protected as the weaker.
-3. **Offer "trust this device for 30 days"?** Recommendation: yes, off by default.
-4. **Sign-in method per user, set by an admin** (either / Microsoft / regular). Recommendation:
+3. **Offer "trust this device for 30 days"?** DECIDED: yes, off by default.
+4. **Sign-in method per user, set by an admin** (either / Microsoft / regular). DECIDED; it is
+   built with part B, when there is a second method to choose. Recommendation:
    employees start on either and move to Microsoft only once it has run for two weeks, except one
    emergency Admin.
 5. **New and reset regular logins start from a one-time password the admin hands over.**
-   Recommendation: yes.
+   DECIDED: yes.
 6. **Non-employees use the regular sign-in**, not a guest account in Xone's Microsoft directory.
    Recommendation: yes, as asked.
 7. **The two logins not on xone.co.za:** do they have Xone mailboxes as well, or do they stay on
@@ -255,11 +259,12 @@ Phase 1 needs nothing from Microsoft and can start at once.
 9. **Outlook: C1, C2 and C3, on demand?** Recommendation: yes, in that order.
 10. **Next actions as To Do tasks, not calendar entries.** Recommendation: tasks. A next action
     has a due date and no time, so a calendar entry would be an all-day block.
-11. **The Netlify rollback copy of the proxy.** It has been idle since 30 October. Port the
-    sign-in changes to it, or stop treating it as a rollback for sign-in? Recommendation: stop,
-    and keep the file.
-12. **The DEV site's address**, for step 3 of section 5, and whether Focus is to get an address
-    such as focus.xone.co.za.
+11. **The Netlify rollback copy of the proxy.** SETTLED BY THE BUILD, and further than first
+    proposed: the file stays, but the deployed copy now answers 410 to everything. A live older
+    proxy on the same service key would let any signed-in user write to the access tables and
+    call the sign-in functions without the guard, so it could not stay as a working rollback.
+12. **The DEV site's address**: given, `https://test--storied-griffin-6eab6b.netlify.app/`.
+    Still open: whether Focus is to get an address such as focus.xone.co.za.
 
 ## 8. Risks and open points
 
