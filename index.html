@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -4655,7 +4655,7 @@ async function loadTable(page) {
         if (col.lookup) {
           const lookup = allData[col.lookup] || [];
           const found = lookup.find(r => +r.id === +val);
-          return found ? col.lookupLabel(found) : (val || '');
+          return found ? (col.lookup === 'people' ? personPickLabel(found, lookup) : col.lookupLabel(found)) : (val || '');
         }
         // For render-only columns we can't usefully sort/filter; fall back to raw
         return val == null ? '' : val;
@@ -4670,7 +4670,7 @@ async function loadTable(page) {
         if (col.lookup) {
           const lookup = allData[col.lookup] || [];
           const found = lookup.find(r => +r.id === +val);
-          val = found ? col.lookupLabel(found) : (val || '—');
+          val = found ? (col.lookup === 'people' ? personPickLabel(found, lookup) : col.lookupLabel(found)) : (val || '—');   // v7.10.58
         }
         return `<td>${escHtml(val ?? '—')}</td>`;
       }).join('');
@@ -4910,7 +4910,9 @@ function renderField(f, val, locked) {
     // existing link never silently falls out of its own select.
     let lookupData = (allData[f.lookupTable] || []).filter(r => !f.lookupFilter || f.lookupFilter(r) || +r.id === +val);
     if (f.lookupOrder === 'family') lookupData = familyOrder(lookupData);   // v7.10.25: a parent, then its children
-    const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${escHtml(f.lookupLabel(r))}</option>`).join('');
+    // v7.10.58: a people lookup tells two people of one name apart (personPickLabel).
+    const isPeopleLookup = f.lookupTable === 'people' || f.lookupTable === 'eligible_people';
+    const opts = lookupData.map(r => `<option value="${r.id}" ${+val===+r.id?'selected':''}>${escHtml(isPeopleLookup ? personPickLabel(r, lookupData) : f.lookupLabel(r))}</option>`).join('');
     return `<div class="form-group">${label}<select id="f_${f.key}" name="${f.key}" class="form-control" ${f.required?'required':''}><option value="">— select —</option>${opts}</select></div>`;
   }
 
@@ -5195,6 +5197,12 @@ async function saveAddContactToClient() {
   const jobTitle = document.getElementById('acc-position')?.value.trim() || '';
   try {
     let personId = _addContactSelectedPersonId;
+    if (!personId) {
+      // v7.10.58: the last check before a new person is written — name, email or phone.
+      const gate = await personDupGate({ first, last, title: document.getElementById('acc-title')?.value, email: document.getElementById('acc-email')?.value, phone: document.getElementById('acc-phone')?.value });
+      if (!gate) return;
+      if (gate.use) personId = +gate.use;
+    }
     if (!personId) {
       const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
       const personResult = await api('people', 'POST', {
@@ -5664,6 +5672,150 @@ function promptDialog(opts) {
   });
 }
 
+// ── One person, one record (v7.10.58) ────────────────────────────────────────
+// Richard 2026-11-22: "i have two Deidre tyson's. how did this happen. how to prevent it from
+// happening again". A client contact who joined Xone was added a second time from People → Add,
+// which checked nothing, and three pickers then listed two identical names (login on one record,
+// home-organisation membership on the other). Three guards:
+//   personDupGate()    asked before every screen writes a NEW person — name, email or phone;
+//   personPickLabel()  the name in a picker, with a telling detail when two people share it;
+//   Merge People       (Site Admin → Settings, rpc/merge_people) for what slips through.
+const _pdNorm = s => String(s == null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
+function _pdPhoneKey(v) { const d = String(v || '').replace(/\D/g, ''); return d.length >= 9 ? d.slice(-9) : ''; }   // +27 79 525 2868 = 079 525 2868
+function personFullName(p) { return [p && p.first_name, p && p.last_name].filter(Boolean).join(' '); }
+
+// The people already on record who look like the candidate { first, last, email, phone, excludeId }.
+// Same email counts by itself; a similar name counts by itself; a shared phone number counts only
+// beside a name that resembles (colleagues share a switchboard number).
+function personDupMatches(c, people) {
+  people = people || allData['people'] || [];
+  const first = _pdNorm(c.first), last = _pdNorm(c.last), full = [first, last].filter(Boolean).join(' ');
+  const email = _pdNorm(c.email), phone = _pdPhoneKey(c.phone);
+  const out = [];
+  for (const p of people) {
+    if (!p || p.id == null || (c.excludeId != null && +p.id === +c.excludeId)) continue;
+    const pFull = _pdNorm(personFullName(p));
+    let score = 0;
+    if (full && pFull) score = pFull === full ? 100 : _personMatchScore(p, full);
+    const why = [];
+    if (email && _pdNorm(p.email) === email) why.push('same email');
+    if (phone && _pdPhoneKey(p.phone) === phone && (score >= 70 || why.length)) why.push('same phone number');
+    if (score === 100) why.push('same name');
+    else if (score >= 90 && first && last) why.push('similar name');
+    if (!why.length) continue;
+    const rank = (why.includes('same email') ? 8 : 0) + (why.includes('same phone number') ? 4 : 0) + (why.includes('same name') ? 2 : 0) + (why.includes('similar name') ? 1 : 0);
+    out.push({ person: p, why, rank, score });
+  }
+  return out.sort((a, b) => b.rank - a.rank || b.score - a.score).slice(0, 6);
+}
+
+// Same full name AND the same email or phone: the same human beyond doubt. Used where nobody is
+// at the keyboard to be asked (lead promotion materialising typed contacts).
+function personSilentMatch(c, people) {
+  const full = _pdNorm([c.first, c.last].filter(Boolean).join(' '));
+  if (!full) return null;
+  const email = _pdNorm(c.email), phone = _pdPhoneKey(c.phone);
+  if (!email && !phone) return null;
+  const hit = (people || allData['people'] || []).find(p => p && _pdNorm(personFullName(p)) === full
+    && ((email && _pdNorm(p.email) === email) || (phone && _pdPhoneKey(p.phone) === phone)));
+  return hit || null;
+}
+
+// What tells one person from another of the same name: email, else where they work, else phone.
+function personDetail(p) {
+  if (!p) return '';
+  const email = String(p.email || '').trim(); if (email) return email;
+  const link = (allData['person_organisation_roles'] || []).find(l => +l.person_id === +p.id && !l.end_date);
+  const org = link && (allData['organisations'] || []).find(o => +o.id === +link.org_id);
+  if (org && org.name) return org.name;
+  const phone = String(p.phone || '').trim(); if (phone) return phone;
+  return 'no details · #' + p.id;
+}
+let _pdDupMemo = { src: null, len: -1, set: new Set() };
+function personDupNameSet(list) {
+  const src = (allData['people'] && allData['people'].length) ? allData['people'] : (list || []);
+  if (_pdDupMemo.src !== src || _pdDupMemo.len !== src.length) {
+    const seen = new Map();
+    src.forEach(p => { const k = _pdNorm(personFullName(p)); if (k) seen.set(k, (seen.get(k) || 0) + 1); });
+    _pdDupMemo = { src, len: src.length, set: new Set([...seen].filter(([, n]) => n > 1).map(([k]) => k)) };
+  }
+  return _pdDupMemo.set;
+}
+// The name as a picker shows it: plain, unless another person carries the same name — then
+// "Deidre Tyson · deidre.tyson@xone.co.za", so the two can never be confused again.
+function personPickLabel(p, list) {
+  const name = personFullName(p);
+  if (!p || !name) return name;
+  const inList = list && list.filter(x => x && _pdNorm(personFullName(x)) === _pdNorm(name)).length > 1;
+  if (!inList && !personDupNameSet(list).has(_pdNorm(name))) return name;
+  return name + ' · ' + personDetail(p);
+}
+
+// Ask before a NEW person is written. Resolves { create: true } (nobody similar, or "create
+// anyway"), { use: id, person } (the user picked the one on record) or null (cancelled).
+// opts: useLabel (button on each match; false = no such button, e.g. while editing),
+// createLabel, title. Reads people fresh so a person a colleague added a minute ago is seen; a
+// failed read never blocks the save it cannot judge.
+let _pdGateBusy = false;   // one question at a time: a second click on Save while the first is being judged does nothing
+async function personDupGate(c, opts) {
+  if (_pdGateBusy) return null;
+  _pdGateBusy = true;
+  try { return await _personDupGate(c, opts || {}); }
+  finally { _pdGateBusy = false; }
+}
+async function _personDupGate(c, opts) {
+  let people;
+  try {
+    const jobs = [apiGet('people', 'select=*')];
+    if (!allData['person_organisation_roles']) jobs.push(apiGet('person_organisation_roles', 'select=*').then(r => { allData['person_organisation_roles'] = r; }).catch(() => {}));
+    if (!allData['organisations']) jobs.push(apiGet('organisations', 'select=*').then(r => { allData['organisations'] = r; }).catch(() => {}));
+    people = (await Promise.all(jobs))[0];
+    if (!allData['people']) allData['people'] = people;
+  } catch (e) { return { create: true }; }
+  const hits = personDupMatches(c, people);
+  if (!hits.length) return { create: true };
+  const typed = [c.title, c.first, c.last].filter(Boolean).join(' ');
+  const logins = new Set((allData['_person_logins'] || allData['system_users'] || []).map(u => +u.person_id));
+  const useLabel = opts.useLabel === false ? '' : (opts.useLabel || 'Use this person');
+  return await new Promise(resolve => {
+    const wrap = document.createElement('div');
+    const onKey = e => { if (e.key === 'Escape') done(null); };
+    const done = v => { document.removeEventListener('keydown', onKey); wrap.remove(); resolve(v); };
+    const rows = hits.map((h, i) => {
+      const p = h.person;
+      const meta = [p.email, p.phone, _personAffiliationsLabel(p.id)].filter(Boolean).map(escHtml).join(' · ');
+      return `<div class="pd-row" style="padding:9px 11px;border:1px solid ${h.rank >= 4 ? '#F59E0B' : 'var(--border)'};background:${h.rank >= 4 ? '#FFFBEB' : '#fff'};border-radius:var(--radius);display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:6px;">
+        <div style="font-size:13px;min-width:0;">
+          <strong>${escHtml([p.title, personFullName(p)].filter(Boolean).join(' '))}</strong>${logins.has(+p.id) ? ' <span class="badge badge-blue" style="font-size:9px;">LOGIN</span>' : ''}
+          ${h.why.map(w => `<span class="pd-why" style="font-size:10px;font-weight:700;text-transform:uppercase;color:#92400E;background:#FEF3C7;border-radius:3px;padding:1px 5px;margin-left:4px;white-space:nowrap;">${escHtml(w)}</span>`).join('')}
+          <div style="color:var(--text3);font-size:11px;margin-top:3px;overflow-wrap:anywhere;">${meta}</div>
+        </div>
+        ${useLabel ? `<button type="button" class="btn btn-primary btn-sm" data-use="${i}" style="white-space:nowrap;">${escHtml(useLabel)}</button>` : ''}
+      </div>`;
+    }).join('');
+    wrap.innerHTML =
+      `<div class="modal-overlay" id="person-dup-gate" style="z-index:100000;">
+         <div class="modal" style="width:600px;max-width:96vw;">
+           <div class="modal-header"><div class="modal-title">${escHtml(opts.title || 'Is this person already on record?')}</div>
+             <button class="modal-close" data-act="cancel">×</button></div>
+           <div class="modal-body">
+             <div style="font-size:13px;color:var(--text2);margin-bottom:10px;line-height:1.5;">${opts.intro ? escHtml(opts.intro) : `You are about to add <strong>${escHtml(typed || 'a new person')}</strong>. ${hits.length === 1 ? 'This person is' : 'These people are'} already on record — one person should have one record, whoever they work for.`}</div>
+             ${rows}
+           </div>
+           <div class="modal-footer">
+             <button class="btn btn-secondary" data-act="cancel">Cancel</button>
+             <button class="btn btn-danger" data-act="create">${escHtml(opts.createLabel || 'No — create a new person')}</button>
+           </div>
+         </div>
+       </div>`;
+    wrap.querySelectorAll('[data-act="cancel"]').forEach(b => b.onclick = () => done(null));
+    wrap.querySelector('[data-act="create"]').onclick = () => done({ create: true, forced: true });
+    wrap.querySelectorAll('[data-use]').forEach(b => b.onclick = () => { const p = hits[+b.dataset.use].person; done({ use: +p.id, person: p }); });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+  });
+}
+
 async function saveRecord(e) {
   if (e) e.preventDefault();
   const cfg = PAGES[currentPage];
@@ -5821,6 +5973,27 @@ async function saveRecord(e) {
     } catch(validErr) {
       showStatus('Could not validate organisation eligibility: ' + validErr.message, 'error');
       return;
+    }
+  }
+
+  // One person, one record (v7.10.58): People / Contacts → Add asks when someone alike is already on
+  // record; an edit asks only when the name, email or phone was changed.
+  if (cfg.table === 'people') {
+    const was = editingId ? ((currentData || []).find(r => +r.id === +editingId) || {}) : null;
+    const changed = !was || ['first_name', 'last_name', 'email', 'phone'].some(k => (k in body) && _pdNorm(body[k]) !== _pdNorm(was[k]));
+    if (changed) {
+      const gate = await personDupGate(
+        { first: body.first_name, last: body.last_name, email: body.email, phone: body.phone, title: body.title, excludeId: editingId || null },
+        editingId
+          ? { useLabel: false, createLabel: 'Save anyway', title: 'Someone else looks like this', intro: 'These details match another person on record. If they are the same person, cancel and fold the two together under Site Admin → Settings → Merge People.' }
+          : { useLabel: 'Open this person' });
+      if (!gate) return;
+      if (gate.use) {
+        closeModal();
+        if ((currentData || []).some(r => +r.id === +gate.use)) { openEditModal(gate.use); showStatus('Already on record — opened instead of adding a second one'); }
+        else showStatus(personFullName(gate.person) + ' is already on record — nothing was added');
+        return;
+      }
     }
   }
 
@@ -6476,7 +6649,7 @@ function openDeliveryOwnerPrompt(mode) {
             <label class="form-label">Delivery owner</label>
             <select id="delivery-owner-pick" class="form-control">
               <option value="">— none yet —</option>
-              ${people.map(p => `<option value="${p.id}" ${+p.id === +current ? 'selected' : ''}>${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+              ${people.map(p => `<option value="${p.id}" ${+p.id === +current ? 'selected' : ''}>${escHtml(personPickLabel(p))}</option>`).join('')}
             </select>
             <div style="font-size:11px;color:var(--text3);margin-top:4px;">The delivery owner holds every area of the ${mode === 'set' ? 'deal' : 'contract'} — contract terms, revenue actuals, billing, the project plan, engagements and files — and may delegate any of them on the Collaborators tab.</div>
           </div>
@@ -7291,7 +7464,7 @@ function setupOppOwnerReassign() {
   const current = oppData.owner_id || currentUser?.personId || '';
   sel.innerHTML = '<option value="">— unassigned —</option>' +
     pool.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      const name = personPickLabel(p);
       return `<option value="${p.id}" ${String(current) === String(p.id) ? 'selected' : ''}>${escHtml(name)}</option>`;
     }).join('');
 }
@@ -7417,7 +7590,7 @@ async function initOppForm() {
   const ownerSel = document.getElementById('opp-owner-id');
   ownerSel.innerHTML = '<option value="">— select owner —</option>' +
     ownerPool.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      const name = personPickLabel(p);
       return `<option value="${p.id}" ${oppData.owner_id==p.id?'selected':''}>${escHtml(name)}</option>`;
     }).join('');
 
@@ -8559,7 +8732,7 @@ function ppPeopleOptions(selectedId, homeOnly) {
   const members = new Set(_pp.members.map(m => +m.person_id));
   // v7.10.34: an outside resource is assignable once on the team — the team is the roster
   const home = homeOrgPeople(_pp.people, homeOnly ? [selectedId] : [selectedId].concat([...members]));
-  const label = x => escHtml([x.first_name, x.last_name].filter(Boolean).join(' '));
+  const label = x => escHtml(personPickLabel(x, _pp.people));   // v7.10.58: two of one name are told apart
   const opt = x => `<option value="${+x.id}" ${+x.id === +selectedId ? 'selected' : ''}>${label(x)}</option>`;
   if (homeOnly) return '<option value="">—</option>' + home.map(opt).join('');
   const team = home.filter(x => members.has(+x.id)), rest = home.filter(x => !members.has(+x.id));
@@ -9135,7 +9308,7 @@ function ppTeamHtml(edit) {
         <td style="text-align:right;">${edit ? `<button class="btn btn-ghost btn-sm" onclick="ppMemberRemove(${+m.id})">Remove</button>` : ''}</td></tr>`).join('')}</tbody></table>`
       : '<div style="font-size:13px;color:var(--text3);margin-bottom:10px;">Nobody on the team yet' + (edit ? ' — add the people who deliver this project: Xone people from the list, or someone from outside (a client, a subcontractor, a freelancer), who is created as a person here. A task can be assigned to any Xone person, team or not, and to an outsider on the team.' : '.') + '</div>'}
     ${edit ? (_pp.teamNew ? ppTeamNewHtml() : `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <select class="form-control" id="pp-member-pick" style="max-width:260px;"><option value="">Add an Xone person…</option>${candidates.map(p => `<option value="${+p.id}">${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}</select>
+      <select class="form-control" id="pp-member-pick" style="max-width:260px;"><option value="">Add an Xone person…</option>${candidates.map(p => `<option value="${+p.id}">${escHtml(personPickLabel(p))}</option>`).join('')}</select>
       <input class="form-control" id="pp-member-role" style="max-width:220px;" placeholder="Role (e.g. Technician)">
       <button class="btn btn-secondary btn-sm" id="pp-member-add" onclick="ppMemberAdd()">+ Add to team</button>
       <span style="color:var(--text3);font-size:12px;">or</span>
@@ -9216,7 +9389,11 @@ async function ppTeamNewSave() {
   if (!ppCanEdit() || !_pp.teamNew || _pp.teamNew.saving) return;
   const d = _pp.teamNew.draft, first = String(d.first_name || '').trim(), last = String(d.last_name || '').trim();
   if (!first) { showStatus('The person needs at least a first name', 'error'); const el = document.getElementById('pp-new-first'); if (el) el.focus(); return; }
+  // v7.10.58: name, email or phone like someone on record → use that person on the team instead.
   _pp.teamNew.saving = true;
+  const gate = await personDupGate({ first, last, email: d.email, phone: d.phone }, { useLabel: 'Use on the team' });
+  if (!_pp.teamNew) return;
+  if (!gate || gate.use) { _pp.teamNew.saving = false; if (gate) await ppTeamNewUse(gate.use); return; }
   const btn = document.getElementById('pp-new-save'); if (btn) btn.disabled = true;
   let person = null;
   try {
@@ -18874,7 +19051,7 @@ function addCollaboratorRow() {
       <label class="form-label">Person</label>
       <select class="form-control collab-person">
         <option value="">— select —</option>
-        ${people.map(p => `<option value="${p.id}">${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+        ${people.map(p => `<option value="${p.id}">${escHtml(personPickLabel(p))}</option>`).join('')}
       </select>
     </div>
     <div class="form-group" style="margin-bottom:0;">
@@ -19961,6 +20138,15 @@ async function saveNewClient() {
     if (regionId) orgPayload.region_id = +regionId;
     if (branchId) orgPayload.branch_id = +branchId;
 
+    // v7.10.58: every typed contact is checked against the people on record BEFORE anything is
+    // written, so a cancel leaves no half-made client behind.
+    for (const c of contacts) {
+      if (c.usePersonId) continue;
+      const gate = await personDupGate({ first: c.first, last: c.last, title: c.title, email: c.email, phone: c.phone });
+      if (!gate) return;
+      if (gate.use) c.usePersonId = +gate.use;
+    }
+
     const orgResult = await api('organisations', 'POST', orgPayload, 'select=*');
     const org = orgResult[0];
     allData['organisations'] = null; // clear cache
@@ -20161,7 +20347,7 @@ async function openAddOppContactModal(editIdx) {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="oc-person-id" class="form-control" ${editing ? 'disabled' : ''}>
               <option value="">— select from client contacts —</option>
-              ${pool.map(p => { const jt = jobTitleById[+p.id]; return `<option value="${p.id}" ${editing?.personId==p.id?'selected':''}>${[p.first_name,p.last_name].filter(Boolean).join(' ')}${jt?' — '+jt:''}</option>`; }).join('')}
+              ${pool.map(p => { const jt = jobTitleById[+p.id]; return `<option value="${p.id}" ${editing?.personId==p.id?'selected':''}>${escHtml(personPickLabel(p))}${jt?' — '+escHtml(jt):''}</option>`; }).join('')}
             </select>
             ${!pool.length && !editing ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No client contacts available — use "Create New Client Contact" to add one</div>' : ''}
           </div>
@@ -20395,20 +20581,30 @@ async function saveNewOppContact() {
   const dmu = dmuRoles.find(r => +r.id === +dmuRoleId);
 
   try {
-    const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
-    const personResult = await api('people', 'POST', {
-      first_name: first, last_name: last,
-      title: document.getElementById('noc-title')?.value || null,
-      email: document.getElementById('noc-email')?.value || null,
-      phone: document.getElementById('noc-phone')?.value || null,
-      initials,
-    }, 'select=*');
-    const person = personResult[0];
-    allData['people'] = null;
+    // v7.10.58: someone alike already on record? Use them rather than add a second person.
+    const gate = await personDupGate({ first, last, title: document.getElementById('noc-title')?.value, email: document.getElementById('noc-email')?.value, phone: document.getElementById('noc-phone')?.value });
+    if (!gate) return;
+    let person;
+    if (gate.use) {
+      person = gate.person;
+      if (oppContacts.some(c => +c.personId === +person.id)) { showStatus(personFullName(person) + ' is already a contact on this deal', 'error'); return; }
+    } else {
+      const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+      const personResult = await api('people', 'POST', {
+        first_name: first, last_name: last,
+        title: document.getElementById('noc-title')?.value || null,
+        email: document.getElementById('noc-email')?.value || null,
+        phone: document.getElementById('noc-phone')?.value || null,
+        initials,
+      }, 'select=*');
+      person = personResult[0];
+      allData['people'] = null;
+    }
 
-    // Auto-affiliate with client, carrying the optional job title.
+    // Auto-affiliate with client, carrying the optional job title (an existing person already
+    // affiliated here keeps that affiliation as it is).
     const jobTitle = (document.getElementById('noc-job-title')?.value || '').trim();
-    if (orgId) {
+    if (orgId && !(gate.use && (await apiGet('person_organisation_roles', `person_id=eq.${+person.id}&org_id=eq.${+orgId}&select=id`)).length)) {
       await api('person_organisation_roles', 'POST', {
         person_id: person.id, org_id: +orgId, role_type: 'Contact', is_primary: false,
         job_title: jobTitle || null, start_date: new Date().toISOString().slice(0, 10),
@@ -20418,7 +20614,7 @@ async function saveNewOppContact() {
 
     const entry = {
       personId: person.id,
-      name: [first, last].join(' '),
+      name: gate.use ? personFullName(person) : [first, last].join(' '),
       title: person.title || '',
       phone: person.phone || '',
       dmuRoleId: dmuRoleId || null,
@@ -20438,7 +20634,7 @@ async function saveNewOppContact() {
     oppContacts.push(entry);
     renderOppContacts();
     closeModal();
-    showStatus([first, last].join(' ') + ' created and added');
+    showStatus(gate.use ? personFullName(person) + ' was already on record — added to this deal' : [first, last].join(' ') + ' created and added');
   } catch(e) {
     showStatus('Failed: ' + e.message, 'error');
   }
@@ -20660,7 +20856,7 @@ async function openAddCollaboratorModal(team) {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="collab-person-id" class="form-control">
               <option value="">— select person —</option>
-              ${pool.map(p => `<option value="${p.id}">${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+              ${pool.map(p => `<option value="${p.id}">${escHtml(personPickLabel(p))}</option>`).join('')}
             </select>
             ${!pool.length ? '<div style="font-size:12px;color:var(--text3);margin-top:4px;">No eligible people found — use "Create New Person" instead</div>' : ''}
           </div>
@@ -20829,19 +21025,29 @@ async function saveNewCollaborator(forEngagement) {
   const orgId = document.getElementById('opp-org-id')?.value || oppData?.org_id;
 
   try {
-    // Create person
-    const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
-    const personResult = await api('people', 'POST', {
-      first_name: first, last_name: last,
-      title: document.getElementById('new-collab-title')?.value || null,
-      email: document.getElementById('new-collab-email')?.value || null,
-      phone: document.getElementById('new-collab-phone')?.value || null,
-      initials,
-    }, 'select=*');
-    const person = personResult[0];
-    allData['people'] = null; // clear cache
+    // v7.10.58: someone alike already on record? Use them rather than add a second person.
+    const gate = await personDupGate({ first, last, title: document.getElementById('new-collab-title')?.value, email: document.getElementById('new-collab-email')?.value, phone: document.getElementById('new-collab-phone')?.value });
+    if (!gate) return;
+    let person;
+    if (gate.use) {
+      person = gate.person;
+    } else {
+      // Create person
+      const initials = ((first[0]||'') + (last[0]||'')).toUpperCase();
+      const personResult = await api('people', 'POST', {
+        first_name: first, last_name: last,
+        title: document.getElementById('new-collab-title')?.value || null,
+        email: document.getElementById('new-collab-email')?.value || null,
+        phone: document.getElementById('new-collab-phone')?.value || null,
+        initials,
+      }, 'select=*');
+      person = personResult[0];
+      allData['people'] = null; // clear cache
+    }
 
-    if (affiliType === 'client' && orgId) {
+    if (gate.use) {
+      // An existing person keeps the affiliations they have: nothing more to write here.
+    } else if (affiliType === 'client' && orgId) {
       // Add affiliation to client
       await api('person_organisation_roles', 'POST', {
         person_id: person.id, org_id: +orgId,
@@ -20854,7 +21060,7 @@ async function saveNewCollaborator(forEngagement) {
       }, '');
     }
 
-    const name = [first, last].join(' ');
+    const name = gate.use ? personFullName(person) : [first, last].join(' ');
     if (forEngagement === 'true' || forEngagement === true) {
       // Add to the shared engagement form's People Involved, then rebuild the
       // engagement modal with fields + selections restored from the snapshot.
@@ -25526,7 +25732,7 @@ async function renderAuditLogPage() {
   const actorSel = document.getElementById('audit-actor');
   if (actorSel) actorSel.innerHTML += (allData['people'] || [])
     .slice().sort((a, b) => String(a.first_name).localeCompare(String(b.first_name)))
-    .map(p => `<option value="${p.id}">${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('');
+    .map(p => `<option value="${p.id}">${escHtml(personPickLabel(p))}</option>`).join('');
   await _auditReload(false);
 }
 
@@ -30418,7 +30624,7 @@ async function initLeadForm() {
   const ownerSel = document.getElementById('lead-owner-id');
   ownerSel.innerHTML = '<option value="">— shared pool —</option>' +
     ownerPool.map(p => {
-      const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+      const name = personPickLabel(p);
       return `<option value="${p.id}">${escHtml(name)}</option>`;
     }).join('');
 
@@ -35300,9 +35506,14 @@ async function commitPromotion(s) {
     // === 2. Person: create if new ============================
     let personId = s.existingPersonId;
     if (s.contactMode === 'new') {
-      const created = await api('people', 'POST', s.newPerson, 'select=*');
-      personId = created[0].id;
-      (allData['people'] = allData['people'] || []).push(created[0]);
+      // v7.10.58: the same name with the same email or phone is the same human — link, never a second record.
+      const same = personSilentMatch({ first: s.newPerson.first_name, last: s.newPerson.last_name, email: s.newPerson.email, phone: s.newPerson.phone });
+      if (same) personId = +same.id;
+      else {
+        const created = await api('people', 'POST', s.newPerson, 'select=*');
+        personId = created[0].id;
+        (allData['people'] = allData['people'] || []).push(created[0]);
+      }
     }
 
     // === 3. Org affiliation: only create if missing ==========
@@ -35424,11 +35635,16 @@ async function commitPromotion(s) {
           const first = parts.shift() || String(c.name || '').trim() || 'Contact';
           const last  = parts.join(' ') || null;
           const initials = ((first[0] || '') + ((last || '')[0] || '')).toUpperCase();
-          const cp = await api('people', 'POST', {
-            // people has a single phone column — prefer the cell, fall back to landline.
-            first_name: first, last_name: last, email: c.email || null, phone: c.phone || c.phone2 || null, initials,
-          }, 'select=*');
-          cpid = cp[0].id;
+          const same = personSilentMatch({ first, last, email: c.email, phone: c.phone || c.phone2 });   // v7.10.58
+          if (same) cpid = +same.id;
+          else {
+            const cp = await api('people', 'POST', {
+              // people has a single phone column — prefer the cell, fall back to landline.
+              first_name: first, last_name: last, email: c.email || null, phone: c.phone || c.phone2 || null, initials,
+            }, 'select=*');
+            cpid = cp[0].id;
+            (allData['people'] = allData['people'] || []).push(cp[0]);
+          }
         }
         try {
           const here = await apiGet('person_organisation_roles', `person_id=eq.${cpid}&org_id=eq.${orgId}&end_date=is.null&select=id,job_title`);
@@ -35589,7 +35805,9 @@ async function commitPromotion(s) {
         const parts = leadData.source_person_name.trim().split(/\s+/);
         const first = parts.shift() || leadData.source_person_name.trim();
         const last  = parts.join(' ') || null;
-        const createdRef = await api('people', 'POST', {
+        // v7.10.58: a referrer already on record under the same name and email or phone is linked, not re-created.
+        const sameRef = personSilentMatch({ first, last, email: leadData.source_person_email, phone: leadData.source_person_phone });
+        const createdRef = sameRef ? [sameRef] : await api('people', 'POST', {
           first_name: first, last_name: last,
           // people.title is the honorific (Mr/Mrs/…), NOT the job title. The
           // referrer's job title lives on their affiliation (below), not here.
@@ -35598,7 +35816,7 @@ async function commitPromotion(s) {
           phone: leadData.source_person_phone || null,
         }, 'select=*');
         sourcePersonId = createdRef[0].id;
-        (allData['people'] = allData['people'] || []).push(createdRef[0]);
+        if (!sameRef) (allData['people'] = allData['people'] || []).push(createdRef[0]);
         // If we know the referrer's organisation, record their job title as an
         // affiliation so it has a proper home (derive-not-store model).
         if (leadData.source_org_id && (leadData.source_person_title || '').trim()) {
@@ -40119,7 +40337,7 @@ async function renderSalesCampaignModal() {
             <div style="display:flex;gap:8px;">
               <select id="sc-person-add" class="form-control" style="flex:1;" onchange="scAddPerson()">
                 <option value="">— pick a person —</option>
-                ${people.map(p => `<option value="${p.id}">${esc([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+                ${people.map(p => `<option value="${p.id}">${esc(personPickLabel(p))}</option>`).join('')}
               </select>
               <button type="button" class="btn btn-secondary" onclick="scAddPerson()">Add</button>
               <button type="button" class="btn btn-ghost" onclick="scToggleNewPerson(true)">+ New</button>
@@ -40151,7 +40369,7 @@ async function renderSalesCampaignModal() {
               <label class="form-label">Owner</label>
               <select id="sc-owner-id" class="form-control">
                 <option value="">— unassigned —</option>
-                ${ownerPool.map(p => { const name = [p.first_name,p.last_name].filter(Boolean).join(' '); const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':''; return `<option value="${p.id}" ${sel}>${esc(name)}</option>`; }).join('')}
+                ${ownerPool.map(p => { const name = personPickLabel(p); const sel = (d.owner_id||currentUser?.personId)==p.id?'selected':''; return `<option value="${p.id}" ${sel}>${esc(name)}</option>`; }).join('')}
               </select>
             </div>
           </div>
@@ -40243,7 +40461,7 @@ async function renderSettingsPage() {
   head.innerHTML = '';
   body.innerHTML = '<tr><td style="padding:0;border:none;"></td></tr>';
 
-  await loadAppSettings();
+  await Promise.all([loadAppSettings(), mergePeopleLoad()]);
   // Merge Organisations card needs the full org list for its pickers.
   if (!allData['organisations']) {
     try { allData['organisations'] = await apiGet('organisations', 'select=*'); }
@@ -40529,6 +40747,7 @@ async function renderSettingsPage() {
           <button class="btn" id="merge-org-go" style="background:var(--red);color:#fff;display:none;" onclick="runOrgMerge()">Merge →</button>
         </div>
       </div>
+      ${mergePeopleCardHtml()}
       <div style="display:flex;justify-content:flex-end;">
         <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
       </div>
@@ -40632,6 +40851,265 @@ async function runOrgMerge() {
   } finally { if (btn) btn.disabled = false; }
 }
 
+// ── Merge People (Admin → Settings, v7.10.58) ────────────────────────────────
+// One person, one record: fold a duplicate person into the record that should survive. The work
+// is ONE transaction in the database (rpc/merge_people, sql/add_merge_people.sql): every foreign
+// key onto people is repointed, a row the kept person already holds is removed, the kept person's
+// own details stand (or the values ticked here), the duplicate is deleted. Preview IS the merge,
+// run and rolled back (p_dry_run), so what it lists is exactly what Merge does.
+let _mergePeople = { keepId: 0, dupId: 0, pick: {}, preview: null, error: '', busy: false, missing: false };
+const MERGE_PEOPLE_FIELDS = [['first_name', 'First name'], ['last_name', 'Last name'], ['title', 'Title'], ['email', 'Email'], ['phone', 'Phone']];
+const MERGE_PEOPLE_LABELS = {
+  'system_users.person_id': 'the login', 'person_organisation_roles.person_id': 'affiliations', 'home_organisation_members.person_id': 'home-organisation membership',
+  'leads.owner_id': 'leads owned', 'leads.target_person_id': 'leads where they are the contact', 'leads.source_person_id': 'leads they referred', 'leads.created_by': 'leads captured',
+  'deals.owner_id': 'deals owned (sales)', 'deals.delivery_owner_id': 'contracts they deliver', 'deals.created_by': 'deals created',
+  'engagements.created_by': 'engagements logged', 'engagement_people.person_id': 'engagements they took part in',
+  'deal_contacts.person_id': 'deal contact entries', 'deal_collaborators.person_id': 'deal team places', 'project_plan_members.person_id': 'project team places',
+  'project_plans.owner_id': 'project plans managed', 'project_tasks.assignee_id': 'project tasks assigned', 'sales_campaign_people.person_id': 'research-study participations',
+  'timesheet_entries.person_id': 'timesheet entries', 'labour_rates.person_id': 'labour rates', 'targets.scope_id': 'targets', 'audit_log.actor_id': 'audit-log entries',
+  'user_presence.person_id': 'presence record', 'user_dashboard_prefs.person_id': 'dashboard layout', 'user_sessions.person_id': 'sign-in sessions', 'user_page_visits.person_id': 'page visits',
+  'settings.delivery_owner_default': 'default delivery owner settings', 'settings.legacy_notes_viewers': 'legacy-notes viewer setting',
+};
+function _mpLabel(key) { return MERGE_PEOPLE_LABELS[key] || key.replace(/_/g, ' ').replace('.', ' · '); }
+function _mpHasLogin(id) { return (allData['_person_logins'] || allData['system_users'] || []).some(u => +u.person_id === +id); }
+function _mpName(p) { return personFullName(p) || '(no name)'; }
+function _mpOptionLabel(p) { return _mpName(p) + ' · ' + personDetail(p) + (_mpHasLogin(p.id) ? ' · LOGIN' : ''); }
+
+// People, logins and affiliations, fresh — the card judges duplicates on what is on record NOW.
+async function mergePeopleLoad() {
+  await Promise.all([
+    apiGet('people', 'select=*').then(r => { allData['people'] = r; }).catch(() => {}),
+    apiGet('system_users', 'select=id,person_id').then(r => { allData['_person_logins'] = r; }).catch(() => {}),   // its own key: the System Users page caches full rows
+    apiGet('person_organisation_roles', 'select=*').then(r => { allData['person_organisation_roles'] = r; }).catch(() => {}),
+  ]);
+}
+
+// Pairs that look like one human: the same name, the same email, or the same phone number beside
+// a resembling name. Cheap by design (keyed, no all-pairs fuzzy pass) — it runs on every paint.
+function mergePeopleSuspects() {
+  const people = (allData['people'] || []).filter(p => p && p.id != null);
+  const pairs = new Map();
+  const add = (a, b, why) => {
+    if (+a.id === +b.id) return;
+    const lo = +a.id < +b.id ? a : b, hi = lo === a ? b : a, key = lo.id + ':' + hi.id;
+    if (!pairs.has(key)) pairs.set(key, { a: lo, b: hi, why: [] });
+    if (!pairs.get(key).why.includes(why)) pairs.get(key).why.push(why);
+  };
+  const group = (keyOf, why, test) => {
+    const m = new Map();
+    people.forEach(p => { const k = keyOf(p); if (k) (m.get(k) || m.set(k, []).get(k)).push(p); });
+    m.forEach(list => { if (list.length < 2 || list.length > 6) return; for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) if (!test || test(list[i], list[j])) add(list[i], list[j], why); });
+  };
+  group(p => _pdNorm(personFullName(p)), 'same name');
+  group(p => _pdNorm(p.email), 'same email');
+  group(p => _pdPhoneKey(p.phone), 'same phone number', (x, y) => _personMatchScore(y, _pdNorm(personFullName(x))) >= 70);
+  return [...pairs.values()].sort((x, y) => y.why.length - x.why.length || _mpName(x.a).localeCompare(_mpName(y.a)));
+}
+
+function mergePeopleCardHtml() {
+  const st = _mergePeople;
+  const people = (allData['people'] || []).slice().sort((a, b) => _mpName(a).localeCompare(_mpName(b)) || (+a.id - +b.id));
+  const opts = sel => people.map(p => `<option value="${+p.id}" ${+sel === +p.id ? 'selected' : ''}>${escHtml(_mpOptionLabel(p))}</option>`).join('');
+  const suspects = mergePeopleSuspects();
+  const one = p => `<strong>${escHtml(_mpName(p))}</strong> <span style="color:var(--text3);">${escHtml(personDetail(p))}</span>${_mpHasLogin(p.id) ? ' <span class="badge badge-blue" style="font-size:9px;">LOGIN</span>' : ''}`;
+  const suspectHtml = suspects.length
+    ? `<div id="merge-people-suspects" style="margin:0 0 12px;">
+         <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#92400E;margin-bottom:5px;">Possible duplicates on record (${suspects.length})</div>
+         ${suspects.slice(0, 12).map(x => `<div class="mp-suspect" style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:7px 10px;border:1px solid #F59E0B;background:#FFFBEB;border-radius:var(--radius);margin-bottom:5px;font-size:12px;">
+             <div style="min-width:0;overflow-wrap:anywhere;">${one(x.a)} &nbsp;↔&nbsp; ${one(x.b)}<div style="color:#92400E;font-size:11px;margin-top:2px;">${escHtml(x.why.join(' · '))}</div></div>
+             <button type="button" class="btn btn-secondary btn-sm" style="white-space:nowrap;" onclick="mergePeopleReview(${+x.a.id}, ${+x.b.id})">Review</button>
+           </div>`).join('')}
+         ${suspects.length > 12 ? `<div style="font-size:11px;color:var(--text3);">…and ${suspects.length - 12} more — they list here as these are dealt with.</div>` : ''}
+       </div>`
+    : `<div id="merge-people-suspects" style="font-size:12px;color:#166534;margin:0 0 12px;">✓ No two people on record share a name, an email or a phone number.</div>`;
+  return `<div class="opp-section" style="margin-bottom:16px;" id="merge-people-card">
+        <div class="opp-section-title">Merge People</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:10px;">One person, one record — whoever they work for. Fold a duplicate person into the record that should survive: the login, affiliations, leads, deals, engagements and everything else move across, then the duplicate is deleted. This cannot be undone.</div>
+        ${suspectHtml}
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Duplicate — will be deleted</label>
+            <select id="merge-person-dup" class="form-control" onchange="mergePeopleChanged()">
+              <option value="">— pick the duplicate —</option>${opts(st.dupId)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Survivor — keeps everything</label>
+            <select id="merge-person-keep" class="form-control" onchange="mergePeopleChanged()">
+              <option value="">— pick the survivor —</option>${opts(st.keepId)}
+            </select>
+          </div>
+        </div>
+        <div id="merge-people-preview" style="font-size:12px;color:var(--text2);margin:2px 0 10px;">${mergePeoplePreviewHtml()}</div>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn-secondary" id="merge-people-preview-btn" onclick="previewPeopleMerge()" ${st.busy ? 'disabled' : ''}>Preview</button>
+          <button type="button" class="btn" id="merge-people-go" style="background:var(--red);color:#fff;${st.preview && !st.error ? '' : 'display:none;'}" onclick="runPeopleMerge()" ${st.busy ? 'disabled' : ''}>Merge →</button>
+        </div>
+      </div>`;
+}
+function mergePeopleRepaint() {
+  const el = document.getElementById('merge-people-card');
+  if (el) el.outerHTML = mergePeopleCardHtml();
+}
+// A pick changed: whatever was previewed no longer describes the pair on screen.
+function mergePeopleChanged() {
+  const st = _mergePeople;
+  st.dupId = +document.getElementById('merge-person-dup')?.value || 0;
+  st.keepId = +document.getElementById('merge-person-keep')?.value || 0;
+  st.preview = null; st.error = ''; st.pick = {};
+  const pv = document.getElementById('merge-people-preview'); if (pv) pv.innerHTML = '';
+  const go = document.getElementById('merge-people-go'); if (go) go.style.display = 'none';
+}
+// From a "possible duplicate" row: the record with the login survives (a login cannot be
+// re-created with its history), else the one holding more detail, else the older record.
+function mergePeopleReview(aId, bId) {
+  const people = allData['people'] || [], a = people.find(p => +p.id === +aId), b = people.find(p => +p.id === +bId);
+  if (!a || !b) { showStatus('Person not found — reload and retry', 'error'); return; }
+  const weight = p => (_mpHasLogin(p.id) ? 100 : 0) + ['title', 'email', 'phone'].filter(k => String(p[k] || '').trim()).length
+    + (allData['person_organisation_roles'] || []).filter(l => +l.person_id === +p.id).length;
+  const keep = weight(b) > weight(a) ? b : a, dup = keep === a ? b : a;
+  Object.assign(_mergePeople, { keepId: +keep.id, dupId: +dup.id, preview: null, error: '', pick: {} });
+  mergePeopleRepaint();
+  previewPeopleMerge();
+}
+function mergePeoplePreviewHtml() {
+  const st = _mergePeople;
+  if (st.busy && !st.preview) return 'Working out what would move…';
+  if (st.error) return `<div id="merge-people-error" style="color:var(--red);">${escHtml(st.error)}</div>`;
+  if (!st.preview) return '';
+  const pv = st.preview, people = allData['people'] || [];
+  const keep = people.find(p => +p.id === +st.keepId) || pv.keep || {}, dup = pv.dup || people.find(p => +p.id === +st.dupId) || {};
+  const blank = v => !String(v == null ? '' : v).trim();
+  const diff = MERGE_PEOPLE_FIELDS.filter(([k]) => !blank(dup[k]) && !blank(keep[k]) && _pdNorm(dup[k]) !== _pdNorm(keep[k]));
+  const fills = MERGE_PEOPLE_FIELDS.filter(([k]) => blank(keep[k]) && !blank(dup[k]));
+  const list = o => Object.entries(o || {}).sort((x, y) => _mpLabel(x[0]).localeCompare(_mpLabel(y[0]))).map(([k, n]) => `${escHtml(_mpLabel(k))} <strong>(${+n})</strong>`);
+  const moved = list(pv.moved), removed = list(pv.removed);
+  let html = `<div id="merge-people-summary" style="border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:var(--bg2);">`;
+  html += `<div style="margin-bottom:6px;">Fold <strong>${escHtml(_mpName(dup))}</strong> <span style="color:var(--text3);">(${escHtml(personDetail(dup))})</span> into <strong>${escHtml(_mpName(keep))}</strong> <span style="color:var(--text3);">(${escHtml(personDetail(keep))}${_mpHasLogin(keep.id) ? ' · has the login' : ''})</span>.</div>`;
+  html += moved.length ? `<div id="merge-people-moved">Moves across: ${moved.join(' · ')}.</div>` : `<div id="merge-people-moved">Nothing references the duplicate — it will simply be deleted.</div>`;
+  if (removed.length) html += `<div id="merge-people-removed" style="margin-top:4px;color:#92400E;">The survivor already holds these, so the duplicate's copy goes: ${removed.join(' · ')}.</div>`;
+  if (fills.length) html += `<div style="margin-top:4px;">The survivor takes from the duplicate what it lacks: ${fills.map(([k, l]) => `${escHtml(l)} <strong>${escHtml(dup[k])}</strong>`).join(' · ')}.</div>`;
+  if (diff.length) {
+    html += `<div style="margin-top:8px;font-weight:700;">The two records differ — choose what the survivor keeps:</div>
+      <table id="merge-people-fields" style="width:100%;margin-top:4px;border-collapse:collapse;">` + diff.map(([k, l]) => {
+        const useDup = st.pick[k] === 'dup';
+        const radio = (which, val) => `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;overflow-wrap:anywhere;"><input type="radio" name="mp-f-${k}" value="${which}" ${(which === 'dup') === useDup ? 'checked' : ''} onchange="mergePeoplePick('${k}', '${which}')" style="accent-color:var(--red);">${escHtml(val)}</label>`;
+        return `<tr><td style="padding:3px 8px 3px 0;border:none;color:var(--text3);white-space:nowrap;vertical-align:top;">${escHtml(l)}</td><td style="padding:3px 8px;border:none;">${radio('keep', keep[k])}</td><td style="padding:3px 0;border:none;">${radio('dup', dup[k])}</td></tr>`;
+      }).join('') + `</table>`;
+  }
+  return html + `</div>`;
+}
+function mergePeoplePick(key, which) { _mergePeople.pick[key] = which; }
+function _mpFields() {
+  const st = _mergePeople, dup = (st.preview && st.preview.dup) || {}, out = {};
+  Object.entries(st.pick).forEach(([k, which]) => { if (which === 'dup' && String(dup[k] == null ? '' : dup[k]).trim()) out[k] = dup[k]; });
+  return Object.keys(out).length ? out : null;
+}
+async function _mpCall(dry) {
+  const st = _mergePeople;
+  if (MOCK) return mergePeopleMock(st.keepId, st.dupId, dry ? null : _mpFields(), dry);
+  const r = await api('rpc/merge_people', 'POST', { p_keep_id: st.keepId, p_dup_id: st.dupId, p_actor_id: currentUser.personId, p_fields: dry ? null : _mpFields(), p_dry_run: !!dry }, '', { prefer: '' })
+    .catch(e => { if (/^404\b|PGRST202/.test((e && e.message) || '')) { st.missing = true; throw new Error('Merge People needs sql/add_merge_people.sql on this database'); } throw e; });
+  return Array.isArray(r) ? r[0] : r;
+}
+async function previewPeopleMerge() {
+  const st = _mergePeople;
+  if (st.busy) return;
+  st.dupId = +document.getElementById('merge-person-dup')?.value || st.dupId || 0;
+  st.keepId = +document.getElementById('merge-person-keep')?.value || st.keepId || 0;
+  st.preview = null; st.error = ''; st.pick = {};
+  if (!st.dupId || !st.keepId) { st.error = 'Pick both people first.'; mergePeopleRepaint(); return; }
+  if (st.dupId === st.keepId) { st.error = 'Those are the same person — pick two different records.'; mergePeopleRepaint(); return; }
+  st.busy = true; mergePeopleRepaint();
+  try { st.preview = await _mpCall(true); if (!st.preview) throw new Error('No answer from the database'); }
+  catch (e) { st.error = String((e && e.message) || e).replace(/^\d{3}\s*:?\s*/, ''); }
+  st.busy = false; mergePeopleRepaint();
+}
+async function runPeopleMerge() {
+  const st = _mergePeople;
+  if (st.busy || !st.preview || st.error) return;
+  const people = allData['people'] || [], dup = people.find(p => +p.id === +st.dupId), keep = people.find(p => +p.id === +st.keepId);
+  if (!dup || !keep) { showStatus('Person not found — reload and retry', 'error'); return; }
+  if (!await confirmDialog({
+    title: 'Merge people', confirmLabel: 'Merge', danger: true,
+    message: `Fold "${_mpName(dup)}" (${personDetail(dup)}) into "${_mpName(keep)}" (${personDetail(keep)})?\n\nEverything that points at the duplicate moves to the survivor and the duplicate is deleted. This cannot be undone.`,
+  })) return;
+  st.busy = true; mergePeopleRepaint();
+  try {
+    const done = await _mpCall(false);
+    // Memory follows the database: the duplicate leaves every cache, the survivor takes its new details.
+    allData['people'] = people.filter(p => +p.id !== +st.dupId).map(p => (+p.id === +st.keepId && done && done.keep) ? done.keep : p);
+    ['eligible_people', 'contacts', 'person_org_roles'].forEach(k => { delete allData[k]; });
+    await Promise.all([
+      mergePeopleLoad(),
+      apiGet('home_organisation_members', 'select=*').then(r => { allData['home_organisation_members'] = r; }).catch(() => {}),
+    ]);
+    Object.assign(st, { keepId: 0, dupId: 0, preview: null, error: '', pick: {}, busy: false });
+    showStatus(`Merged — "${_mpName(dup)}" folded into "${_mpName(keep)}"`);
+    mergePeopleRepaint();
+  } catch (e) {
+    st.busy = false; st.error = String((e && e.message) || e).replace(/^\d{3}\s*:?\s*/, '');
+    mergePeopleRepaint();
+    showStatus('Not merged: ' + st.error, 'error');
+  }
+}
+// Mock twin of rpc/merge_people: the same rules over the mock store (a preview works on a copy).
+function mergePeopleMock(keepId, dupId, fields, dry) {
+  if (!can('manage_settings')) throw new Error('You do not have permission to merge people');
+  const live = _mockStore(), db = dry ? JSON.parse(JSON.stringify(live)) : live;
+  const people = db.people || [], k = people.find(p => +p.id === +keepId), d = people.find(p => +p.id === +dupId);
+  if (!k || !d || +keepId === +dupId) throw new Error('Pick two different people');
+  const su = db.system_users || [];
+  if (su.some(u => +u.person_id === +keepId) && su.some(u => +u.person_id === +dupId)) throw new Error('Both records have a login. Remove one of the two under System Users first, then merge.');
+  const before = JSON.parse(JSON.stringify(d)), moved = {}, removed = {}, bump = (o, key) => { o[key] = (o[key] || 0) + 1; };
+  const ONE_PER = { person_organisation_roles: 'org_id', home_organisation_members: 'org_id', engagement_people: 'engagement_id', deal_collaborators: 'deal_id', project_plan_members: 'plan_id', sales_campaign_people: 'sales_campaign_id', deal_contacts: 'deal_id', user_presence: null, user_dashboard_prefs: null, system_users: null };
+  const PERSON_COL = /^(person_id|owner_id|created_by|updated_by|delivery_owner_id|assignee_id|target_person_id|source_person_id|requested_by|decided_by|reviewed_by|proposed_by|interviewer_id|reporter_id|resolved_by|uploaded_by|removed_by|issued_by|answered_by|taken_by|delegated_by|integrity_confirmed_by|last_touch_by|acting_person_id|actor_id|real_actor_id|baseline_set_by|secured_by|accepted_by|approved_by|entered_by|submitted_by|peer_review_by|promotion_requested_by|dead_reviewed_by)$/;
+  for (const [t, rows] of Object.entries(db)) {
+    if (!Array.isArray(rows) || t === 'people') continue;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]; if (!r || typeof r !== 'object') continue;
+      for (const col of Object.keys(r)) {
+        if (r[col] == null || +r[col] !== +dupId || !PERSON_COL.test(col)) continue;
+        if (col === 'person_id' && (t in ONE_PER)) {
+          const other = ONE_PER[t];
+          const clash = rows.find(x => x !== r && +x.person_id === +keepId && (other == null || +x[other] === +r[other]));
+          if (clash) {
+            if (t === 'person_organisation_roles') {
+              if (!String(clash.job_title || '').trim()) clash.job_title = r.job_title || null;
+              if (!clash.start_date) clash.start_date = r.start_date || null;
+              clash.is_primary = !!(clash.is_primary || r.is_primary);
+              clash.end_date = (!clash.end_date || !r.end_date) ? null : (clash.end_date > r.end_date ? clash.end_date : r.end_date);
+            }
+            rows.splice(i, 1); bump(removed, t + '.' + col); break;
+          }
+        }
+        r[col] = +keepId; bump(moved, t + '.' + col);
+      }
+    }
+  }
+  (db.targets || []).slice().forEach(tg => {
+    if (tg.scope_type !== 'person' || +tg.scope_id !== +dupId) return;
+    if (db.targets.some(x => x !== tg && x.scope_type === 'person' && +x.scope_id === +keepId && x.period_type === tg.period_type && x.period_start === tg.period_start)) { db.targets.splice(db.targets.indexOf(tg), 1); bump(removed, 'targets.scope_id'); }
+    else { tg.scope_id = +keepId; bump(moved, 'targets.scope_id'); }
+  });
+  (db.settings || []).forEach(sv => {
+    if (/^delivery_owner_default_/.test(sv.key) && String(sv.value).trim() === String(dupId)) { sv.value = String(keepId); bump(moved, 'settings.delivery_owner_default'); }
+    if (sv.key === 'legacy_notes_viewers' && String(sv.value || '').split(',').map(x => x.trim()).includes(String(dupId))) {
+      sv.value = [...new Set(String(sv.value).split(',').map(x => x.trim()).filter(Boolean).map(x => x === String(dupId) ? String(keepId) : x))].join(','); bump(moved, 'settings.legacy_notes_viewers');
+    }
+  });
+  ['last_name', 'title', 'email', 'phone', 'initials'].forEach(f => { if (!String(k[f] == null ? '' : k[f]).trim() && d[f] != null) k[f] = d[f]; });
+  Object.entries(fields || {}).forEach(([f, v]) => {
+    if (!MERGE_PEOPLE_FIELDS.some(x => x[0] === f) && f !== 'initials') throw new Error('A merge cannot set the field ' + f);
+    const val = String(v == null ? '' : v).trim() || null;
+    if (f === 'first_name' && !val) throw new Error('First name cannot be blank');
+    k[f] = val;
+  });
+  people.splice(people.indexOf(d), 1);
+  if (!dry) _mockPersist();
+  return { dry_run: !!dry, keep: JSON.parse(JSON.stringify(k)), dup: before, moved, removed };
+}
+
 // v7.10.51: Settings → Delivery owners — one select per active service family (settings.delivery_owner_default_<id>).
 function deliveryOwnerSettingHtml() {
   const majors = (allData['service_major'] || []).filter(m => m.active !== false).slice().sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -40643,7 +41121,7 @@ function deliveryOwnerSettingHtml() {
       <label class="form-label">${escHtml(m.name)}</label>
       <select class="form-control setting-delivery-default" data-major="${+m.id}">
         <option value="">— no default —</option>
-        ${people.map(p => `<option value="${p.id}" ${cur === +p.id ? 'selected' : ''}>${escHtml([p.first_name, p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+        ${people.map(p => `<option value="${p.id}" ${cur === +p.id ? 'selected' : ''}>${escHtml(personPickLabel(p))}</option>`).join('')}
       </select>
     </div>`;
   }).join('') + '</div>';
@@ -40983,7 +41461,7 @@ async function onPartyTypeChange(type) {
       allData['people'] = records;
       refEl.innerHTML = '<option value="">— select person —</option>' +
         records.map(p => {
-          const name = [p.first_name, p.last_name].filter(Boolean).join(' ');
+          const name = personPickLabel(p);
           return `<option value="${p.id}">${escHtml(name)}</option>`;
         }).join('');
     } else if (type === 'organisation') {
@@ -41163,7 +41641,7 @@ async function openAddHomeMemberModal(editMember) {
             <label class="form-label">Person <span class="lead-req-star" class="lead-req-star" style="color:var(--red)">*</span></label>
             <select id="hom-person-id" class="form-control" onchange="checkHomeOrgAffiliation()">
               <option value="">— select person —</option>
-              ${people.map(p => `<option value="${p.id}" ${editMember?.person_id==p.id?'selected':''}>${escHtml([p.first_name,p.last_name].filter(Boolean).join(' '))}</option>`).join('')}
+              ${people.map(p => `<option value="${p.id}" ${editMember?.person_id==p.id?'selected':''}>${escHtml(personPickLabel(p))}</option>`).join('')}
             </select>
           </div>
           <div class="form-group">
