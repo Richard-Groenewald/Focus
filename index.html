@@ -912,7 +912,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.56 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +952,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.56 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -5541,10 +5541,10 @@ const HELP_CONTENT = {
     sub: 'Your landing view — cards chosen for your role, cut to the scope you choose, arranged the way you like.',
     sections: [
       { note: '<strong>What appears here is role-driven.</strong> Admin curates which cards each role sees (Admin → Settings → Dashboards); you see the union of your roles\' cards.' },
-      { h: 'Mine / Team / All', body: 'The scope switch (top right) cuts the ownership-scoped cards — Outstanding Actions, Leads, Opportunities, Pipeline, Campaigns, Interactions, Recent Milestones — to <strong>Mine</strong> (records you own or engagements you logged), <strong>Team</strong> (Sales Managers: your region/branch) or <strong>All</strong> (view-all rights). Each card\'s chip states the scope it is showing, and your choice is remembered between logins. The switch only appears when your rights offer more than one option.' },
+      { h: 'Mine / Team / All', body: 'The scope switch (top right) cuts the ownership-scoped cards — Outstanding Actions, Leads, Opportunities, Pipeline, Campaigns, Interactions and Activity, Recent Milestones — to <strong>Mine</strong> (records you own or engagements you logged), <strong>Team</strong> (Sales Managers: your region/branch) or <strong>All</strong> (view-all rights). Each card\'s chip states the scope it is showing, and your choice is remembered between logins. The switch only appears when your rights offer more than one option.' },
       { h: 'Arrange it your way', body: 'Drag any card to reorder, and use <strong>☰ Cards</strong> to choose which of the cards your role allows actually show — both are remembered for you personally on this device. <strong>↺ Reset layout</strong> returns to your role\'s standard arrangement with every card shown.' },
       { h: 'The action cards', body: '<strong>Outstanding Actions</strong> — open next actions across leads and opportunities, overdue first; click a row to open the engagement. <strong>Approvals Outstanding</strong> (approvers only) — everything awaiting <em>your</em> decision: promotions, dead reviews, red flags (Executives) and proposed ★ milestones; click a row to act. <strong>Leads</strong> — the two umbrella-band counts (In Qualification vs Qualified) with the full stage composition and your overdue follow-up count. <strong>Leads needing attention</strong> (banner) — woken holds and aging leads; its <strong>Manage →</strong> button opens the Attention Workbench page, where the full lead list and every open action are workable.' },
-      { h: 'The activity cards', body: '<strong>Interactions</strong> — engagements per week/month, stacked by category, with its own Mine/All toggle and the per-person target line. <strong>Recent Milestones</strong> — the latest approved ★ milestones in your scope. <strong>Pipeline</strong> — weighted and total open value, computed from revenue streams.' },
+      { h: 'The activity cards', body: '<strong>Interactions and Activity</strong> — engagements per week/month in two layers: <strong>interactions</strong> (client-facing engagements, stacked by category) and, on top of each bar in grey, <strong>activity</strong> (engagements marked Our own work, plus the rows Focus writes itself such as a promotion or a handover). The two KPIs count them apart, and the per-person target line and the Team list measure interactions only — the Reports page draws the same line. The card has its own Mine/All toggle. <strong>Recent Milestones</strong> — the latest approved ★ milestones in your scope. <strong>Pipeline</strong> — weighted and total open value, computed from revenue streams.' },
       { h: 'Announcements', body: 'A navy (notice) or red (urgent) banner across the top is a <strong>broadcast</strong> from admin — e.g. a deploy warning. Dismiss it with the ×; it disappears everywhere once it expires or is ended.' },
     ],
   }),
@@ -22690,7 +22690,7 @@ const DASH_WIDGET_CATALOG = {
   campaigns:     'Campaigns',
   contracts:     'Active Contracts',
   company:       'Company Overview',
-  interactions:  'Interactions',
+  interactions:  'Interactions and Activity',
   milestones:    'Recent Milestones',
   milestone_pulse: 'Milestone Pulse',
   bugs:          'Bugs',
@@ -23354,20 +23354,37 @@ async function _dashActions() {
     </div></div>`;
 }
 
-// ── Interactions per period ──────────────────────────────────────────────────
-// Activity metric: engagements logged per week/month (12 periods), stacked by
-// category (Outreach / Sales / Contract / Project — same derivation as the
-// stream backfill). Admin settings: interactions_team_scope ('managers' |
-// 'everyone'), interactions_weekly_target (per person per week, '' = off),
-// interactions_count_promotion ('true'/'false').
+// ── Interactions and Activity per period ─────────────────────────────────────
+// Engagements logged per week/month (12 periods), in two layers (v7.10.57):
+//   INTERACTIONS — client-facing engagements (work_mode client): contact with
+//     the prospect or client, stacked by category (Outreach / Sales / Contract /
+//     Project — same derivation as the stream backfill). The weekly target and
+//     the Team list's n / target measure these alone, as the Reports page does.
+//   ACTIVITY — "Our own work" engagements (work_mode internal) and the rows
+//     Focus writes by itself (_DASH_INT_AUTO: Promotion, Suspended, Restored,
+//     Suspension lifted, Proposal withdrawn, Handover) — effort on the record,
+//     never contact. One muted segment on top of each bar, so the target line
+//     still reads against the interactions beneath it.
+// Until v7.10.56 the card counted every row as an interaction while Reports
+// skipped internal work — the same week read two different numbers.
+// Admin settings: interactions_team_scope ('managers' | 'everyone'),
+// interactions_weekly_target (per person per week, '' = off),
+// interactions_count_promotion ('true' = the automatic rows count under
+// Activity, 'false' = left out altogether).
 const _DASH_INT_CATS = ['Outreach', 'Sales', 'Contract', 'Project'];
 const _DASH_INT_COLORS = { Outreach: '#C3B091', Sales: '#003057', Contract: '#16a34a', Project: '#64748b' };
+const _DASH_INT_ACT_COLOR = '#B8C4D0';
+const _DASH_INT_AUTO = ['Promotion', 'Suspended', 'Restored', 'Suspension lifted', 'Proposal withdrawn', 'Handover'];
+// The one rule for which layer an engagement row lands in.
+function _dashIntIsActivity(e) {
+  return (e.work_mode || 'client') === 'internal' || _DASH_INT_AUTO.includes(e.engagement_type || '');
+}
 
 async function _dashReloadInteractions() {
   const el = document.getElementById('dash-interactions');
   if (!el) return;
   try { el.innerHTML = await _dashInteractions(); }
-  catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load interactions: ${e.message}</div>`; }
+  catch (e) { el.innerHTML = `<div class="card" style="padding:18px;color:var(--red);">Couldn't load interactions and activity: ${e.message}</div>`; }
 }
 
 // Widget scope toggle — remembered per person across logins (same pattern as
@@ -23420,8 +23437,10 @@ async function _dashInteractions() {
   // Mine/Team toggles re-render without a round trip.
   const B = window._dashBundle;
   let engs = B ? (B.interactions || []).filter(e => (e.engagement_date || '') >= fromIso) : await apiGetAll('engagements',
-    'engagement_date=gte.' + fromIso + '&select=id,lead_id,deal_id,engagement_date,engagement_type,created_by');
-  if (!countPromo) engs = engs.filter(e => e.engagement_type !== 'Promotion');
+    'engagement_date=gte.' + fromIso + '&select=id,lead_id,deal_id,engagement_date,engagement_type,created_by,work_mode');
+  // A bundle from a database that has not re-run perf_tier2_dashboard_summary.sql
+  // carries no work_mode: every logged row then reads as an interaction, as before.
+  if (!countPromo) engs = engs.filter(e => !_DASH_INT_AUTO.includes(e.engagement_type || ''));
   if (scope === 'own') {
     // Mine = engagements I logged OR on records I own — same rule as the
     // Engagement History page (created-by alone hid owned records' activity).
@@ -23466,28 +23485,42 @@ async function _dashInteractions() {
     return 'Sales';
   };
 
-  // Bucket counts: per period per category, plus per person in the current period.
-  const buckets = periods.map(() => ({ total: 0, cats: { Outreach: 0, Sales: 0, Contract: 0, Project: 0 } }));
+  // Bucket counts: per period — interactions per category, activity as one
+  // figure, total = both — plus per person in the current period.
+  const buckets = periods.map(() => ({ total: 0, int: 0, act: 0, cats: { Outreach: 0, Sales: 0, Contract: 0, Project: 0 } }));
   const curByPerson = {};
   const cur = periods.length - 1;
   for (const e of engs) {
     const d = e.engagement_date || '';
     const pi = periods.findIndex(p => d >= iso(p.s) && d < iso(p.e));
     if (pi < 0) continue;
+    const act = _dashIntIsActivity(e);
     buckets[pi].total++;
-    buckets[pi].cats[catOf(e)]++;
-    if (pi === cur) { const k = e.created_by == null ? 0 : +e.created_by; curByPerson[k] = (curByPerson[k] || 0) + 1; }
+    if (act) buckets[pi].act++;
+    else { buckets[pi].int++; buckets[pi].cats[catOf(e)]++; }
+    if (pi === cur) {
+      const k = e.created_by == null ? 0 : +e.created_by;
+      const pp = curByPerson[k] || (curByPerson[k] = { int: 0, act: 0 });
+      if (act) pp.act++; else pp.int++;
+    }
   }
-  const curCount = buckets[cur].total, prevCount = buckets[cur - 1].total;
+  const curCount = buckets[cur].int, prevCount = buckets[cur - 1].int;
   const delta = curCount - prevCount;
+  const curAct = buckets[cur].act, prevAct = buckets[cur - 1].act;
+  const deltaAct = curAct - prevAct;
 
   // Chart: stacked columns, dashed target line (Mine view — target is per person).
   const H = 88;
   const maxVal = Math.max(1, ...buckets.map(b => b.total), (scope === 'own' && target) ? target : 0);
   const cols = buckets.map((b, i) => {
+    // Interactions by category at the foot of the bar, Activity as the one muted
+    // segment on top (column-reverse: the last segment is the topmost).
     const segs = _DASH_INT_CATS.map(c => b.cats[c]
-      ? `<div style="height:${Math.max(1, Math.round(b.cats[c] / maxVal * H))}px;background:${_DASH_INT_COLORS[c]};"></div>` : '').join('');
-    const tip = periods[i].label + ': ' + b.total + _DASH_INT_CATS.map(c => b.cats[c] ? ` · ${c} ${b.cats[c]}` : '').join('');
+      ? `<div style="height:${Math.max(1, Math.round(b.cats[c] / maxVal * H))}px;background:${_DASH_INT_COLORS[c]};"></div>` : '').join('')
+      + (b.act ? `<div class="dash-int-act" style="height:${Math.max(1, Math.round(b.act / maxVal * H))}px;background:${_DASH_INT_ACT_COLOR};"></div>` : '');
+    const tip = periods[i].label + ': ' + b.int + ' interaction' + (b.int === 1 ? '' : 's')
+      + _DASH_INT_CATS.map(c => b.cats[c] ? ` · ${c} ${b.cats[c]}` : '').join('')
+      + ' · ' + b.act + ' activity';
     const showLbl = period === 'week' ? (i % 3 === 2) : (i % 2 === 1);
     return `<div title="${esc(tip)}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:stretch;min-width:0;">
       <div style="display:flex;flex-direction:column-reverse;border-radius:2px 2px 0 0;overflow:hidden;${i === cur ? 'outline:1.5px solid var(--red);outline-offset:1px;' : ''}">${segs || '<div style="height:1px;"></div>'}</div>
@@ -23496,21 +23529,23 @@ async function _dashInteractions() {
   }).join('');
   const targetLine = (scope === 'own' && target)
     ? `<div style="position:absolute;left:0;right:0;bottom:${13 + Math.round(target / maxVal * H)}px;border-top:2px dashed var(--red);"><span style="position:absolute;right:0;top:-14px;font-size:9px;font-weight:700;color:var(--red);">target ${target}</span></div>` : '';
-  const legend = _DASH_INT_CATS.map(c =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text3);"><span style="width:8px;height:8px;border-radius:2px;background:${_DASH_INT_COLORS[c]};"></span>${c}</span>`).join('');
+  const legendItem = (color, label, title) =>
+    `<span title="${esc(title || '')}" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text3);"><span style="width:8px;height:8px;border-radius:2px;background:${color};"></span>${label}</span>`;
+  const legend = _DASH_INT_CATS.map(c => legendItem(_DASH_INT_COLORS[c], c, 'Interactions — client-facing engagements, by category')).join('')
+    + legendItem(_DASH_INT_ACT_COLOR, 'Activity · our own work', 'Activity — "Our own work" engagements' + (countPromo ? ' and the rows Focus writes itself (promotion, suspension, handover)' : '') + '; effort on the record, not contact');
 
   // Team view: this period per person vs the per-person target.
   let teamList = '';
   if (scope === 'team') {
     if (!allData['people']) { try { allData['people'] = await apiGetAll('people', 'select=id,first_name,last_name'); } catch (e) { allData['people'] = []; } }
     const personName = id => { const p = (allData['people'] || []).find(x => +x.id === +id); return p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : 'Unknown'; };
-    const ppl = Object.entries(curByPerson).map(([id, n]) => ({ id: +id, n })).sort((a, b) => b.n - a.n).slice(0, 8);
+    const ppl = Object.entries(curByPerson).map(([id, v]) => ({ id: +id, n: v.int, act: v.act })).sort((a, b) => (b.n - a.n) || (b.act - a.act)).slice(0, 8);
     teamList = ppl.length ? `<div style="margin-top:10px;">` + ppl.map(p => {
       const col = target ? (p.n >= target ? '#16a34a' : 'var(--red)') : 'var(--navy)';
-      return `<div style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid var(--border);font-size:12px;">
+      return `<div class="dash-int-person" data-person="${p.id}" style="display:flex;justify-content:space-between;gap:10px;padding:4px 0;border-top:1px solid var(--border);font-size:12px;">
         <span style="min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(personName(p.id))}</span>
-        <span style="font-weight:700;color:${col};white-space:nowrap;">${p.n}${target ? ' / ' + target : ''}</span></div>`;
-    }).join('') + `</div>` : `<div style="margin-top:10px;color:var(--text3);font-size:12px;">No interactions logged this ${period} yet.</div>`;
+        <span style="white-space:nowrap;"><span style="font-weight:700;color:${col};" title="Interactions this ${period}${target ? ' against the target' : ''}">${p.n}${target ? ' / ' + target : ''}</span><span style="color:var(--text3);font-size:11px;margin-left:8px;" title="Activity this ${period}">· ${p.act} activity</span></span></div>`;
+    }).join('') + `</div>` : `<div style="margin-top:10px;color:var(--text3);font-size:12px;">No interactions or activity logged this ${period} yet.</div>`;
   }
 
   // The non-Mine scope has no person filter — it is everyone's activity, so
@@ -23523,15 +23558,17 @@ async function _dashInteractions() {
   const scopeSeg = canChoose
     ? `<span style="display:inline-flex;border-radius:4px;overflow:hidden;margin-left:6px;">${seg('Mine', scope === 'own', "dashSetIntScope('own')")}${seg(wideLabel, scope === 'team', "dashSetIntScope('team')")}</span>` : '';
   const kpi = (label, val, color) => `<div><div style="font-size:26px;font-weight:800;color:${color || 'var(--navy)'};line-height:1.1;">${val}</div><div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.3px;margin-top:2px;">${label}</div></div>`;
-  const deltaHtml = kpi('vs previous', (delta >= 0 ? '▲ +' : '▼ ') + delta, delta >= 0 ? '#16a34a' : 'var(--red)');
+  const deltaOf = (d, label) => kpi(label, (d >= 0 ? '▲ +' : '▼ ') + d, d >= 0 ? '#16a34a' : 'var(--red)');
+  const deltaHtml = deltaOf(delta, 'vs previous');
+  const actHtml = `<div style="border-left:1px solid var(--border);padding-left:18px;display:flex;gap:18px;">${kpi('Activity this ' + period, curAct, 'var(--text2)')}${deltaOf(deltaAct, 'vs previous')}</div>`;
 
   return `<div class="card" style="padding:0;height:100%;">
     <div style="display:flex;justify-content:space-between;align-items:center;padding:13px 16px;border-bottom:1px solid var(--border);">
-      <div style="font-weight:700;color:var(--navy);font-size:14px;">Interactions<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipTxt}</span></div>
+      <div style="font-weight:700;color:var(--navy);font-size:14px;" title="Interactions are client-facing engagements; Activity is our own work on the record (and the rows Focus writes itself)">Interactions and Activity<span style="font-size:10px;font-weight:700;text-transform:uppercase;color:var(--text3);border:1px solid var(--border);border-radius:10px;padding:1px 7px;margin-left:8px;">${chipTxt}</span></div>
       <div>${periodSeg}${scopeSeg}</div>
     </div>
     <div style="padding:16px;">
-      <div style="display:flex;gap:26px;flex-wrap:wrap;">${kpi('This ' + period, curCount)}${deltaHtml}${(scope === 'own' && target) ? kpi('Target', target) : ''}</div>
+      <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;">${kpi('Interactions this ' + period, curCount)}${deltaHtml}${(scope === 'own' && target) ? kpi('Target', target) : ''}${actHtml}</div>
       <div style="position:relative;margin-top:14px;">
         <div style="display:flex;gap:3px;align-items:flex-end;">${cols}</div>
         ${targetLine}
@@ -37414,7 +37451,7 @@ function _rptPaint() {
   if (m.person) notes.push(`Showing ${m.personName} only: engagements they logged, and engagements and qualified leads on records they own, inside the ${st.scope === 'team' ? 'Team' : 'All'} scope.`);
   if (m.dropped) notes.push(`Showing the most recent ${P.length} periods — ${m.dropped} earlier ${m.dropped === 1 ? 'period was' : 'periods were'} dropped to keep the table readable. Widen the interval to see them.`);
   if (m.pendingMils) notes.push(`${m.pendingMils} milestone${m.pendingMils === 1 ? '' : 's'} in this range still await review and are not counted above.`);
-  if (m.internalSkipped) notes.push(`${m.internalSkipped} engagement${m.internalSkipped === 1 ? ' is' : 's are'} marked internal work and excluded by definition.`);
+  if (m.internalSkipped) notes.push(`${m.internalSkipped} engagement${m.internalSkipped === 1 ? ' is' : 's are'} marked internal work and excluded by definition — the dashboard's Interactions and Activity card counts them as Activity.`);
   if (m.futureCount) notes.push(`${m.futureCount} engagement${m.futureCount === 1 ? ' is' : 's are'} dated after ${st.to} and so fall outside this range — activity booked but not yet done.`);
   // Each period counts DISTINCT leads, so the row total double-counts anyone who
   // qualified in two of them. Say so instead of quietly overstating.
@@ -40420,7 +40457,7 @@ async function renderSettingsPage() {
         ${navHiddenSettingHtml()}
       </div>
       <div class="opp-section" style="margin-bottom:16px;">
-        <div class="opp-section-title">Interactions Widget</div>
+        <div class="opp-section-title">Interactions and Activity card</div>
         <div class="form-row-3">
           <div class="form-group">
             <label class="form-label">Who sees the Team view?</label>
@@ -40428,20 +40465,20 @@ async function renderSettingsPage() {
               <option value="managers" ${(appSettings['interactions_team_scope']||'managers')!=='everyone'?'selected':''}>Managers only</option>
               <option value="everyone" ${(appSettings['interactions_team_scope']||'managers')==='everyone'?'selected':''}>Everyone</option>
             </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The team breakdown (per-person counts) on the dashboard Interactions widget. Everyone else sees only their own numbers.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">The team breakdown (per-person counts) on the dashboard's Interactions and Activity card. Everyone else sees only their own numbers.</div>
           </div>
           <div class="form-group">
             <label class="form-label">Weekly target per person</label>
             <input type="number" id="setting-int-weekly-target" class="form-control" min="0" step="1" value="${appSettings['interactions_weekly_target']||''}" placeholder="none">
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Interactions each person should log per week. Shows as a target line (personal view) and a per-person red/green comparison (team view). Monthly view derives its target from this. Empty = no target.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Client-facing interactions each person should log per week — our own work does not count toward it. Shows as a target line (personal view) and a per-person red/green comparison (team view). Monthly view derives its target from this. Empty = no target.</div>
           </div>
           <div class="form-group">
-            <label class="form-label">Count promotion engagements?</label>
+            <label class="form-label">Count automatic engagements?</label>
             <select id="setting-int-count-promo" class="form-control">
-              <option value="true" ${(appSettings['interactions_count_promotion']||'true')==='true'?'selected':''}>Yes — count them in interaction totals</option>
+              <option value="true" ${(appSettings['interactions_count_promotion']||'true')==='true'?'selected':''}>Yes — count them as Activity</option>
               <option value="false" ${(appSettings['interactions_count_promotion']||'true')!=='true'?'selected':''}>No — manually logged engagements only</option>
             </select>
-            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether the engagement written automatically by the Promote flow counts toward interaction totals.</div>
+            <div style="font-size:11px;color:var(--text3);margin-top:4px;">Whether the rows Focus writes by itself — promotion, suspension and restore, suspension lifted, proposal withdrawn, delivery handover — count on the card. They are never interactions; when counted they sit under Activity.</div>
           </div>
         </div>
       </div>
