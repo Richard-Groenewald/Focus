@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#003057">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Focus Log">
+<link rel="manifest" href="/log.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/icons/favicon-48.png">
+<title>Focus Log</title>
+<style>
+  :root { --navy:#003057; --red:#FA0A11; --khaki:#C3B091; --bg:#F1F4F8; --card:#fff; --line:#D9E1E9; --text:#0E1C28; --text2:#41505F; --text3:#6B7A89; --ok:#166534; --warn:#9A3412; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { margin:0; background:var(--bg); color:var(--text); font-family:Arial,Helvetica,sans-serif; font-size:16px; }
+  body { padding-bottom:calc(92px + env(safe-area-inset-bottom)); min-height:100vh; }
+  [hidden] { display:none !important; }
+  button { font:inherit; cursor:pointer; }
+  #envbar { display:none; background:#F59E0B; color:#000; font:700 11px Arial; text-align:center; padding:3px; letter-spacing:.05em; }
+  .bar { position:sticky; top:0; z-index:20; background:var(--navy); color:#fff; padding:calc(10px + env(safe-area-inset-top)) 16px 10px; display:flex; align-items:center; gap:10px; }
+  .bar h1 { margin:0; font-size:17px; flex:1; }
+  .bar .who { font-size:12px; opacity:.8; }
+  .bar button { background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:8px; padding:6px 10px; font-size:13px; }
+  .sync { margin:8px 16px 0; font-size:13px; padding:8px 12px; border-radius:8px; background:#FFF7ED; color:var(--warn); border:1px solid #FED7AA; display:flex; gap:8px; align-items:center; }
+  .sync button { margin-left:auto; border:1px solid var(--warn); background:#fff; color:var(--warn); border-radius:6px; padding:4px 10px; }
+  .form { padding:4px 16px 0; }
+  label, .lbl { display:block; font-size:13px; font-weight:700; color:var(--text2); margin:16px 0 6px; }
+  .lbl small { font-weight:400; color:var(--text3); }
+  input, textarea { width:100%; font:inherit; font-size:16px; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--text); }
+  textarea { min-height:110px; resize:vertical; }
+  .pick { display:block; width:100%; text-align:left; background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; min-height:52px; }
+  .pick .ph { color:var(--text3); } .pick b { color:var(--navy); } .pick span { display:block; color:var(--text2); font-size:14px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .ch { border:1px solid var(--line); background:#fff; color:var(--text); border-radius:22px; padding:0 16px; min-height:44px; font-size:15px; }
+  .ch.on { background:var(--navy); color:#fff; border-color:var(--navy); font-weight:700; }
+  .ch.nfa.on { background:var(--ok); border-color:var(--ok); }
+  .mic { position:relative; } .mic textarea { padding-right:64px; }
+  .mic button { position:absolute; right:8px; bottom:8px; width:48px; height:48px; border-radius:24px; border:1px solid var(--line); background:#fff; font-size:22px; }
+  .mic button.on { background:var(--red); color:#fff; border-color:var(--red); }
+  .microw { display:flex; gap:8px; align-items:center; margin-top:8px; font-size:13px; color:var(--text3); }
+  .microw .ch { min-height:34px; padding:0 12px; font-size:13px; }
+  .hint { font-size:13px; color:var(--text3); margin-top:6px; }
+  .err { color:#991B1B; background:#FEE2E2; border-radius:8px; padding:8px 10px; font-size:14px; margin-top:12px; }
+  .foot { position:fixed; left:0; right:0; bottom:0; z-index:30; background:#fff; border-top:1px solid var(--line); padding:10px 16px calc(10px + env(safe-area-inset-bottom)); display:flex; gap:10px; }
+  .btn { border:none; border-radius:12px; padding:0 18px; height:52px; font-weight:700; font-size:17px; flex:1; }
+  .btn-red { background:var(--red); color:#fff; } .btn-line { background:#fff; color:var(--navy); border:1px solid var(--navy); }
+  .btn[disabled] { opacity:.45; }
+  h2 { font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--text3); margin:28px 16px 8px; }
+  .entry { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px; margin:0 16px 8px; }
+  .entry.pend { border-left:4px solid #F59E0B; }
+  .entry .r1 { display:flex; gap:8px; align-items:baseline; } .entry .t { font-weight:700; color:var(--navy); } .entry .d { margin-left:auto; color:var(--text3); font-size:13px; white-space:nowrap; }
+  .entry .sub { color:var(--text2); font-size:14px; margin-top:2px; } .entry .n { font-size:14px; margin-top:6px; white-space:pre-wrap; }
+  .chip { display:inline-block; font-size:11px; font-weight:700; border-radius:10px; padding:2px 8px; margin-top:8px; margin-right:6px; background:#F1F4F8; color:var(--text2); }
+  .chip.pend { background:#FEF3C7; color:var(--warn); }
+  .empty { color:var(--text3); font-size:14px; padding:6px 16px; }
+  .login { max-width:380px; margin:0 auto; padding:calc(40px + env(safe-area-inset-top)) 20px 20px; }
+  .login h2 { color:var(--navy); margin:0 0 4px; font-size:22px; text-transform:none; letter-spacing:0; } .login p { color:var(--text2); margin:0 0 18px; }
+  .full { position:fixed; inset:0; z-index:60; background:var(--bg); display:flex; flex-direction:column; }
+  .full .top { background:var(--navy); padding:calc(10px + env(safe-area-inset-top)) 12px 10px; display:flex; gap:8px; }
+  .full .top input { flex:1; } .full .top button { background:none; border:none; color:#fff; font-size:15px; }
+  .full .list { flex:1; overflow-y:auto; padding:8px 12px calc(20px + env(safe-area-inset-bottom)); }
+  .opt { display:block; width:100%; text-align:left; background:#fff; border:1px solid var(--line); border-radius:10px; padding:12px; margin-bottom:6px; }
+  .opt b { color:var(--navy); } .opt span { display:block; color:var(--text2); font-size:14px; }
+  .grp { font-size:12px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:.05em; margin:12px 2px 6px; }
+  .toast { position:fixed; left:16px; right:16px; bottom:calc(100px + env(safe-area-inset-bottom)); z-index:80; background:#111827; color:#fff; padding:12px 14px; border-radius:12px; font-size:14px; }
+</style>
+</head>
+<body>
+<div id="envbar"></div>
+
+<section id="v-login" hidden>
+  <div class="login">
+    <h2>Focus Log</h2>
+    <p>Log an engagement from your phone. Sign in with your Focus username and password.</p>
+    <label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" autocorrect="off">
+    <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+    <div id="lerr" class="err" hidden></div>
+    <div style="margin-top:16px;display:flex;"><button class="btn btn-red" id="lbtn" onclick="doLogin()">Sign in</button></div>
+  </div>
+</section>
+
+<section id="v-app" hidden>
+  <div class="bar"><h1>Focus Log</h1><span class="who" id="who"></span><button onclick="signOut()">Sign out</button></div>
+  <div id="syncbar" class="sync" hidden></div>
+  <div class="form" id="form"></div>
+  <h2>Recent</h2>
+  <div id="recent"></div>
+  <div class="foot"><button class="btn btn-line" onclick="resetForm()">Clear</button><button class="btn btn-red" id="savebtn" onclick="save()">Log engagement</button></div>
+</section>
+
+<div id="overlay"></div>
+<div id="toast" class="toast" hidden></div>
+
+<script>
+'use strict';
+const API = '/sb/';   // same-origin edge rewrite to the Supabase-hosted proxy (see netlify.toml)
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const LS = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} },
+};
+const pad = n => String(n).padStart(2, '0');
+const ymd = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const addDays = (d, n) => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); x.setDate(x.getDate() + n); return x; };
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10));
+const fmtDate = s => { const [y, m, d] = String(s).split('-').map(Number); return new Date(y, m - 1, d).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' }); };
+
+let S = null;                       // { t, u, s } — the same session record the main app and /time keep
+let ME = { personId: null, name: '' };
+let TARGETS = [];                   // [{ key:'d12'|'l3', kind, id, label, sub, mine }]
+let TYPES = [];                     // activity_types rows
+let RECENT = [];                    // my latest engagements from the server
+let PEND = LS.get('lg_pend', []);   // [{ uuid, at, tried, err, target:{deal_id|lead_id}, label, data }]
+let F = blankForm();
+let flushing = false;
+let VOICE = LS.get('lg_voice', 'en-ZA');
+
+function blankForm() { return { key: null, type: null, date: 'today', customDate: '', notes: '', na: null, due: null, customDue: '', details: '' }; }
+
+// ── session (shared with the main app and /time) ─────────────────────────────────────────────
+function loadSession() { const s = LS.get('focus_session', null); if (s && s.t) { S = s; return true; } return false; }
+function tokenPerson(t) { try { return JSON.parse(atob(String(t).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).p || null; } catch (e) { return null; } }
+function showLogin(msg) {
+  S = null; LS.del('focus_session');
+  $('v-app').hidden = true; $('v-login').hidden = false;
+  const e = $('lerr'); e.hidden = !msg; e.textContent = msg || '';
+}
+async function doLogin() {
+  const username = $('u').value.trim(), password = $('p').value;
+  if (!username || !password) { showLogin('Enter your username and password'); return; }
+  $('lbtn').disabled = true;
+  try {
+    const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'login', username, password }) })).json();
+    if (!r || !r.ok) { showLogin(r && r.mustSet ? 'You need to choose your own password first — sign in once on the main Focus site.' : ((r && r.error) || 'Sign-in failed')); return; }
+    S = { t: r.token, u: +r.userId, s: r.sessionId ? +r.sessionId : null };
+    LS.set('focus_session', S); $('p').value = '';
+    await start();
+  } catch (e) { showLogin('Could not reach the server — you need a connection to sign in'); }
+  finally { $('lbtn').disabled = false; }
+}
+function signOut() {
+  if (PEND.length && !confirm(PEND.length + ' engagement' + (PEND.length === 1 ? ' has' : 's have') + ' not synced yet and will be lost if you sign out. Sign out anyway?')) return;
+  PEND = []; LS.del('lg_pend'); LS.del('lg_targets'); LS.del('lg_types'); LS.del('lg_recent'); showLogin('');
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────────────────────
+class NetErr extends Error {}
+async function api(path, method, body, prefer) {
+  const h = { 'Content-Type': 'application/json', 'X-Focus-Token': S.t };
+  if (ME.personId) h['X-Actor-Id'] = String(ME.personId);
+  if (prefer) h['Prefer'] = prefer;
+  let r;
+  try { r = await fetch(API + path, { method: method || 'GET', headers: h, body: body ? JSON.stringify(body) : undefined }); }
+  catch (e) { throw new NetErr('offline'); }
+  const text = await r.text();
+  if (r.status === 401) { showLogin('Your session expired — sign in again.'); throw new Error('auth'); }
+  if (!r.ok) { let m = text; try { const j = JSON.parse(text); m = j.message || j.error || m; } catch (e) {} const err = new Error(m); err.status = r.status; throw err; }
+  return text ? JSON.parse(text) : [];
+}
+
+// ── start-up ─────────────────────────────────────────────────────────────────────────────────
+async function start() {
+  $('v-login').hidden = true; $('v-app').hidden = false;
+  ME.personId = tokenPerson(S.t);
+  try {
+    const u = (await api('system_users?id=eq.' + S.u + '&select=person_id,people(first_name,last_name)'))[0];
+    if (!u) throw new Error('auth');
+    ME.personId = u.person_id; ME.name = u.people ? [u.people.first_name, u.people.last_name].filter(Boolean).join(' ') : '';
+    LS.set('lg_me', ME);
+  } catch (e) {
+    if (e.message === 'auth') return;
+    const c = LS.get('lg_me', null); if (c && c.personId) ME = c;
+  }
+  if (!ME.personId) { showLogin('Could not identify your account — try again with a connection.'); return; }
+  $('who').textContent = ME.name;
+  TARGETS = LS.get('lg_targets', []); TYPES = LS.get('lg_types', []); RECENT = LS.get('lg_recent', []);
+  paintAll();
+  try { await flush(); await Promise.all([loadTargets(), loadTypes(), loadRecent()]); } catch (e) { /* offline: the cached lists stay */ }
+  paintAll();
+}
+async function loadTargets() {
+  const [deals, leads, stages, orgs] = await Promise.all([
+    api('deals?select=id,name,owner_id,org_id,stage_id&order=name.asc&limit=3000'),
+    api('leads?status=not.in.(Dead,Promoted)&select=id,owner_id,site_name,target_org_name,description,status&order=id.desc&limit=2000'),
+    api('stages?select=id,name&limit=200'),
+    api('organisations?select=id,name&limit=5000'),
+  ]);
+  const SKIP = ['Lost', 'Complete', 'Suspended'];
+  const stageName = {}; stages.forEach(s => stageName[s.id] = s.name);
+  const orgName = {}; orgs.forEach(o => orgName[o.id] = o.name);
+  TARGETS = deals.filter(d => !SKIP.includes(stageName[d.stage_id]))
+    .map(d => ({ key: 'd' + d.id, kind: 'deal', id: +d.id, label: orgName[d.org_id] || d.name || 'Deal', sub: (d.name || '') + (stageName[d.stage_id] ? ' · ' + stageName[d.stage_id] : ''), mine: +d.owner_id === +ME.personId }))
+    .concat(leads.map(l => ({ key: 'l' + l.id, kind: 'lead', id: +l.id, label: l.site_name || l.target_org_name || l.description || ('Lead #' + l.id), sub: 'Lead · ' + l.status, mine: +l.owner_id === +ME.personId })));
+  LS.set('lg_targets', TARGETS);
+}
+async function loadTypes() {
+  TYPES = await api('activity_types?active=eq.true&select=id,name,applies_to_opportunities,applies_to_leads,use_as_type,use_as_next_action,requires_detail,detail_prompt,sort_order&order=sort_order.asc.nullslast,name.asc');
+  LS.set('lg_types', TYPES);
+}
+async function loadRecent() {
+  RECENT = await api('engagements?created_by=eq.' + ME.personId + '&select=id,deal_id,lead_id,engagement_date,engagement_type,notes,next_action,next_action_date&order=created_at.desc&limit=15');
+  LS.set('lg_recent', RECENT);
+}
+
+// ── lookups ──────────────────────────────────────────────────────────────────────────────────
+const SYSTEM_TYPES = ['promotion', 'handover', 'demotion', 'suspended', 'restored', 'suspension lifted'];
+const FALLBACK = [{ id: null, name: 'Call' }, { id: null, name: 'Email' }, { id: null, name: 'Meeting' }, { id: null, name: 'Site Visit' }];
+const targetOf = k => TARGETS.find(t => t.key === k);
+function appliesTo(row, t) { return !t || (t.kind === 'deal' ? row.applies_to_opportunities !== false : row.applies_to_leads !== false); }
+function typeChoices() { const t = targetOf(F.key); const r = TYPES.filter(x => x.use_as_type && !SYSTEM_TYPES.includes(String(x.name).toLowerCase()) && appliesTo(x, t)); return r.length ? r : FALLBACK; }
+function naChoices() { const t = targetOf(F.key); const r = TYPES.filter(x => x.use_as_next_action && !SYSTEM_TYPES.includes(String(x.name).toLowerCase()) && appliesTo(x, t)); return r.length ? r : FALLBACK.concat([{ id: null, name: 'No Further Action' }]); }
+const isNfa = r => r && String(r.name).trim().toLowerCase() === 'no further action';
+const asks = r => !!r && (r.requires_detail != null ? !!r.requires_detail : String(r.name).trim().toLowerCase() === 'other');
+const rowByName = (list, n) => list.find(r => r.name === n);
+
+// ── painting ─────────────────────────────────────────────────────────────────────────────────
+function paintAll() { paintForm(); paintRecent(); paintSync(); }
+function chips(items, sel, fn, cls) { return '<div class="chips">' + items.map(i => '<button class="ch ' + (cls || '') + (sel(i) ? ' on' : '') + '" onclick="' + fn + '(\'' + esc(String(i.v).replace(/'/g, "\\'")) + '\')">' + esc(i.t) + '</button>').join('') + '</div>'; }
+function paintForm() {
+  const t = targetOf(F.key), types = typeChoices(), nas = naChoices();
+  const typeRow = rowByName(types, F.type), naRow = rowByName(nas, F.na);
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const needNotes = asks(typeRow), needDetails = asks(naRow);
+  const tomorrow = ymd(addDays(new Date(), 1));
+  let h = '<div class="lbl">Who or what</div><button class="pick" onclick="openPicker()">' + (t ? '<b>' + esc(t.label) + '</b><span>' + esc(t.sub) + '</span>' : '<span class="ph">Choose a deal or lead</span>') + '</button>'
+    + '<div class="lbl">Type</div>' + chips(types.map(x => ({ v: x.name, t: x.name })), i => F.type === i.v, 'setType')
+    + '<div class="lbl">When</div><div class="chips">'
+    + ['today', 'yesterday'].map(k => '<button class="ch' + (F.date === k ? ' on' : '') + '" onclick="setDate(\'' + k + '\')">' + (k === 'today' ? 'Today' : 'Yesterday') + '</button>').join('')
+    + '<button class="ch' + (F.date === 'custom' ? ' on' : '') + '" onclick="setDate(\'custom\')">' + (F.date === 'custom' && F.customDate ? esc(fmtDate(F.customDate)) : 'Pick a date') + '</button></div>'
+    + (F.date === 'custom' ? '<input type="date" id="cdate" max="' + ymd(new Date()) + '" value="' + esc(F.customDate) + '" onchange="F.customDate=this.value;paintForm()" style="margin-top:8px;">' : '')
+    + '<div class="lbl">What happened' + (needNotes ? ' <small>(required for “' + esc(typeRow.name) + '”' + (typeRow.detail_prompt ? ': ' + esc(typeRow.detail_prompt) : '') + ')</small>' : '') + '</div>'
+    + '<div class="mic"><textarea id="notes" oninput="F.notes=this.value" placeholder="Type, or tap the microphone on your keyboard to dictate">' + esc(F.notes) + '</textarea>'
+    + (SR ? '<button id="micbtn" onclick="toggleMic()" aria-label="Dictate">&#127908;</button>' : '') + '</div>'
+    + (SR ? '<div class="microw">Voice language <button class="ch' + (VOICE === 'en-ZA' ? ' on' : '') + '" onclick="setVoice(\'en-ZA\')">English</button><button class="ch' + (VOICE === 'af-ZA' ? ' on' : '') + '" onclick="setVoice(\'af-ZA\')">Afrikaans</button></div>' : '<div class="hint">Tap the microphone on your keyboard to dictate.</div>')
+    + '<div class="lbl">Next action <small>(required)</small></div>' + chips(nas.map(x => ({ v: x.name, t: x.name })), i => F.na === i.v, 'setNa', '')
+    + (isNfa(naRow) ? '<div class="hint">Nothing owed after this — it saves as complete.</div>' : '')
+    + (naRow && !isNfa(naRow) ? '<div class="lbl">Due</div><div class="chips">'
+      + [['t1', 'Tomorrow'], ['t3', 'In 3 days'], ['t7', 'Next week'], ['t14', 'In 2 weeks']].map(([k, n]) => '<button class="ch' + (F.due === k ? ' on' : '') + '" onclick="setDue(\'' + k + '\')">' + n + '</button>').join('')
+      + '<button class="ch' + (F.due === 'custom' ? ' on' : '') + '" onclick="setDue(\'custom\')">' + (F.due === 'custom' && F.customDue ? esc(fmtDate(F.customDue)) : 'Pick a date') + '</button></div>'
+      + (F.due === 'custom' ? '<input type="date" id="cdue" min="' + tomorrow + '" value="' + esc(F.customDue) + '" onchange="F.customDue=this.value;paintForm()" style="margin-top:8px;">' : '') : '')
+    + (needDetails ? '<div class="lbl">Action details <small>(required for “' + esc(naRow.name) + '”' + (naRow.detail_prompt ? ': ' + esc(naRow.detail_prompt) : '') + ')</small></div><textarea id="details" oninput="F.details=this.value" style="min-height:70px">' + esc(F.details) + '</textarea>' : '')
+    + '<div id="ferr" class="err" hidden></div>';
+  const ae = document.activeElement && document.activeElement.id;
+  $('form').innerHTML = h;
+  if (ae && $(ae) && (ae === 'notes' || ae === 'details')) $(ae).focus();
+}
+function paintRecent() {
+  const rows = PEND.map(p => ({ _p: p, label: p.label, engagement_type: p.data.engagement_type, engagement_date: p.data.engagement_date, notes: p.data.notes, next_action: p.data.next_action, next_action_date: p.data.next_action_date }))
+    .concat(RECENT.map(r => { const t = targetOf(r.deal_id ? 'd' + r.deal_id : 'l' + r.lead_id); return Object.assign({ label: t ? t.label : (r.deal_id ? 'Deal #' + r.deal_id : 'Lead #' + r.lead_id) }, r); }));
+  $('recent').innerHTML = rows.length ? rows.map(r => '<div class="entry' + (r._p ? ' pend' : '') + '"><div class="r1"><span class="t">' + esc(r.label) + '</span><span class="d">' + esc(fmtDate(r.engagement_date)) + '</span></div>'
+    + '<div class="sub">' + esc(r.engagement_type || '') + (r.next_action ? ' → ' + esc(r.next_action) + (r.next_action_date ? ' ' + esc(fmtDate(r.next_action_date)) : '') : '') + '</div>'
+    + (r.notes ? '<div class="n">' + esc(String(r.notes).slice(0, 240)) + '</div>' : '')
+    + (r._p ? '<span class="chip pend">' + (r._p.err ? 'Not saved: ' + esc(r._p.err) : 'Waiting to sync') + '</span>' : '') + '</div>').join('') : '<div class="empty">Nothing logged yet</div>';
+}
+function paintSync() {
+  const sb = $('syncbar'), bad = PEND.filter(p => p.err).length;
+  sb.hidden = !PEND.length;
+  if (PEND.length) sb.innerHTML = '<span>' + (bad ? bad + ' could not be saved. ' : '') + (PEND.length - bad ? (PEND.length - bad) + ' waiting to sync.' : '') + '</span><button onclick="flushNow()">Retry</button>';
+}
+
+// ── form handlers ────────────────────────────────────────────────────────────────────────────
+function setType(n) { F.type = n; paintForm(); }
+function setNa(n) { F.na = n; F.due = null; F.details = ''; paintForm(); }
+function setDate(k) { F.date = k; paintForm(); if (k === 'custom') { const e = $('cdate'); if (e && e.showPicker) { try { e.showPicker(); } catch (x) {} } } }
+function setDue(k) { F.due = k; paintForm(); if (k === 'custom') { const e = $('cdue'); if (e && e.showPicker) { try { e.showPicker(); } catch (x) {} } } }
+function setVoice(l) { VOICE = l; LS.set('lg_voice', l); paintForm(); }
+function resetForm() { stopMic(); F = blankForm(); paintForm(); }
+function ferr(m) { const e = $('ferr'); if (!e) return; e.hidden = !m; e.textContent = m || ''; if (m) e.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+
+// the target picker — Recent, then mine, then (when searching) everyone's
+function openPicker() {
+  const box = document.createElement('div'); box.className = 'full'; box.id = 'picker';
+  box.innerHTML = '<div class="top"><input id="q" placeholder="Search client, deal or lead" autocomplete="off" oninput="pickList()"><button onclick="closePicker()">Cancel</button></div><div class="list" id="plist"></div>';
+  document.body.appendChild(box); pickList(); $('q').focus();
+}
+function closePicker() { const p = $('picker'); if (p) p.remove(); }
+function pickList() {
+  const q = ($('q').value || '').toLowerCase().trim();
+  const opt = t => '<button class="opt" onclick="pickTarget(\'' + t.key + '\')"><b>' + esc(t.label) + '</b><span>' + esc(t.sub) + '</span></button>';
+  const hit = t => !q || (t.label + ' ' + t.sub).toLowerCase().includes(q);
+  const rec = !q ? LS.get('lg_recent_targets', []).map(targetOf).filter(Boolean) : [];
+  const mine = TARGETS.filter(t => t.mine && hit(t) && !rec.includes(t)).slice(0, 60);
+  const others = q ? TARGETS.filter(t => !t.mine && hit(t)).slice(0, 40) : [];
+  $('plist').innerHTML = (rec.length ? '<div class="grp">Recent</div>' + rec.map(opt).join('') : '')
+    + (mine.length ? '<div class="grp">Mine</div>' + mine.map(opt).join('') : '')
+    + (others.length ? '<div class="grp">Everyone else\'s</div>' + others.map(opt).join('') : '')
+    + (!rec.length && !mine.length && !others.length ? '<div class="empty">' + (TARGETS.length ? 'Nothing matches “' + esc(q) + '”.' : 'Nothing loaded yet — connect once to load your deals and leads.') + '</div>' : '');
+}
+function pickTarget(k) {
+  F.key = k; closePicker();
+  const r = [k].concat(LS.get('lg_recent_targets', []).filter(x => x !== k)).slice(0, 6); LS.set('lg_recent_targets', r);
+  // a type or next action that does not apply to this kind of target is dropped
+  if (F.type && !rowByName(typeChoices(), F.type)) F.type = null;
+  if (F.na && !rowByName(naChoices(), F.na)) F.na = null;
+  paintForm();
+}
+
+// ── voice (where the browser offers it; the keyboard microphone always works as well) ─────────
+let REC = null;
+function toggleMic() {
+  if (REC) { stopMic(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+  REC = new SR(); REC.lang = VOICE; REC.interimResults = false; REC.continuous = true;
+  REC.onresult = ev => {
+    let t = ''; for (let i = ev.resultIndex; i < ev.results.length; i++) if (ev.results[i].isFinal) t += ev.results[i][0].transcript;
+    if (t) { const el = $('notes'); el.value = (el.value ? el.value.replace(/\s*$/, ' ') : '') + t.trim(); F.notes = el.value; }
+  };
+  REC.onerror = ev => { ferr(ev.error === 'not-allowed' ? 'Microphone access was refused — use your keyboard\'s microphone instead.' : (ev.error === 'network' ? 'Voice needs a connection — type instead.' : '')); stopMic(); };
+  REC.onend = () => stopMic();
+  try { REC.start(); const b = $('micbtn'); if (b) b.classList.add('on'); } catch (e) { REC = null; }
+}
+function stopMic() { try { if (REC) REC.stop(); } catch (e) {} REC = null; const b = $('micbtn'); if (b) b.classList.remove('on'); }
+
+// ── save: queue first, then sync ─────────────────────────────────────────────────────────────
+function save() {
+  stopMic();
+  const t = targetOf(F.key), types = typeChoices(), nas = naChoices();
+  const typeRow = rowByName(types, F.type), naRow = rowByName(nas, F.na);
+  if (!t) return ferr('Choose the deal or lead first.');
+  if (!typeRow) return ferr('Choose the type of engagement.');
+  const today = ymd(new Date());
+  const date = F.date === 'today' ? today : F.date === 'yesterday' ? ymd(addDays(new Date(), -1)) : F.customDate;
+  if (!date) return ferr('Pick the date.');
+  if (date > today) return ferr('The date cannot be in the future.');
+  const notes = (F.notes || '').trim(), details = (F.details || '').trim();
+  if (asks(typeRow) && !notes) return ferr('“' + typeRow.name + '” needs a description' + (typeRow.detail_prompt ? ': ' + typeRow.detail_prompt : '.'));
+  if (!naRow) return ferr('A next action is required — pick “No Further Action” if nothing is owed.');
+  let due;
+  if (isNfa(naRow)) due = today;
+  else {
+    due = F.due === 'custom' ? F.customDue : (F.due && /^t\d+$/.test(F.due) ? ymd(addDays(new Date(), +F.due.slice(1))) : '');
+    if (!due) return ferr('Choose when the next action is due.');
+  }
+  if (asks(naRow) && !details) return ferr('“' + naRow.name + '” needs a description' + (naRow.detail_prompt ? ': ' + naRow.detail_prompt : '.'));
+  const data = {
+    engagement_date: date, engagement_type: typeRow.name, activity_type_id: typeRow.id == null ? null : +typeRow.id,
+    notes: notes || null, action_details: details || null,
+    next_action: naRow.name, next_action_id: naRow.id == null ? null : +naRow.id, next_action_date: due, next_action_done: !!isNfa(naRow),
+  };
+  PEND.push({ uuid: uuid(), at: new Date().toISOString(), tried: false, err: null, label: t.label, target: t.kind === 'deal' ? { deal_id: t.id } : { lead_id: t.id }, data });
+  LS.set('lg_pend', PEND);
+  F = blankForm(); paintAll(); window.scrollTo(0, 0);
+  toast(navigator.onLine === false ? 'Saved on this phone — it will sync when you have signal' : 'Saving…');
+  flush();
+}
+
+// ── sync ───────────────────────────────────────────────────────────────────────────────────
+function savePend() { LS.set('lg_pend', PEND); }
+async function flushNow() { const had = PEND.length; await flush(true); if (had && !PEND.length) toast('Synced'); }
+async function flush(retryErrors) {
+  if (flushing || !S || !ME.personId) return;
+  flushing = true;
+  try {
+    for (const p of PEND.slice()) {
+      if (p.err && !retryErrors) continue;
+      try {
+        // An attempt that was sent but never acknowledged may have landed: look for it before sending again.
+        let done = false;
+        if (p.tried) {
+          const k = p.target.deal_id ? 'deal_id=eq.' + p.target.deal_id : 'lead_id=eq.' + p.target.lead_id;
+          const hits = await api('engagements?created_by=eq.' + ME.personId + '&' + k + '&engagement_date=eq.' + p.data.engagement_date + '&created_at=gte.' + encodeURIComponent(p.at) + '&select=id,notes');
+          done = hits.some(h => (h.notes || null) === (p.data.notes || null));
+        }
+        if (!done) {
+          p.tried = true; p.err = null; savePend();
+          await api('engagements', 'POST', Object.assign({ created_by: ME.personId }, p.target, p.data), 'return=minimal');
+          // a logged touch is the pickup: the lead's wake reminder clears (last touch itself is a database trigger)
+          if (p.target.lead_id) { try { await api('leads?id=eq.' + p.target.lead_id, 'PATCH', { woke_at: null }, 'return=minimal'); } catch (e) {} }
+        }
+        PEND = PEND.filter(x => x !== p); savePend();
+      } catch (e) {
+        if (e instanceof NetErr || e.message === 'auth' || (e.status >= 500)) break;   // try again later
+        p.err = e.message || 'refused'; p.tried = false; savePend();                   // the server said no: the person must fix it
+      }
+    }
+  } finally { flushing = false; }
+  if (!PEND.length) { try { await loadRecent(); } catch (e) {} }
+  paintRecent(); paintSync();
+}
+addEventListener('online', () => { if (S) flushNow(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && S && PEND.length) flush(); });
+let _tt; function toast(m) { const t = $('toast'); t.textContent = m; t.hidden = false; clearTimeout(_tt); _tt = setTimeout(() => t.hidden = true, 3500); }
+
+// ── boot ───────────────────────────────────────────────────────────────────────────────────
+(async function () {
+  if ('serviceWorker' in navigator) { try { navigator.serviceWorker.register('/log-sw.js'); } catch (e) {} }
+  try { const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'env' }) })).json();
+    if (r && r.environment && !/^prod/i.test(r.environment)) { const b = $('envbar'); b.style.display = 'block'; b.textContent = r.environment.toUpperCase() + ' SITE — TEST DATA'; document.title = '[DEV] ' + document.title; } } catch (e) {}
+  if (loadSession()) { const c = LS.get('lg_me', null); if (c) ME = c; await start(); } else showLogin('');
+})();
+</script>
+</body>
+</html>
