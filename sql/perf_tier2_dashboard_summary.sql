@@ -37,7 +37,10 @@
 --   stream_values    per deal: opp_total (opportunity streams' opportunity_revenue),
 --                    sec_total (fulfilment streams' secured_revenue) — from revenue streams only
 --   interactions     engagements dated >= p_from with _owner_id (parent's owner) and _cat
---                    (Outreach / Sales / Contract / Project — the _engHistCat rule)
+--                    (Outreach / Sales / Contract / Project — the _engHistCat rule); v7.10.57: + work_mode,
+--                    so the dashboard's Interactions and Activity card can tell client-facing
+--                    interactions from our own work (re-run this file on both databases; a bundle
+--                    without the key reads every row as an interaction, as before)
 
 BEGIN;
 
@@ -158,7 +161,7 @@ SELECT jsonb_build_object(
 
   'interactions', (SELECT coalesce(jsonb_agg(jsonb_build_object(
       'id', e.id, 'lead_id', e.lead_id, 'deal_id', e.deal_id, 'engagement_date', e.engagement_date,
-      'engagement_type', e.engagement_type, 'created_by', e.created_by,
+      'engagement_type', e.engagement_type, 'created_by', e.created_by, 'work_mode', e.work_mode,
       '_owner_id', coalesce(l.owner_id, d.owner_id),
       '_cat', CASE WHEN e.lead_id IS NOT NULL THEN 'Outreach'
                    WHEN d.stage_id IN (5, 7, 8) THEN CASE WHEN ss.is_recurring = false THEN 'Project' ELSE 'Contract' END
