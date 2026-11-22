@@ -76,6 +76,10 @@
     <p>Log an engagement from your phone. Sign in with your Focus username and password.</p>
     <label for="u">Username</label><input id="u" autocomplete="username" autocapitalize="none" autocorrect="off">
     <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+    <div id="cwrap" hidden>
+      <label for="c">Authenticator code</label><input id="c" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000">
+      <label id="twrap" style="display:none;align-items:center;gap:8px;font-weight:400;margin-top:10px;"><input type="checkbox" id="tr" style="width:auto;"> <span id="tlbl"></span></label>
+    </div>
     <div id="lerr" class="err" hidden></div>
     <div style="margin-top:16px;display:flex;"><button class="btn btn-red" id="lbtn" onclick="doLogin()">Sign in</button></div>
   </div>
@@ -129,15 +133,40 @@ function showLogin(msg) {
   $('v-app').hidden = true; $('v-login').hidden = false;
   const e = $('lerr'); e.hidden = !msg; e.textContent = msg || '';
 }
+// v7.10.58: where Focus asks for an authenticator code, a correct password is answered with needCode and
+// this card shows the code box. A device the person chose to trust holds a token (localStorage focus_trust,
+// shared with the main app) that stands in for the code. The app itself is set up once, on the main site.
+function trustMap() { try { return JSON.parse(localStorage.getItem('focus_trust') || '{}') || {}; } catch (e) { return {}; } }
+function codeStep(on, days) {
+  $('cwrap').hidden = !on;
+  $('twrap').style.display = on && days > 0 ? 'flex' : 'none';
+  $('tlbl').textContent = 'Trust this device for ' + days + (days === 1 ? ' day' : ' days');
+  if (!on) { $('c').value = ''; $('tr').checked = false; }
+}
 async function doLogin() {
   const username = $('u').value.trim(), password = $('p').value;
   if (!username || !password) { showLogin('Enter your username and password'); return; }
+  const asking = !$('cwrap').hidden, code = $('c').value.replace(/\s+/g, '');
+  if (asking && !/^\d{6}$/.test(code)) { showLogin('Enter the 6-digit code from your authenticator app'); return; }
   $('lbtn').disabled = true;
   try {
-    const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'login', username, password }) })).json();
-    if (!r || !r.ok) { showLogin(r && r.mustSet ? 'You need to choose your own password first — sign in once on the main Focus site.' : ((r && r.error) || 'Sign-in failed')); return; }
+    const key = username.toLowerCase(), trust = trustMap();
+    const body = { action: 'login', username, password, device: trust[key] || undefined };
+    if (asking) { body.code = code; body.trust = $('tr').checked; }
+    const r = await (await fetch(API + 'auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json();
+    if (!r || !r.ok) {
+      if (r && r.needCode) { codeStep(true, +r.trustDays || 0); $('c').value = ''; showLogin(asking ? (r.error || 'That code is not right') : ''); $('c').focus(); return; }
+      codeStep(false, 0);
+      showLogin(r && r.mustSet ? 'You need to choose your own password first — sign in once on the main Focus site.'
+        : r && r.enrol ? 'Set up your authenticator app first — sign in once on the main Focus site.'
+        : ((r && r.error) || 'Sign-in failed'));
+      return;
+    }
+    if (r.device) { trust[key] = r.device; try { localStorage.setItem('focus_trust', JSON.stringify(trust)); } catch (e) {} }
+    codeStep(false, 0);
     S = { t: r.token, u: +r.userId, s: r.sessionId ? +r.sessionId : null };
-    LS.set('focus_session', S); $('p').value = '';
+    LS.set('focus_session', S);
+    $('p').value = '';
     await start();
   } catch (e) { showLogin('Could not reach the server — you need a connection to sign in'); }
   finally { $('lbtn').disabled = false; }

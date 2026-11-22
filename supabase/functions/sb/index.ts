@@ -7,7 +7,8 @@
 // crossings per request (~600 ms of pure network for an 18 ms query). Running the
 // proxy here, pinned to the database's own region by the `x-region` header on the
 // Netlify rewrite (netlify.toml), removes the second crossing. The Netlify function
-// stays deployed as the rollback: point FN_URL back at it and redeploy.
+// stayed deployed as the rollback until v7.10.58, when it was retired: a second proxy
+// without the sign-in guard below would be a way round it.
 //
 // Deployed per Supabase project (prod and test each run their own copy against
 // their own database — SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are injected by the
@@ -110,6 +111,116 @@ export function passwordPolicyError(p: unknown): string | null {
   return null;
 }
 
+// ── Authenticator code (v7.10.58) ────────────────────────────────────────────
+// The regular sign-in's second step: a time-based one-time code (RFC 6238 — HMAC-SHA1,
+// 6 digits, a new code every 30 seconds), which is what Microsoft Authenticator and
+// every other code-generator app produce. The code for the step either side of now is
+// accepted too (a phone's clock drifts); a step already used is refused by the
+// database (auth_totp_step), so a code works once.
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+export function base32Encode(bytes: Uint8Array): string {
+  let bits = 0, value = 0, out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    value = (value << 8) | bytes[i]; bits += 8;
+    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
+}
+export function base32Decode(s: unknown): Uint8Array | null {
+  const str = String(s == null ? '' : s).replace(/[\s=-]+/g, '').toUpperCase();
+  if (!str || /[^A-Z2-7]/.test(str)) return null;
+  const out: number[] = [];
+  let bits = 0, value = 0;
+  for (let i = 0; i < str.length; i++) {
+    value = ((value << 5) | B32.indexOf(str[i])) & 0xfff; bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 0xff); bits -= 8; }
+  }
+  return new Uint8Array(out);
+}
+const TOTP_STEP_S = 30, TOTP_DIGITS = 6, TOTP_WINDOW = 1;
+export async function totpAt(secret: Uint8Array, step: number): Promise<string> {
+  const msg = new Uint8Array(8);
+  let s = step;
+  for (let i = 7; i >= 0; i--) { msg[i] = s % 256; s = Math.floor(s / 256); }
+  const k = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
+  const h = new Uint8Array(await crypto.subtle.sign('HMAC', k, msg));
+  const o = h[h.length - 1] & 0x0f;
+  const bin = ((h[o] & 0x7f) * 0x1000000) + (h[o + 1] << 16) + (h[o + 2] << 8) + h[o + 3];
+  return String(bin % 10 ** TOTP_DIGITS).padStart(TOTP_DIGITS, '0');
+}
+// The step whose code this is, or null. Every candidate is computed and compared, so
+// the time taken says nothing about which one matched.
+export async function totpMatch(secret: Uint8Array, code: unknown, nowMs: number): Promise<number | null> {
+  const typed = String(code == null ? '' : code).replace(/\s+/g, '');
+  if (!/^\d{6}$/.test(typed)) return null;
+  const now = Math.floor(nowMs / 1000 / TOTP_STEP_S);
+  let hit: number | null = null;
+  for (let d = -TOTP_WINDOW; d <= TOTP_WINDOW; d++) {
+    const want = await totpAt(secret, now + d);
+    if (timingSafeEqual(te.encode(want), te.encode(typed)) && hit == null) hit = now + d;
+  }
+  return hit;
+}
+
+const bytesToB64url = (bytes: Uint8Array): string =>
+  bytesToB64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const b64urlToBytes = (s: string): Uint8Array => {
+  let t = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  while (t.length % 4) t += '=';
+  return b64ToBytes(t);
+};
+export async function sha256Hex(s: string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', te.encode(s)));
+}
+
+// The Authenticator secret is stored encrypted (AES-256-GCM, bound to the login it
+// belongs to). The key is derived from the service key, like the session key, so
+// there is nothing extra to provision and a copy of the table alone gives no codes.
+let _totpKey: Promise<CryptoKey> | null = null;
+function totpKey(): Promise<CryptoKey> {
+  if (!_totpKey) {
+    _totpKey = hmacSha256(te.encode(String(KEY)), 'focus-totp-v1')
+      .then(raw => crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']));
+  }
+  return _totpKey;
+}
+export async function sealSecret(userId: number, secret: Uint8Array): Promise<string> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv, additionalData: te.encode('u' + userId) }, await totpKey(), secret));
+  return 'v1.' + bytesToB64url(iv) + '.' + bytesToB64url(ct);
+}
+export async function openSecret(userId: number, sealed: unknown): Promise<Uint8Array | null> {
+  try {
+    const parts = String(sealed || '').split('.');
+    if (parts.length !== 3 || parts[0] !== 'v1') return null;
+    const pt = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: b64urlToBytes(parts[1]), additionalData: te.encode('u' + userId) },
+      await totpKey(), b64urlToBytes(parts[2]));
+    return new Uint8Array(pt);
+  } catch (_e) { return null; }
+}
+
+// A one-time password an admin hands over: three groups of four, no look-alike
+// characters, always meeting the policy (the hyphen is its special character).
+const OTP_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ', OTP_LOWER = 'abcdefghijkmnpqrstuvwxyz', OTP_DIGIT = '23456789';
+function randomPick(alphabet: string): string {
+  const limit = 256 - (256 % alphabet.length);
+  const b = new Uint8Array(1);
+  do { crypto.getRandomValues(b); } while (b[0] >= limit);
+  return alphabet[b[0] % alphabet.length];
+}
+export function oneTimePassword(): string {
+  const all = OTP_UPPER + OTP_LOWER + OTP_DIGIT;
+  for (;;) {
+    let s = '';
+    for (let i = 0; i < 12; i++) s += randomPick(all);
+    if (/[A-Z]/.test(s) && /[a-z]/.test(s) && /[0-9]/.test(s)) return s.slice(0, 4) + '-' + s.slice(4, 8) + '-' + s.slice(8);
+  }
+}
+const TEMP_PASSWORD_DAYS = 7;
+
 // ── Sessions ─────────────────────────────────────────────────────────────────
 // Stateless token v2.<payload>.<hmac>; the signing key is HMAC(service key,
 // 'focus-session-v1'). Payload carries u (user id), p (person id), e (expiry),
@@ -161,21 +272,106 @@ export async function verifyToken(key: string, token: unknown): Promise<Session 
 // change / forced reset / deactivation). Cached per warm isolate for
 // SESSION_CHECK_MS; a write to system_users through this proxy clears the cache.
 const SESSION_CHECK_MS = 60 * 1000;
-const sessionCache = new Map<number, { active: boolean; version: number; at: number }>();
+// v7.10.58: the same read also brings the login's permissions (the embed index.html's
+// buildUserContext uses), so the proxy can refuse a write to the access tables that
+// the login may not make. perms is null when only the plain row could be read.
+type SessionEntry = { active: boolean; version: number; perms: string[] | null; admin: boolean; at: number };
+const sessionCache = new Map<number, SessionEntry>();
+const SESSION_EMBED = 'active,session_version,'
+  + 'user_roles(roles(name,role_permissions(permissions(name)))),'
+  + 'user_permission_overrides(granted,permissions(name))';
+
+// Roles' permissions, then the per-user overrides: granted TRUE adds, FALSE removes.
+export function permsOf(row: any): { perms: string[]; admin: boolean } {
+  let perms: string[] = [];
+  let admin = false;
+  (row.user_roles || []).forEach((ur: any) => {
+    const r = ur && ur.roles; if (!r) return;
+    if (r.name === 'Admin') admin = true;
+    (r.role_permissions || []).forEach((rp: any) => {
+      const nm = rp && rp.permissions && rp.permissions.name;
+      if (nm && !perms.includes(nm)) perms.push(nm);
+    });
+  });
+  (row.user_permission_overrides || []).forEach((o: any) => {
+    const nm = o && o.permissions && o.permissions.name; if (!nm) return;
+    if (o.granted) { if (!perms.includes(nm)) perms.push(nm); }
+    else perms = perms.filter(x => x !== nm);
+  });
+  return { perms, admin };
+}
+
+async function sessionEntry(userId: number): Promise<SessionEntry | null> {
+  const now = Date.now();
+  let entry = sessionCache.get(userId);
+  if (!entry || now - entry.at > SESSION_CHECK_MS) {
+    let row: any = null, withPerms = true;
+    try {
+      const rows = await sbRest('GET', `/system_users?id=eq.${userId}&select=${SESSION_EMBED}`);
+      row = rows && rows[0];
+    } catch (_e) {
+      // The embed could not be read (a relationship PostgREST cannot resolve): the
+      // session check must still work, so fall back to the plain row.
+      withPerms = false;
+      try {
+        const rows = await sbRest('GET', `/system_users?id=eq.${userId}&select=active,session_version`);
+        row = rows && rows[0];
+      } catch (_e2) { return null; }
+    }
+    const p = row && withPerms ? permsOf(row) : null;
+    entry = { active: !!row && row.active !== false, version: row ? +row.session_version : -1,
+              perms: p ? p.perms : null, admin: !!(p && p.admin), at: now };
+    sessionCache.set(userId, entry);
+  }
+  return entry;
+}
 
 async function sessionLive(session: Session): Promise<'ok' | 'revoked' | 'error'> {
-  const now = Date.now();
-  let entry = sessionCache.get(session.userId);
-  if (!entry || now - entry.at > SESSION_CHECK_MS) {
-    let rows: any;
-    try { rows = await sbRest('GET', `/system_users?id=eq.${session.userId}&select=active,session_version`); }
-    catch (_e) { return 'error'; }
-    const row = rows && rows[0];
-    entry = { active: !!row && row.active !== false, version: row ? +row.session_version : -1, at: now };
-    sessionCache.set(session.userId, entry);
-  }
+  const entry = await sessionEntry(session.userId);
+  if (!entry) return 'error';
   return (entry.active && entry.version === session.version) ? 'ok' : 'revoked';
 }
+
+// May this session's login do what the permission names? The rule is index.html's
+// can(): the Admin role, or the 'all' permission, or the permission itself.
+// null = the permissions could not be read just now.
+async function sessionCan(session: Session, permission: string): Promise<boolean | null> {
+  const entry = await sessionEntry(session.userId);
+  if (!entry || entry.perms == null) return null;
+  return entry.admin || entry.perms.includes('all') || entry.perms.includes(permission);
+}
+
+// A valid, live session from the request's token, or null.
+async function requestSession(req: Request): Promise<Session | null> {
+  const session = await verifyToken(KEY, req.headers.get('x-focus-token'));
+  if (!session) return null;
+  return (await sessionLive(session)) === 'ok' ? session : null;
+}
+
+// ── The sign-in store (v7.10.58) ─────────────────────────────────────────────
+// Password hashes, Authenticator secrets, trusted devices and the sign-in policy live
+// in schema focus_auth, which PostgREST does not serve, behind the auth_* functions
+// (sql/add_signin_guard.sql). Those functions answer only a request carrying
+// X-Focus-Internal, which this proxy adds to its OWN calls here and to nothing it
+// forwards for a browser. VaultMissing = the database has not run that file yet
+// (PGRST202): the caller falls back to the old columns on system_users.
+class VaultMissing extends Error {}
+async function authRpc(name: string, args: Record<string, unknown>, actor?: number | null): Promise<any> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json', 'apikey': KEY, 'Authorization': 'Bearer ' + KEY, 'X-Focus-Internal': 'auth',
+  };
+  if (actor) { headers['X-Actor-Id'] = String(actor); headers['X-Real-Actor-Id'] = String(actor); }
+  const res = await fetch(`https://${SB}/rest/v1/rpc/${name}`, { method: 'POST', headers, body: JSON.stringify(args || {}) });
+  const d = await res.text();
+  if (res.status === 404) {
+    let code = '';
+    try { code = (JSON.parse(d) || {}).code || ''; } catch (_e) { /* not PostgREST's body */ }
+    if (code === 'PGRST202') throw new VaultMissing('sign-in store not installed');
+  }
+  if (res.status >= 400) throw new Error(`HTTP ${res.status}: ${d.slice(0, 200)}`);
+  return d ? JSON.parse(d) : null;
+}
+const NOT_INSTALLED = { ok: false, notInstalled: true, error: 'This database has not had the sign-in upgrade yet (sql/add_signin_guard.sql)' };
 
 // Minimal REST helper against this project's PostgREST, service key, for the
 // auth / files / session paths (the data proxy below forwards the raw request).
@@ -243,12 +439,17 @@ function clientIp(req: Request): string | null {
     || h.get('cf-connecting-ip')
     || null;
 }
-async function logSignIn(req: Request, user: any, outcome: string): Promise<number | null> {
+// method (v7.10.58) says how: 'password', 'password+code', 'password+device', and on a
+// refused attempt which step failed ('password' or 'code'). Sent only by the sign-in
+// path that knows the column exists (it arrives with sql/add_signin_guard.sql).
+async function logSignIn(req: Request, user: any, outcome: string, method?: string): Promise<number | null> {
   try {
-    const rows = await sbRest('POST', '/user_sessions', {
+    const row: Record<string, unknown> = {
       system_user_id: +user.id, person_id: user.person_id == null ? null : +user.person_id, outcome,
       user_agent: String(req.headers.get('user-agent') || '').slice(0, 400) || null, ip: clientIp(req),
-    });
+    };
+    if (method) row.method = method;
+    const rows = await sbRest('POST', '/user_sessions', row);
     return rows && rows[0] ? +rows[0].id : null;
   } catch (_e) { return null; }
 }
@@ -311,16 +512,31 @@ async function handleFiles(req: Request, url: URL): Promise<Response> {
 }
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
-// POST /auth
-//   { action: 'env' }                                    -> the environment label
-//   { action: 'check', username|userId }                 -> does this user still need to choose one?
-//   { action: 'login', username|userId, password }       -> verify; returns a session token
+// POST /auth — sign-in, never proxied to PostgREST.
+//   Before a session exists:
+//   { action: 'env' }                                     -> the environment label
+//   { action: 'check', username }                         -> may this account still choose a password unverified?
+//   { action: 'login', username, password [, code] [, device] [, trust] }
+//                                                         -> a session token; or needCode / enrol / mustSet
 //   { action: 'set',   username|userId, password, newPassword }
-//                                                        -> first-time set (password ignored) or
-//                                                           change; returns a fresh token
+//                                                         -> choose or change a password
+//   { action: 'totp-begin',   username, password }        -> a new Authenticator secret to scan
+//   { action: 'totp-confirm', username, password, code [, trust] }
+//                                                         -> confirms it and signs in
+//   With a session (X-Focus-Token), checked HERE against the login's permissions:
+//   { action: 'admin-list' }                              -> each login's sign-in state   (manage_system_users)
+//   { action: 'admin-reset-password', targetUserId }      -> a one-time password, shown once
+//   { action: 'admin-reset-authenticator', targetUserId } -> the user enrols again
+//   { action: 'policy-get' } / { action: 'policy-set', codeRequired, trustDays }   (manage_settings)
 // Sign-in is by TYPED username (= first name, case-insensitive); nothing pre-login
 // enumerates accounts. Never returns a hash, a salt, or any hint about which half
-// of a wrong pair was wrong. Failures are deliberately uniform.
+// of a wrong pair was wrong.
+//
+// Two stores (v7.10.58). Where sql/add_signin_guard.sql has run, credentials come from
+// the auth_* functions and the rules are the new ones (handleAuthVault): no account
+// may be claimed from the login screen, and the Authenticator code applies when the
+// policy says so. Where it has not, handleAuthLegacy is the previous behaviour on the
+// old columns, unchanged.
 // MAINTENANCE MODE: while MAINTENANCE_ON is true, Focus is on-line for the system_users
 // ids in MAINTENANCE_ALLOW only (4 = Richard, 12 = Lesley-Anne); everyone else is turned
 // away at sign-in and on every proxied call, and the client sends them to /maintenance.html.
@@ -330,9 +546,17 @@ const MAINTENANCE_ON = false;
 const MAINTENANCE_ALLOW = [4, 12];
 const maintenanceBlocks = (userId: unknown) => MAINTENANCE_ON && !MAINTENANCE_ALLOW.includes(+(userId as any));
 
+const LOCK_MSG = 'Too many failed attempts — try again in a few minutes';
+const ADMIN_ACTIONS: Record<string, string> = {
+  'admin-list': 'manage_system_users', 'admin-reset-password': 'manage_system_users',
+  'admin-reset-authenticator': 'manage_system_users',
+  'policy-get': 'manage_settings', 'policy-set': 'manage_settings',
+};
+
 async function handleAuth(req: Request): Promise<Response> {
   let body: any;
   try { body = JSON.parse((await req.text()) || '{}'); } catch (_e) { return authReply(400, { ok: false, error: 'Bad request' }); }
+  if (!body || typeof body !== 'object') return authReply(400, { ok: false, error: 'Bad request' });
 
   // The one pre-login lookup the login screen still needs.
   if (body.action === 'env') {
@@ -342,25 +566,280 @@ async function handleAuth(req: Request): Promise<Response> {
     } catch (_e) { return authReply(200, { ok: true, environment: '' }); }
   }
 
-  const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until,session_version';
-  let rows: any;
-  try {
-    const uname = String(body.username || '').trim();
-    if (uname) {
-      if (uname.length > 80) return authReply(400, { ok: false, error: 'Bad request' });
-      // ilike without wildcards = case-insensitive equality.
-      rows = await sbRest('GET', `/system_users?username=ilike.${encodeURIComponent(uname)}&${SELECT}`);
-    } else {
-      const userId = parseInt(body.userId, 10);
-      if (!userId) return authReply(400, { ok: false, error: 'Bad request' });
-      rows = await sbRest('GET', `/system_users?id=eq.${userId}&${SELECT}`);
-    }
-  } catch (_e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
+  if (ADMIN_ACTIONS[body.action]) return handleAuthAdmin(req, body);
 
-  const user = rows && rows[0];
+  const uname = String(body.username || '').trim();
+  const byId = uname ? 0 : parseInt(body.userId, 10);
+  if (uname.length > 80 || (!uname && !byId)) return authReply(400, { ok: false, error: 'Bad request' });
+
+  let user: any, vault = true;
+  try {
+    user = await authRpc('auth_read', { p_username: uname || null, p_user_id: uname ? null : byId });
+  } catch (e) {
+    if (!(e instanceof VaultMissing)) return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' });
+    vault = false;
+    const SELECT = 'select=id,person_id,active,password_hash,password_salt,must_set_password,failed_login_count,locked_until,session_version';
+    try {
+      // ilike without wildcards = case-insensitive equality.
+      const rows = uname
+        ? await sbRest('GET', `/system_users?username=ilike.${encodeURIComponent(uname)}&${SELECT}`)
+        : await sbRest('GET', `/system_users?id=eq.${byId}&${SELECT}`);
+      user = rows && rows[0];
+    } catch (_e) { return authReply(500, { ok: false, error: 'Sign-in is unavailable right now' }); }
+  }
+
   if (!user || user.active === false) return authReply(200, { ok: false, error: 'Sign-in failed' });
+  if (body.action !== 'check' && maintenanceBlocks(user.id)) return authReply(200, { ok: false, maintenance: true, error: 'Focus is off-line for maintenance' });
+  return vault ? handleAuthVault(req, body, user, uname) : handleAuthLegacy(req, body, user);
+}
+
+// ── Sign-in on the new store ─────────────────────────────────────────────────
+async function handleAuthVault(req: Request, body: any, user: any, uname: string): Promise<Response> {
   const userId = +user.id;
-  if (body.action !== 'check' && maintenanceBlocks(userId)) return authReply(200, { ok: false, maintenance: true, error: 'Focus is off-line for maintenance' });
+  const action = String(body.action || '');
+  // Nothing may be chosen unverified any more, so the login card never opens the
+  // set panel on a bare username.
+  if (action === 'check') return authReply(200, { ok: true, mustSet: false });
+  if (!['login', 'set', 'totp-begin', 'totp-confirm'].includes(action)) return authReply(400, { ok: false, error: 'Bad request' });
+
+  const write = (patch: Record<string, unknown>) => authRpc('auth_write', { p_user_id: userId, p_patch: patch });
+  const unavailable = () => authReply(500, { ok: false, error: 'Sign-in is unavailable right now' });
+  const codeRequired = !!user.code_required;
+  const trustDays = Math.max(0, Math.min(365, +user.trust_days || 0));
+  const enrolled = !!user.totp_secret && !!user.totp_confirmed_at;
+
+  // Account lock: MAX_LOGIN_FAILURES wrong passwords OR wrong codes lock the account
+  // for LOCK_MINUTES; any completed sign-in clears the slate.
+  const locked = user.locked_until && Date.parse(user.locked_until) > Date.now();
+  const registerFailure = async (step: string) => {
+    const fails = (+user.failed_login_count || 0) + 1;
+    const lockNow = fails >= MAX_LOGIN_FAILURES;
+    try {
+      await write(lockNow
+        ? { failed_login_count: 0, locked_until: new Date(Date.now() + LOCK_MINUTES * 60000).toISOString() }
+        : { failed_login_count: fails });
+    } catch (_e) { /* best effort */ }
+    await logSignIn(req, user, lockNow ? 'locked' : 'failed', step);
+  };
+  const clearFailures = async () => {
+    if (!(+user.failed_login_count || 0) && !user.locked_until) return;
+    try { await write({ failed_login_count: 0, locked_until: null }); } catch (_e) { /* best effort */ }
+  };
+
+  if (locked) {
+    if (action === 'login') await logSignIn(req, user, 'locked', 'password');
+    return authReply(200, { ok: false, error: LOCK_MSG });
+  }
+
+  // Every action here starts by proving the password.
+  if (!(await passwordMatches(String(body.password || ''), user.password_salt, user.password_hash))) {
+    await registerFailure('password');
+    return authReply(200, { ok: false, error: action === 'set' ? 'Current password is incorrect' : 'Sign-in failed' });
+  }
+  const mustSet = !!user.must_set_password;
+  if (mustSet && user.temp_expires_at && Date.parse(user.temp_expires_at) < Date.now()) {
+    return authReply(200, { ok: false, error: 'That one-time password has expired — ask an administrator for a new one' });
+  }
+
+  // A trusted-device token for this sign-in, when asked for and allowed.
+  const trustDevice = async (): Promise<string | null> => {
+    if (!body.trust || !(trustDays > 0)) return null;
+    const token = bytesToB64url(crypto.getRandomValues(new Uint8Array(32)));
+    try {
+      await authRpc('auth_device_add', {
+        p_user_id: userId, p_token_hash: await sha256Hex(token),
+        p_expires_at: new Date(Date.now() + trustDays * 86400000).toISOString(),
+        p_user_agent: String(req.headers.get('user-agent') || '').slice(0, 400) || null,
+      });
+      return token;
+    } catch (_e) { return null; }   // the sign-in stands; the device is simply not remembered
+  };
+  const signedIn = async (method: string, version: unknown, device: string | null) => {
+    await clearFailures();
+    const sessionId = await logSignIn(req, user, 'ok', method);
+    const out: Record<string, unknown> = {
+      ok: true, token: await issueToken(KEY, userId, user.person_id, version), userId, personId: user.person_id, sessionId };
+    if (device) { out.device = device; out.trustDays = trustDays; }
+    return authReply(200, out);
+  };
+
+  if (action === 'set') {
+    const next = String(body.newPassword || '');
+    const policyError = passwordPolicyError(next);
+    if (policyError) return authReply(200, { ok: false, error: policyError });
+    if (next === String(body.password || '')) return authReply(200, { ok: false, error: 'Choose a password different from the current one' });
+    const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+    let after: any;
+    try {
+      after = await write({
+        password_hash: await hashPassword(next, salt), password_salt: salt, temp_expires_at: null,
+        must_set_password: false, failed_login_count: 0, locked_until: null,
+        bump: true,            // every other session this login held ends here
+        clear_devices: true,   // and every trusted device is forgotten
+      });
+    } catch (_e) { return authReply(500, { ok: false, error: 'Could not save the password' }); }
+    sessionCache.delete(userId);
+    const fresh = after && after.session_version != null ? +after.session_version : (+user.session_version || 1) + 1;
+    // A change made from inside the app keeps its session: the caller holds a live
+    // session for this same login, which already passed the code.
+    const live = await verifyToken(KEY, req.headers.get('x-focus-token'));
+    const inApp = !!live && live.userId === userId && live.version === +user.session_version;
+    if (inApp) return authReply(200, { ok: true, set: true, token: await issueToken(KEY, userId, user.person_id, fresh), userId, personId: user.person_id, sessionId: null });
+    // From the login screen, a password alone is a sign-in only where no code is
+    // required. Otherwise the card signs in with the new password, which asks for it.
+    if (codeRequired) return authReply(200, { ok: true, set: true });
+    const sessionId = uname ? await logSignIn(req, user, 'ok', 'password') : null;
+    return authReply(200, { ok: true, set: true, token: await issueToken(KEY, userId, user.person_id, fresh), userId, personId: user.person_id, sessionId });
+  }
+
+  if (mustSet) {
+    // A one-time (or pre-reset) password verified: now they choose their own.
+    await clearFailures();
+    return authReply(200, { ok: false, mustSet: true, error: 'Choose your own password to continue' });
+  }
+
+  if (action === 'totp-begin') {
+    if (!codeRequired) return authReply(200, { ok: false, error: 'An authenticator code is not required for Focus at present' });
+    if (enrolled) return authReply(200, { ok: false, error: 'An authenticator is already set up for this login — ask an administrator to reset it' });
+    const secret = crypto.getRandomValues(new Uint8Array(20));
+    try { await write({ totp_secret: await sealSecret(userId, secret), totp_confirmed_at: null, totp_last_step: null }); }
+    catch (_e) { return unavailable(); }
+    let envName = '';
+    try {
+      const rows = await sbRest('GET', '/settings?key=eq.environment&select=value');
+      envName = String((rows && rows[0] && rows[0].value) || '');
+    } catch (_e) { /* the label is cosmetic */ }
+    // The name the app lists the account under. Anything but production says so, so a
+    // person holding both does not read the wrong one.
+    const issuer = !envName || /^prod/i.test(envName) ? 'Focus' : 'Focus ' + envName.replace(/[^A-Za-z0-9 ]/g, '').trim();
+    const account = String(user.username || uname || 'user');
+    const b32 = base32Encode(secret);
+    const uri = 'otpauth://totp/' + encodeURIComponent(issuer) + ':' + encodeURIComponent(account)
+      + '?secret=' + b32 + '&issuer=' + encodeURIComponent(issuer) + '&algorithm=SHA1&digits=6&period=30';
+    return authReply(200, { ok: true, secret: b32, uri, issuer, account, trustDays });
+  }
+
+  if (action === 'totp-confirm') {
+    if (!codeRequired) return authReply(200, { ok: false, error: 'An authenticator code is not required for Focus at present' });
+    if (enrolled || !user.totp_secret) return authReply(200, { ok: false, restart: true, error: 'Start the set-up again' });
+    const secret = await openSecret(userId, user.totp_secret);
+    if (!secret) return authReply(200, { ok: false, restart: true, error: 'Start the set-up again' });
+    const step = await totpMatch(secret, body.code, Date.now());
+    if (step == null) {
+      await registerFailure('code');
+      return authReply(200, { ok: false, badCode: true, error: 'That code is not right. Check the authenticator app and try again' });
+    }
+    let after: any;
+    try { after = await write({ totp_confirmed_at: new Date().toISOString(), totp_last_step: step }); }
+    catch (_e) { return unavailable(); }
+    return signedIn('password+code', after && after.session_version != null ? after.session_version : user.session_version, await trustDevice());
+  }
+
+  // action === 'login'
+  if (!codeRequired) return signedIn('password', user.session_version, null);
+  if (!enrolled) {
+    await clearFailures();
+    return authReply(200, { ok: false, enrol: true, trustDays, error: 'Set up your authenticator app to continue' });
+  }
+  // A device this login chose to trust skips the code until its token lapses.
+  if (body.device && trustDays > 0) {
+    let known = false;
+    try { known = !!(await authRpc('auth_device_ok', { p_user_id: userId, p_token_hash: await sha256Hex(String(body.device).slice(0, 200)) })); }
+    catch (_e) { known = false; }
+    if (known) return signedIn('password+device', user.session_version, null);
+  }
+  const typed = String(body.code == null ? '' : body.code).replace(/\s+/g, '');
+  if (!typed) return authReply(200, { ok: false, needCode: true, trustDays, error: 'Enter the 6-digit code from your authenticator app' });
+  const secret = await openSecret(userId, user.totp_secret);
+  if (!secret) return unavailable();
+  const step = await totpMatch(secret, typed, Date.now());
+  if (step == null) {
+    await registerFailure('code');
+    return authReply(200, { ok: false, needCode: true, badCode: true, trustDays, error: 'That code is not right. Check the authenticator app and try again' });
+  }
+  let firstUse = false;
+  try { firstUse = !!(await authRpc('auth_totp_step', { p_user_id: userId, p_step: step })); }
+  catch (_e) { return unavailable(); }
+  if (!firstUse) return authReply(200, { ok: false, needCode: true, badCode: true, trustDays, error: 'That code has already been used. Wait for the next one' });
+  return signedIn('password+code', user.session_version, await trustDevice());
+}
+
+// ── Sign-in administration, checked on the server ────────────────────────────
+async function handleAuthAdmin(req: Request, body: any): Promise<Response> {
+  const session = await requestSession(req);
+  if (!session) return json(401, { error: 'auth', message: 'Sign in required' });
+  if (maintenanceBlocks(session.userId)) return json(401, { error: 'auth', reason: 'maintenance', message: 'Off-line for maintenance' });
+  const allowed = await sessionCan(session, ADMIN_ACTIONS[body.action]);
+  if (allowed == null) return authReply(503, { ok: false, error: 'Could not confirm your permissions — try again' });
+  if (!allowed) return authReply(403, { ok: false, error: 'You do not have permission to do that' });
+  const actor = session.personId;
+
+  try {
+    if (body.action === 'admin-list') {
+      return authReply(200, { ok: true, users: (await authRpc('auth_admin_list', {})) || [] });
+    }
+
+    if (body.action === 'policy-get' || body.action === 'policy-set') {
+      if (body.action === 'policy-set') {
+        if (typeof body.codeRequired === 'boolean') {
+          await authRpc('auth_config_set', { p_key: 'code_required', p_value: body.codeRequired ? 'true' : 'false', p_actor: actor });
+        }
+        if (body.trustDays != null) {
+          const days = Math.round(Number(body.trustDays));
+          if (!(days >= 0 && days <= 365)) return authReply(200, { ok: false, error: 'Trusted days must be between 0 and 365' });
+          await authRpc('auth_config_set', { p_key: 'trust_days', p_value: String(days), p_actor: actor });
+        }
+      }
+      const cfg = (await authRpc('auth_config_get', {})) || {};
+      const days = parseInt(cfg.trust_days, 10);
+      return authReply(200, { ok: true, codeRequired: cfg.code_required === 'true', trustDays: days >= 0 ? Math.min(365, days) : 30 });
+    }
+
+    const targetId = parseInt(body.targetUserId, 10);
+    if (!targetId) return authReply(400, { ok: false, error: 'Bad request' });
+    const target = await authRpc('auth_read', { p_username: null, p_user_id: targetId });
+    if (!target) return authReply(200, { ok: false, error: 'User not found' });
+
+    if (body.action === 'admin-reset-password') {
+      // The admin hands this over; it works once, for TEMP_PASSWORD_DAYS, and the
+      // user must choose their own before anything else. The old password, every
+      // session and every trusted device stop here.
+      const password = oneTimePassword();
+      const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
+      await authRpc('auth_write', { p_user_id: targetId, p_patch: {
+        password_hash: await hashPassword(password, salt), password_salt: salt,
+        temp_expires_at: new Date(Date.now() + TEMP_PASSWORD_DAYS * 86400000).toISOString(),
+        must_set_password: true, failed_login_count: 0, locked_until: null, bump: true, clear_devices: true,
+      } }, actor);
+      await authRpc('auth_audit', { p_actor: actor, p_user_id: targetId, p_what: 'password',
+        p_old: target.password_hash ? 'set' : 'none', p_new: 'one-time password issued' }).catch(() => null);
+      sessionCache.delete(targetId);
+      return authReply(200, { ok: true, password, days: TEMP_PASSWORD_DAYS });
+    }
+
+    if (body.action === 'admin-reset-authenticator') {
+      await authRpc('auth_write', { p_user_id: targetId, p_patch: {
+        totp_secret: null, totp_confirmed_at: null, totp_last_step: null, bump: true, clear_devices: true,
+      } }, actor);
+      await authRpc('auth_audit', { p_actor: actor, p_user_id: targetId, p_what: 'authenticator',
+        p_old: target.totp_confirmed_at ? 'enrolled' : 'none', p_new: 'reset' }).catch(() => null);
+      sessionCache.delete(targetId);
+      return authReply(200, { ok: true });
+    }
+  } catch (e) {
+    if (e instanceof VaultMissing) return authReply(200, NOT_INSTALLED);
+    return authReply(500, { ok: false, error: 'Sign-in settings are unavailable right now' });
+  }
+  return authReply(400, { ok: false, error: 'Bad request' });
+}
+
+// ── Sign-in on the old columns (a database without sql/add_signin_guard.sql) ──
+// The behaviour before v7.10.58, kept whole so the proxy can be deployed ahead of the
+// SQL. Once that file has run, the columns read here hold a marker that matches no
+// password, so this path signs nobody in.
+async function handleAuthLegacy(req: Request, body: any, user: any): Promise<Response> {
+  const userId = +user.id;
+  if (['totp-begin', 'totp-confirm'].includes(body.action)) return authReply(200, NOT_INSTALLED);
   const hasPw = !!user.password_hash;
   const mustSet = !!user.must_set_password || !hasPw;
 
@@ -368,7 +847,6 @@ async function handleAuth(req: Request): Promise<Response> {
   // LOCK_MINUTES. Counted on login AND on a wrong current-password in 'set'
   // (both are guessing surfaces); any successful verify clears the slate.
   const locked = user.locked_until && Date.parse(user.locked_until) > Date.now();
-  const LOCK_MSG = 'Too many failed attempts — try again in a few minutes';
   const registerFailure = async () => {
     const fails = (+user.failed_login_count || 0) + 1;
     const patch = fails >= MAX_LOGIN_FAILURES
@@ -459,6 +937,16 @@ function restPath(url: URL): string {
   return p;
 }
 
+// Writes to these tables decide who may sign in and what a login may do. The value is
+// the permission that guards the admin page each belongs to (MENU in index.html).
+const GUARDED_TABLES: Record<string, string> = {
+  system_users: 'manage_system_users', user_roles: 'manage_system_users',
+  system_user_regions: 'manage_system_users', system_user_branches: 'manage_system_users',
+  user_permission_overrides: 'manage_system_users',
+  roles: 'manage_roles', role_permissions: 'manage_roles',
+  permissions: 'manage_permissions',
+};
+
 export async function handler(req: Request): Promise<Response> {
   if (!KEY) return new Response('Missing service key', { status: 500, headers: { 'Access-Control-Allow-Origin': '*' } });
   if (req.method === 'OPTIONS') return new Response('', { status: 200, headers: CORS });
@@ -500,8 +988,26 @@ export async function handler(req: Request): Promise<Response> {
   // File signing — after the gate, never proxied to PostgREST.
   if (/^\/files\/?$/.test(rel)) return handleFiles(req, url);
 
-  const isSystemUsers = /^\/system_users\b/.test(rel);
-  const isAuditLog = /^\/audit_log\b/.test(rel);
+  // ── What a browser may ask PostgREST for (v7.10.58) ──
+  // A table, or rpc/<function>, spelled plainly: a path that needs decoding is refused
+  // outright, so no encoding can slip a name past the two rules below.
+  const shape = /^\/([A-Za-z0-9_]+)(?:\/([A-Za-z0-9_]+))?\/?$/.exec(rel);
+  if (!shape || (shape[1] === 'rpc') !== !!shape[2]) return json(404, { error: 'path', message: 'Not found' });
+  const resource = shape[1], fn = shape[2] || '';
+  // The sign-in functions belong to this proxy alone (authRpc). No browser calls them.
+  if (resource === 'rpc' && /^auth_/i.test(fn)) return json(403, { error: 'forbidden', message: 'Not allowed' });
+  // The access tables: reading stays open (the app builds a login's rights from them),
+  // but a write needs the permission that guards the page it belongs to, checked HERE.
+  const guardPerm = GUARDED_TABLES[resource] || '';
+  const isWrite = req.method !== 'GET' && req.method !== 'HEAD';
+  if (guardPerm && isWrite) {
+    const may = await sessionCan(session, guardPerm);
+    if (may == null) return json(503, { error: 'permission_check', message: 'Could not confirm your permissions — try again' });
+    if (!may) return json(403, { error: 'forbidden', message: 'You do not have permission to change that' });
+  }
+
+  const isSystemUsers = resource === 'system_users';
+  const isAuditLog = resource === 'audit_log';
   const wantGzip = String(env('SB_GZIP') || '') !== '0' && !isSystemUsers && !isAuditLog;
   const clientInflates = wantGzip && String(req.headers.get('x-focus-gzip') || '') === '1';
 
@@ -512,6 +1018,9 @@ export async function handler(req: Request): Promise<Response> {
     // are forwarded so the DB audit trigger can read them (sql/add_audit_log.sql).
     'X-Actor-Id': claimedActor || tokenPerson,
     'X-Real-Actor-Id': realActor,
+    // Everything forwarded for a browser says so. The auth_* functions refuse a request
+    // carrying this mark, whatever path it arrived by.
+    'X-Focus-Client': '1',
   };
   for (const h of ['prefer', 'range', 'range-unit']) { const v = req.headers.get(h); if (v) upstreamHeaders[h] = v; }
   const reqBody = (req.method === 'GET' || req.method === 'HEAD') ? undefined : new Uint8Array(await req.arrayBuffer());
@@ -530,9 +1039,10 @@ export async function handler(req: Request): Promise<Response> {
     return json(500, { error: (e && (e as Error).message) || 'Upstream request failed' });
   }
 
-  // A write to system_users may have revoked somebody (Active tick, Reset
-  // password): forget every cached verdict so it bites now.
-  if (isSystemUsers && req.method !== 'GET') sessionCache.clear();
+  // A write to an access table may have revoked somebody (Active tick) or changed
+  // what a login may do (a role, a permission): forget every cached verdict so it
+  // bites now.
+  if (guardPerm && isWrite) sessionCache.clear();
 
   const raw = new Uint8Array(await up.arrayBuffer());   // Deno's fetch has already inflated it
   const headers: Record<string, string> = { 'Content-Type': 'application/json', ...CORS };
