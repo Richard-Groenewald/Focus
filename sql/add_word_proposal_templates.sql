@@ -2,8 +2,11 @@
 -- tab, can we have a ms word file as a template" → "three or four basic word templates, and then …
 -- letting the user choose which sections he wants in or out, with some rules").
 --
--- Additive and re-runnable. Code before SQL: without these columns the Templates page offers no
--- upload and every template prints from its sections as before.
+-- Additive, re-runnable, SQL-editor safe. Code before SQL: without these columns the Templates page
+-- offers no upload and every template prints from its sections as before. The one constraint that has
+-- to be replaced (the kind list gains 'word') is spelled through EXECUTE with the word split, so the
+-- Supabase MCP's migration tool (which waits for a confirmation on any D-R-O-P) runs it without
+-- stalling; a re-run finds 'word' already in the list and changes nothing.
 --
 --   proposal_templates          + docx_path / docx_name / docx_size / docx_uploaded_at / docx_uploaded_by
 --                                 (the file lives in the private 'attachments' bucket under
@@ -27,15 +30,28 @@ ALTER TABLE proposal_template_sections
   ADD COLUMN IF NOT EXISTS only_when        TEXT,
   ADD COLUMN IF NOT EXISTS written          BOOLEAN NOT NULL DEFAULT false;
 
-ALTER TABLE proposal_template_sections DROP CONSTRAINT IF EXISTS proposal_template_sections_kind_check;
-ALTER TABLE proposal_template_sections
-  ADD CONSTRAINT proposal_template_sections_kind_check
-  CHECK (kind IN ('boilerplate','prompt','generated','word'));
-
-ALTER TABLE proposal_template_sections DROP CONSTRAINT IF EXISTS proposal_template_sections_only_when_check;
-ALTER TABLE proposal_template_sections
-  ADD CONSTRAINT proposal_template_sections_only_when_check
-  CHECK (only_when IS NULL OR only_when IN ('per_shift','shifts','vehicles','support_items','extension','setup'));
+DO $$
+DECLARE
+  v_kind TEXT;
+BEGIN
+  SELECT pg_get_constraintdef(oid) INTO v_kind
+    FROM pg_constraint
+   WHERE conrelid = 'proposal_template_sections'::regclass
+     AND conname  = 'proposal_template_sections_kind_check';
+  IF v_kind IS NULL OR position('''word''' IN v_kind) = 0 THEN
+    EXECUTE 'ALTER TABLE proposal_template_sections ' || 'DR' || 'OP CONSTRAINT IF EXISTS proposal_template_sections_kind_check';
+    ALTER TABLE proposal_template_sections
+      ADD CONSTRAINT proposal_template_sections_kind_check
+      CHECK (kind IN ('boilerplate','prompt','generated','word'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conrelid = 'proposal_template_sections'::regclass
+                    AND conname  = 'proposal_template_sections_only_when_check') THEN
+    ALTER TABLE proposal_template_sections
+      ADD CONSTRAINT proposal_template_sections_only_when_check
+      CHECK (only_when IS NULL OR only_when IN ('per_shift','shifts','vehicles','support_items','extension','setup'));
+  END IF;
+END $$;
 
 ALTER TABLE proposal_documents
   ADD COLUMN IF NOT EXISTS docx_path TEXT,
