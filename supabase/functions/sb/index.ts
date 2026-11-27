@@ -262,19 +262,27 @@ const authReply = json;
 // carries a file's bytes — it signs:
 //   POST /files { action:'upload', owner:'deal', owner_id, file_name, size }
 //        -> { ok, path, uploadUrl }  a one-time URL the browser PUTs the file to
-//   GET  /files?download=<attachments.id>
+//   GET  /files?download=<attachments.id> | ?template=<proposal_templates.id> | ?proposal=<proposal_documents.id>
 //        -> { ok, url }              a 5-minute URL that downloads under the file's name
 const FILE_BUCKET = 'attachments';
 const FILE_MAX_BYTES = 50 * 1024 * 1024;
-const FILE_OWNERS: Record<string, string> = { deal: 'deals' };   // a contract or project is the same deals row once secured
+const FILE_OWNERS: Record<string, string> = { deal: 'deals', proposal_template: 'proposal_templates', proposal_document: 'proposal_documents' };   // a contract or project is the same deals row once secured
+// v7.10.58: a Word template file (proposal_templates.docx_path) and an issued proposal's filled file
+// (proposal_documents.docx_path) live in the same bucket; GET /files?template=<id> | ?proposal=<id> sign them.
+const FILE_DOCX: Record<string, string> = { template: 'proposal_templates', proposal: 'proposal_documents' };
 const encPath = (p: string) => String(p).split('/').map(encodeURIComponent).join('/');
 
 async function handleFiles(req: Request, url: URL): Promise<Response> {
   if (req.method === 'GET') {
-    const id = parseInt(url.searchParams.get('download') || '', 10);
+    const docxKind = Object.keys(FILE_DOCX).find(k => url.searchParams.get(k));
+    const id = parseInt(url.searchParams.get(docxKind || 'download') || '', 10);
     if (!id) return authReply(400, { ok: false, error: 'Bad request' });
     let rows: any;
-    try { rows = await sbRest('GET', `/attachments?id=eq.${id}&removed_at=is.null&select=storage_path,file_name`); }
+    try {
+      rows = docxKind
+        ? (await sbRest('GET', `/${FILE_DOCX[docxKind]}?id=eq.${id}&docx_path=not.is.null&select=docx_path,docx_name`)).map((r: any) => ({ storage_path: r.docx_path, file_name: r.docx_name || 'proposal.docx' }))
+        : await sbRest('GET', `/attachments?id=eq.${id}&removed_at=is.null&select=storage_path,file_name`);
+    }
     catch (_e) { return authReply(500, { ok: false, error: 'Files are unavailable right now' }); }
     const f = rows && rows[0];
     if (!f) return authReply(404, { ok: false, error: 'File not found' });

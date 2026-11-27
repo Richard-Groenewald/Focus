@@ -688,10 +688,20 @@ td.rev-past { background:#EEF0F3; }
 .pg-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:12px; }
 .pg-preview { flex:1; min-width:0; background:#e9ecf0; padding:22px; border-radius:4px; overflow-x:auto; }
 .pg-preview .pg-doc { background:#fff; box-shadow:0 2px 12px rgba(0,0,0,0.15); padding:18mm 16mm; max-width:210mm; box-sizing:border-box; }
+.pg-outline { max-width:210mm; margin:0 auto; padding:16px 20px; font-size:13px; }
+.pg-outline-h { color:var(--text3); font-size:12px; margin-bottom:12px; }
+.pg-outline-sec { border:1px solid var(--border); border-left:4px solid var(--navy); border-radius:4px; padding:8px 12px; margin-bottom:8px; background:#fff; }
+.pg-outline-sec.off { border-left-color:var(--border); color:var(--text3); background:var(--bg2); }
+.pg-outline-t { font-weight:700; color:var(--navy); } .pg-outline-sec.off .pg-outline-t { color:var(--text3); }
+.pg-outline-p { margin-top:4px; color:var(--text2); font-size:12px; } .pg-outline-p div { margin-bottom:2px; }
+.pg-outline-w { margin-top:6px; padding:6px 8px; background:#FFFBEB; border:1px solid #FDE68A; border-radius:3px; white-space:pre-wrap; }
+.pg-wordbox { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:8px 10px; margin:8px 0; border:1px dashed var(--border); border-radius:4px; font-size:13px; }
 .pg-warn { background:#FEE2E2; color:#7F1D1D; padding:8px 12px; border-radius:4px; margin-bottom:12px; font-size:12px; font-weight:600; max-width:210mm; }
 .pg-admin { display:flex; gap:16px; align-items:flex-start; padding:12px 0; }
 .pg-admin-side { flex:0 0 260px; }
 .pg-admin-main { flex:1; min-width:0; }
+/* v7.10.58: a Word template's rules need the width — under 1280px the list of templates sits above them */
+@media (max-width:1279px) { .pg-admin.pg-admin-word { flex-wrap:wrap; } .pg-admin.pg-admin-word .pg-admin-side { flex:1 1 100%; } }
 .pg-tpl { padding:8px 10px; border:1px solid var(--border); border-radius:4px; margin-bottom:6px; cursor:pointer; background:#fff; font-size:13px; }
 .pg-tpl.active { border-color:var(--navy); background:#EEF2F6; }
 .pg-tpl .pg-muted, .pg-admin .pg-muted { color:var(--text3); font-size:11px; }
@@ -912,7 +922,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
     <button class="btn btn-primary" id="login-setpw-btn" style="display:none;width:100%;justify-content:center;padding:11px;" onclick="submitNewPassword()">Set Password</button>
     <div style="margin-top:8px;">
               <div class="env-label" style="font-size:13px;font-weight:800;letter-spacing:0.08em;color:var(--navy);"></div>
-              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
+              <div style="font-size:11px;font-weight:700;color:var(--red);">FOCUS v7.10.58 <span class="build-stamp" style="font-weight:600;opacity:0.8;margin-left:4px;"></span></div>
             </div>
     <!-- PWA install: hidden automatically when already running as the installed app -->
     <div id="pwa-install-wrap" style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px;">
@@ -952,7 +962,7 @@ tr.pbi-drop-into > td { box-shadow:inset 0 0 0 2px var(--red); }
       </div>
       <div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;align-items:flex-start;">
         <div class="env-label" style="font-size:10px;font-weight:800;letter-spacing:0.08em;color:rgba(255,255,255,0.7);"></div>
-        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.57 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
+        <div style="background:var(--red);color:white;font-size:9px;font-weight:800;padding:2px 6px;border-radius:4px;letter-spacing:0.04em;">FOCUS v7.10.58 <span class="build-stamp" style="font-weight:600;opacity:0.85;margin-left:3px;"></span></div>
       </div>
     </div>
   </aside>
@@ -12068,7 +12078,9 @@ async function openQuote(id) {
     const pgP = _pgMissing ? Promise.resolve([[], [], [], []]) : Promise.all([
       apiGet('proposal_templates', 'active=eq.true&select=*&order=is_default.desc,name'),
       apiGet('proposal_template_sections', 'select=*&order=template_id,display_order,id'),
-      apiGet('proposal_documents', 'quote_id=eq.' + id + '&select=id,quote_id,template_id,snapshot_id,version,status,proposal_ref,issued_at,issued_by,valid_until,content_json,owner_id,created_at,updated_at&order=version.desc'),
+      apiGet('proposal_documents', 'quote_id=eq.' + id + '&select=' + PG_DOC_COLS + ',docx_path,docx_name&order=version.desc')
+        // v7.10.58: a database without the two columns (sql/add_word_proposal_templates.sql not run) answers 42703 — read without them
+        .catch(e => { if (/42703|PGRST204|docx_(path|name)/.test((e && e.message) || '')) return apiGet('proposal_documents', 'quote_id=eq.' + id + '&select=' + PG_DOC_COLS + '&order=version.desc'); throw e; }),
       apiGet('quote_snapshots', 'quote_id=eq.' + id + '&select=id,snapshot_at,as_of_date,rate_data&order=snapshot_at.desc&limit=1'),
     ]).catch(e => { if (/^404\b|PGRST205/.test((e && e.message) || '')) _pgMissing = true; return [[], [], [], []]; });
     const catP = Promise.all([
@@ -12134,6 +12146,10 @@ async function openQuote(id) {
     pbContractAccOff = new Map((cats[4] || []).filter(r => r.state === 'off').map(r => [+r.accessory_id, r.override_reason || '']));   // v7.9.55
     pbWorkforceAdj = new Map((cats[5] || []).map(r => [+r.accessory_id, { mode: r.mode, quantity: +r.quantity || 0, reason: r.reason || '' }]));
     pgReset({ templates: pg[0], sections: pg[1], docs: pg[2], snapshot: pg[3][0] || null });
+    if (pgState.draft && !pgTemplateLoaded()) {   // v7.10.58: a draft keeps the template it was made on, even one since made inactive — its row is read too
+      const own = await apiGet('proposal_templates', 'id=eq.' + (+pgState.templateId || 0) + '&select=*').catch(() => []);
+      if (own[0]) pgState.templates.push(own[0]);
+    }
     allData['quote_grades'] = grades;
     allData['quote_areas'] = areas;
     await pbQuoteAreaEnsure();   // v7.10.40: a quote without an area takes the site's, else Area 1
@@ -14240,24 +14256,43 @@ function pbChecklistOverrideCancel(postId, kind) {
 // proposal_documents row per quote, created lazily on the first edit.
 let _pgMissing = false;           // proposal_templates absent (404 / PGRST205) → tab hidden
 let _pgRpcMissing = false;        // rpc/issue_proposal absent (404 / PGRST202) → Issue stays disabled
+const PG_DOC_COLS = 'id,quote_id,template_id,snapshot_id,version,status,proposal_ref,issued_at,issued_by,valid_until,content_json,owner_id,created_at,updated_at';
 let pgState = { templates: [], sections: [], docs: [], draft: null, snapshot: null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
 function pgReset(o) {
   const docs = (o.docs || []).slice().sort((a, b) => b.version - a.version);
   pgState = { templates: o.templates || [], sections: o.sections || [], docs, draft: docs.find(d => d.status === 'draft') || null,
     snapshot: o.snapshot || null, templateId: null, overrides: {}, editing: null, ctx: null, ctxFor: null };
   const def = pgState.templates.find(t => t.is_default) || pgState.templates[0];
-  // A new draft after an issue starts from the issued version's template.
+  // A new draft after an issue starts from the issued version's template — while that template is still
+  // on offer: one since made inactive is not loaded, and the next version then starts on the default.
   const seed = pgState.draft || pgState.docs.find(d => d.status === 'issued');
   pgState.templateId = seed ? +seed.template_id : (def ? +def.id : null);
+  if (!pgState.draft && !pgTemplateLoaded()) pgState.templateId = def ? +def.id : null;
+  pgSeedFromLast();
+}
+function pgTemplateLoaded(st) { st = st || pgState; return st.templates.some(t => +t.id === +st.templateId); }
+// With no draft the tab shows what the NEXT version starts from: the ticks and text of the version that
+// went out last, when it was made on this template. They are on screen — the list, the preview, the
+// Issue check and Download Word all read them — but not stored (`seeded`) until pgEnsureDraft makes the
+// draft, which then stores exactly what was shown.
+function pgSeedFromLast(st) {
+  st = st || pgState;
+  const prev = st.docs.find(d => d.status === 'issued') || st.docs.find(d => d.status === 'superseded' || d.status === 'withdrawn');
+  const ov = !st.draft && prev && +prev.template_id === +st.templateId && prev.content_json && prev.content_json.overrides;
+  st.overrides = {};
+  if (ov) Object.keys(ov).forEach(k => { const o = ov[k] || {}; st.overrides[k] = { included: o.included !== false, body: o.body == null ? null : o.body }; });
+  st.seeded = Object.keys(st.overrides).length > 0;
+  st.seedFrom = st.seeded ? prev : null;
 }
 function pgCurrentIssued() { return pgState.docs.find(d => d.status === 'issued') || null; }
 function pgNextVersion() { return pgState.docs.reduce((m, d) => Math.max(m, +d.version || 0), 0) + 1; }
 function pgApplyDraftSections(rows) {
-  pgState.overrides = {};
+  if (!pgState.draft) return pgSeedFromLast();   // no draft, no rows of its own: the tab shows what the next version starts from
+  pgState.overrides = {}; pgState.seeded = false; pgState.seedFrom = null;
   (rows || []).forEach(r => { pgState.overrides[r.section_key] = { included: r.included !== false, body: r.body_override }; });
 }
 function pgSections() {
-  return pgState.sections.filter(s => +s.template_id === +pgState.templateId)
+  return pgState.sections.filter(s => +s.template_id === +pgState.templateId && s.kind !== 'word')
     .sort((a, b) => (a.display_order - b.display_order) || (a.id - b.id))
     .map(s => {
       const o = pgState.overrides[s.section_key] || {};
@@ -14292,8 +14327,9 @@ function pgMoney(n) { return 'R ' + (+n || 0).toLocaleString('en-US', { minimumF
 function pgValidUntil() {
   if (pbQ.valid_until) return pbQ.valid_until;
   const days = +(appSettings['proposal_default_validity_days'] || 30);
-  const d = new Date((pbQ.quote_date || new Date().toISOString().slice(0, 10)) + 'T00:00:00'); d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  const d = pbQ.quote_date ? new Date(pbQ.quote_date + 'T00:00:00') : new Date(); d.setDate(d.getDate() + days);
+  // the LOCAL day: toISOString() names the day before for anyone east of Greenwich (South Africa is UTC+2)
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 function pgFields(ctx, pricing) {
   const q = pbQ, org = ctx.org, site = ctx.site, own = ctx.owner, home = ctx.home, c = ctx.contact;
@@ -14787,16 +14823,20 @@ function renderProposalTab() {
       : 'No active proposal template. Create one under Admin → Proposal Builder → Proposal Templates.');
   }
   setTimeout(pgFillPreview, 0);
-  const secs = pgSections();
-  const tplOpts = pgState.templates.map(t => '<option value="' + t.id + '" ' + (+t.id === +pgState.templateId ? 'selected' : '') + '>' + pbEsc(t.name) + '</option>').join('');
+  const wordTpl = pgWordTemplate();   // v7.10.58: a template carrying a .docx prints from the Word file
+  const secs = wordTpl ? pgWordSections() : pgSections();
+  const tplOpts = pgState.templates.map(t => '<option value="' + t.id + '" ' + (+t.id === +pgState.templateId ? 'selected' : '') + '>' + pbEsc(t.name) + (t.active === false ? ' (inactive)' : '') + '</option>').join('');
   const list = secs.map(s => {
     const editing = pgState.editing === s.section_key;
-    const editable = s.kind !== 'generated';
+    const editable = wordTpl ? s.written : s.kind !== 'generated';
+    const locked = s.mandatory || (wordTpl && !s.okWhen);
+    const lockWhy = s.mandatory ? 'Always in the document' : (wordTpl && !s.okWhen) ? 'Only when ' + (PG_ONLY_WHEN[s.only_when] || s.only_when) : 'Include in the document';
     return '<div class="pg-sec' + (s.included ? '' : ' off') + (editing ? ' editing' : '') + '">' +
-      '<label title="' + (s.mandatory ? 'Mandatory section' : 'Include in the document') + '"><input type="checkbox" ' + (s.included ? 'checked' : '') + (s.mandatory ? ' disabled' : '') + ' onchange="pgSetIncluded(\'' + pbEsc(s.section_key) + '\', this.checked)"></label>' +
-      '<span class="pg-sec-title" onclick="pgScrollTo(\'' + pbEsc(s.section_key) + '\')">' + pbEsc(s.title) +
+      '<label title="' + pbEsc(lockWhy) + '"><input type="checkbox" ' + (s.included ? 'checked' : '') + (locked ? ' disabled' : '') + ' onchange="pgSetIncluded(\'' + pbEsc(s.section_key) + '\', this.checked)"></label>' +
+      '<span class="pg-sec-title" onclick="pgScrollTo(\'' + pbEsc(s.section_key) + '\')"><span data-pg-sec-name="' + pbEsc(s.section_key) + '">' + pbEsc(s.title) + '</span>' +
         (s.customised ? '<span class="pg-dot" title="Customised for this proposal"></span>' : '') +
-        (s.kind === 'generated' ? '<span class="pg-kind">auto</span>' : s.kind === 'prompt' ? '<span class="pg-kind">write</span>' : '') + '</span>' +
+        (wordTpl ? (s.written ? '<span class="pg-kind">write</span>' : '') + (s.only_when ? '<span class="pg-kind" title="Only when ' + pbEsc(PG_ONLY_WHEN[s.only_when] || s.only_when) + '">when</span>' : '')
+          : s.kind === 'generated' ? '<span class="pg-kind">auto</span>' : s.kind === 'prompt' ? '<span class="pg-kind">write</span>' : '') + '</span>' +
       (editable ? '<button class="pb-btn xs" onclick="pgEdit(\'' + pbEsc(s.section_key) + '\')">' + (editing ? 'Close' : 'Edit') + '</button>' : '') +
       (editing ? '<div class="pg-editor"><textarea id="pg-edit-body" rows="10">' + pbEsc(s.body_effective || '') + '</textarea>' +
         '<div class="pg-editor-actions"><button class="pb-btn primary small" onclick="pgSaveEdit(\'' + pbEsc(s.section_key) + '\')">Save</button>' +
@@ -14806,17 +14846,19 @@ function renderProposalTab() {
   }).join('');
   return '<style>' + PG_DOC_CSS + '</style><div class="pg-wrap">' +
     '<div class="pg-side">' +
-      '<div class="pg-side-head"><label class="form-label">Template</label><select class="form-control" onchange="pgSetTemplate(+this.value)">' + tplOpts + '</select>' +
+      '<div class="pg-side-head"><label class="form-label">Template</label><select class="form-control" onchange="pgSetTemplate(+this.value)">' + (pgTemplateLoaded() ? '' : '<option value="" selected disabled>— template no longer available: choose one —</option>') + tplOpts + '</select>' +
         '<div style="margin-top:8px;">' + pbPriceBasisField('Prices shown as') + '</div>' +
-        '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft — edits create v' + pgNextVersion()) +
+        '<div class="pg-status">' + (pgState.draft ? 'Draft v' + pbEsc(pgState.draft.version) + ' · saved ' + pbEsc(String(pgState.draft.updated_at || '').slice(0, 10)) : 'No draft — edits create v' + pgNextVersion() + (pgState.seeded && pgState.seedFrom ? ', starting from the sections and text of v' + pbEsc(pgState.seedFrom.version) : '')) +
           (pgCurrentIssued() ? ' · <strong>' + pbEsc(pgCurrentIssued().proposal_ref) + ' v' + pbEsc(pgCurrentIssued().version) + '</strong> issued ' + pbEsc(String(pgCurrentIssued().issued_at || '').slice(0, 10)) : '') + '</div></div>' +
       '<div class="pg-sec-list">' + list + '</div>' +
       '<div class="pg-actions">' +
-        '<button class="btn btn-primary" onclick="pgPrint()">Print / Save PDF</button>' +
+        (wordTpl ? '<button class="btn btn-primary" id="pg-word-btn" onclick="pgWordDownload()" title="Fill the Word template with this quote and download it">Download Word</button>'
+          : '<button class="btn btn-primary" onclick="pgPrint()">Print / Save PDF</button>') +
         pgIssueButton() +
         (pgState.draft ? '<button class="btn btn-ghost btn-sm" onclick="pgDiscardDraft()">Discard draft</button>' : '') +
       '</div>' +
       pgHistoryPanel() +
+      (wordTpl ? '<div class="pg-muted" style="font-size:11px;margin-top:8px;">Word template: the preview is an outline — the layout is Word\'s. Open the downloaded file in Word to see it as the client will.</div>' : '') +
     '</div>' +
     '<div class="pg-preview" id="pg-preview"><p style="color:var(--text3);padding:30px;">Rendering…</p></div>' +
   '</div>';
@@ -14824,6 +14866,7 @@ function renderProposalTab() {
 async function pgFillPreview() {
   const el = document.getElementById('pg-preview');
   if (!el || !pbQ) return;
+  if (pgWordTemplate()) return pgWordFillPreview();
   try {
     const ctx = await pgLoadContext();
     const r = pgRenderDocument(ctx);
@@ -14832,10 +14875,11 @@ async function pgFillPreview() {
     const btn = document.getElementById('pg-issue-btn'); if (btn && r.unknown.length) { btn.disabled = true; btn.title = 'Fix the unknown merge fields first'; }
   } catch (e) { el.innerHTML = '<p style="color:var(--red);padding:30px;">Could not render: ' + pbEsc(e.message) + '</p>'; }
 }
-function pgScrollTo(key) { const s = document.querySelector('#pg-preview .pg-section[data-key="' + key + '"]'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+function pgScrollTo(key) { const s = document.querySelector('#pg-preview [data-key="' + key + '"]'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 function pgEdit(key) { pgState.editing = pgState.editing === key ? null : key; renderQuoteEditor(); }
 async function pgSetTemplate(id) {
-  pgState.templateId = id; pgState.editing = null;
+  pgState.templateId = id; pgState.editing = null; pgState.lastUnknown = [];
+  if (!pgState.draft) pgSeedFromLast();   // the last version's ticks and text apply on its own template only
   if (pgState.draft) {
     // A template switch drops the old sections' overrides — they belong to the other template.
     try {
@@ -14846,26 +14890,36 @@ async function pgSetTemplate(id) {
   }
   renderQuoteEditor();
 }
-// One draft row per quote, made the first time anything is customised.
-async function pgEnsureDraft() {
-  if (pgState.draft) return pgState.draft;
-  const r = await apiPost('proposal_documents', { quote_id: pbQ.id, template_id: pgState.templateId, status: 'draft', version: pgNextVersion(),
-    owner_id: currentUser.personId, created_by: currentUser.personId });
-  pgState.draft = r[0];
-  pgState.docs.unshift(pgState.draft);
-  // v2+ starts from the wording that went out last time, not from the bare template.
-  const prev = pgCurrentIssued() || pgState.docs.find(d => d.status === 'superseded' || d.status === 'withdrawn');
-  const seedOv = prev && +prev.template_id === +pgState.templateId && prev.content_json && prev.content_json.overrides;
-  if (seedOv && Object.keys(seedOv).length && !Object.keys(pgState.overrides).length) {
-    const rows = Object.entries(seedOv).map(([k, o]) => ({ document_id: pgState.draft.id, section_key: k, included: o.included !== false, body_override: o.body == null ? null : o.body }));
-    try { await api('proposal_document_sections', 'POST', rows, '', { prefer: 'return=minimal' }); pgApplyDraftSections(rows.map(r => ({ section_key: r.section_key, included: r.included, body_override: r.body_override }))); }
-    catch (e) { /* the draft still works from the template */ }
-  }
-  return pgState.draft;
+// One draft row per quote, made the first time anything is customised — or at Issue. v2+ starts from
+// the wording that went out last time, which is what the tab has been showing (pgSeedFromLast): those
+// ticks and text are stored with the new draft here, so the draft holds exactly what was on screen.
+// Single-flight: two quick ticks make one draft and store its starting rows once.
+function pgEnsureDraft() {
+  const st = pgState;
+  if (st.draft && !st.seeded) return Promise.resolve(st.draft);
+  if (!st.draftP) st.draftP = (async () => {
+    try {
+      if (!st.draft) {
+        const r = await apiPost('proposal_documents', { quote_id: pbQ.id, template_id: st.templateId, status: 'draft', version: pgNextVersion(),
+          owner_id: currentUser.personId, created_by: currentUser.personId });
+        st.draft = r[0];
+        st.docs.unshift(st.draft);
+      }
+      if (st.seeded) {
+        const rows = Object.entries(st.overrides).map(([k, o]) => ({ document_id: st.draft.id, section_key: k, included: o.included !== false, body_override: o.body == null ? null : o.body }));
+        if (rows.length) await api('proposal_document_sections', 'POST', rows, '', { prefer: 'return=minimal' });
+        st.seeded = false; st.seedFrom = null;
+      }
+      return st.draft;
+    } finally { st.draftP = null; }
+  })();
+  return st.draftP;
 }
 async function pgUpsertSection(key, patch) {
   const d = await pgEnsureDraft();
-  const cur = pgState.overrides[key] || { included: true, body: null };
+  // A Word section's tick starts from its rule: saving the text of a section that is off by default must not switch it on.
+  const rule = pgState.sections.find(s => +s.template_id === +pgState.templateId && s.section_key === key);
+  const cur = pgState.overrides[key] || { included: rule && rule.kind === 'word' ? rule.included_default !== false : true, body: null };
   const next = Object.assign({}, cur, patch);
   await api('proposal_document_sections', 'POST',
     { document_id: d.id, section_key: key, included: next.included !== false, body_override: next.body == null ? null : next.body },
@@ -14892,11 +14946,20 @@ async function pgRevert(key) {
   renderQuoteEditor();
 }
 async function pgDiscardDraft() {
-  if (!pgState.draft) return;
-  if (!await confirmDialog({ title: 'Discard draft', message: 'Drop every customisation on this proposal and go back to the plain template?', confirmLabel: 'Discard', danger: true })) return;
-  try { await apiDelete('proposal_documents', pgState.draft.id); pgState.docs = pgState.docs.filter(d => d.id !== pgState.draft.id); pgState.draft = null; pgState.overrides = {}; pgState.editing = null; }
-  catch (e) { showStatus('Could not discard: ' + e.message, 'error'); }
-  renderQuoteEditor();
+  const st = pgState, d = st.draft;
+  if (!d) return;
+  const prev = st.docs.find(x => x.status === 'issued') || st.docs.find(x => x.status === 'superseded' || x.status === 'withdrawn');
+  const back = prev && +prev.template_id === +st.templateId ? 'the sections and text of ' + prev.proposal_ref + ' v' + prev.version : 'the plain template';
+  if (!await confirmDialog({ title: 'Discard draft', message: 'Drop every change made on this draft and go back to ' + back + '?', confirmLabel: 'Discard', danger: true })) return;
+  try {
+    // Only a DRAFT is ever deleted. A row that was numbered meanwhile (an Issue whose answer was lost,
+    // another window) does not match the filter and stays: it is read back, and said.
+    await api('proposal_documents', 'DELETE', null, 'id=eq.' + d.id + '&status=eq.draft');
+    const still = await apiGet('proposal_documents', 'id=eq.' + d.id + '&select=id,status');
+    if (still[0]) showStatus('Nothing was deleted: that draft is no longer a draft (it is ' + still[0].status + '). Reopen the quote to see where it stands', 'error');
+    else { st.docs = st.docs.filter(x => x.id !== d.id); st.draft = null; st.editing = null; pgSeedFromLast(st); }
+  } catch (e) { showStatus('Could not discard: ' + e.message, 'error'); }
+  if (pgState === st) renderQuoteEditor();
 }
 // Document stylesheet, shared by the in-app preview and the print window
 // (scoped to .pg-doc so it cannot touch Focus's own chrome).
@@ -14946,13 +15009,29 @@ function pgIssueBlockers() {
   if (pbQ.is_sandbox) why.push('sandbox quotes cannot be issued');
   if (!can('issue_proposal')) why.push('you do not have the issue_proposal permission');
   if (_pgRpcMissing) why.push('sql/proposal_generator_inc2.sql is not installed on this database');
+  if (!pgTemplateLoaded()) { why.push('the template of this proposal is no longer available — choose another template'); return why; }
   { const pr = pgPricing();   // v7.10.28: the calculation must exist, be current and be clean
     if (pr.errors.length) why.push(pr.errors.length === 1 ? 'cannot be priced: ' + pr.errors[0] : pr.errors.length + ' costing problems (see the posts\' Costing sections and the Site Mobility tab)');
     if (!pgState.snapshot) why.push('the quote has not been calculated yet (Pricing tab → Calculate)');
     else if (pr.stale) why.push('the quote changed since it was calculated (Pricing tab → Recalculate)');
     else if (pbPriceBasis() !== 'monthly' && !pr.perShift) why.push('per-shift pricing is selected but the calculation carries no per-shift rates'); }
+  const wordTpl = pgWordTemplate();
+  if (wordTpl) {   // v7.10.58: a Word template — judged against the file as READ (pgState.word, set by the preview), never before
+    if (!pgDocxReady()) why.push('this browser cannot build Word files');
+    const w = pgState.word && pgState.word.path === wordTpl.docx_path ? pgState.word : null;
+    if (!w) { why.push('the Word template is still being read'); return why; }
+    if (w.error) { why.push('the Word template could not be read (' + w.error + ')'); return why; }
+    if (w.unknown.length) why.push('the Word file has placeholders Focus cannot fill: ' + w.unknown.map(pgDocxTokenLabel).join(', '));
+    const secs = pgWordSections(), have = new Set(secs.map(s => s.section_key));
+    const orphan = w.sections.filter(a => !have.has(a.key));
+    if (orphan.length) why.push('the Word file has headings with no section here (' + orphan.map(a => a.title).join(', ') + ') — reopen the quote, or press Re-read sections on the Proposal Templates page');
+    secs.filter(s => s.included && !w.keys.has(s.section_key)).forEach(s => why.push('"' + s.title + '" is ticked but is no longer in the Word file'));
+    secs.filter(s => s.included && s.written && w.keys.has(s.section_key) && !(s.body_effective || '').trim()).forEach(s => why.push('"' + s.title + '" is not written yet'));
+    return why;
+  }
   if ((pgState.lastUnknown || []).length) why.push('the text still has unknown merge fields');
   const secs = pgSections();
+  if (!secs.length) why.push('this template has no sections');
   secs.filter(s => s.mandatory && s.kind !== 'generated' && !(s.body_effective || '').trim()).forEach(s => why.push('"' + s.title + '" is empty'));
   if (secs.some(s => s.kind === 'prompt' && s.included && !s.customised)) why.push('rewrite the "write" sections — they still show the template prompt');
   return why;
@@ -14971,65 +15050,161 @@ function pgBuildContent(ctx, rendered) {
   return {
     fields: f,
     template_id: pgState.templateId,
-    sections: pgSections().map(s => ({ key: s.section_key, title: s.title, kind: s.kind, included: s.included, body: s.kind === 'generated' ? null : s.body_effective })),
-    overrides: pgState.overrides,
+    sections: (pgWordTemplate() ? pgWordSections() : pgSections()).map(s => ({ key: s.section_key, title: s.title, kind: s.kind, included: s.included, body: s.kind === 'generated' ? null : s.body_effective })),
+    word_template: pgWordTemplate() ? { name: pgWordTemplate().name, file: pgWordTemplate().docx_name, path: pgWordTemplate().docx_path } : undefined,
+    overrides: JSON.parse(JSON.stringify(pgState.overrides)),   // its own copy: the tab keeps working on pgState.overrides
     pricing: rendered.pricing,
     snapshot_id: pgState.snapshot ? pgState.snapshot.id : null,
     contact_person_id: ctx.contact ? ctx.contact.personId : null,
     issued_from_version: pgState.draft ? pgState.draft.version : pgNextVersion(),
   };
 }
+// An error that is no clear answer — api()'s 12-second abort, a failed fetch, a body that did not arrive
+// whole, or any 5xx: the proxy answers 500 when its own connection to the database died after the write
+// may have landed, a gateway 502 to 504. A refusal by the database is a 4xx and is taken at its word.
+function pgNoAnswer(e) { return !!e && (e.name === 'AbortError' || e.name === 'TypeError' || e.name === 'SyntaxError' || /^5\d\d\b/.test(e.message || '')); }
+// issue_proposal() can commit although its answer never arrives: the row is then numbered with nobody
+// told. It is read back — a few times, the transaction may still be finishing — and when it is issued,
+// by this person, the issue carries on with it. Returns the issued row; null while it is still a draft
+// (or is not ours to finish); throws when the row could not be read at all.
+async function pgIssueReadBack(docId, tries) {
+  let err = null, seen = false;
+  for (let i = 0; i < tries; i++) {
+    if (i) await new Promise(res => setTimeout(res, 2500));
+    try {
+      const r = (await apiGet('proposal_documents', 'id=eq.' + docId + '&select=' + PG_DOC_COLS))[0] || null;
+      seen = true;
+      if (r && r.status === 'issued' && r.proposal_ref && +r.issued_by === +currentUser.personId) return r;
+      if (!r || r.status !== 'draft') return null;
+    } catch (e) { err = e; }
+  }
+  if (!seen) throw err || new Error('the proposal could not be read back');
+  return null;
+}
+// A veil over the whole app while a proposal is being issued: between the number being assigned and
+// the Word file being stored nothing else may be opened or pressed (v7.10.58).
+function pgBusyOn(text) {
+  let v = document.getElementById('pg-busy');
+  if (!v) {
+    v = document.createElement('div'); v.id = 'pg-busy';
+    v.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;z-index:99000;background:rgba(0,48,87,.45);display:flex;align-items:center;justify-content:center;';
+    v.innerHTML = '<div style="background:#fff;border-radius:8px;padding:22px 28px;max-width:420px;font-family:Arial,sans-serif;font-size:14px;color:#003057;box-shadow:0 8px 30px rgba(0,0,0,.3);text-align:center;">' +
+      '<div style="font-weight:700;margin-bottom:6px;">Issuing the proposal</div><div id="pg-busy-text"></div><div style="font-size:12px;color:#666;margin-top:8px;">Keep this page open until it finishes.</div></div>';
+    document.body.appendChild(v);
+    try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) {}
+  }
+  const t = document.getElementById('pg-busy-text'); if (t) t.textContent = text || '';
+}
+function pgBusyOff() { const v = document.getElementById('pg-busy'); if (v) v.remove(); }
 async function pgIssue() {
   const why = pgIssueBlockers();
   if (why.length) { showStatus('Cannot issue: ' + why[0], 'error'); return; }
-  const v = pgState.draft ? pgState.draft.version : pgNextVersion();
-  const prev = pgCurrentIssued();
-  const ok = await confirmDialog({ title: 'Issue proposal v' + v,
-    message: 'This numbers the proposal, freezes its text and figures, and marks the quote as sent.' +
-      (prev ? ' The current issued version ' + pbEsc(prev.proposal_ref) + ' v' + prev.version + ' becomes superseded.' : '') +
-      ' A Proposal engagement is logged on the deal.', confirmLabel: 'Issue' });
-  if (!ok) return;
+  // The quote being issued. Every step below belongs to IT: what is in memory is spliced into these two
+  // objects, and a step that reads the open quote runs only while this is still the open quote.
+  const q = pbQ, st = pgState;
+  if (st.issuing) return;
+  st.issuing = true;
+  const here = () => pbQ === q && pgState === st;
+  let issued = '';   // the number, once the transaction has assigned it
   try {
+    const v = st.draft ? st.draft.version : pgNextVersion();
+    const prev = pgCurrentIssued();
+    const ok = await confirmDialog({ title: 'Issue proposal v' + v,
+      message: 'This numbers the proposal, freezes its text and figures, and marks the quote as sent.' +
+        (prev ? ' The current issued version ' + prev.proposal_ref + ' v' + prev.version + ' becomes superseded.' : '') +
+        ' A Proposal engagement is logged on the deal.', confirmLabel: 'Issue' });
+    if (!ok) return;
+    if (!here()) throw new Error('another quote was opened — nothing was issued');
+    pgBusyOn('Preparing…');
     const d = await pgEnsureDraft();
     const ctx = await pgLoadContext();
+    const wordTpl = pgWordTemplate();
+    // v7.10.58: everything a Word build needs is read ONCE, here (pgWordPlan) — the numbered file built
+    // after the transaction is filled from exactly what was judged before it.
+    if (wordTpl) pgBusyOn('Reading the Word template…');
+    const plan = wordTpl ? await pgWordPlan() : null;
+    if (!here()) throw new Error('another quote was opened — nothing was issued');
     // Render once with the number placeholder, once more after the number is known: the
     // frozen HTML must carry the real reference, which only the transaction can assign.
-    const first = pgRenderDocument(ctx);
+    const first = wordTpl ? pgWordRender(ctx, wordTpl) : pgRenderDocument(ctx);
     const content = pgBuildContent(ctx, first);
+    // A Word proposal is built once BEFORE the number is assigned, and its place in the bucket signed —
+    // a template that cannot be read or filled, or a proxy that cannot sign, stops here with nothing numbered.
+    if (wordTpl) pgBusyOn('Building the Word file…');
+    const wordSlot = wordTpl ? await pgWordPrepareIssue(d, plan) : null;
+    if (!here()) throw new Error('another quote was opened — nothing was issued');
+    pgBusyOn('Numbering the proposal…');
     let row;
-    if (MOCK) row = pgMockIssue(d.id, content, first.html);
-    else {
-      const r = await api('rpc/issue_proposal', 'POST', { p_document_id: d.id, p_actor_id: currentUser.personId, p_content: content, p_html: first.html }, '', { prefer: '' })
-        .catch(e => { if (/^404\b|PGRST202/.test((e && e.message) || '')) { _pgRpcMissing = true; throw new Error('sql/proposal_generator_inc2.sql is not installed on this database'); } throw e; });
-      row = Array.isArray(r) ? r[0] : r;
+    try {
+      if (MOCK) row = pgMockIssue(d.id, content, first.html);
+      else { const r = await api('rpc/issue_proposal', 'POST', { p_document_id: d.id, p_actor_id: currentUser.personId, p_content: content, p_html: first.html }, '', { prefer: '' }); row = Array.isArray(r) ? r[0] : r; }
+    } catch (e) {
+      const msg = (e && e.message) || '';
+      if (/^404\b|PGRST202/.test(msg)) { _pgRpcMissing = true; throw new Error('sql/proposal_generator_inc2.sql is not installed on this database'); }
+      // No answer is not a refusal: the transaction may have committed with nobody told (the request timed
+      // out, the connection dropped, a gateway failed). The row is read back before this is called a
+      // failure — and so is a refusal that follows such a lost answer (the number went out the first time).
+      const lost = pgNoAnswer(e);
+      if (!lost && st.issueLost !== d.id) throw e;
+      pgBusyOn('No answer from the server — checking whether the proposal was numbered…');
+      let back = null;
+      try { back = await pgIssueReadBack(d.id, lost ? 4 : 1); }
+      catch (e2) { st.issueLost = d.id; throw new Error('the server did not answer (' + msg + ') and the proposal could not be read back. It may have been numbered: do not discard the draft — press Issue again in a moment'); }
+      if (!back) { if (!lost) throw e; st.issueLost = d.id; throw new Error('the server did not answer (' + msg + '). The proposal is not numbered so far — press Issue again in a moment'); }
+      row = back;
     }
     if (!row) throw new Error('No row returned');
+    st.issueLost = null;
+    issued = row.proposal_ref + ' v' + row.version;
+    // The number is out. The transaction also marked the quote sent and fixed its valid-until date:
+    // the quote in memory follows before anything is rendered again, so every date printed is the row's.
+    q.status = 'sent'; q.valid_until = row.valid_until;
     // Re-render with the assigned number and store the final HTML on the row (one PATCH).
-    pgState.issuingRef = row.proposal_ref;
-    const final = pgRenderDocument(ctx);
-    pgState.issuingRef = null;
-    content.fields = pgFields(ctx, final.pricing);
-    try { await api('proposal_documents', 'PATCH', { rendered_html: final.html.replace('data-watermark="DRAFT"', 'data-watermark=""'), content_json: content }, 'id=eq.' + row.id, { prefer: 'return=minimal' }); } catch (e) {}
+    if (here()) {
+      let final = null;
+      st.issuingRef = row.proposal_ref;
+      try { final = wordTpl ? pgWordRender(ctx, wordTpl) : pgRenderDocument(ctx); content.fields = pgFields(ctx, final.pricing); } catch (e) { final = null; }
+      st.issuingRef = null;
+      if (final) { try { await api('proposal_documents', 'PATCH', { rendered_html: final.html.replace('data-watermark="DRAFT"', 'data-watermark=""'), content_json: content }, 'id=eq.' + row.id, { prefer: 'return=minimal' }); } catch (e) {} }
+    }
+    let wordNote = '', wordLost = null;
+    if (wordTpl) {   // the Word file with the real number, kept with the version
+      pgBusyOn('Storing the Word file…');
+      try { const w = await pgWordStoreIssued(row, wordSlot, plan, pct => pgBusyOn('Storing the Word file… ' + pct + '%')); row.docx_path = w.path; row.docx_name = w.name; if (w.unknown.length) wordNote = ' — ' + w.unknown.length + ' placeholder(s) printed as typed'; }
+      catch (e) { wordLost = { why: e.message, savedAs: e.savedAs || '' };
+        wordNote = ' — the Word file could not be kept with this version (' + e.message + ')' + (e.savedAs ? '. It was downloaded to this computer as "' + e.savedAs + '" — keep that file and attach it with the Attach Word button under Issued versions' : ''); }
+    }
     // Splice into memory: the issued row, the superseded one, the quote.
-    pgState.docs = pgState.docs.map(x => x.id === row.id ? Object.assign({}, x, row, { content_json: content }) : (x.status === 'issued' ? Object.assign({}, x, { status: 'superseded' }) : x));
-    pgState.draft = null; pgState.overrides = {}; pgState.editing = null;
-    pbQ.status = 'sent'; pbQ.valid_until = row.valid_until;
-    showStatus('Issued ' + row.proposal_ref + ' v' + row.version, 'success');
-    renderQuoteEditor();
-    await pgLedgerAfterIssue(row, ctx);
-  } catch (e) { showStatus('Could not issue: ' + e.message, 'error'); renderQuoteEditor(); }
+    st.docs = st.docs.map(x => x.id === row.id ? Object.assign({}, x, row, { content_json: content }) : (x.status === 'issued' ? Object.assign({}, x, { status: 'superseded' }) : x));
+    st.draft = null; st.editing = null; pgSeedFromLast(st);   // the tab now shows what the next version starts from: this one's ticks and text
+    pgBusyOff();
+    showStatus('Issued ' + row.proposal_ref + ' v' + row.version + wordNote, wordNote ? 'error' : 'success');
+    if (here()) renderQuoteEditor();
+    // The one thing left for the user to do by hand is said in a dialog of its own: the status line is
+    // replaced by the next message, and the stage question would cover it. It is shown once the engagement
+    // is written (a dialog left open must not hold the ledger back) and before the stage question.
+    const sayLost = !wordLost ? null : () => confirmDialog({ title: row.proposal_ref + ': the Word file was not stored',
+      message: row.proposal_ref + ' v' + row.version + ' is issued, but its Word file could not be kept in Focus (' + wordLost.why + ').\n\n' +
+        (wordLost.savedAs ? 'The file was downloaded to this computer as "' + wordLost.savedAs + '". Keep it, and attach it with the Attach Word button under Issued versions.'
+          : 'The file could not be built, so there is nothing to attach: withdraw this version and issue it again once the cause is fixed.'),
+      confirmLabel: 'OK', cancelLabel: 'Close' });
+    await pgLedgerAfterIssue(row, ctx, q, sayLost);
+  } catch (e) { pgBusyOff(); showStatus(issued ? 'Issued ' + issued + ', but a later step failed: ' + e.message : 'Could not issue: ' + e.message, 'error'); if (here()) renderQuoteEditor(); }
+  finally { st.issuing = false; pgBusyOff(); }
 }
 // The ledger: an engagement on the deal (client-facing — a proposal IS contact,
-// so Last Contact moves) and the offer to advance to the Proposal stage.
-async function pgLedgerAfterIssue(row, ctx) {
-  if (!pbQ.deal_id) return;
+// so Last Contact moves) and the offer to advance to the Proposal stage. `q` is the quote that was
+// issued (the open one unless told otherwise).
+async function pgLedgerAfterIssue(row, ctx, q, between) {
+  q = q || pbQ;
+  if (!q.deal_id) { if (between) await between(); return; }
   try {
     const types = await engagementLookupRows('type', 'opportunities');   // v7.10.13: the one list's type use
     const type = types.find(t => /proposal/i.test(t.name || '')) || null;
-    const notes = 'Proposal ' + row.proposal_ref + ' v' + row.version + ' issued — ' + (pbQ.contract_name || '') +
+    const notes = 'Proposal ' + row.proposal_ref + ' v' + row.version + ' issued — ' + (q.contract_name || '') +
       (row.valid_until ? '; valid until ' + row.valid_until : '') + '. Monthly ' + pgMoney((row.content_json || {}).pricing ? row.content_json.pricing.monthly : 0) + ' excl. VAT.';
     const eng = await api('engagements', 'POST', {
-      deal_id: pbQ.deal_id, engagement_date: new Date().toISOString().slice(0, 10),
+      deal_id: q.deal_id, engagement_date: new Date().toISOString().slice(0, 10),
       engagement_type: type ? type.name : 'Proposal Submitted', activity_type_id: type ? +type.id : null,
       notes, next_action: null, next_action_done: true, created_by: currentUser.personId,
     }, 'select=id');
@@ -15038,24 +15213,26 @@ async function pgLedgerAfterIssue(row, ctx) {
       try { await api('engagements', 'PATCH', { stream_label: 'Sales' }, 'id=eq.' + engId, { prefer: 'return=minimal' }); } catch (e) {}
       if (ctx.contact && ctx.contact.personId) { try { await api('engagement_people', 'POST', { engagement_id: engId, person_id: ctx.contact.personId }, '', { prefer: 'return=minimal' }); } catch (e) {} }
     }
-    if (oppData && +oppData.id === +pbQ.deal_id) { try { await loadEngagements(pbQ.deal_id); } catch (e) {} }
+    if (oppData && +oppData.id === +q.deal_id) { try { await loadEngagements(q.deal_id); } catch (e) {} }
   } catch (e) { showStatus('Issued, but the engagement could not be logged: ' + e.message, 'error'); }
-  await pgOfferStageMove();
+  if (between) await between();   // what the user must be told before the stage question (a Word file that was not stored)
+  await pgOfferStageMove(q);
 }
-async function pgOfferStageMove() {
+async function pgOfferStageMove(q) {
+  q = q || pbQ;
   try {
     const stages = allData['stages'] || await apiGet('stages', 'active=eq.true&select=*&order=sort_order.asc');
     allData['stages'] = stages;
     const proposal = stages.find(s => /^proposal$/i.test(s.name || ''));
     if (!proposal) return;
-    const dealRows = (oppData && +oppData.id === +pbQ.deal_id) ? [oppData] : await apiGet('deals', 'id=eq.' + pbQ.deal_id + '&select=id,stage_id');
+    const dealRows = (oppData && +oppData.id === +q.deal_id) ? [oppData] : await apiGet('deals', 'id=eq.' + q.deal_id + '&select=id,stage_id');
     const deal = dealRows[0]; if (!deal) return;
     const cur = stages.find(s => +s.id === +deal.stage_id);
     if (!cur || +cur.sort_order >= +proposal.sort_order) return;   // never backwards, never a no-op
     const ok = await confirmDialog({ title: 'Move to Proposal stage?', message: 'The deal is at ' + pbEsc(cur.name) + '. Move it to Proposal now that ' + 'a proposal is out?', confirmLabel: 'Move to Proposal' });
     if (!ok) return;
-    await api('deals', 'PATCH', { stage_id: proposal.id }, 'id=eq.' + pbQ.deal_id, { prefer: 'return=minimal' });
-    if (oppData && +oppData.id === +pbQ.deal_id) {
+    await api('deals', 'PATCH', { stage_id: proposal.id }, 'id=eq.' + q.deal_id, { prefer: 'return=minimal' });
+    if (oppData && +oppData.id === +q.deal_id) {
       oppData.stage_id = proposal.id;
       if (typeof _oppAsOpened === 'object' && _oppAsOpened) _oppAsOpened.stage_id = proposal.id;
       const sel = document.getElementById('opp-stage-id'); if (sel) { sel.value = proposal.id; try { onOppStageChange(false); } catch (e) {} }
@@ -15095,12 +15272,20 @@ function pgHistoryPanel() {
   const hist = pgState.docs.filter(d => d.status !== 'draft');
   if (!hist.length) return '';
   const badge = st => ({ issued: '#DCFCE7/#166534', superseded: '#F3F4F6/#6B7280', withdrawn: '#FEE2E2/#7F1D1D' }[st] || '#F3F4F6/#374151').split('/');
-  return '<div class="pg-history"><div class="pg-history-h">Issued versions</div>' + hist.map(d => {
+  // v7.10.58: a version issued from a Word template whose file did not reach the bucket (the upload failed
+  // and the numbered file was downloaded instead) can have that file attached afterwards.
+  const wordMissing = d => !d.docx_path && d.content_json && d.content_json.word_template;
+  const noFile = d => wordMissing(d) && can('issue_proposal');
+  return '<div class="pg-history"><div class="pg-history-h">Issued versions</div>' +
+    (hist.some(noFile) ? '<input type="file" id="pg-attach-file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none;" onchange="const f = this.files[0]; this.value = \'\'; pgAttachDocx(f)">' : '') + hist.map(d => {
     const [bg, fg] = badge(d.status);
     return '<div class="pg-hist-row"><div><strong>' + pbEsc(d.proposal_ref || '') + '</strong> v' + pbEsc(d.version) +
       ' <span class="badge" style="background:' + bg + ';color:' + fg + ';">' + pbEsc(d.status) + '</span>' +
-      '<div class="pg-muted">' + pbEsc(String(d.issued_at || '').slice(0, 10)) + (d.valid_until ? ' · valid to ' + pbEsc(d.valid_until) : '') + '</div></div>' +
-      '<div class="pg-hist-actions"><button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', false)">View</button><button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', true)">Print</button>' +
+      '<div class="pg-muted">' + pbEsc(String(d.issued_at || '').slice(0, 10)) + (d.valid_until ? ' · valid to ' + pbEsc(d.valid_until) : '') + '</div>' +
+      (wordMissing(d) ? '<div data-pg-nofile="' + d.id + '" style="font-size:11px;color:#92400E;">Word file not stored' + (noFile(d) ? ' — if it was downloaded when this version was issued (named ' + pbEsc(d.proposal_ref || '') + ' … .docx), attach it' + (d.status === 'issued' ? '; if not, withdraw this version and issue it again' : '') : '') + '</div>' : '') + '</div>' +
+      '<div class="pg-hist-actions">' + (d.docx_path ? '<button class="pb-btn xs" data-pg-docx-btn="' + d.id + '" onclick="pgOpenDocx(' + d.id + ')"' + (_pgOpening.has(+d.id) ? ' disabled' : '') + ' title="' + pbEsc(d.docx_name || '') + '">' + (_pgOpening.has(+d.id) ? 'Fetching…' : 'Word') + '</button>' : '') +
+      (noFile(d) ? '<button class="pb-btn xs" onclick="pgAttachDocxPick(' + d.id + ')" title="The Word file was not stored when this version was issued — attach the file that was downloaded then, if there is one (named ' + pbEsc(d.proposal_ref || '') + ' … .docx)">Attach Word</button>' : '') +
+      '<button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', false)">View</button>' + (d.docx_path ? '' : '<button class="pb-btn xs" onclick="pgOpenIssued(' + d.id + ', true)">Print</button>') +
       (d.status === 'issued' && can('issue_proposal') ? '<button class="pb-btn xs danger" onclick="pgWithdraw(' + d.id + ')">Withdraw</button>' : '') + '</div></div>';
   }).join('') + '</div>';
 }
@@ -15154,9 +15339,24 @@ async function renderPgTemplatesPage() {
   const tplList = pgAdmin.templates.map(t => '<div class="pg-tpl' + (tpl && +t.id === +tpl.id ? ' active' : '') + '" onclick="pgAdminOpen(' + t.id + ')">' +
     '<strong>' + pbEsc(t.name) + '</strong>' + (t.is_default ? ' <span class="badge" style="background:#DCFCE7;color:#166534;">default</span>' : '') + (t.active ? '' : ' <span class="badge">inactive</span>') +
     '<div class="pg-muted">' + pbEsc(t.service_scope || '') + '</div></div>').join('');
-  const secRows = secs.map(s => {
+  const isWord = pgTplIsWord(tpl);   // v7.10.58
+  const onlyWhenSel = s => '<span style="display:inline-block;width:100%;min-width:150px;max-width:280px;vertical-align:middle;"><select class="form-control" style="width:100%;font-size:12px;padding:2px 4px;" title="' + pbEsc(s.only_when && PG_ONLY_WHEN[s.only_when] ? 'Only when ' + PG_ONLY_WHEN[s.only_when] : 'Always offered') + '" onchange="pgAdminOnlyWhen(this, ' + s.id + ')"><option value="">always</option>' +
+    Object.keys(PG_ONLY_WHEN).map(k => '<option value="' + k + '"' + (s.only_when === k ? ' selected' : '') + '>only when ' + pbEsc(PG_ONLY_WHEN[k]) + '</option>').join('') + '</select></span>';
+  const secRow = s => {
     const ed = pgAdmin.editing === s.id;
-    return '<tr' + (ed ? ' style="background:#FFF8DC;"' : '') + '>' +
+    if (s.kind === 'word') return '<tr data-pg-word="' + pbEsc(s.section_key) + '"' + (ed ? ' data-pgs-edit="' + s.id + '" style="background:#FFF8DC;"' : '') + '>' +
+      '<td>' + s.display_order + '</td>' +
+      '<td colspan="2"><div style="min-width:88px;overflow-wrap:anywhere;">' + pbEsc(s.title) + '</div><div style="font-size:11px;overflow-wrap:anywhere;"><code style="color:var(--text3);">' + pbEsc(s.section_key).replace(/_/g, '_<wbr>') + '</code></div>' + (ed ? '<div class="pg-muted" style="font-size:11px;">The title is the Heading 1 in the Word file — change it there.</div>' : '') + '</td>' +
+      '<td colspan="3" style="font-size:12px;">' +
+        '<label style="display:inline-block;white-space:nowrap;margin:0 10px 3px 0;"><input type="checkbox" ' + (s.included_default !== false ? 'checked' : '') + ' onchange="pgAdminWordRule(' + s.id + ', {included_default: this.checked})"> On by default</label>' +
+        '<label style="display:inline-block;white-space:nowrap;margin:0 10px 3px 0;"><input type="checkbox" ' + (s.mandatory ? 'checked' : '') + ' onchange="pgAdminWordRule(' + s.id + ', {mandatory: this.checked})"> Mandatory</label>' +
+        '<label style="display:inline-block;white-space:nowrap;margin:0 10px 3px 0;"><input type="checkbox" ' + (s.written ? 'checked' : '') + ' onchange="pgAdminWordRule(' + s.id + ', {written: this.checked})"> Written per proposal</label>' +
+        onlyWhenSel(s) + '</td>' +
+      '<td' + (ed ? ' colspan="2"' : '') + ' style="max-width:420px;">' + (ed ? '<textarea class="form-control" id="pgs-body" rows="6" style="min-width:150px;" placeholder="Default text for a written section (optional)">' + pbEsc(s.body || '') + '</textarea>' +
+          '<div style="margin-top:6px;white-space:nowrap;"><button class="btn btn-primary btn-sm" onclick="pgAdminSaveSection(' + s.id + ')">Done</button> <button class="btn btn-ghost btn-sm" onclick="pgAdminEdit(null)">Cancel</button></div>'
+        : (s.written ? '<div class="pg-clip" style="min-width:150px;">' + pbEsc((s.body || '').slice(0, 160) || '(no default text)') + '</div>' : '<span class="pg-muted" style="white-space:nowrap;">from the Word file</span>')) + '</td>' +
+      (ed ? '' : '<td style="white-space:nowrap;"><button class="btn btn-ghost btn-sm" onclick="pgAdminEdit(' + s.id + ')">Edit</button></td>') + '</tr>';   // edited: the text cell has taken this column
+    return '<tr' + (ed ? ' data-pgs-edit="' + s.id + '" style="background:#FFF8DC;"' : '') + '>' +
       '<td>' + (ed ? '<input type="number" class="form-control" style="width:64px;" id="pgs-order" value="' + s.display_order + '">' : s.display_order) + '</td>' +
       '<td><code>' + pbEsc(s.section_key) + '</code></td>' +
       '<td>' + (ed ? '<input type="text" class="form-control" id="pgs-title" value="' + pbEsc(s.title) + '">' : pbEsc(s.title)) + '</td>' +
@@ -15167,25 +15367,75 @@ async function renderPgTemplatesPage() {
       '<td style="white-space:nowrap;">' + (ed
         ? '<button class="btn btn-primary btn-sm" onclick="pgAdminSaveSection(' + s.id + ')">Done</button> <button class="btn btn-ghost btn-sm" onclick="pgAdminEdit(null)">Cancel</button>'
         : '<button class="btn btn-ghost btn-sm" onclick="pgAdminEdit(' + s.id + ')">Edit</button> <button class="btn btn-danger btn-sm" onclick="pgAdminDeleteSection(' + s.id + ')">Delete</button>') + '</td></tr>';
-  }).join('');
-  body.innerHTML = '<tr><td style="padding:0;border:none;"><div class="pg-admin">' +
+  };
+  const secTable = (headMid, list) => '<table style="width:100%;"><thead><tr><th>Order</th>' + headMid + '<th>Text</th><th></th></tr></thead><tbody>' +
+    (list.map(secRow).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px;">No sections yet.</td></tr>') + '</tbody></table>';
+  const HEAD_BUILTIN = '<th>Key</th><th>Title</th><th>Kind</th><th>Mandatory</th><th>Page break</th>';
+  const otherSecs = secs.filter(s => s.kind !== 'word');
+  const keep = pgAdminKeepRead();   // what is being typed, read just before the page is drawn again
+  body.innerHTML = '<tr><td style="padding:0;border:none;"><div class="pg-admin' + (isWord ? ' pg-admin-word' : '') + '">' +
     '<div class="pg-admin-side"><button class="btn btn-primary btn-sm" style="width:100%;justify-content:center;margin-bottom:10px;" onclick="pgAdminAddTemplate()">+ New template</button>' + tplList + '</div>' +
     '<div class="pg-admin-main">' + (tpl ? (
       '<div class="pb-qheader" style="display:grid;grid-template-columns:2fr 1fr auto auto auto;gap:10px;align-items:end;">' +
-        '<div class="form-group"><label class="form-label">Name</label><input class="form-control" value="' + pbEsc(tpl.name) + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {name:this.value})"></div>' +
-        '<div class="form-group"><label class="form-label">Service scope</label><input class="form-control" value="' + pbEsc(tpl.service_scope || '') + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {service_scope:this.value})"></div>' +
+        '<div class="form-group"><label class="form-label">Name</label><input class="form-control" id="pgt-name" data-tpl="' + tpl.id + '" value="' + pbEsc(tpl.name) + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {name:this.value})"></div>' +
+        '<div class="form-group"><label class="form-label">Service scope</label><input class="form-control" id="pgt-scope" data-tpl="' + tpl.id + '" value="' + pbEsc(tpl.service_scope || '') + '" onchange="pgAdminSaveTemplate(' + tpl.id + ', {service_scope:this.value})"></div>' +
         '<label style="font-size:12px;"><input type="checkbox" ' + (tpl.active ? 'checked' : '') + ' onchange="pgAdminSaveTemplate(' + tpl.id + ', {active:this.checked})"> Active</label>' +
         '<button class="btn btn-secondary btn-sm" ' + (tpl.is_default ? 'disabled' : '') + ' onclick="pgAdminMakeDefault(' + tpl.id + ')">Make default</button>' +
         '<button class="btn btn-danger btn-sm" onclick="pgAdminDeleteTemplate(' + tpl.id + ')">Delete</button>' +
       '</div>' +
+      pgAdminWordBoxHtml(tpl) +
+      (isWord ? '<p class="pg-muted" style="font-size:12px;margin:6px 0;">A Word template\'s sections are its Heading 1 blocks, read from the file. Set the rules here: on by default, mandatory (always in), written per proposal (typed on the Proposal tab, printed at the section\'s {{write}} paragraph, else after its heading), and "only when" a quote condition holds. Sections of other kinds below are not used while the file is attached.</p>' : '') +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin:6px 0;"><h3 style="margin:0;color:var(--navy);font-size:14px;">Sections</h3><button class="btn btn-primary btn-sm" onclick="pgAdminAddSection(' + tpl.id + ')">+ Add section</button></div>' +
-      '<table style="width:100%;"><thead><tr><th>Order</th><th>Key</th><th>Title</th><th>Kind</th><th>Mandatory</th><th>Page break</th><th>Text</th><th></th></tr></thead><tbody>' +
-        (secRows || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px;">No sections yet.</td></tr>') + '</tbody></table>' +
+      (isWord ? secTable('<th colspan="2">Section</th><th colspan="3">Rules</th>', secs.filter(s => s.kind === 'word')) +
+          (otherSecs.length ? '<h3 style="margin:16px 0 6px;color:var(--navy);font-size:14px;">Other sections <span class="pg-muted" style="font-weight:400;">· not used while the file is attached</span></h3>' +
+            '<div data-pg-other style="overflow-x:auto;width:0;min-width:100%;">' + secTable(HEAD_BUILTIN, otherSecs) + '</div>' : '')   // the box scrolls by itself: the wide built-in table has no say in the panel's width
+        : secTable(HEAD_BUILTIN, secs)) +
       '<details style="margin-top:14px;font-size:12px;color:var(--text2);"><summary style="cursor:pointer;color:var(--navy);font-weight:600;">Merge fields and formatting</summary>' +
         '<p>Generated sections (kind <code>generated</code>) are drawn by Focus from the quote: <code>cover</code>, <code>scope_posts</code>, <code>shift_schedule</code>, <code>pricing</code>, <code>acceptance</code>. <code>prompt</code> sections show their text as a starting point sales rewrites per proposal. Blank lines make paragraphs; lines starting with • make a bulleted list.</p>' +
-        '<p>Fields: ' + PG_FIELD_LIST.map(f => '<code>{{' + f + '}}</code>').join(' ') + '</p></details>'
+        '<p>Fields: ' + PG_FIELD_LIST.concat(PG_DOCX_EXTRA_FIELDS).map(f => '<code>{{' + f + '}}</code>').join(' ') + '</p>' +
+        '<p><strong>Word templates (v7.10.58).</strong> Type the same fields into the Word file, headers and footers included. A table row carrying <code>{#posts}</code> … <code>{/posts}</code> repeats once per post with ' + PG_DOCX_LISTS.posts.fields.map(f => '<code>{{' + f + '}}</code>').join(' ') +
+        '; <code>{#lines}</code> gives every priced line (' + PG_DOCX_LISTS.lines.fields.map(f => '<code>{{' + f + '}}</code>').join(' ') + ') and <code>{#shifts}</code> the per-shift rates (' + PG_DOCX_LISTS.shifts.fields.map(f => '<code>{{' + f + '}}</code>').join(' ') + '). ' +
+        'A paragraph holding only ' + PG_DOCX_TABLES.map(t => '<code>{{table.' + t + '}}</code>').join(', ') + ' becomes a generated table. <code>{{write}}</code>, alone on a line of its own, marks where a written section\'s text lands. ' +
+        'Give each of these a line that holds nothing else — no picture, text box or page break on it — and mind the braces: two each side for a field, one for a row marker.</p></details>'
     ) : '<p style="color:var(--text3);padding:30px;">Add a template to begin.</p>') + '</div>' +
   '</div></td></tr>';
+  pgAdminKeepWrite(keep);
+}
+// The page is drawn again by things the user did not ask for at that moment — a Word file that finished
+// uploading, a rule or a section that could not be saved, a save of another box. None of them may cost
+// the text being typed: an open section editor's boxes are read before the redraw and written back after
+// it (while that section is still the one being edited), and so is a Name / Service scope box still in
+// focus — those two save when they are left, so a restored one is saved on leaving even if nothing more
+// is typed. The caret goes back where it was.
+function pgAdminKeepRead() {
+  const k = { ed: null, vals: {}, focus: null };
+  const row = document.querySelector('.pg-admin tr[data-pgs-edit]');
+  if (row && pgAdmin.editing != null && +row.getAttribute('data-pgs-edit') === +pgAdmin.editing) {
+    k.ed = +pgAdmin.editing;
+    ['pgs-order', 'pgs-title', 'pgs-kind', 'pgs-body', 'pgs-mand', 'pgs-break'].forEach(i => { const e = document.getElementById(i); if (e) k.vals[i] = e.type === 'checkbox' ? e.checked : e.value; });
+  }
+  const a = document.activeElement, id = (a && a.id) || '';
+  if (/^pgt-/.test(id) || (/^pgs-/.test(id) && k.ed != null)) {
+    k.focus = { id, tpl: a.getAttribute('data-tpl'), value: a.value, dirty: a.value !== a.defaultValue, s: null, e: null };
+    try { k.focus.s = a.selectionStart; k.focus.e = a.selectionEnd; } catch (e) {}
+  }
+  return k;
+}
+function pgAdminKeepWrite(k) {
+  const same = k.ed != null && +pgAdmin.editing === k.ed && !!document.querySelector('.pg-admin tr[data-pgs-edit="' + k.ed + '"]');
+  if (same) Object.keys(k.vals).forEach(i => { const e = document.getElementById(i); if (!e) return; if (e.type === 'checkbox') e.checked = k.vals[i]; else e.value = k.vals[i]; });
+  const f = k.focus, el = f ? document.getElementById(f.id) : null;
+  if (!el) return;
+  if (/^pgt-/.test(f.id)) {
+    if (el.getAttribute('data-tpl') !== f.tpl) return;
+    if (f.dirty && el.value !== f.value) {
+      el.value = f.value;
+      let saved = false;
+      el.addEventListener('change', () => { saved = true; }, { once: true });
+      el.addEventListener('blur', () => { if (!saved && el.isConnected) el.dispatchEvent(new Event('change', { bubbles: true })); }, { once: true });
+    }
+  } else if (!same) return;
+  try { el.focus(); if (f.s != null && el.setSelectionRange) el.setSelectionRange(f.s, f.e); } catch (e) {}
 }
 function pgAdminOpen(id) { pgAdmin.open = +id; pgAdmin.editing = null; renderPgTemplatesPage(); }
 function pgAdminEdit(id) { pgAdmin.editing = id; renderPgTemplatesPage(); }
@@ -15221,6 +15471,7 @@ async function pgAdminAddSection(templateId) {
   const key = await promptDialog({ title: 'New section', message: 'Section key (letters, digits, underscore — e.g. custom_1)?', confirmLabel: 'Add' });
   if (!key) return;
   const k = String(key).trim().toLowerCase().replace(/[^a-z0-9_]/g, '_');
+  if (k.indexOf(PG_DOCX_KEY_PREFIX) === 0) { showStatus('Keys starting with ' + PG_DOCX_KEY_PREFIX + ' are kept for the sections of a Word file — choose another key', 'error'); return; }
   const order = pgAdmin.sections.filter(s => +s.template_id === +templateId).reduce((m, s) => Math.max(m, s.display_order || 0), 0) + 1;
   try {
     const r = await apiPost('proposal_template_sections', { template_id: templateId, section_key: k, title: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), display_order: order, kind: 'boilerplate', body: '', mandatory: false, page_break_before: false });
@@ -15230,9 +15481,11 @@ async function pgAdminAddSection(templateId) {
 }
 async function pgAdminSaveSection(id) {
   const g = i => document.getElementById(i);
-  const patch = { display_order: Math.round(+g('pgs-order').value || 0), title: g('pgs-title').value.trim(), kind: g('pgs-kind').value,
-    mandatory: g('pgs-mand').checked, page_break_before: g('pgs-break').checked, body: g('pgs-body').value };
-  if (!patch.title) { showStatus('A section needs a title', 'error'); return; }
+  const word = !g('pgs-kind');   // v7.10.58: a Word section row — only its default text is edited here (the title and the order are the file's)
+  const patch = word ? { body: g('pgs-body').value || null }
+    : { display_order: Math.round(+g('pgs-order').value || 0), title: g('pgs-title').value.trim(), kind: g('pgs-kind').value,
+        mandatory: g('pgs-mand').checked, page_break_before: g('pgs-break').checked, body: g('pgs-body').value };
+  if (!word && !patch.title) { showStatus('A section needs a title', 'error'); return; }
   try { await apiPatch('proposal_template_sections', id, patch); pgAdmin.editing = null; showStatus('Saved', 'success'); }
   catch (e) { showStatus('Save failed: ' + e.message, 'error'); }
   renderPgTemplatesPage();
@@ -15242,6 +15495,1311 @@ async function pgAdminDeleteSection(id) {
   try { await apiDelete('proposal_template_sections', id); } catch (e) { showStatus('Delete failed: ' + e.message, 'error'); }
   renderPgTemplatesPage();
 }
+
+// ── Word (.docx) proposal templates (v7.10.58) ─────────────────────────────────────────────
+// Richard 2026-11-26: "under proposal, the proposal tab, can we have a ms word file as a template" →
+// "three or four basic word templates, and then … letting the user choose which sections he wants in
+// or out, with some rules". A proposal template may carry a Word file (proposal_templates.docx_*, the
+// bytes in the private attachments bucket). Focus reads the file in the browser — a .docx is a zip of
+// XML parts, read and written here by hand like the Excel export, no library — and:
+//   • SECTIONS are the file's Heading 1 blocks (everything from one Heading 1 to the next); the front
+//     matter before the first heading (cover, document control, contents) always prints. Uploading the
+//     file writes one proposal_template_sections row of kind 'word' per heading; the admin sets the
+//     rules there: mandatory, default on / off, "only when" (a quote condition) and "written here"
+//     (its text is typed on the Proposal tab and lands at the {{write}} paragraph of the section).
+//   • MERGE FIELDS are the same {{client.name}} tokens the built-in templates use, in body, headers
+//     and footers; a token Word split across runs is joined before it is replaced.
+//   • TABLE ROWS repeat: a row carrying {#posts} … {/posts} prints once per post ({{post.name}} …);
+//     lists posts · lines · shifts; a pair stays inside one table, and an empty list takes its rows
+//     (and a table left with no row) out. {{table.pricing}}, {{table.posts}}, {{table.shift_rates}} and
+//     {{table.shift_schedule}} on a paragraph of their own are replaced by a generated table.
+//   • A section LEFT OUT takes its entry off the saved contents table and its bookmarks with it
+//     (pgDocxBookmarkPlan, pgDocxPruneToc), and never leaves an empty page section behind (pgDocxFill's
+//     section-break rule). Page numbers and Word's own heading numbers settle when Word updates the
+//     fields on opening (settings.xml updateFields).
+//   • COVER-PAGE CONTROLS bound to a document property (Subject, Keywords, Company, a publish date …)
+//     would show the property, not the merged text: the fill cuts the binding (pgDocxUnbind) and fills
+//     merge fields typed in the properties themselves (docProps).
+// Download Word fills the file for a draft (which opens on a red DRAFT page of its own, in front of the
+// cover, while the figures are not a calculated price); Issue fills it with the real number and stores the result beside the frozen HTML
+// (proposal_documents.docx_path) — both from ONE reading of the quote (pgWordPlan). The in-page preview
+// is an outline — Word's layout is not drawn in the browser.
+const PG_ONLY_WHEN = {
+  per_shift: 'prices are shown per shift', shifts: 'the posts have shifts', vehicles: 'vehicles are on the quote',
+  support_items: 'support items are on the quote', extension: 'the deal is an extension', setup: 'there is a once-off setup charge',
+};
+const PG_DOCX_LISTS = {
+  posts:  { fields: ['post.group', 'post.name', 'post.grade', 'post.description', 'post.uniform', 'post.shift_pattern', 'post.officers_per_shift', 'post.officers', 'post.monthly'] },
+  lines:  { fields: ['line.group', 'line.name', 'line.officers', 'line.monthly'] },
+  shifts: { fields: ['shift.post', 'shift.grade', 'shift.label', 'shift.hours', 'shift.days', 'shift.public_holidays', 'shift.officers', 'shift.per_month', 'shift.rate', 'shift.monthly'] },
+};
+const PG_DOCX_TABLES = ['pricing', 'posts', 'shift_rates', 'shift_schedule'];
+const PG_DOCX_EXTRA_FIELDS = ['pricing.vat', 'pricing.vat_pct', 'pricing.months', 'pricing.setup_once_off', 'quote.site_count', 'today'];
+const PG_DOCX_CORE = { 'word/document.xml': 1, 'word/styles.xml': 1, 'word/settings.xml': 1 };   // pgDocxOpen's names for the main part, its styles and its settings, whatever the file calls them
+const PG_DOCX_KEY_PREFIX = 'w_';   // every Word section key starts with it (pgDocxAnalyse); pgAdminAddSection refuses it for the built-in kinds
+const _pgDocxCache = {};   // template id → { blob, zip, analysis } for the session
+
+// ── Zip ──────────────────────────────────────────────────────────────────────
+function _zipU16(b, o) { return b[o] | (b[o + 1] << 8); }
+function _zipU32(b, o) { return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0; }
+// Central directory → entries with their raw (still compressed) bytes.
+function pgZipRead(buf) {
+  const b = new Uint8Array(buf);
+  let eocd = -1;
+  for (let i = b.length - 22; i >= Math.max(0, b.length - 70000); i--) if (_zipU32(b, i) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('Not a .docx file (no zip directory)');
+  const count = _zipU16(b, eocd + 10), cdOff = _zipU32(b, eocd + 16);
+  if (count === 0xFFFF || cdOff === 0xFFFFFFFF) throw new Error('Zip64 files are not supported');
+  const entries = []; let p = cdOff;
+  const dec = new TextDecoder();
+  for (let n = 0; n < count; n++) {
+    if (_zipU32(b, p) !== 0x02014b50) throw new Error('Damaged zip directory');
+    const flags = _zipU16(b, p + 8), method = _zipU16(b, p + 10), time = _zipU16(b, p + 12), date = _zipU16(b, p + 14), crc = _zipU32(b, p + 16);
+    const csize = _zipU32(b, p + 20), usize = _zipU32(b, p + 24), nl = _zipU16(b, p + 28), el = _zipU16(b, p + 30), cl = _zipU16(b, p + 32), lo = _zipU32(b, p + 42);
+    if (csize === 0xFFFFFFFF || usize === 0xFFFFFFFF || lo === 0xFFFFFFFF) throw new Error('Zip64 files are not supported');
+    const name = dec.decode(b.subarray(p + 46, p + 46 + nl));
+    if (_zipU32(b, lo) !== 0x04034b50) throw new Error('Damaged zip entry ' + name);
+    const dataAt = lo + 30 + _zipU16(b, lo + 26) + _zipU16(b, lo + 28);
+    entries.push({ name, nameBytes: b.slice(p + 46, p + 46 + nl), flags, method, time, date, crc, csize, usize, raw: b.subarray(dataAt, dataAt + csize) });
+    p += 46 + nl + el + cl;
+  }
+  return entries;
+}
+async function _zipPipe(bytes, stream) { return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(stream)).arrayBuffer()); }
+async function pgZipInflate(e) {
+  if (e.method === 0) return e.raw;
+  if (e.method !== 8) throw new Error('Unsupported zip compression in ' + e.name);
+  return _zipPipe(e.raw, new DecompressionStream('deflate-raw'));
+}
+async function pgZipText(entries, name) { const e = entries.find(x => x.name === name); return e ? new TextDecoder().decode(await pgZipInflate(e)) : null; }
+// Write a zip: changed parts (name → string) are deflated afresh, everything else is copied as it was.
+async function pgZipWrite(entries, changed, mime) {
+  const enc = new TextEncoder(), parts = [], central = []; let offset = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF], u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  for (const e of entries) {
+    let method = e.method, crc = e.crc, csize = e.csize, usize = e.usize, raw = e.raw;
+    if (changed && Object.prototype.hasOwnProperty.call(changed, e.name)) {
+      const data = enc.encode(changed[e.name]);
+      crc = _xlsxCrc32(data); usize = data.length;
+      try { raw = await _zipPipe(data, new CompressionStream('deflate-raw')); method = 8; } catch (_e) { raw = data; method = 0; }
+      csize = raw.length;
+    }
+    const name = e.nameBytes || enc.encode(e.name), flags = e.flags & 0x0800;   // the name's own bytes: a code-page name is not re-encoded
+    const head = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(flags), ...u16(method), ...u16(e.time), ...u16(e.date), ...u32(crc), ...u32(csize), ...u32(usize), ...u16(name.length), ...u16(0), ...name]);
+    parts.push(head, raw);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(flags), ...u16(method), ...u16(e.time), ...u16(e.date), ...u32(crc), ...u32(csize), ...u32(usize), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset), ...name]));
+    offset += head.length + raw.length;
+  }
+  const cdSize = central.reduce((n, c) => n + c.length, 0);
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(entries.length), ...u16(entries.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  return new Blob([...parts, ...central, end], { type: mime || 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+}
+
+// ── OOXML scanning ───────────────────────────────────────────────────────────
+function _xmlUnesc(s) { return String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(+n)).replace(/&#x([0-9a-f]+);/gi, (m, h) => String.fromCodePoint(parseInt(h, 16))).replace(/&amp;/g, '&'); }
+// Text for an XML text node or attribute. What XML 1.0 does not allow (control characters, U+FFFE / U+FFFF,
+// half of a surrogate pair) would make Word refuse the whole file, so it is dropped; a carriage return
+// goes too (the line feed beside it is the line break).
+function _xmlEsc(s) {
+  return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B-\u001F\uFFFE\uFFFF]/g, '')
+    .replace(/[\uD800-\uDFFF]/g, (c, i, str) => { const u = c.charCodeAt(0);
+      if (u <= 0xDBFF) { const n = str.charCodeAt(i + 1); return n >= 0xDC00 && n <= 0xDFFF ? c : ''; }
+      const p = str.charCodeAt(i - 1); return p >= 0xD800 && p <= 0xDBFF ? c : ''; })
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+// Outermost elements of one tag inside xml[from..to): [{ start, end, xml }] (same-tag nesting counted).
+function pgXmlOuter(xml, tag, from, to) {
+  from = from || 0; to = to == null ? xml.length : to;
+  const re = new RegExp('<(/?)' + tag.replace(/:/g, '\\:') + '(?=[\\s>/])[^>]*?(/?)>', 'g');
+  re.lastIndex = from;
+  const out = []; let depth = 0, start = -1, m;
+  while ((m = re.exec(xml)) && m.index < to) {
+    if (m[1]) { depth--; if (depth === 0 && start >= 0) { out.push({ start, end: m.index + m[0].length }); start = -1; } }
+    else if (m[2]) { if (depth === 0) out.push({ start: m.index, end: m.index + m[0].length }); }
+    else { if (depth === 0) start = m.index; depth++; }
+  }
+  out.forEach(r => { r.xml = xml.slice(r.start, r.end); });
+  return out;
+}
+// The body's top-level blocks (paragraphs, tables, sdt wrappers, bookmarks … and the closing sectPr).
+function pgDocxBlocks(xml) {
+  const bs = xml.indexOf('<w:body>'), be = xml.lastIndexOf('</w:body>');
+  if (bs < 0 || be < 0) throw new Error('No document body in the Word file');
+  const from = bs + 8;
+  const re = /<(\/?)([\w:.-]+)(?:\s+[^>]*?)?(\/?)>/g; re.lastIndex = from;
+  const blocks = []; let depth = 0, start = -1, m;
+  while ((m = re.exec(xml)) && m.index < be) {
+    if (m[1]) { depth--; if (depth === 0 && start >= 0) { blocks.push({ start, end: m.index + m[0].length, tag: m[2] }); start = -1; } }
+    else if (m[3]) { if (depth === 0) blocks.push({ start: m.index, end: m.index + m[0].length, tag: m[2] }); }
+    else { if (depth === 0) { start = m.index; } depth++; }
+  }
+  blocks.forEach(b => { b.xml = xml.slice(b.start, b.end); });
+  return { head: xml.slice(0, from), blocks, tail: xml.slice(be) };
+}
+function pgDocxText(xml) { let t = ''; const re = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<w:tab\/>|<w:br\/>/g; let m; while ((m = re.exec(xml))) t += m[1] != null ? _xmlUnesc(m[1]) : (m[0] === '<w:tab/>' ? '\t' : '\n'); return t; }
+// A paragraph's OWN style: pPr is its first child and pStyle the first child of that. A text box or a
+// tracked formatting change inside the paragraph carries a pPr of its own, which must not be read.
+function pgDocxParaStyle(pXml) { const m = /^<w:p(?:\s[^>]*)?>\s*<w:pPr>\s*<w:pStyle\s+w:val="([^"]+)"/.exec(pXml); return m ? m[1] : ''; }
+// The paragraph without its drawings and text boxes (their text is not the paragraph's own).
+function pgDocxOwnXml(pXml) { return _pgXmlCut(pXml, ['mc:AlternateContent', 'w:pict', 'w:drawing']); }
+// A PLACEHOLDER LINE is a paragraph whose own text is exactly {{table.x}} or {{write}}; the filler
+// replaces the whole paragraph. So the line must hold nothing else: a picture, shape or text box anchored
+// in it, a page or column break, a symbol or a note reference would go with it. A line that holds more is
+// NOT replaced — its placeholder prints as typed and is reported (upload check, outline, Issue).
+function _pgLineHoldsMore(pXml) { return /<w:(?:drawing|pict|object|sym|footnoteReference|endnoteReference)[\s\/>]|<mc:AlternateContent|<m:oMath|<w:br\s[^>]*w:type="(?:page|column)"/.test(pXml); }
+function pgDocxWriteLine(pXml) { return pXml.indexOf('{') >= 0 && !_pgLineHoldsMore(pXml) && /^\{\{\s*write\s*\}\}$/i.test(pgDocxText(pgDocxOwnXml(pXml)).trim()); }
+// "Page break before" set on a placeholder line: kept on a one-point paragraph in front of what is generated.
+function _pgPageBreakBefore(pXml) {
+  const open = /^<w:p(?:\s[^>]*)?>\s*(?=<w:pPr>)/.exec(pXml); if (!open) return '';
+  const ppr = _pgXmlCut((pgXmlOuter(pXml, 'w:pPr', open[0].length)[0] || {}).xml || '', ['w:pPrChange']);
+  return /<w:pageBreakBefore(?:\s+w:val="(?:1|true|on)")?\s*\/>/.test(ppr) ? '<w:p><w:pPr><w:pageBreakBefore/><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr></w:p>' : '';
+}
+// Brace shapes in a paragraph's text that are NOT placeholders as Focus reads them — a field is {{name}},
+// a row marker {#name} / {/name} — but were clearly meant as one: three braces, a brace short, a space
+// or a dash inside the name, a row marker in double braces, a field name in single braces. They print as
+// typed, so the filler reports each (as typed) beside the unknown names. Ordinary text in single braces
+// ({see annexure}) is left alone.
+function pgDocxOddBraces(text) {
+  if (text.indexOf('{') < 0 && text.indexOf('}}') < 0) return [];
+  const out = [], re = /\{+[^{}]{0,80}\}*|\}{2,}/g; let m;
+  const clip = g => g.length > 60 ? g.slice(0, 60) + '…' : g;
+  while ((m = re.exec(text))) {
+    const g = m[0];
+    if (g[0] === '}') { out.push(clip(text.slice(Math.max(0, m.index - 20), m.index + g.length).replace(/^\S*\s+/, ''))); continue; }   // closing braces with nothing opened
+    const o = /^\{+/.exec(g)[0].length, c = (/\}+$/.exec(g) || [''])[0].length, inner = g.slice(o, g.length - c);
+    if (o === 2 && c === 2 && /^\s*[a-z_][\w.]*\s*$/i.test(inner)) continue;   // a field (its NAME is judged elsewhere)
+    if (o === 1 && c === 1 && /^[#\/]\w+$/.test(inner)) continue;              // a row marker
+    if (o === 1 && c <= 1 && !/^\s*(?:[#\/\\]\s*\w+|[a-z_]\w*(?:\.\w+)+|write|today)\s*$/i.test(inner)) continue;   // ordinary text in braces
+    out.push(clip(g));
+  }
+  return out;
+}
+// xml without the outermost elements of the given tags (cut by nesting, not by the first closing tag).
+function _pgXmlCut(xml, tags) {
+  tags.forEach(tag => {
+    if (xml.indexOf('<' + tag) < 0) return;
+    let out = '', last = 0; pgXmlOuter(xml, tag).forEach(r => { out += xml.slice(last, r.start); last = r.end; });
+    xml = out + xml.slice(last);
+  });
+  return xml;
+}
+// styles.xml → { h1: Set of Heading 1 style ids, bullet: a bullet style id or '' }
+function pgDocxStyles(stylesXml) {
+  const h1 = new Set(['Heading1']); let bullet = '';
+  if (stylesXml) {
+    const re = /<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g; let m;
+    while ((m = re.exec(stylesXml))) {
+      const nm = /<w:name w:val="([^"]+)"/.exec(m[2]); const name = nm ? nm[1].toLowerCase() : '';
+      if (name === 'heading 1') h1.add(m[1]);
+      if (!bullet && /^(list bullet|xonebullet|bullet)$/i.test(name.replace(/\s+/g, ' '))) bullet = m[1];
+    }
+    if (!bullet) { const m2 = /w:styleId="(XoneBullet|ListBullet)"/.exec(stylesXml); if (m2) bullet = m2[1]; }
+  }
+  return { h1, bullet };
+}
+// A heading's key. A slug longer than a key allows is cut and closed with a short hash of the whole of
+// it: two long headings that agree in their opening words still get keys of their own, so their rules
+// and typed text follow the heading and not its place in the file.
+function pgDocxHash(s) { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return ('000000' + h.toString(36)).slice(-6); }
+function pgDocxSlug(t) {
+  const s = String(t || '').toLowerCase().replace(/&amp;/g, 'and').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return s.length <= 48 ? (s || 'section') : s.slice(0, 41).replace(/_+$/, '') + '_' + pgDocxHash(s);
+}
+// The template's shape: sections (Heading 1 blocks), the placeholders used, a few counts.
+function pgDocxAnalyse(docXml, stylesXml, extraXmls) {
+  const st = pgDocxStyles(stylesXml);
+  const { blocks } = pgDocxBlocks(docXml);
+  const sections = []; const front = []; let cur = null; const keys = Object.create(null);
+  const names = Object.create(null), repeated = [];   // Heading 1s that share a name: told apart by their order only (key, key_2 …)
+  blocks.forEach((b, i) => {
+    if (b.tag === 'w:sectPr') return;
+    const h1Text = b.tag === 'w:p' && st.h1.has(pgDocxParaStyle(b.xml)) ? pgDocxText(pgDocxOwnXml(b.xml)).trim().replace(/\s+/g, ' ') : '';
+    if (h1Text) {
+      const title = h1Text;
+      // Keys carry the prefix w_: a template's built-in sections (pricing, terms …) share the table and
+      // its UNIQUE (template_id, section_key), and a heading named like one of them must not collide.
+      const base = PG_DOCX_KEY_PREFIX + pgDocxSlug(title); let key = base, n = 1; while (keys[key]) key = base + '_' + (++n); keys[key] = 1;
+      names[base] = (names[base] || 0) + 1; if (names[base] === 2) repeated.push(title);
+      cur = { key, title, blocks: [i], paras: 0, tables: 0, write: false, preview: [] };
+      sections.push(cur);
+    } else if (cur) {
+      cur.blocks.push(i);
+      if (b.tag === 'w:tbl') cur.tables++;
+      else if (b.tag === 'w:p') { cur.paras++; if (pgDocxWriteLine(b.xml)) cur.write = true; else { const t = pgDocxText(pgDocxOwnXml(b.xml)).trim(); if (t && cur.preview.length < 3) cur.preview.push(t.slice(0, 160)); } }
+    } else front.push(i);
+  });
+  const tokens = Object.create(null), loops = Object.create(null);   // no prototype: a {{constructor}} is just a name
+  const scan = xml => {
+    let m; const re = /\{\{\s*([a-z_][\w.]*)\s*\}\}/gi; while ((m = re.exec(xml))) tokens[m[1].toLowerCase()] = (tokens[m[1].toLowerCase()] || 0) + 1;
+    const re2 = /\{#(\w+)\}/g; while ((m = re2.exec(xml))) loops[m[1]] = (loops[m[1]] || 0) + 1;
+  };
+  // Tokens are read from the paragraph TEXT (a token Word split across runs still counts).
+  pgXmlOuter(docXml, 'w:p').forEach(p => scan(pgDocxText(p.xml)));
+  (extraXmls || []).forEach(x => pgXmlOuter(x, 'w:p').forEach(p => scan(pgDocxText(p.xml))));
+  const hasToc = /TOC \\|Table of Contents|w:docPartGallery w:val="Table of Contents"/.test(docXml);
+  return { sections, repeated, frontBlocks: front.length, tokens, loops, hasToc, bullet: st.bullet, h1: [...st.h1] };
+}
+// Which placeholders Focus cannot fill BY NAME: not a field, not a list item field, not write / table.
+function pgDocxUnknownTokens(analysis) {
+  const known = new Set(PG_FIELD_LIST.concat(PG_DOCX_EXTRA_FIELDS));
+  Object.values(PG_DOCX_LISTS).forEach(l => l.fields.forEach(f => known.add(f)));
+  PG_DOCX_TABLES.forEach(t => known.add('table.' + t));
+  known.add('write');
+  return Object.keys(analysis.tokens).filter(k => !known.has(k));
+}
+// Everything the filler would leave as typed, whatever the quote says: an unknown name, a loop marker
+// that is not on a table row or names no list, a list field outside its loop's rows, a {{table.x}} or
+// {{write}} placeholder that does not stand alone on a line of its own (or whose line holds a picture,
+// text box or page break), and braces typed wrong ('!' + the text as typed — pgDocxOddBraces). Judged
+// by a dry run of the ONE filler (every section in, one blank item per list), so the check and the
+// fill cannot disagree.
+function pgDocxProblems(parts, analysis) {
+  const fields = {}; PG_FIELD_LIST.concat(PG_DOCX_EXTRA_FIELDS).forEach(k => { fields[k] = ''; });
+  const lists = {}; Object.keys(PG_DOCX_LISTS).forEach(n => { const item = {}; PG_DOCX_LISTS[n].fields.forEach(f => { item[f] = ''; }); lists[n] = [item]; });
+  const tables = {}; PG_DOCX_TABLES.forEach(t => { tables[t] = () => ''; });
+  const dry = pgDocxFill(parts, { include: new Set(analysis.sections.map(s => s.key)), write: {}, fields, data: { lists, tables }, analysis });
+  return [...new Set(pgDocxUnknownTokens(analysis).concat(dry.unknown))];
+}
+function pgDocxTokenLabel(u) { u = String(u); return u[0] === '!' ? u.slice(1) : u[0] === '#' || u[0] === '/' ? '{' + u + '}' : '{{' + u + '}}'; }
+const PG_DOCX_PLACEMENT_NOTE = 'A field is typed {{name}} — two braces each side, no space inside the name — and a row marker {#posts} with one. A {#posts} … {/posts} pair works on table rows only, a list field (post.name …) only inside those rows, and a {{table.…}} or {{write}} placeholder must stand alone on a line of its own: a line that holds nothing else, not even a picture, a text box or a page break.';
+
+// ── Merge ────────────────────────────────────────────────────────────────────
+// Replace {{tokens}} in every outermost paragraph of xml. Runs are joined where a token was split.
+// `resolve(key)` returns a string, or undefined to leave the token as it stands (reported in `unknown`).
+function pgDocxMergeXml(xml, resolve, unknown) {
+  const paras = pgXmlOuter(xml, 'w:p');
+  let out = '', last = 0;
+  paras.forEach(p => {
+    if (p.xml.indexOf('{') < 0) return;
+    const merged = pgDocxMergeParagraph(p.xml, resolve, unknown);
+    if (merged !== p.xml) { out += xml.slice(last, p.start) + merged; last = p.end; }
+  });
+  return out + xml.slice(last);
+}
+function pgDocxMergeParagraph(pXml, resolve, unknown) {
+  const runs = []; const re = /<w:t(\s[^>]*)?>([^<]*)<\/w:t>|<w:t(\s[^>]*)?\/>/g; let m, text = '';
+  while ((m = re.exec(pXml))) { const t = m[2] != null ? _xmlUnesc(m[2]) : ''; runs.push({ start: m.index, end: m.index + m[0].length, off: text.length, text: t }); text += t; }
+  if (!runs.length || text.indexOf('{') < 0) return pXml;
+  runs.forEach(r => { r.len = r.text.length; r.out = r.text; });
+  const edits = []; const tre = /\{\{\s*([a-z_][\w.]*)\s*\}\}|\{([#\/]\w+)\}/gi;
+  while ((m = tre.exec(text))) {
+    // Wrapped in a further brace ({{{name}}}, {{#posts}}): not a placeholder as Focus reads them. Left
+    // exactly as typed — never half-filled — and reported by pgDocxOddBraces.
+    if (text[m.index - 1] === '{' || text[m.index + m[0].length] === '}') continue;
+    const key = m[1] ? m[1].toLowerCase() : m[2]; let v = resolve(key);
+    if (v === undefined) { if (unknown) unknown.add(key); continue; }
+    edits.push({ a: m.index, b: m.index + m[0].length, v: String(v == null ? '' : v) });
+  }
+  if (!edits.length) return pXml;
+  // Apply from the back: the run holding the token's first character takes the value and the
+  // tail of the run holding its last character; the runs between (and that tail) are emptied.
+  edits.reverse().forEach(e => {
+    const i = runs.findIndex(r => e.a >= r.off && e.a < r.off + r.len);
+    let j = runs.findIndex(r => e.b - 1 >= r.off && e.b - 1 < r.off + r.len);
+    if (i < 0) return; if (j < 0) j = i;
+    const head = runs[i].out.slice(0, e.a - runs[i].off);
+    const tail = runs[j].out.slice(e.b - runs[j].off);
+    runs[i].out = head + e.v + (j === i ? tail : '');
+    for (let k = i + 1; k <= j; k++) runs[k].out = k === j ? tail : '';
+    // keep the offsets honest for the (earlier) edits still to come: they sit before e.a
+    runs[i].len = runs[i].out.length; for (let k = i + 1; k <= j; k++) runs[k].len = runs[k].out.length;
+  });
+  let out = '', last = 0;
+  runs.forEach(r => {
+    if (r.out === r.text) return;
+    out += pXml.slice(last, r.start) + '<w:t xml:space="preserve">' + _xmlEsc(r.out).replace(/\n/g, '</w:t><w:br/><w:t xml:space="preserve">') + '</w:t>';
+    last = r.end;
+  });
+  return out + pXml.slice(last);
+}
+// The paragraphs generated for a written section: cloned from the {{write}} paragraph's formatting.
+function pgDocxParagraphsFor(text, modelPXml, bulletStyle) {
+  // The model's OWN paragraph and run properties, cut by nesting (a tracked change carries a pPr / rPr
+  // of its own inside, and the first closing tag would cut the element in half), without the tracked-
+  // change records. A section break on the model is kept ONCE: on the last paragraph written, or alone.
+  const model = pgDocxOwnXml(modelPXml || '');
+  const open = /^<w:p(?:\s[^>]*)?>\s*(?=<w:pPr>)/.exec(model);
+  let pPr = open ? ((pgXmlOuter(model, 'w:pPr', open[0].length)[0] || {}).xml || '') : '';
+  const sect = pPr ? ((pgXmlOuter(pPr, 'w:sectPr', 7)[0] || {}).xml || '') : '';
+  pPr = _pgXmlCut(pPr, ['w:pPrChange', 'w:sectPr', 'w:rPrChange']).replace(/<w:(?:ins|del|moveFrom|moveTo)\s[^>]*\/>/g, '').replace(/<w:pageBreakBefore\b[^>]*\/>/g, '');   // "page break before" is the filler's to keep, once (_pgPageBreakBefore)
+  if (pPr === '<w:pPr></w:pPr>') pPr = '';
+  const run = /<w:r(?:\s[^>]*)?>\s*(?=<w:rPr>)/.exec(model);
+  const rPr = run ? _pgXmlCut((pgXmlOuter(model, 'w:rPr', run.index + run[0].length)[0] || {}).xml || '', ['w:rPrChange']) : '';
+  const bulletPPr = bulletStyle ? '<w:pPr><w:pStyle w:val="' + _xmlEsc(bulletStyle) + '"/></w:pPr>' : pPr;
+  const para = (ppr, lines) => '<w:p>' + ppr + '<w:r>' + rPr + '<w:t xml:space="preserve">' + lines.map(_xmlEsc).join('</w:t><w:br/><w:t xml:space="preserve">') + '</w:t></w:r></w:p>';
+  const out = [];   // [pPr, lines]
+  String(text || '').replace(/\r/g, '').split(/\n\s*\n/).forEach(pr => {
+    const lines = pr.split('\n').filter(l => l.trim() !== '');
+    if (!lines.length) return;
+    if (lines.every(l => /^\s*[•\-*]\s/.test(l))) lines.forEach(l => out.push([bulletPPr, [l.replace(/^\s*[•\-*]\s*/, bulletStyle ? '' : '• ')]]));
+    else out.push([pPr, lines]);
+  });
+  if (sect) {
+    if (!out.length) return '<w:p><w:pPr>' + sect + '</w:pPr></w:p>';
+    const last = out[out.length - 1]; last[0] = last[0] ? last[0].replace(/<\/w:pPr>$/, sect + '</w:pPr>') : '<w:pPr>' + sect + '</w:pPr>';
+  }
+  return out.map(o => para(o[0], o[1])).join('');
+}
+// A content control bound to a document property (w:dataBinding → docProps/core.xml, app.xml or a
+// customXml item) shows the PROPERTY when Word opens the file, whatever text the control holds: a
+// {{client.name}} merged inside one would print the value the template was saved with. The binding is
+// cut (and the stored date of a date control with it); the control stays, holding the merged text.
+function pgDocxUnbind(xml) {
+  if (xml.indexOf('dataBinding') < 0) return xml;
+  return xml.replace(/<w:sdtPr(?:\s[^>]*)?>[\s\S]*?<\/w:sdtPr>/g, pr => pr.indexOf('dataBinding') < 0 ? pr
+    : pr.replace(/<w(?:15)?:dataBinding\b(?:[^>"']|"[^"]*"|'[^']*')*?\/>/g, '')
+        .replace(/<(w(?:15)?):dataBinding\b(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/\1:dataBinding>/g, '')
+        .replace(/(<w:date\b[^>]*?)\s+w:fullDate="[^"]*"/g, '$1'));
+}
+// {{tokens}} in a part that is property XML, not paragraphs (docProps: title, subject, keywords, company …).
+function pgDocxMergeText(xml, resolve) {
+  return xml.indexOf('{{') < 0 ? xml : xml.replace(/\{\{\s*([a-z_][\w.]*)\s*\}\}/gi, (m, k) => { const v = resolve(k.toLowerCase()); return v === undefined ? m : _xmlEsc(v == null ? '' : v).replace(/\s*\n\s*/g, ' '); });
+}
+// Repeat the table rows that carry {#name} … {/name} once per item of lists[name]; each copy is merged
+// with the item's fields (post.name …) before the document-wide merge runs. A pair lives inside ONE
+// table: the closing marker is looked for in the rows that follow in the same table (a marker row with
+// none repeats alone). A table nested in a cell is done first, so a marker there repeats ITS row and
+// not the row around it. An empty list takes the rows out — and the table with them when it is left
+// with no row at all (Word does not open a table without rows).
+function pgDocxLoops(xml, lists, unknown) {
+  if (xml.indexOf('<w:tr') < 0) return xml;
+  const st = { cut: false };
+  const out = _pgLoopRows(xml, lists || {}, unknown, st);
+  return st.cut ? out.replace(/<w:tbl>(?:(?!<w:tr[\s>]|<w:tbl>)[\s\S])*?<\/w:tbl>/g, '') : out;
+}
+function _pgLoopRows(xml, lists, unknown, st) {
+  const rows = pgXmlOuter(xml, 'w:tr');
+  if (!rows.length) return xml;
+  rows.forEach(r => {   // the tables inside this row's cells first
+    const gt = r.xml.indexOf('>') + 1, lt = r.xml.lastIndexOf('</w:tr>');
+    if (lt <= gt || r.xml.indexOf('<w:tbl>', gt) < 0) return;
+    const inner = r.xml.slice(gt, lt), done = _pgLoopRows(inner, lists, unknown, st);
+    if (done !== inner) r.xml = r.xml.slice(0, gt) + done + r.xml.slice(lt);
+  });
+  const txt = rows.map(r => r.xml.indexOf('{') < 0 ? '' : pgDocxText(r.xml));
+  // rows k and k+1 follow one another in one table: nothing between them but bookmark-like empty tags
+  const joined = k => /^(?:\s|<[^<>\/][^<>]*\/>)*$/.test(xml.slice(rows[k].end, rows[k + 1].start));
+  // A marker wrapped in a second pair of braces ({{#posts}}) is not a marker: the rows stay as typed.
+  const bare = (t, p, n) => t[p - 1] !== '{' && t[p + n] !== '}';
+  const mark = t => { const re = /\{#(\w+)\}/g; let m; while ((m = re.exec(t))) if (bare(t, m.index, m[0].length)) return m; return null; };
+  const closes = (t, s) => { for (let p = t.indexOf(s); p >= 0; p = t.indexOf(s, p + 1)) if (bare(t, p, s.length)) return true; return false; };
+  let out = '', last = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const m = mark(txt[i]);
+    const list = m && Object.prototype.hasOwnProperty.call(lists, m[1]) && Array.isArray(lists[m[1]]) ? lists[m[1]] : null;
+    if (!list) {
+      if (m && unknown) unknown.add('#' + m[1]);
+      if (rows[i].xml !== xml.slice(rows[i].start, rows[i].end)) { out += xml.slice(last, rows[i].start) + rows[i].xml; last = rows[i].end; }
+      continue;
+    }
+    const name = m[1], close = '{/' + name + '}';
+    let j = i;
+    if (!closes(txt[i], close)) for (let k = i; k + 1 < rows.length && joined(k); k++) if (closes(txt[k + 1], close)) { j = k + 1; break; }
+    let tpl = '', between = '';
+    for (let k = i; k <= j; k++) { if (k > i) between += xml.slice(rows[k - 1].end, rows[k].start); tpl += rows[k].xml; }
+    let rep = '';
+    list.forEach(item => { rep += pgDocxMergeXml(tpl, k => k === '#' + name || k === '/' + name ? '' : (Object.prototype.hasOwnProperty.call(item, k) ? item[k] : undefined), null); });
+    if (!list.length) st.cut = true;
+    out += xml.slice(last, rows[i].start) + rep + between; last = rows[j].end;
+    i = j;
+  }
+  return out + xml.slice(last);
+}
+
+// ── Generated tables ─────────────────────────────────────────────────────────
+const _PG_TBL_BORDER = '<w:tblBorders>' + ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(s => '<w:' + s + ' w:val="single" w:sz="4" w:space="0" w:color="D9DEE5"/>').join('') + '</w:tblBorders>';
+function pgDocxCell(text, o) {
+  o = o || {};
+  const tcPr = '<w:tcPr>' + (o.span > 1 ? '<w:gridSpan w:val="' + o.span + '"/>' : '') + (o.fill ? '<w:shd w:val="clear" w:color="auto" w:fill="' + o.fill + '"/>' : '') + '<w:vAlign w:val="center"/></w:tcPr>';
+  const rPr = '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>' + (o.bold ? '<w:b/>' : '') + (o.color ? '<w:color w:val="' + o.color + '"/>' : '') + '<w:sz w:val="' + (o.sz || 18) + '"/></w:rPr>';
+  const lines = String(text == null ? '' : text).split('\n');
+  return '<w:tc>' + tcPr + '<w:p><w:pPr><w:spacing w:before="40" w:after="40"/>' + (o.right ? '<w:jc w:val="right"/>' : '') + '</w:pPr><w:r>' + rPr +
+    '<w:t xml:space="preserve">' + lines.map(_xmlEsc).join('</w:t><w:br/><w:t xml:space="preserve">') + '</w:t></w:r></w:p></w:tc>';
+}
+// cols: [{ label, w (twips), right }]; rows: [{ cells: [text…], kind: 'head'|'group'|'sub'|'total'|'' }]
+function pgDocxTable(cols, rows) {
+  const grid = '<w:tblGrid>' + cols.map(c => '<w:gridCol w:w="' + (c.w || 1400) + '"/>').join('') + '</w:tblGrid>';
+  const head = '<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>' + cols.map(c => pgDocxCell(c.label, { fill: '003057', bold: true, color: 'FFFFFF', right: c.right })).join('') + '</w:tr>';
+  const body = rows.map(r => {
+    const k = r.kind || '';
+    const fill = k === 'group' ? 'EEF2F6' : k === 'sub' ? 'F7F8FA' : k === 'total' ? '003057' : '';
+    const bold = k === 'group' || k === 'sub' || k === 'total' || k === 'tot';
+    const color = k === 'total' ? 'FFFFFF' : k === 'group' ? '003057' : '';
+    if (r.cells.length < cols.length) {   // a band / total line spans up to the last cell
+      const span = cols.length - r.cells.length + 1;
+      return '<w:tr><w:trPr><w:cantSplit/></w:trPr>' + pgDocxCell(r.cells[0], { span, fill, bold, color }) +
+        r.cells.slice(1).map((c, i) => pgDocxCell(c, { fill, bold, color, right: cols[cols.length - r.cells.length + 1 + i].right })).join('') + '</w:tr>';
+    }
+    return '<w:tr><w:trPr><w:cantSplit/></w:trPr>' + r.cells.map((c, i) => pgDocxCell(c, { fill, bold, color, right: cols[i].right })).join('') + '</w:tr>';
+  }).join('');
+  return '<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/>' + _PG_TBL_BORDER + '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar><w:tblLook w:val="04A0"/></w:tblPr>' + grid + head + body + '</w:tbl>';
+}
+// The quote's data for the Word file: lists for row loops and the generated tables.
+function pgDocxData(pr) {
+  const grades = allData['quote_grades'] || [], unif = allData['quote_uniform_types'] || [];
+  const posts = [], lines = [], shifts = [];
+  const byId = {}; pbHeadings.forEach(h => h.posts.forEach(p => { byId[p.id] = { p, h }; }));
+  pr.groups.forEach(g => g.posts.forEach(p => {
+    lines.push({ 'line.group': g.name, 'line.name': p.name, 'line.officers': g.other ? '' : String(p.officers), 'line.monthly': pgMoney(p.monthly) });
+    if (g.other) return;
+    const live = p.postId != null ? byId[p.postId] : null; const lp = live && live.p;
+    posts.push({ 'post.group': g.name, 'post.name': p.name, 'post.grade': p.grade || (lp ? ((grades.find(x => +x.id === +lp.grade_id) || {}).code || '') : ''),
+      'post.description': lp ? (lp.description || '') : '', 'post.uniform': lp ? ((unif.find(u => +u.id === +lp.uniform_id) || {}).name || '') : '',
+      'post.shift_pattern': lp ? pgShiftPattern(lp) : '', 'post.officers_per_shift': lp ? String(pbNoPerShift(lp)) : '', 'post.officers': String(p.officers), 'post.monthly': pgMoney(p.monthly) });
+    (Array.isArray(p.shiftRows) ? p.shiftRows : []).forEach(r => shifts.push({ 'shift.post': p.name, 'shift.grade': p.grade || '', 'shift.label': (r.label || '') + ' ' + (r.start || '') + '–' + (r.end || ''),
+      'shift.hours': r.hours != null ? pbFormatHrs(+r.hours) : '', 'shift.days': pbDaysLabel(r.days || []),
+      'shift.public_holidays': typeof r.ph !== 'boolean' ? '' : (r.phText || (r.ph ? 'also staffed on public holidays' : 'not staffed on public holidays')),
+      'shift.officers': String(r.officers), 'shift.per_month': (+r.perMonth || 0).toFixed(2), 'shift.rate': pgMoney(pbRound2(r.rate)), 'shift.monthly': pgMoney(r.monthly) }));
+  }));
+  const totals = [
+    { cells: ['Monthly total (excl. VAT)', pgMoney(pr.monthly)], kind: 'tot' }, { cells: ['VAT @ ' + pr.vatPct + '%', pgMoney(pr.vat)], kind: 'tot' },
+    { cells: ['Monthly total (incl. VAT)', pgMoney(pr.inclVat)], kind: 'total' }, { cells: ['Contract value over ' + pr.months + ' months (excl. VAT)', pgMoney(pr.contract)], kind: 'tot' }];
+  if (pr.setupOnceOff) totals.push({ cells: ['Setup and equipment, once-off (excl. VAT)', pgMoney(pr.setupOnceOff)], kind: 'tot' });
+  const tables = {};
+  tables.pricing = () => {
+    const rows = [];
+    pr.groups.forEach(g => { rows.push({ cells: [g.name], kind: 'group' }); g.posts.forEach(p => rows.push({ cells: [p.name, g.other ? '' : String(p.officers), pgMoney(p.monthly)] }));
+      if (pr.groups.length > 1) rows.push({ cells: ['Sub-total — ' + g.name, pgMoney(g.sub)], kind: 'sub' }); });
+    return pgDocxTable([{ label: 'Post', w: 5400 }, { label: 'Officers', w: 1400, right: true }, { label: 'Monthly (excl. VAT)', w: 2400, right: true }], rows.concat(totals));
+  };
+  tables.posts = () => {
+    const rows = [];
+    pbHeadings.forEach(h => { if (!h.posts.length) return; rows.push({ cells: [h.isUngrouped ? 'General' : h.name], kind: 'group' });
+      h.posts.forEach(p => rows.push({ cells: [p.name + (p.description ? '\n' + p.description : ''), (unif.find(u => +u.id === +p.uniform_id) || {}).name || '—', pgShiftPattern(p), String(pbNoPerShift(p)), String(pbOfficersForPost(p))] })); });
+    return pgDocxTable([{ label: 'Post', w: 2600 }, { label: 'Uniform', w: 1400 }, { label: 'Shift pattern', w: 2800 }, { label: 'Officers per shift', w: 1200, right: true }, { label: 'Officers required', w: 1200, right: true }], rows);
+  };
+  tables.shift_rates = () => {
+    const rows = [];
+    pr.groups.forEach(g => { rows.push({ cells: [g.name], kind: 'group' });
+      g.posts.forEach(p => { const rs = !g.other && Array.isArray(p.shiftRows) ? p.shiftRows : [];
+        if (!rs.length) rows.push({ cells: [p.name, p.grade || '', g.other ? 'Monthly charge, not per shift' : 'No shifts scheduled – monthly charge', '', '', '', '', pgMoney(p.monthly)] });
+        rs.forEach((r, i) => rows.push({ cells: [i ? '' : p.name, i ? '' : (p.grade || ''), (r.label || '') + ' ' + (r.start || '') + '–' + (r.end || '') + (r.hours != null ? ' (' + pbFormatHrs(+r.hours) + ')' : ''),
+          pbDaysLabel(r.days || []), String(r.officers), (+r.perMonth || 0).toFixed(2), pgMoney(pbRound2(r.rate)), pgMoney(r.monthly)] })); });
+      if (pr.groups.length > 1) rows.push({ cells: ['Sub-total — ' + g.name, pgMoney(g.sub)], kind: 'sub' }); });
+    return pgDocxTable([{ label: 'Post', w: 1700 }, { label: 'Grade', w: 700 }, { label: 'Shift', w: 1500 }, { label: 'Days', w: 1300 }, { label: 'Officers per shift', w: 900, right: true }, { label: 'Shifts per month', w: 900, right: true }, { label: 'Rate per officer per shift', w: 1200, right: true }, { label: 'Monthly (excl. VAT)', w: 1200, right: true }], rows.concat(totals));
+  };
+  // The schedule follows the proposal's own rule (pbShiftScheduleHtml): one table while every post's
+  // Monday to Friday is the same day, else the weekdays day by day and a second table for Saturdays,
+  // Sundays and public holidays — "Weekdays" must never stand for a Monday the other days differ from.
+  tables.shift_schedule = () => {
+    const N = pbQ.shifts_per_day || 1;
+    const same = p => { for (let s = 1; s <= N; s++) { const mo = p.shifts[pbKey(s, 'monday')] || {};
+      for (const d of PB_WEEKDAYS) { const v = p.shifts[pbKey(s, d)] || {}; if ((+v.num || 0) !== (+mo.num || 0) || v.start !== mo.start || v.end !== mo.end) return false; } } return true; };
+    const split = !pbHeadings.reduce((a, h) => a.concat(h.posts), []).every(same);
+    const cellTxt = (p, s, g, two) => { const v = p.shifts[pbKey(s, g)] || {}; return +v.num > 0 ? (+v.num) + (two ? '\n' : ' · ') + (v.start || '') + '–' + (v.end || '') : '—'; };
+    const make = (days, labels, w, two) => {
+      const rows = [];
+      pbHeadings.forEach(h => { if (!h.posts.length) return; rows.push({ cells: [h.isUngrouped ? 'General' : h.name], kind: 'group' });
+        h.posts.forEach(p => { const grade = (grades.find(g => +g.id === +p.grade_id) || {}).code || '';
+          for (let s = 1; s <= N; s++) rows.push({ cells: [s === 1 ? p.name : '', s === 1 ? grade : '', pbShiftLabel(s, N)].concat(days.map(g => cellTxt(p, s, g, two))) }); }); });
+      return pgDocxTable([{ label: 'Post', w: w[0] }, { label: 'Grade', w: w[1] }, { label: 'Shift', w: w[2] }].concat(labels.map(l => ({ label: l, w: w[3] }))), rows);
+    };
+    const rest = ['saturday', 'sunday', 'public_holiday'], restLabels = ['Saturdays', 'Sundays', 'Public holidays'];
+    if (!split) return make(['monday'].concat(rest), ['Weekdays'].concat(restLabels), [2200, 700, 900, 1500], false);
+    return make(PB_WEEKDAYS, PB_WEEKDAYS.map(d => PB_DAY_LABELS[d]), [2100, 650, 850, 1180], true) +
+      '<w:p><w:pPr><w:spacing w:before="0" w:after="0"/></w:pPr></w:p>' + make(rest, restLabels, [2600, 800, 1000, 1700], false);
+  };
+  return { lists: { posts, lines, shifts }, tables };
+}
+
+// ── Fill ─────────────────────────────────────────────────────────────────────
+// opts: { include: Set of section keys to print (others dropped), write: { key: text }, fields: {…},
+//        data: pgDocxData(pr), analysis } → { changed: { partName: xml }, unknown: [tokens] }
+// A paragraph that carries nothing but a section break: one point high, so it adds no line of its own.
+function _pgBreakPara(sect) { return '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr>' + sect + '</w:pPr></w:p>'; }
+// The page a DRAFT file opens on while its figures are not a calculated price (opts.notice:
+// { title, lines: [] }). A page section of its own IN FRONT of the document, so nothing is laid over the
+// cover: a line at the top of the cover's own page sat behind its header art, and a positioned frame had
+// its text pushed about by the cover's floating pictures. So that the document itself reads as it did:
+//   • its first page section starts on a new page (the type it carried meant nothing while it was first);
+//   • and numbers its pages from 1 unless it says where to start — the cover keeps its page number, its
+//     odd / even side and its first-page header.
+// The file's page COUNT is one more, in a draft only: an issued file never carries the page.
+function _pgNoticeSection(notice, body) {
+  const run = (t, sz, color, bold) => '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>' + (bold ? '<w:b/><w:bCs/>' : '') + '<w:color w:val="' + color + '"/><w:sz w:val="' + sz + '"/><w:szCs w:val="' + sz + '"/></w:rPr><w:t xml:space="preserve">' + _xmlEsc(t) + '</w:t></w:r>';
+  const para = (inner, after, bdr, sect) => '<w:p><w:pPr>' + (bdr || '') + '<w:spacing w:before="0" w:after="' + after + '" w:line="276" w:lineRule="auto"/><w:ind w:left="0" w:right="0" w:firstLine="0"/><w:jc w:val="center"/>' + (sect || '') + '</w:pPr>' + inner + '</w:p>';
+  const bdr = '<w:pBdr>' + ['top', 'left', 'bottom', 'right'].map(x => '<w:' + x + ' w:val="dashed" w:sz="12" w:space="6" w:color="FA0A11"/>').join('') + '</w:pBdr>';
+  let pgSz = '', pgMar = '';
+  const at = body.indexOf('<w:sectPr');
+  if (at < 0) body += '<w:sectPr><w:pgNumType w:start="1"/></w:sectPr>';   // no page set-up at all: one that restarts the numbering
+  else {
+    const sp = pgXmlOuter(body, 'w:sectPr', at)[0];
+    if (sp) {
+      // Only the section's own properties: a tracked change keeps the old ones in a sectPr of its own.
+      const cut = sp.xml.indexOf('<w:sectPrChange');
+      let live = cut >= 0 ? sp.xml.slice(0, cut) : sp.xml; const rest = cut >= 0 ? sp.xml.slice(cut) : '';
+      pgSz = (/<w:pgSz\b[^>]*\/>/.exec(live) || [''])[0]; pgMar = (/<w:pgMar\b[^>]*\/>/.exec(live) || [''])[0];
+      live = live.replace(/<w:type\b[^>]*\/>/, '');
+      const pn = /<w:pgNumType\b([^>]*?)\/>/.exec(live), restart = '<w:pgNumType w:start="1"/>';
+      if (pn) { if (!/\sw:start="/.test(pn[1])) live = live.slice(0, pn.index) + '<w:pgNumType' + pn[1] + ' w:start="1"/>' + live.slice(pn.index + pn[0].length); }
+      else if (live.indexOf('<w:pgNumType') < 0) {
+        if (/^<w:sectPr\b[^>]*\/>$/.test(live)) live = live.slice(0, -2) + '>' + restart + '</w:sectPr>';
+        else {   // CT_SectPr is a sequence: pgNumType sits before the first of these that the section has
+          const later = /<w:(?:cols|formProt|vAlign|noEndnote|titlePg|textDirection|bidi|rtlGutter|docGrid|printerSettings)[\s\/>]/.exec(live);
+          const pos = later ? later.index : (cut >= 0 ? live.length : live.lastIndexOf('</w:sectPr>'));
+          if (pos >= 0) live = live.slice(0, pos) + restart + live.slice(pos);
+        }
+      }
+      body = body.slice(0, sp.start) + live + rest + body.slice(sp.end);
+    }
+  }
+  const lines = (notice.lines || []).filter(Boolean), mine = '<w:sectPr>' + pgSz + pgMar + '</w:sectPr>';
+  return para(run(notice.title || 'DRAFT', 32, 'FA0A11', true), lines.length ? 240 : 0, bdr, lines.length ? '' : mine) +
+    lines.map((t, i) => para(run(t, 20, '333333', false), 120, '', i === lines.length - 1 ? mine : '')).join('') + body;
+}
+// A paragraph's bookmark markers as body-level elements (the paragraph itself is being replaced).
+function _pgBodyMarks(pXml) {
+  return pXml.indexOf('<w:bookmark') < 0 ? '' : (pXml.match(/<w:bookmark(?:Start|End)\b[^>]*\/>/g) || []).map(t => t.replace(/\s+w:col(?:First|Last)="[^"]*"/g, '')).join('');
+}
+// Bookmarks when sections are left out. A bookmark lives while some of the text it covers still prints
+// (one that covers no text: while the block holding its start prints). A live bookmark whose start or
+// end marker sat in a left-out block gets that marker back at body level, in the block's place; a dead
+// one's marker left behind in a block that prints is cut. `dead` (the names) is what the contents table
+// is pruned by. null when the file's bookmark ids are not unique — nothing is touched then.
+function pgDocxBookmarkPlan(xml, blocks, isDropped) {
+  const re = /<w:bookmark(Start|End)\b([^>]*)\/>/g, byId = Object.create(null); let m, bi = 0;
+  // A text box is stored twice (mc:Choice and its mc:Fallback copy): the copy's markers repeat the ids
+  // of the first and are not counted — a bookmark inside a text box never leaves its block.
+  const fb = xml.indexOf('<mc:Fallback') >= 0 ? pgXmlOuter(xml, 'mc:Fallback') : []; let fi = 0;
+  while ((m = re.exec(xml))) {
+    const id = (/\sw:id="([^"]*)"/.exec(m[2]) || [])[1]; if (id == null) continue;
+    while (fi < fb.length && fb[fi].end <= m.index) fi++;
+    if (fi < fb.length && fb[fi].start <= m.index) continue;
+    while (bi < blocks.length && blocks[bi].end <= m.index) bi++;
+    if (bi >= blocks.length || blocks[bi].start > m.index) continue;   // not inside a body block
+    const mk = { start: m.index, end: m.index + m[0].length, block: bi, xml: m[0] };
+    const b = byId[id] || (byId[id] = {});
+    if (m[1] === 'Start') { if (b.s) return null; b.s = mk; b.name = (/\sw:name="([^"]*)"/.exec(m[2]) || [])[1] || ''; }
+    else { if (b.e) return null; b.e = mk; }
+  }
+  const hasText = (a, z) => a < z && /<w:t(?:\s[^>]*)?>[^<]/.test(xml.slice(a, z));
+  const emit = {}, strip = {}, dead = new Set();
+  Object.keys(byId).forEach(id => {
+    const b = byId[id], s = b.s; if (!s) return;   // an end with no start is left as it is
+    const e = b.e && b.e.start >= s.end ? b.e : null;
+    const from = s.block, to = e ? e.block : s.block;
+    let alive = false;
+    if (from === to) alive = !isDropped(from);
+    else {
+      let text = false;
+      for (let i = from; i <= to && !alive; i++) {
+        if (!hasText(i === from ? s.end : blocks[i].start, i === to ? e.start : blocks[i].end)) continue;
+        text = true; if (!isDropped(i)) alive = true;
+      }
+      if (!alive && !text) alive = !isDropped(from);
+    }
+    [s, e].forEach(mk => {
+      if (!mk) return;
+      const gone = isDropped(mk.block);
+      if (alive && gone) (emit[mk.block] || (emit[mk.block] = [])).push(mk);
+      else if (!alive && !gone) (strip[mk.block] || (strip[mk.block] = [])).push(mk);
+    });
+    if (!alive && b.name) dead.add(b.name);
+  });
+  Object.keys(emit).forEach(k => { emit[k] = emit[k].sort((a, b) => a.start - b.start).map(mk => mk.xml.replace(/\s+w:col(?:First|Last)="[^"]*"/g, '')).join(''); });
+  Object.keys(strip).forEach(k => { strip[k].sort((a, b) => b.start - a.start); });   // cut from the back
+  return { emit, strip, dead };
+}
+// The contents table as it was last saved still lists the sections that are left out (Word rebuilds it
+// only when the fields are updated, which the reader may decline). An entry — a paragraph in a TOC
+// style — whose targets (hyperlink anchors, PAGEREF bookmarks) are ALL dead is taken out here. The
+// first entry of a table also holds the start of the TOC field itself: those runs move to the next
+// entry that stays, or the paragraph is emptied in place when none follows, so the field stays whole.
+function pgDocxPruneToc(doc, stylesXml, dead) {
+  if (!dead || !dead.size) return doc;
+  const tocStyle = new Set();
+  if (stylesXml) {
+    const re = /<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g; let m;
+    while ((m = re.exec(stylesXml))) { const nm = /<w:name w:val="([^"]+)"/.exec(m[2]); if (nm && /^(toc \d|table of figures)$/i.test(nm[1].trim())) tocStyle.add(m[1]); }
+  }
+  const isToc = id => !!id && (tocStyle.has(id) || /^TOC\d$/i.test(id));
+  const count = (s, t) => (s.match(new RegExp('w:fldCharType="' + t + '"', 'g')) || []).length;
+  const paras = pgXmlOuter(doc, 'w:p');
+  const info = paras.map(p => {
+    if (!isToc(pgDocxParaStyle(p.xml))) return null;
+    const x = p.xml, targets = []; let m;
+    const ra = /\sw:anchor="([^"]+)"/g; while ((m = ra.exec(x))) targets.push(m[1]);
+    let instr = ''; const ri = /<w:instrText(?:\s[^>]*)?>([^<]*)<\/w:instrText>|\sw:instr="([^"]*)"/g; while ((m = ri.exec(x))) instr += ' ' + (m[1] != null ? m[1] : m[2]);
+    const rp = /PAGEREF\s+([^\s\\]+)/g; while ((m = rp.exec(instr))) targets.push(m[1]);
+    const begins = count(x, 'begin'), ends = count(x, 'end');
+    return { goes: targets.length > 0 && targets.every(t => dead.has(t)), begins, ends };
+  });
+  // The opener's own runs: everything from the end of its pPr to the run holding the first "separate".
+  const openerOf = x => {
+    const open = /^<w:p(?:\s[^>]*)?>/.exec(x); if (!open) return null;
+    let at = open[0].length;
+    if (/^\s*<w:pPr>/.test(x.slice(at, at + 40))) { const ppr = pgXmlOuter(x, 'w:pPr', at)[0]; if (!ppr) return null; at = ppr.end; }
+    const sep = x.indexOf('w:fldCharType="separate"', at); if (sep < 0) return null;
+    const runEnd = x.indexOf('</w:r>', sep); if (runEnd < 0) return null;
+    const pre = x.slice(at, runEnd + 6), rest = x.slice(runEnd + 6);
+    if (count(pre, 'begin') !== 1 || count(pre, 'separate') !== 1 || count(pre, 'end') !== 0 || count(rest, 'begin') !== count(rest, 'end')) return null;
+    if (!/\bTOC\b/.test((pre.match(/<w:instrText(?:\s[^>]*)?>[^<]*<\/w:instrText>/g) || []).join(' ').replace(/<[^>]+>/g, ''))) return null;
+    if (/<w:(?:hyperlink|sdt|ins|del|smartTag|fldSimple|customXml)\b/.test(pre)) return null;   // the runs must be the paragraph's own children
+    if ((pre.match(/<w:r[\s>]/g) || []).length !== (pre.match(/<\/w:r>/g) || []).length) return null;
+    return { head: x.slice(0, at), pre };
+  };
+  const gap = k => /^(?:\s|<[^<>\/][^<>]*\/>)*$/.test(doc.slice(paras[k].end, paras[k + 1].start));
+  const edits = [];   // { i, xml }
+  info.forEach((f, i) => {
+    if (!f || !f.goes) return;
+    if (f.begins === f.ends) { edits.push({ i, xml: '' }); return; }
+    if (f.begins !== f.ends + 1) return;   // some other shape: left as it is
+    const op = openerOf(paras[i].xml); if (!op) return;
+    let j = i;
+    while (j + 1 < paras.length && gap(j) && info[j + 1] && info[j + 1].goes && info[j + 1].begins === info[j + 1].ends) j++;   // the entries that go with it
+    const t = j + 1 < paras.length && gap(j) ? info[j + 1] : null;
+    if (t && !t.goes && t.begins === t.ends) {   // the next entry stays: it takes the field's start
+      const y = paras[j + 1].xml, o2 = /^<w:p(?:\s[^>]*)?>/.exec(y)[0].length;
+      const ppr = /^\s*<w:pPr>/.test(y.slice(o2, o2 + 40)) ? pgXmlOuter(y, 'w:pPr', o2)[0] : null, at = ppr ? ppr.end : o2;
+      edits.push({ i, xml: '' }); edits.push({ i: j + 1, xml: y.slice(0, at) + op.pre + y.slice(at) });
+    } else edits.push({ i, xml: op.head + op.pre + '</w:p>' });
+  });
+  if (!edits.length) return doc;
+  edits.sort((a, b) => a.i - b.i);
+  let out = '', last = 0;
+  edits.forEach(e => { const p = paras[e.i]; if (p.start < last) return; out += doc.slice(last, p.start) + e.xml; last = p.end; });
+  return out + doc.slice(last);
+}
+// Does this xml print anything — text, a picture, a field, a break, a table? Paragraph and run
+// properties are not looked at. An empty paragraph does not: it is not the content of a page section.
+function _pgPrints(x) { return /<w:t(?:\s[^>]*)?>[^<]|<w:(?:drawing|pict|object|br|cr|sym|tab|ptab|fldChar|fldSimple|footnoteReference|endnoteReference|noBreakHyphen|softHyphen|tbl)[\s\/>]|<m:oMath|<mc:AlternateContent/.test(_pgXmlCut(x, ['w:pPr', 'w:rPr'])); }
+// A paragraph that holds nothing at all: only its properties, bookmarks, proofing marks and empty runs.
+function _pgEmptyPara(pXml) { return /^<w:p(?:\s[^>]*)?>(?:\s|<w:bookmark(?:Start|End)\b[^>]*\/>|<w:proofErr\b[^>]*\/>|<w:r(?:\s[^>]*)?>\s*<\/w:r>|<w:r(?:\s[^>]*)?\/>)*<\/w:p>$/.test(_pgXmlCut(pXml, ['w:pPr', 'w:rPr'])); }
+function pgDocxFill(parts, opts) {
+  const unknown = new Set();
+  const fields = Object.assign({}, opts.fields);
+  const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+  // A {{write}} or a row marker that reaches the document-wide merge was not where it works ({{write}}:
+  // alone on a line of its own inside a section; a marker: on a table row) — left as typed and reported.
+  const resolve = k => (k === 'write' || k[0] === '#' || k[0] === '/') ? undefined : (own(fields, k) ? fields[k] : undefined);
+  // Braces typed wrong in a block that prints, a header, a footer or a note (pgDocxOddBraces): reported as typed.
+  const odd = xml => {
+    if (xml.indexOf('{') < 0 && xml.indexOf('}') < 0) return;
+    pgXmlOuter(xml, 'w:p').forEach(q => { if (q.xml.indexOf('{') >= 0 || q.xml.indexOf('}') >= 0) pgDocxOddBraces(pgDocxText(q.xml)).forEach(g => unknown.add('!' + g)); });
+  };
+  const an = opts.analysis, src = parts['word/document.xml'];
+  const { head, blocks, tail } = pgDocxBlocks(src);
+  const bySec = {}; an.sections.forEach(s => s.blocks.forEach(i => { bySec[i] = s; }));
+  const dropped = i => { const s = bySec[i]; return !!s && !opts.include.has(s.key); };
+  const plan = blocks.some((b, i) => dropped(i)) ? pgDocxBookmarkPlan(src, blocks, dropped) : null;
+  const tables = (opts.data && opts.data.tables) || {};
+  // SECTION BREAKS. A paragraph's sectPr ends the page section that paragraph closes; the body's own
+  // sectPr describes the last one. Leaving blocks out must not leave a page section with nothing in it
+  // (a blank page), nor lose the page set-up of what still prints:
+  //   • a left-out block's break is written again (on a one-point paragraph) only when something printed
+  //     since the break before it — otherwise it is skipped, and the header / footer references it held
+  //     pass to the next break written (the sections after it would have inherited them);
+  //   • when nothing prints after the last break written, that break becomes the body's and the original
+  //     last one, whose section is empty, goes (and with it a paragraph that carried nothing but the break);
+  //   • "something printed" means text, a picture, a table … (_pgPrints): an empty paragraph beside a
+  //     left-out chapter is not the content of a page section.
+  const out = []; let since = 0, lastBreak = null, droppedAfter = false, carry = {};
+  const NOT_CONTENT = /^w:(?:bookmark|proofErr|perm|commentRange|move(?:From|To)Range|customXml(?:Ins|Del|Move))/;
+  const refsOf = sect => { const o = {}; const re = /<w:(header|footer)Reference\b[^>]*\/>/g; let m; while ((m = re.exec(sect))) { const ty = /\sw:type="([^"]+)"/.exec(m[0]); o[m[1] + ':' + (ty ? ty[1] : 'default')] = m[0]; } return o; };
+  const withCarry = sect => {
+    const keys = Object.keys(carry); if (!keys.length) return sect;
+    const have = refsOf(sect), add = keys.filter(k => !have[k]).map(k => carry[k]).join('');
+    carry = {};
+    if (!add) return sect;
+    if (/^<w:sectPr\b[^>]*\/>$/.test(sect)) return sect.slice(0, -2) + '>' + add + '</w:sectPr>';
+    const gt = sect.indexOf('>'); return sect.slice(0, gt + 1) + add + sect.slice(gt + 1);
+  };
+  const putBreak = sect => { const s2 = withCarry(sect); out.push(_pgBreakPara(s2)); lastBreak = { at: out.length - 1, bare: true, sect: s2 }; since = 0; droppedAfter = false; };
+  const put = (x, tag) => {   // a block that prints (or the blocks generated in its place)
+    if (!x) return;
+    const sps = x.indexOf('<w:sectPr') >= 0 ? pgXmlOuter(x, 'w:sectPr') : [];
+    if (!sps.length) { out.push(x); if (!NOT_CONTENT.test(tag) && (tag !== 'w:p' || _pgPrints(x))) since++; return; }
+    const first = withCarry(sps[0].xml), d = first.length - sps[0].xml.length;
+    if (first !== sps[0].xml) { x = x.slice(0, sps[0].start) + first + x.slice(sps[0].end); sps[0].xml = first; sps.forEach((sp, k) => { if (k) sp.start += d; sp.end += d; }); }
+    const lastSp = sps[sps.length - 1];
+    out.push(x); lastBreak = { at: out.length - 1, bare: false, sect: lastSp.xml };
+    // What follows the break is judged after the paragraph that CARRIES it: a text box anchored in that
+    // paragraph is part of it, on the page section the paragraph closes.
+    const host = pgXmlOuter(x, 'w:p').find(q => q.start <= lastSp.start && lastSp.end <= q.end), after = x.slice(host ? host.end : lastSp.end);
+    since = /<w:(?:p|tbl)[\s>]/.test(after) && _pgPrints(after) ? 1 : 0; droppedAfter = false;
+  };
+  // FIELDS. A complex field (begin … separate … end marks) can start in one block and end in another —
+  // a contents table whose end mark sits in the heading typed straight after it. Leaving a block out must
+  // not leave a field open: Word would take everything after it for the field's result. So a field that
+  // began in a block that prints gets back, on a one-point paragraph, the separate / end mark a left-out
+  // block held; and one that began in a left-out block loses the marks it left in blocks that print.
+  const fstack = [], FLD = /<w:fldChar\b([^>]*?)(\/?)>/g;
+  const fmarks = (x, gone) => {   // → the block with stray marks cut, or (gone) what is written in the block's place
+    if (x.indexOf('<w:fldChar') < 0) return gone ? '' : x;
+    let m, emit = ''; const cuts = [];
+    FLD.lastIndex = 0;
+    while ((m = FLD.exec(x))) {
+      const ty = (/\sw:fldCharType="(\w+)"/.exec(m[1]) || [])[1];
+      let end = m.index + m[0].length;
+      if (!m[2]) { const c = x.indexOf('</w:fldChar>', end); if (c >= 0) { end = c + 12; FLD.lastIndex = end; } }
+      if (ty === 'begin') { fstack.push({ printed: !gone }); continue; }
+      if (ty !== 'separate' && ty !== 'end') continue;
+      const f = ty === 'end' ? fstack.pop() : fstack[fstack.length - 1];
+      if (!f) continue;   // a mark with no field open: left as it stands
+      if (gone && f.printed) emit += '<w:r><w:fldChar w:fldCharType="' + ty + '"/></w:r>';
+      else if (!gone && !f.printed) cuts.push([m.index, end]);
+    }
+    if (gone) return emit ? '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/><w:szCs w:val="2"/></w:rPr></w:pPr>' + emit + '</w:p>' : '';
+    for (let k = cuts.length - 1; k >= 0; k--) x = x.slice(0, cuts[k][0]) + x.slice(cuts[k][1]);
+    return x;
+  };
+  blocks.forEach((b, i) => {
+    const sec = bySec[i];
+    if (b.tag === 'w:sectPr') {   // the body's own: the last page section
+      if (lastBreak && since === 0 && ((lastBreak.bare && !lastBreak.kept) || droppedAfter)) {
+        const o = out[lastBreak.at], p = o.lastIndexOf(lastBreak.sect);
+        if (p >= 0) {
+          // The paragraph that carried the break stays as an ordinary one — unless it holds nothing at all
+          // (an empty heading left behind would print its number alone at the end): then it goes, its bookmarks kept.
+          const rest = o.slice(0, p) + o.slice(p + lastBreak.sect.length);
+          out[lastBreak.at] = lastBreak.bare ? '' : _pgEmptyPara(rest) ? _pgBodyMarks(rest) : rest;
+          out.push(lastBreak.sect); return;
+        }
+      }
+      out.push(withCarry(b.xml)); return;
+    }
+    if (dropped(i)) {
+      if (plan && plan.emit[i]) out.push(plan.emit[i]);
+      const fm = fmarks(b.xml, true); if (fm) out.push(fm);
+      droppedAfter = true;
+      if (b.xml.indexOf('<w:sectPr') >= 0) pgXmlOuter(b.xml, 'w:sectPr').forEach(sp => { if (since > 0) putBreak(sp.xml); else Object.assign(carry, refsOf(sp.xml)); });
+      return;
+    }
+    let x = b.xml;
+    if (plan && plan.strip[i]) plan.strip[i].forEach(mk => { x = x.slice(0, mk.start - b.start) + x.slice(mk.end - b.start); });
+    if (b.tag === 'w:p' && x.indexOf('{') >= 0) {
+      // A placeholder line: the paragraph's OWN text (a text box anchored in it is not the paragraph) is
+      // exactly {{table.x}} or {{write}} AND the paragraph holds nothing else (_pgLineHoldsMore) — it is
+      // replaced whole. A line that holds more is left as it stands: its placeholder prints as typed and
+      // is reported, so a picture, a text box or a page break is never lost without a word.
+      const mine = pgDocxOwnXml(x), t = pgDocxText(mine).trim(), whole = !_pgLineHoldsMore(x);
+      const tm = whole ? /^\{\{\s*table\.(\w+)\s*\}\}$/i.exec(t) : null, tn = tm ? tm[1].toLowerCase() : '';
+      if (tm && own(tables, tn)) {   // a generated table takes the paragraph's place; its section break, bookmarks and "page break before" stay
+        const gen = tables[tn]() || '', pb = gen ? _pgPageBreakBefore(mine) : '';
+        if (pb) put(pb, 'w:p');
+        put(gen, 'w:tbl');
+        const marks = _pgBodyMarks(mine); if (marks) out.push(marks);
+        const fm = fmarks(x, true); if (fm) out.push(fm);
+        // Its break is one the template prints: marked kept, so an empty last page section after it (a back
+        // page that is only its header and footer) stays unless something after it was left out.
+        const sp = mine.indexOf('<w:sectPr') >= 0 ? pgXmlOuter(mine, 'w:sectPr')[0] : null; if (sp) { putBreak(sp.xml); lastBreak.kept = true; }
+        return;
+      }
+      if (whole && sec && i !== sec.blocks[0] && /^\{\{\s*write\s*\}\}$/i.test(t)) {
+        const gen = pgDocxParagraphsFor((opts.write && opts.write[sec.key]) || '', x, an.bullet) || '';   // nothing written → the paragraph goes
+        const pb = _pgPrints(gen) ? _pgPageBreakBefore(mine) : '';
+        if (pb) put(pb, 'w:p');
+        put(gen, 'w:p');
+        const marks = _pgBodyMarks(mine); if (marks) out.push(marks);
+        const fm = fmarks(x, true); if (fm) out.push(fm);
+        return;
+      }
+    }
+    odd(x);
+    put(fmarks(x, false), b.tag);
+    // A written section whose Word text has no {{write}} paragraph takes its text after the heading.
+    if (sec && i === sec.blocks[0] && !sec.write && opts.write && (opts.write[sec.key] || '').trim()) put(pgDocxParagraphsFor(opts.write[sec.key], '', an.bullet), 'w:p');
+  });
+  const body = out.join('');
+  let doc = head + (opts.notice ? _pgNoticeSection(opts.notice, body) : body) + tail;
+  if (plan && plan.dead.size) doc = pgDocxPruneToc(doc, parts['word/styles.xml'], plan.dead);
+  doc = pgDocxLoops(doc, (opts.data && opts.data.lists) || {}, unknown);
+  doc = pgDocxMergeXml(doc, resolve, unknown);
+  doc = pgDocxUnbind(doc);
+  const changed = { 'word/document.xml': doc };
+  Object.keys(parts).forEach(n => {
+    if (PG_DOCX_CORE[n]) return;
+    // headers, footers and notes: merge fields, bindings cut; the file's properties: merge fields as plain text
+    const paras = /<w:(?:hdr|ftr|footnotes|endnotes)[\s>]/.test(parts[n].slice(0, 6000));
+    if (paras) odd(parts[n]);
+    const x = paras ? pgDocxUnbind(pgDocxMergeXml(parts[n], resolve, unknown)) : pgDocxMergeText(parts[n], resolve);
+    if (x !== parts[n]) changed[n] = x;
+  });
+  if (an.hasToc && parts['word/settings.xml'] && !/<w:updateFields\b/.test(parts['word/settings.xml'])) {
+    const s = parts['word/settings.xml']; const tag = '<w:updateFields w:val="true"/>';
+    // CT_Settings is a sequence: updateFields sits before the first of these that the file has.
+    const anchor = ['<w:hdrShapeDefaults', '<w:footnotePr', '<w:endnotePr', '<w:compat', '<w:docVars', '<w:rsids', '<m:mathPr', '<w:attachedSchema', '<w:themeFontLang', '<w:clrSchemeMapping',
+      '<w:doNotIncludeSubdocsInStats', '<w:doNotAutoCompressPictures', '<w:forceUpgrade', '<w:captions', '<w:readModeInkLockDown', '<w:smartTagType', '<sl:schemaLibrary', '<w:shapeDefaults',
+      '<w:doNotEmbedSmartTags', '<w:decimalSymbol', '<w:listSeparator', '<w14:', '<w15:', '<w16', '</w:settings>'].map(a => s.indexOf(a)).find(i => i >= 0);
+    changed['word/settings.xml'] = anchor >= 0 ? s.slice(0, anchor) + tag + s.slice(anchor) : s;
+  }
+  return { changed, unknown: [...unknown] };
+}
+
+// ── Loading a template's file ────────────────────────────────────────────────
+function pgTplIsWord(t) { return !!(t && t.docx_path); }
+function pgWordTemplate() { const t = pgState.templates.find(x => +x.id === +pgState.templateId); return pgTplIsWord(t) ? t : null; }
+function pgDocxReady() { return typeof DecompressionStream === 'function' && typeof CompressionStream === 'function'; }
+async function pgFilesUrl(kind, id) {   // kind 'template' | 'proposal' → a short-lived download URL
+  if (MOCK) { const row = kind === 'template' ? pgState.templates.find(t => +t.id === +id) || (pgAdmin.templates || []).find(t => +t.id === +id) : pgState.docs.find(d => +d.id === +id);
+    const blob = row && _mockFileBlobs.get(row.docx_path); if (!blob) throw new Error('Mock mode keeps files only until a reload'); return URL.createObjectURL(blob); }
+  const r = await apiGet('files', kind + '=' + (+id));
+  if (!r || !r.ok) throw new Error((r && r.error) || 'Could not reach the file');
+  return r.url;
+}
+async function pgFilesSign(owner, ownerId, file) {
+  if (MOCK) return { path: owner + '/' + ownerId + '/' + Date.now() + '/' + file.name, uploadUrl: null };
+  const r = await api('files', 'POST', { action: 'upload', owner, owner_id: ownerId, file_name: file.name, size: file.size });
+  if (!r || !r.ok) throw new Error((r && r.error) || 'Could not start the upload');
+  return r;
+}
+// Package relationships (.rels) → [{ type: the last segment of Type, target }], internal targets only.
+function _opcRels(xml) {
+  const out = []; const re = /<Relationship\b[^>]*>/g; let m;
+  while ((m = re.exec(xml || ''))) {
+    const t = /\sType=(["'])(.*?)\1/.exec(m[0]), g = /\sTarget=(["'])(.*?)\1/.exec(m[0]);
+    if (t && g && !/\sTargetMode=["']External["']/.test(m[0])) out.push({ type: t[2].slice(t[2].lastIndexOf('/') + 1), target: _xmlUnesc(g[2]) });
+  }
+  return out;
+}
+function _opcResolve(dir, target) {   // dir: the source part's folder ('word/'); a leading / means the package root
+  const out = [];
+  (target[0] === '/' ? target.slice(1) : dir + target).split('/').forEach(seg => { if (seg === '..') out.pop(); else if (seg && seg !== '.') out.push(seg); });
+  return out.join('/');
+}
+// Parse a .docx Blob once: the zip entries, the XML parts the fill touches, the analysis, the placeholders
+// it cannot fill. The MAIN part is the one the package names (Word writes word/document.xml; Word for the
+// web and some generators write word/document2.xml) and its own relationships name the styles, settings,
+// headers, footers and notes. `parts` keys the main part, styles and settings by the standard names
+// (PG_DOCX_CORE) whatever the file calls them — `actual` maps those back for the write.
+async function pgDocxOpen(blob) {
+  const entries = pgZipRead(await blob.arrayBuffer());
+  const byLower = {}; entries.forEach(e => { byLower[e.name.toLowerCase()] = e; });
+  const read = async name => { const e = name ? byLower[String(name).toLowerCase()] : null; return e ? { name: e.name, xml: new TextDecoder().decode(await pgZipInflate(e)) } : null; };
+  const rootRels = await read('_rels/.rels');
+  const mainRel = _opcRels(rootRels && rootRels.xml).find(r => r.type === 'officeDocument');
+  const main = (mainRel && await read(_opcResolve('', mainRel.target))) || await read('word/document.xml');
+  if (!main) throw new Error('Not a Word document (no main document part)');
+  const dir = main.name.slice(0, main.name.lastIndexOf('/') + 1), file = main.name.slice(dir.length);
+  const relsPart = await read(dir + '_rels/' + file + '.rels');
+  const rels = _opcRels(relsPart && relsPart.xml);
+  const one = async (type, fallback) => { const r = rels.find(x => x.type === type); return (r && await read(_opcResolve(dir, r.target))) || await read(fallback); };
+  const styles = await one('styles', dir + 'styles.xml'), settings = await one('settings', dir + 'settings.xml');
+  const parts = { 'word/document.xml': main.xml }, actual = { 'word/document.xml': main.name };
+  if (styles) { parts['word/styles.xml'] = styles.xml; actual['word/styles.xml'] = styles.name; }
+  if (settings) { parts['word/settings.xml'] = settings.xml; actual['word/settings.xml'] = settings.name; }
+  let extraNames = rels.filter(r => /^(header|footer|footnotes|endnotes)$/.test(r.type)).map(r => _opcResolve(dir, r.target));
+  if (!rels.length) extraNames = entries.filter(e => /^word\/(header|footer)\d*\.xml$/.test(e.name)).map(e => e.name);
+  for (const n of extraNames) { const x = await read(n); if (x && !(x.name in parts) && !Object.values(actual).includes(x.name)) parts[x.name] = x.xml; }
+  const extra = Object.keys(parts).filter(n => !PG_DOCX_CORE[n]).map(n => parts[n]);
+  // The file's own properties (title, subject, keywords, company …): a merge field typed there is filled
+  // too. A cover-page control bound to one of them shows the property until the fill cuts the binding.
+  for (const r of _opcRels(rootRels && rootRels.xml).filter(x => /^(core-properties|extended-properties|custom-properties)$/.test(x.type))) {
+    const x = await read(_opcResolve('', r.target)); if (x && !(x.name in parts) && !Object.values(actual).includes(x.name)) parts[x.name] = x.xml;
+  }
+  const analysis = pgDocxAnalyse(parts['word/document.xml'], parts['word/styles.xml'], extra);
+  let unknown;
+  try { unknown = pgDocxProblems(parts, analysis); } catch (e) { throw new Error('This Word file cannot be filled (' + e.message + ')'); }
+  return { entries, parts, actual, analysis, unknown, size: blob.size };
+}
+async function pgDocxForTemplate(tpl) {
+  const c = _pgDocxCache[tpl.id];
+  if (c && c.path === tpl.docx_path) return c.promise;
+  const promise = (async () => {
+    const url = await pgFilesUrl('template', tpl.id);
+    const resp = await fetch(url); if (!resp.ok) throw new Error('Could not download the Word file (' + resp.status + ')');
+    return pgDocxOpen(await resp.blob());
+  })();
+  _pgDocxCache[tpl.id] = { path: tpl.docx_path, promise };
+  promise.catch(() => { delete _pgDocxCache[tpl.id]; });
+  return promise;
+}
+
+// ── The Word sections on the Proposal tab ────────────────────────────────────
+function pgOnlyWhenOk(code) {
+  if (!code) return true;
+  switch (code) {
+    case 'per_shift': return pbPriceBasis() !== 'monthly';
+    case 'shifts': return pbHeadings.some(h => h.posts.some(p => Object.values(p.shifts || {}).some(v => +v.num > 0)));
+    case 'vehicles': return pbMobilityAll().lines.length > 0;
+    case 'support_items': { const s = pbAccSummary(); return (s.monthly || s.onceOff || (s.lines && s.lines.length)) ? true : false; }
+    case 'extension': return !!(pbQ.deal_id && oppData && +oppData.id === +pbQ.deal_id && oppData.opportunity_type === 'extension');
+    case 'setup': return pgPricing().setupOnceOff > 0;
+  }
+  return true;
+}
+// The template's word sections with their effective state for THIS quote.
+function pgWordSections() {
+  // A heading that carries a merge field ("{{client.name}} Risk landscape") reads with its value once
+  // the quote's context is in, and without the braces until then.
+  let f = null;
+  const titleOf = t => String(t || '').indexOf('{{') < 0 ? t : (String(t).replace(/\{\{\s*([a-z_][\w.]*)\s*\}\}/gi, (m, k) => {
+    if (!f) f = pgState.ctx && pbQ && pgState.ctxFor === pbQ.id ? pgWordFields(pgState.ctx, pgPricing()) : {};
+    k = k.toLowerCase(); return Object.prototype.hasOwnProperty.call(f, k) ? String(f[k] == null ? '' : f[k]) : '';
+  }).replace(/\s+/g, ' ').trim() || t);
+  return pgState.sections.filter(s => +s.template_id === +pgState.templateId && s.kind === 'word')
+    .sort((a, b) => (a.display_order - b.display_order) || (a.id - b.id))
+    .map(s => {
+      const o = pgState.overrides[s.section_key] || {};
+      const okWhen = pgOnlyWhenOk(s.only_when);
+      const chosen = o.included != null ? o.included !== false : s.included_default !== false;
+      const included = okWhen && (s.mandatory || chosen);
+      return Object.assign({}, s, { title: titleOf(s.title), included, okWhen, mandatory: !!s.mandatory, written: !!s.written,
+        body_effective: (o.body != null ? o.body : s.body) || '', customised: o.body != null });
+    });
+}
+// What the quote's figures are worth, for a Word file built from them — label '' when they are a
+// calculated, current price. The built-in proposal shows these states as its red banner and watermark;
+// a Word DRAFT opens on a red page of its own that says so (notice → pgDocxFill's opts.notice). An issued
+// file never carries one: Issue is refused in every one of these states.
+function pgWordPricingState(pr) {
+  let label = '', title = '', why = '';
+  if (pbQ.is_sandbox) { label = 'SANDBOX QUOTE — not a client proposal'; title = 'SANDBOX QUOTE'; why = 'This file comes from a sandbox quote, which is for trying things out.'; }
+  else if (pr.errors && pr.errors.length) {
+    const what = pr.errors.length === 1 ? pr.errors[0] : pr.errors.length + ' costing problems on the quote';
+    label = 'CANNOT BE PRICED — ' + what; title = 'THE QUOTE CANNOT BE PRICED'; why = 'Focus could not price the quote: ' + what + '.';
+  }
+  else if (pr.stale) { label = 'PRICES OUT OF DATE — the quote changed since it was last calculated'; title = 'PRICES OUT OF DATE'; why = 'The quote changed since it was last calculated.'; }
+  else if (pr.indicative) { label = 'NOT YET CALCULATED — live figures from the rates in force on ' + pgFmtDate(pr.liveAsAt); title = 'PRICES NOT YET CALCULATED'; why = 'The figures are live figures from the rates in force on ' + pgFmtDate(pr.liveAsAt) + ', not a calculated price.'; }
+  if (!label) return { label: '', notice: null };
+  return { label, notice: { title: 'DRAFT — ' + title, lines: [why, pbQ.is_sandbox
+    ? 'It is not a client proposal. A proposal is issued from a quote on a client’s opportunity; an issued file does not carry this page.'
+    : 'It is not an issued proposal. Calculate the quote on the Pricing tab in Focus, then use Issue; an issued file does not carry this page.'] } };
+}
+// The merge fields of a Word build for the open quote: the built-in template's (pgFields) plus the
+// Word-only ones (PG_DOCX_EXTRA_FIELDS). The build, the section titles and the outline all read this.
+function pgWordFields(ctx, pr) {
+  const now = new Date(), today = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');   // the user's own day, not UTC's
+  return Object.assign(pgFields(ctx, pr), {
+    'pricing.vat': pgMoney(pr.vat), 'pricing.vat_pct': String(pr.vatPct), 'pricing.months': String(pr.months), 'pricing.setup_once_off': pgMoney(pr.setupOnceOff),
+    // sites: the post headings that hold posts (a quote for several sites carries a heading per site), at least one
+    'quote.site_count': String(Math.max(1, pbHeadings.filter(h => h.posts.length).length)), 'today': pgFmtDate(today),
+  });
+}
+// Everything a Word build needs, read ONCE from the open quote: the fields, the ticks, the written text,
+// the lists and the generated tables (drawn here, not at build time). plan.build(ref, validUntil) may
+// then run any number of times — the draft before Issue, the numbered file after it — and always fills
+// from what was read here, whatever is on screen by then.
+async function pgWordPlan() {
+  const q = pbQ, st = pgState;
+  const tpl = pgWordTemplate(); if (!tpl) throw new Error('This template has no Word file');
+  if (!pgDocxReady()) throw new Error('This browser cannot build Word files (no compression streams)');
+  const ctx = await pgLoadContext();
+  const docx = await pgDocxForTemplate(tpl);
+  if (pbQ !== q || pgState !== st || pgWordTemplate() !== tpl) throw new Error('another quote or template was opened while the Word file was being read — try again');
+  const pr = pgPricing();
+  const fields = pgWordFields(ctx, pr);
+  const secs = pgWordSections();
+  const include = new Set(secs.filter(s => s.included).map(s => s.section_key));
+  // A heading of the file with no section row has no tick: it prints as it stands rather than vanish
+  // (the outline says so and Issue is refused until the rows are read again).
+  const haveRow = new Set(secs.map(s => s.section_key));
+  docx.analysis.sections.forEach(a => { if (!haveRow.has(a.key)) include.add(a.key); });
+  const write = {}; secs.forEach(s => { if (s.written) write[s.section_key] = s.body_effective; });
+  const data = pgDocxData(pr), tables = {};
+  Object.keys(data.tables).forEach(k => { const xml = data.tables[k](); tables[k] = () => xml; });
+  const state = pgWordPricingState(pr);
+  const client = (ctx.org && ctx.org.name) || q.sandbox_client_name || q.contract_name || 'proposal';
+  const version = (st.draft && st.draft.version) || pgNextVersion();
+  const nameFor = ref => ((ref ? ref + ' ' : 'DRAFT v' + version + ' ') + client).replace(/[\\/:*?"<>|]+/g, '-').trim() + '.docx';
+  const build = async (ref, validUntil) => {
+    const f = Object.assign({}, fields, { 'proposal.ref': ref || 'DRAFT' });
+    if (validUntil) { const v = pgFmtDate(validUntil); f['proposal.valid_until'] = v; f['quote.valid_until'] = v; }   // the date the transaction fixed
+    const r = pgDocxFill(docx.parts, { include, write, fields: f, data: { lists: data.lists, tables }, analysis: docx.analysis, notice: ref ? null : state.notice });
+    const changed = {}; Object.keys(r.changed).forEach(n => { changed[(docx.actual && docx.actual[n]) || n] = r.changed[n]; });
+    return { blob: await pgZipWrite(docx.entries, changed), unknown: r.unknown, name: nameFor(ref), fields: f, sections: secs };
+  };
+  return { q, st, ctx, tpl, fields, sections: secs, state, build };
+}
+// Fill the template for the open quote → { blob, unknown, name, fields, sections }
+async function pgWordBuild(ref) { return (await pgWordPlan()).build(ref); }
+function pgSaveBlob(blob, name) {   // hand a file to the browser's downloads
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+}
+async function pgWordDownload() {
+  const btn = document.getElementById('pg-word-btn'); if (btn) { btn.disabled = true; btn.textContent = 'Building…'; }
+  try {
+    const plan = await pgWordPlan();
+    const r = await plan.build(null);   // always the draft: an issued version's own file is the Word button in the history
+    window._pgLastDocx = r.blob;   // the harness reads it back
+    pgSaveBlob(r.blob, r.name);
+    const notes = [];
+    if (plan.state.label) notes.push(plan.state.label + ' (the file opens on a red DRAFT page that says so)');
+    if (r.unknown.length) notes.push(r.unknown.length + ' placeholder' + (r.unknown.length > 1 ? 's' : '') + ' left as typed: ' + r.unknown.map(pgDocxTokenLabel).join(', '));
+    showStatus('Word file built' + (notes.length ? ' — ' + notes.join(' · ') : ''), notes.length ? 'error' : 'success');
+  } catch (e) { showStatus('Could not build the Word file: ' + e.message, 'error'); }
+  const b2 = document.getElementById('pg-word-btn'); if (b2) { b2.disabled = false; b2.textContent = 'Download Word'; }
+}
+// Outline preview for a Word template: the sections as they will go out, with the placeholder check.
+async function pgWordFillPreview() {
+  const el = document.getElementById('pg-preview'); if (!el || !pbQ) return;
+  const tpl = pgWordTemplate(); if (!tpl) return;
+  el.innerHTML = '<p style="color:var(--text3);padding:30px;">Reading the Word template…</p>';
+  const state = pgState;   // the quote this preview was started for
+  const setIssueBtn = () => { const btn = document.getElementById('pg-issue-btn'); if (btn) { const why = pgIssueBlockers(); btn.disabled = !!why.length; btn.title = why.length ? 'Cannot issue: ' + why.join('; ') : 'Number this proposal and freeze it'; } };
+  try {
+    const docx = await pgDocxForTemplate(tpl);
+    try { await pgLoadContext(); } catch (_e) { /* headings then read without their merge fields */ }
+    if (pgState !== state || !document.getElementById('pg-preview') || pgWordTemplate() !== tpl) return;
+    const an = docx.analysis, secs = pgWordSections();
+    const unknown = docx.unknown || pgDocxUnknownTokens(an);
+    pgState.lastUnknown = unknown;
+    const byKey = {}; an.sections.forEach(s => { byKey[s.key] = s; });
+    // The file as read: what pgIssueBlockers judges (placeholders, headings with no row, rows with no heading).
+    pgState.word = { path: tpl.docx_path, unknown, keys: new Set(an.sections.map(a => a.key)), sections: an.sections.map(a => ({ key: a.key, title: a.title })) };
+    secs.forEach(s => { const n = document.querySelector('[data-pg-sec-name="' + s.section_key + '"]'); if (n && n.textContent !== s.title) n.textContent = s.title; });
+    const missing = secs.filter(s => !byKey[s.section_key]);
+    const orphan = an.sections.filter(a => !secs.some(s => s.section_key === a.key));
+    const pr = pgPricing(), pstate = pgWordPricingState(pr);
+    // A section's opening lines read as they will print: a field Focus knows takes its value, anything
+    // else (a list field, a table placeholder, an unknown name) stays as typed.
+    const pf = pgState.ctx && pgState.ctxFor === pbQ.id ? pgWordFields(pgState.ctx, pr) : null;
+    const asPrinted = t => !pf || t.indexOf('{{') < 0 ? t : t.replace(/\{\{\s*([a-z_][\w.]*)\s*\}\}/gi, (m, k) => { k = k.toLowerCase(); return Object.prototype.hasOwnProperty.call(pf, k) ? String(pf[k] == null ? '' : pf[k]) : m; });
+    let html = '<div class="pg-outline">' +
+      '<div class="pg-outline-h"><strong>' + pbEsc(tpl.docx_name || 'Word template') + '</strong> · ' + _fmtBytes(docx.size) + ' · ' + an.sections.length + ' sections' + (an.frontBlocks ? ' after the front matter' : '') +
+        (an.hasToc ? ' · contents table: sections left out are taken off it, page numbers refresh when Word opens the file' : '') + (!pstate.label && pr.asOf ? ' · rates as at ' + pbEsc(pgFmtDate(pr.asOf)) : '') + '</div>' +
+      (pstate.label ? '<div class="pg-warn"><strong>' + pbEsc(pstate.label) + '.</strong> A Word file downloaded now is a draft and opens on a red page that says so' + (pbQ.is_sandbox ? '.' : '; the proposal cannot be issued until the quote is calculated on the Pricing tab.') + '</div>' : '') +
+      (unknown.length ? '<div class="pg-warn">Placeholders Focus cannot fill: ' + unknown.map(u => '<code>' + pbEsc(pgDocxTokenLabel(u)) + '</code>').join(' ') + ' — they print as typed. ' + pbEsc(PG_DOCX_PLACEMENT_NOTE) + ' The list of fields is on the Proposal Templates page.</div>' : '') +
+      (orphan.length ? '<div class="pg-warn">Headings in the Word file with no section here: ' + orphan.map(a => pbEsc(a.title)).join(', ') + ' — they print as they stand and the proposal cannot be issued. Reopen the quote; if they are still listed, press Re-read sections on the Proposal Templates page.</div>' : '') +
+      (missing.length ? '<div class="pg-warn">Sections no longer in the Word file: ' + missing.map(s => pbEsc(s.title)).join(', ') + ' — they cannot print. Untick them, or upload the file again on the Proposal Templates page.</div>' : '');
+    secs.forEach(s => {
+      const a = byKey[s.section_key];
+      html += '<div class="pg-outline-sec' + (s.included ? '' : ' off') + '" data-key="' + pbEsc(s.section_key) + '"><div class="pg-outline-t">' + pbEsc(s.title) +
+        (s.included ? '' : ' <span class="pg-kind">' + (s.okWhen ? 'left out' : 'left out — only when ' + pbEsc(PG_ONLY_WHEN[s.only_when] || s.only_when)) + '</span>') +
+        (s.mandatory ? ' <span class="pg-kind">always</span>' : '') + (s.written ? ' <span class="pg-kind">write</span>' : '') + '</div>';
+      if (s.included) {
+        if (s.written) html += (s.body_effective.trim() ? '<div class="pg-outline-w">' + pbEsc(s.body_effective).replace(/\n/g, '<br>') + '</div>' : '<div class="pg-outline-w pg-muted">Nothing written yet — Edit this section.</div>');
+        else if (a) html += '<div class="pg-outline-p">' + a.preview.map(t => '<div>' + pbEsc(asPrinted(t.length >= 160 ? t.replace(/\s*\{(?:\{[^{}]*\}?)?$/, '') : t)) + (t.length >= 160 ? '…' : '') + '</div>').join('') + '<div class="pg-muted">' + a.paras + ' paragraph' + (a.paras === 1 ? '' : 's') + (a.tables ? ' · ' + a.tables + ' table' + (a.tables === 1 ? '' : 's') : '') + ' from the template</div></div>';
+      }
+      html += '</div>';
+    });
+    el.innerHTML = html + '</div>';
+    setIssueBtn();
+  } catch (e) {
+    if (pgState !== state || pgWordTemplate() !== tpl) return;
+    pgState.word = { path: tpl.docx_path, error: e.message };
+    el.innerHTML = '<p style="color:var(--red);padding:30px;">Could not read the Word template: ' + pbEsc(e.message) + '</p>';
+    setIssueBtn();
+  }
+}
+// The outline as frozen HTML on an issued version (View still works without the file).
+function pgWordOutlineHtml(fields, secs, tpl) {
+  return '<div class="pg-doc" data-watermark=""><section class="pg-section"><h2>Proposal ' + pbEsc(fields['proposal.ref']) + ' v' + pbEsc(fields['proposal.version']) + '</h2>' +
+    '<p>Issued from the Word template <strong>' + pbEsc(tpl.name) + '</strong> (' + pbEsc(tpl.docx_name || '') + ') on ' + pbEsc(fields['proposal.date']) + ' for ' + pbEsc(fields['client.name']) + '. The issued document is the Word file kept with this version.</p>' +
+    '<table class="pg-kv"><tr><td>Monthly</td><td>' + pbEsc(fields['pricing.monthly_total']) + ' excl. VAT</td></tr><tr><td>Contract</td><td>' + pbEsc(fields['pricing.contract_total']) + '</td></tr><tr><td>Valid until</td><td>' + pbEsc(fields['proposal.valid_until']) + '</td></tr></table>' +
+    '<h3>Sections</h3><ul>' + secs.map(s => '<li>' + pbEsc(s.title) + (s.included ? '' : ' <span class="pg-muted">(left out)</span>') + (s.included && s.written && s.body_effective ? '<br><span class="pg-muted">' + pbEsc(s.body_effective).replace(/\n/g, '<br>') + '</span>' : '') + '</li>').join('') + '</ul></section></div>';
+}
+function pgWordRender(ctx, tpl) {
+  const pricing = pgPricing(), f = pgFields(ctx, pricing);
+  return { html: pgWordOutlineHtml(f, pgWordSections(), tpl), unknown: pgState.lastUnknown || [], pricing };
+}
+// Before issue_proposal(): the file is built once as a draft (the template downloads, fills and zips,
+// nothing is left as typed) and its place in the bucket is signed (the proxy and the bucket answer) —
+// so what can fail does so before a number is used up. Returns the signed slot for pgWordStoreIssued.
+async function pgWordPrepareIssue(draft, plan) {
+  const pre = await (plan || await pgWordPlan()).build(null);
+  if (pre.unknown.length) throw new Error('the Word file has placeholders Focus cannot fill: ' + pre.unknown.map(pgDocxTokenLabel).join(', '));
+  return pgFilesSign('proposal_document', draft.id, { name: 'proposal v' + draft.version + '.docx', size: pre.blob.size });
+}
+// After issue_proposal(): the Word file with the real number, kept with the version. The upload is
+// tried three times; if it still fails the numbered file is handed to the user's downloads instead
+// of being lost (after issue the draft's ticks and text are cleared, so it could not be rebuilt).
+async function pgWordStoreIssued(row, slot, plan, onPct) {
+  const r = await (plan || await pgWordPlan()).build(row.proposal_ref, row.valid_until);
+  const file = new File([r.blob], r.name, { type: r.blob.type });
+  window._pgLastDocx = r.blob;
+  let err = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const signed = attempt === 1 && slot ? slot : await pgFilesSign('proposal_document', row.id, file);
+      if (MOCK) _mockFileBlobs.set(signed.path, r.blob); else await _putWithProgress(signed.uploadUrl, file, pct => { if (onPct) onPct(pct); });
+      await api('proposal_documents', 'PATCH', { docx_path: signed.path, docx_name: r.name }, 'id=eq.' + row.id, { prefer: 'return=minimal' });
+      return { path: signed.path, name: r.name, unknown: r.unknown };
+    } catch (e) { err = e; if (attempt < 3) await new Promise(res => setTimeout(res, 700 * attempt)); }
+  }
+  pgSaveBlob(r.blob, r.name);
+  const fail = new Error((err && err.message) || 'the upload failed'); fail.savedAs = r.name; throw fail;
+}
+// A version issued from a Word template whose file never reached the bucket: the user attaches the
+// numbered file Focus handed to their downloads at the time (pgWordStoreIssued's last resort).
+let _pgAttachFor = null;
+function pgAttachDocxPick(id) { _pgAttachFor = id; const i = document.getElementById('pg-attach-file'); if (i) i.click(); }
+async function pgAttachDocx(file) {
+  const id = _pgAttachFor; _pgAttachFor = null;
+  const st = pgState, d = st.docs.find(x => +x.id === +id);
+  if (!file || !d) return;
+  if (!/\.docx$/i.test(file.name)) { showStatus('Choose the .docx file that was downloaded when this version was issued', 'error'); return; }
+  if (file.size > 50 * 1024 * 1024) { showStatus('Files are limited to 50 MB', 'error'); return; }
+  try { if (!pgZipRead(await file.arrayBuffer()).some(e => e.name === '[Content_Types].xml')) throw new Error('no content types'); }
+  catch (e) { showStatus('That is not a Word file', 'error'); return; }
+  if (!await confirmDialog({ title: 'Attach the Word file to ' + d.proposal_ref, message: 'Keep "' + file.name + '" as the Word file of ' + d.proposal_ref + ' v' + d.version + '?\n\nUse the file Focus downloaded when this version was issued — it carries the proposal number.', confirmLabel: 'Attach' })) return;
+  try {
+    const signed = await pgFilesSign('proposal_document', d.id, file);
+    if (MOCK) _mockFileBlobs.set(signed.path, file); else await _putWithProgress(signed.uploadUrl, file, () => {});
+    await api('proposal_documents', 'PATCH', { docx_path: signed.path, docx_name: file.name }, 'id=eq.' + d.id, { prefer: 'return=minimal' });
+    d.docx_path = signed.path; d.docx_name = file.name;
+    showStatus('Word file kept with ' + d.proposal_ref, 'success');
+  } catch (e) { showStatus('Could not attach: ' + e.message, 'error'); }
+  if (pgState === st) renderQuoteEditor();
+}
+// The issued file is FETCHED and handed to the browser's downloads, the way a template's file is read
+// (pgDocxForTemplate). Nothing opens and nothing leaves the page: a pop-up blocker has nothing to stop, an
+// unsaved deal is not asked "Leave site?", and a file-store error lands in the status line, not in the tab.
+// A large file takes seconds to arrive and nothing shows meanwhile: the button reads "Fetching…" and takes
+// no second press until its file is in (or has failed).
+const _pgOpening = new Set();   // the versions whose Word file is being fetched
+function pgOpenDocxMark(id) {
+  document.querySelectorAll('button[data-pg-docx-btn="' + (+id) + '"]').forEach(b => { const on = _pgOpening.has(+id); b.disabled = on; b.textContent = on ? 'Fetching…' : 'Word'; });
+}
+async function pgOpenDocx(id) {
+  id = +id;
+  if (_pgOpening.has(id)) return;
+  _pgOpening.add(id); pgOpenDocxMark(id);
+  try {
+    const d = pgState.docs.find(x => +x.id === id);
+    const resp = await fetch(await pgFilesUrl('proposal', id));
+    if (!resp.ok) throw new Error('the file store answered ' + resp.status);
+    pgSaveBlob(await resp.blob(), (d && d.docx_name) || 'proposal.docx');
+  } catch (e) { showStatus('Could not open the Word file: ' + e.message, 'error'); }
+  finally { _pgOpening.delete(id); pgOpenDocxMark(id); }
+}
+
+// ── Admin: the Word file on a template ───────────────────────────────────────
+function pgAdminWordBoxHtml(tpl) {
+  const ready = pgWordColumnsReady();
+  const has = pgTplIsWord(tpl);
+  const chk = (pgAdmin.wordChecks || {})[tpl.id];   // what the last upload / Re-read found (this session)
+  const busy = pgAdmin.wordBusy != null, dis = busy ? ' disabled' : '';   // one file is handled at a time
+  const mine = pgAdmin.sections.filter(s => +s.template_id === +tpl.id && s.kind === 'word');
+  // The notes follow the rows as they are NOW: a section whose paragraph in the file says {{write}} (its key,
+  // as the file was last read) is listed while it is not ticked Written — ticked it goes, unticked it is back.
+  const unm = ready && has && chk && chk.path === tpl.docx_path ? mine.filter(s => !s.written && (chk.write || []).indexOf(s.section_key) >= 0).map(s => s.title) : [];
+  const rep = ready && has ? pgAdminWordRepeated(mine) : [];
+  return '<div class="pg-wordbox">' +
+    '<div><strong>Word file</strong>' + (!ready ? '<div class="pg-muted">Needs sql/add_word_proposal_templates.sql on this database.</div>'
+      : has ? '<div>' + pbEsc(tpl.docx_name || '') + ' · ' + _fmtBytes(tpl.docx_size) + (tpl.docx_uploaded_at ? ' · uploaded ' + pbEsc(String(tpl.docx_uploaded_at).slice(0, 10)) : '') + '</div>'
+      : '<div class="pg-muted">None — this template prints from its sections below. Upload a .docx to make it a Word template: its Heading 1 blocks become the sections.</div>') +
+      (ready && has && chk && chk.path === tpl.docx_path && chk.unknown.length ? '<div class="pg-warn" style="margin-top:6px;">Placeholders Focus cannot fill: ' + chk.unknown.map(u => '<code>' + pbEsc(pgDocxTokenLabel(u)) + '</code>').join(' ') + ' — a proposal on this template cannot be issued until the file is corrected and uploaded again. ' + pbEsc(PG_DOCX_PLACEMENT_NOTE) + '</div>' : '') +
+      (unm.length ? '<div class="pg-warn" style="margin-top:6px;">' + pbEsc(pgAdminWordUnmarkedNote(unm)) + '</div>' : '') +
+      (rep.length ? '<div class="pg-warn" data-pg-repeated style="margin-top:6px;">' + pbEsc(pgAdminWordRepeatedNote(rep)) + '</div>' : '') + '</div>' +
+    (ready ? '<div style="display:flex;gap:6px;align-items:center;">' +
+      '<input type="file" id="pg-word-file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" style="display:none;" onchange="const f = this.files[0]; this.value = \'\'; pgAdminWordUpload(' + tpl.id + ', f)">' +
+      '<button class="btn btn-secondary btn-sm"' + dis + ' onclick="document.getElementById(\'pg-word-file\').click()">' + (has ? 'Replace file' : 'Upload .docx') + '</button>' +
+      (has ? '<button class="btn btn-ghost btn-sm"' + dis + ' onclick="pgAdminWordRead(' + tpl.id + ')">Re-read sections</button><button class="btn btn-danger btn-sm"' + dis + ' onclick="pgAdminWordRemove(' + tpl.id + ')">Remove</button>' : '') +
+      '<span id="pg-word-status" class="pg-muted">' + pbEsc(busy && +pgAdmin.wordBusy === +tpl.id ? pgAdmin.wordStatus || '' : '') + '</span></div>' : '') +
+  '</div>';
+}
+function pgWordColumnsReady() { const t = (pgAdmin.templates || []).concat(pgState.templates || [])[0]; return MOCK || !t || ('docx_path' in t); }
+// One Word file is handled at a time (upload, re-read or remove). The state lives on pgAdmin, so the
+// page may be redrawn meanwhile — another template opened, a rule ticked — and the box still shows it.
+function pgAdminWordSay(m) { pgAdmin.wordStatus = m || ''; const st = document.getElementById('pg-word-status'); if (st) st.textContent = pgAdmin.wordStatus; }
+function pgAdminWordBegin(tplId, m) {
+  pgAdmin.wordBusy = +tplId; pgAdmin.wordStatus = m || '';
+  document.querySelectorAll('.pg-wordbox button').forEach(b => { b.disabled = true; });
+  pgAdminWordSay(m);
+}
+// The page is redrawn only while it is still the page on screen (an upload of a large file takes a while).
+function pgAdminWordEnd() { pgAdmin.wordBusy = null; pgAdmin.wordStatus = ''; if (currentPage === 'pb_proposal_templates') return renderPgTemplatesPage(); }
+// Headings that share a name get the keys name, name_2 … by their order in the file: their rules, and the
+// text typed for them on a proposal, follow the order and not the heading. Said wherever the file is read.
+function pgAdminWordRepeated(rows) {
+  const n = Object.create(null), out = [];
+  rows.forEach(s => { const b = pgDocxSlug(s.title); n[b] = (n[b] || 0) + 1; if (n[b] === 2) out.push(s.title); });
+  return out;
+}
+function pgAdminWordRepeatedNote(titles) {
+  return 'More than one Heading 1 is named ' + titles.map(t => '"' + t + '"').join(', ') + ' — Focus tells them apart by their order in the file only, so their rules and typed text follow the order, not the heading. Give each heading a name of its own.';
+}
+function pgAdminWordBoxRefresh(tplId) {
+  const box = document.querySelector('.pg-admin .pg-wordbox'), tpl = pgAdmin.templates.find(t => +t.id === +tplId);
+  if (box && tpl && +pgAdmin.open === +tpl.id) box.outerHTML = pgAdminWordBoxHtml(tpl);
+}
+function pgAdminWordUnmarkedNote(titles) {
+  return '{{write}} is typed in ' + titles.map(t => '"' + t + '"').join(', ') + ', which ' + (titles.length === 1 ? 'is' : 'are') + ' not marked Written per proposal — that paragraph is left out of the document until the section is marked.';
+}
+// The rows of the template this file no longer has a Heading 1 for: their rules and default text go
+// with them. Asked BEFORE anything is uploaded or written; false = leave everything as it is.
+async function pgAdminWordConfirmGone(tplId, analysis, title) {
+  const keys = new Set(analysis.sections.map(s => s.key));
+  const gone = pgAdmin.sections.filter(s => +s.template_id === +tplId && s.kind === 'word' && !keys.has(s.section_key));
+  if (!gone.length) return true;
+  const one = gone.length === 1;
+  const left = new Set(analysis.sections.map(s => pgDocxSlug(s.title)));   // a heading of the same name may remain: one of several is gone
+  return confirmDialog({ title, danger: true, confirmLabel: 'Continue',
+    message: 'This file no longer has a Heading 1 for ' + gone.map(s => '"' + s.title + '"' + (left.has(pgDocxSlug(s.title)) ? ' (it has fewer headings of that name than before)' : '')).join(', ') + '.\n\n' + (one ? 'That section is' : 'Those ' + gone.length + ' sections are') + ' removed from the template with the rules set on ' + (one ? 'it' : 'them') +
+      ' (on by default, mandatory, written text, only-when). A heading that was only renamed counts as a new section: set its rules again afterwards.' });
+}
+async function pgAdminWordUpload(tplId, file) {
+  if (!file) return;
+  if (pgAdmin.wordBusy != null) { showStatus('Another Word file is still being handled — wait for it to finish', 'error'); return; }
+  if (!/\.docx$/i.test(file.name)) { showStatus('Choose a .docx file (Word document)', 'error'); return; }
+  if (file.size > 50 * 1024 * 1024) { showStatus('Files are limited to 50 MB', 'error'); return; }
+  const say = pgAdminWordSay;
+  pgAdminWordBegin(tplId, 'Reading…');
+  try {
+    const docx = await pgDocxOpen(file);
+    if (!docx.analysis.sections.length) { showStatus('No Heading 1 paragraphs in this file — the sections are its Heading 1 blocks', 'error'); return; }
+    if (!await pgAdminWordConfirmGone(tplId, docx.analysis, 'Replace the Word file')) return;
+    say('Uploading…');
+    const signed = await pgFilesSign('proposal_template', tplId, file);
+    if (MOCK) _mockFileBlobs.set(signed.path, file); else await _putWithProgress(signed.uploadUrl, file, pct => say('Uploading… ' + pct + '%'));
+    await apiPatch('proposal_templates', tplId, { docx_path: signed.path, docx_name: file.name, docx_size: file.size, docx_uploaded_at: new Date().toISOString(), docx_uploaded_by: currentUser.personId, updated_at: new Date().toISOString() });
+    _pgDocxCache[tplId] = { path: signed.path, promise: Promise.resolve(docx) };   // already parsed: no need to download what was just uploaded
+    const t = pgAdmin.templates.find(x => +x.id === +tplId); if (t) Object.assign(t, { docx_path: signed.path, docx_name: file.name, docx_size: file.size });
+    say('Reading sections…');
+    const n = await pgAdminWordSyncSections(tplId, docx.analysis);
+    const bad = docx.unknown || [], same = docx.analysis.repeated || [];
+    (pgAdmin.wordChecks || (pgAdmin.wordChecks = {}))[tplId] = { path: signed.path, unknown: bad, write: docx.analysis.sections.filter(x => x.write).map(x => x.key) };
+    showStatus('Word file saved — ' + n.added + ' section' + (n.added === 1 ? '' : 's') + ' added, ' + n.kept + ' kept, ' + n.removed + ' removed' +
+      (bad.length ? ' · ' + bad.length + ' placeholder' + (bad.length === 1 ? '' : 's') + ' Focus cannot fill: ' + bad.map(pgDocxTokenLabel).join(', ') : '') +
+      (n.unmarked.length ? ' · ' + pgAdminWordUnmarkedNote(n.unmarked) : '') + (same.length ? ' · ' + pgAdminWordRepeatedNote(same) : ''), bad.length || n.unmarked.length || same.length ? 'error' : 'success');
+  } catch (e) { showStatus('Upload failed: ' + e.message, 'error'); }
+  finally { await pgAdminWordEnd(); }
+}
+// One 'word' section row per Heading 1 of the file. A row already there keeps every rule the admin set
+// on it — "Written per proposal" included: the file's {{write}} marks a NEW row written, and on a kept
+// row that is not marked it is only reported (`unmarked`). The title and the order are the file's.
+async function pgAdminWordSyncSections(tplId, analysis) {
+  const mine = pgAdmin.sections.filter(s => +s.template_id === +tplId && s.kind === 'word');
+  const keys = new Set(analysis.sections.map(s => s.key));
+  let added = 0, kept = 0, removed = 0; const unmarked = [];
+  const writes = [];
+  analysis.sections.forEach((s, i) => {
+    const row = mine.find(r => r.section_key === s.key);
+    if (row) { kept++; if (s.write && !row.written) unmarked.push(s.title);
+      if (row.title !== s.title || row.display_order !== i + 1) writes.push(apiPatch('proposal_template_sections', row.id, { title: s.title, display_order: i + 1 })); }
+    else { added++; writes.push(apiPost('proposal_template_sections', { template_id: tplId, section_key: s.key, title: s.title, display_order: i + 1, kind: 'word', body: null, mandatory: false, included_default: true, written: s.write })); }
+  });
+  mine.filter(r => !keys.has(r.section_key)).forEach(r => { removed++; writes.push(apiDelete('proposal_template_sections', r.id)); });
+  const res = await Promise.allSettled(writes);
+  const bad = res.find(r => r.status === 'rejected'); if (bad) throw bad.reason;
+  return { added, kept, removed, unmarked };
+}
+async function pgAdminWordRead(tplId) {
+  const tpl = pgAdmin.templates.find(x => +x.id === +tplId); if (!tpl) return;
+  if (pgAdmin.wordBusy != null) { showStatus('Another Word file is still being handled — wait for it to finish', 'error'); return; }
+  pgAdminWordBegin(tplId, 'Reading the file…');
+  try { delete _pgDocxCache[tplId]; const docx = await pgDocxForTemplate(tpl);
+    if (!await pgAdminWordConfirmGone(tplId, docx.analysis, 'Re-read sections')) return;
+    const n = await pgAdminWordSyncSections(tplId, docx.analysis);
+    const bad = docx.unknown || [], same = docx.analysis.repeated || [];
+    (pgAdmin.wordChecks || (pgAdmin.wordChecks = {}))[tplId] = { path: tpl.docx_path, unknown: bad, write: docx.analysis.sections.filter(x => x.write).map(x => x.key) };
+    showStatus(n.added + ' added, ' + n.kept + ' kept, ' + n.removed + ' removed' + (bad.length ? ' · ' + bad.length + ' placeholder' + (bad.length === 1 ? '' : 's') + ' Focus cannot fill: ' + bad.map(pgDocxTokenLabel).join(', ') : '') +
+      (n.unmarked.length ? ' · ' + pgAdminWordUnmarkedNote(n.unmarked) : '') + (same.length ? ' · ' + pgAdminWordRepeatedNote(same) : ''), bad.length || n.unmarked.length || same.length ? 'error' : 'success'); }
+  catch (e) { showStatus('Could not read the file: ' + e.message, 'error'); }
+  finally { await pgAdminWordEnd(); }
+}
+async function pgAdminWordRemove(tplId) {
+  if (pgAdmin.wordBusy != null) { showStatus('Another Word file is still being handled — wait for it to finish', 'error'); return; }
+  if (!await confirmDialog({ title: 'Remove the Word file', message: 'The template goes back to printing from its sections. The Word sections and their rules are deleted; issued proposals keep their files.', confirmLabel: 'Remove', danger: true })) return;
+  if (pgAdmin.wordBusy != null) return;
+  pgAdminWordBegin(tplId, 'Removing…');
+  try {
+    // The rows first: a failure after this leaves a file whose sections Re-read brings back — never Word rows on a template with no file.
+    await api('proposal_template_sections', 'DELETE', null, 'template_id=eq.' + tplId + '&kind=eq.word');
+    await apiPatch('proposal_templates', tplId, { docx_path: null, docx_name: null, docx_size: null, docx_uploaded_at: null, docx_uploaded_by: null, updated_at: new Date().toISOString() });
+    delete _pgDocxCache[tplId]; if (pgAdmin.wordChecks) delete pgAdmin.wordChecks[tplId];
+  } catch (e) { showStatus('Could not remove: ' + e.message, 'error'); }
+  finally { await pgAdminWordEnd(); }
+}
+async function pgAdminWordRule(id, patch) {
+  try { await apiPatch('proposal_template_sections', id, patch); const s = pgAdmin.sections.find(x => +x.id === +id); if (s) Object.assign(s, patch);
+    if (s && 'written' in patch) pgAdminWordBoxRefresh(s.template_id); }   // the Word box's "{{write}} … not marked Written" note follows the tick
+  catch (e) { showStatus('Save failed: ' + e.message, 'error'); renderPgTemplatesPage(); }
+}
+// The only-when select: its tooltip names the rule in full (the option text is cut on a narrow screen), so it follows the choice.
+function pgAdminOnlyWhen(sel, id) { sel.title = sel.value && PG_ONLY_WHEN[sel.value] ? 'Only when ' + PG_ONLY_WHEN[sel.value] : 'Always offered'; return pgAdminWordRule(id, { only_when: sel.value || null }); }
 
 function renderPbPlaceholderTab(title, blurb) {
   return '<div style="padding:60px 20px;text-align:center;color:var(--text3);background:var(--bg2);border:1px dashed var(--border);border-radius:var(--radius);">' +
