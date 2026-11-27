@@ -216,13 +216,16 @@ const authReply = (statusCode, obj) => ({
 // function body tops out near 6 MB and files may be 50 MB. It signs instead:
 //   POST /files { action:'upload', owner:'deal', owner_id, file_name, size }
 //        -> { ok, path, uploadUrl }  a one-time URL the browser PUTs the file to
-//   GET  /files?download=<attachments.id>
+//   GET  /files?download=<attachments.id> | ?template=<proposal_templates.id> | ?proposal=<proposal_documents.id>
 //        -> { ok, url }              a 5-minute URL that downloads under the file's name
 // Both sit behind the session gate like every other route. The bucket's own
 // 50 MB limit is what actually binds; the size check here only fails early.
 const FILE_BUCKET = 'attachments';
 const FILE_MAX_BYTES = 50 * 1024 * 1024;
-const FILE_OWNERS = { deal: 'deals' };   // a contract or project is the same deals row once secured
+const FILE_OWNERS = { deal: 'deals', proposal_template: 'proposal_templates', proposal_document: 'proposal_documents' };   // a contract or project is the same deals row once secured
+// v7.10.58: a Word template file (proposal_templates.docx_path) and an issued proposal's filled file
+// (proposal_documents.docx_path) live in the same bucket; GET /files?template=<id> | ?proposal=<id> sign them.
+const FILE_DOCX = { template: 'proposal_templates', proposal: 'proposal_documents' };
 const encPath = (p) => String(p).split('/').map(encodeURIComponent).join('/');
 
 function sbStorage(key, method, path, body) {
@@ -246,10 +249,16 @@ function sbStorage(key, method, path, body) {
 
 async function handleFiles(event, key) {
   if (event.httpMethod === 'GET') {
-    const id = parseInt((event.queryStringParameters || {}).download, 10);
+    const qs = event.queryStringParameters || {};
+    const docxKind = Object.keys(FILE_DOCX).find(k => qs[k]);
+    const id = parseInt(qs[docxKind || 'download'], 10);
     if (!id) return authReply(400, { ok: false, error: 'Bad request' });
     let rows;
-    try { rows = await sbRest(key, 'GET', `/attachments?id=eq.${id}&removed_at=is.null&select=storage_path,file_name`); }
+    try {
+      rows = docxKind
+        ? (await sbRest(key, 'GET', `/${FILE_DOCX[docxKind]}?id=eq.${id}&docx_path=not.is.null&select=docx_path,docx_name`)).map(r => ({ storage_path: r.docx_path, file_name: r.docx_name || 'proposal.docx' }))
+        : await sbRest(key, 'GET', `/attachments?id=eq.${id}&removed_at=is.null&select=storage_path,file_name`);
+    }
     catch (e) { return authReply(500, { ok: false, error: 'Files are unavailable right now' }); }
     const f = rows && rows[0];
     if (!f) return authReply(404, { ok: false, error: 'File not found' });
